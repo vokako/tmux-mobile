@@ -337,7 +337,7 @@ test('endpoint grab fixes the far endpoint and compensates both coordinates (#13
   const grab = /function beginEndpointDrag\(which\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1] ?? '';
   assert.match(grab, /if \(!selection\) return;\s*selection = selForDrag\(selection, which\);/u);
   assert.match(source, /selection = \{ anchor: selection\.anchor, head: \{ row: bufRow, col \} \};/u);
-  assert.match(source, /handleGrabDx = cx - epCenterX;\s*handleGrabDy = cy - epCenterY;/u);
+  assert.match(source, /const offset = handleGrabOffset\(cx, cy, ep, term\.buffer\.active\.viewportY, r, cell\);\s*handleGrabDx = offset\.dx;\s*handleGrabDy = offset\.dy;/u);
   assert.match(source, /lastDragX = t0\.clientX - handleGrabDx;\s*lastDragY = t0\.clientY - handleGrabDy;/u);
   assert.match(source, /const HIT_HALF_W = 28;/u);
   assert.match(source, /const HIT_DOT_PAD = 22;/u);
@@ -351,6 +351,15 @@ test('range and word decisions use the existing canonical selection model (#140)
   assert.match(source, /import \{[^}]*selContains[^}]*wordBounds \} from '\.\/selection-model\.ts';/u);
   assert.match(source, /function isInsideSelection\(bufRow, col\) \{\s*return selContains\(selection, bufRow, col\);\s*\}/u);
   assert.match(source, /const line = term\.buffer\.active\.getLine\(bufRow\);\s*return wordBounds\(line\?\.translateToString\(false\), col\);/u);
+});
+
+test('geometry adapters read the live rectangle and the single cellSize source (#141)', () => {
+  const cell = /function touchToCell\(clientX, clientY\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1] ?? '';
+  assert.match(cell, /const rect = termEl\.getBoundingClientRect\(\);\s*const cell = cellSize\(term\);\s*return pointToCell\(clientX, clientY, rect, cell, term\.cols, term\.rows\);/u);
+  const drag = /function applyHandleDragAt\(px, py\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1] ?? '';
+  assert.match(drag, /const rect = termEl\.getBoundingClientRect\(\);\s*const \{ w: cellW \} = cellSize\(term\);/u);
+  assert.match(drag, /const cell = touchToCell\(px, py\);\s*const col = snapHandleColumn\(x, cell\.col, rect\.width, cellW, term\.cols, SCROLLBAR_TOUCH_WIDTH\);/u);
+  assert.match(drag, /const row = term\.buffer\.active\.viewportY \+ cell\.row;\s*moveHead\(row, col\);/u);
 });
 
 test('gesture motion keeps signed remainder and the measured fixed-frame rules (#139)', () => {

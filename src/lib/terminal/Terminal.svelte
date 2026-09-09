@@ -19,6 +19,7 @@
   import { adaptAnsiColors } from './ansi-colors.ts';
   import { compactLineGeometry } from './terminal-line-geometry.ts';
   import { selStart, selEnd, selContains, selLength, selForDrag, selFromExclusive, wordBounds } from './selection-model.ts';
+  import { pointToCell, handleGrabOffset, snapHandleColumn } from './terminal-gesture-geometry.ts';
   import { computeCursorLayout } from './cursor-layout.ts';
   import { restoreViewportAfterPaneSwitch } from './terminal-viewport.ts';
   import { cycleItem } from '../app/shortcuts.ts';
@@ -886,11 +887,8 @@
     // Helper: convert touch coordinates to terminal cell (col, row in viewport)
     function touchToCell(clientX, clientY) {
       const rect = termEl.getBoundingClientRect();
-      const { w: cellW, h: cellH } = cellSize(term);
-      return {
-        col: Math.min(term.cols - 1, Math.max(0, Math.floor((clientX - rect.left) / cellW))),
-        row: Math.min(term.rows - 1, Math.max(0, Math.floor((clientY - rect.top) / cellH))),
-      };
+      const cell = cellSize(term);
+      return pointToCell(clientX, clientY, rect, cell, term.cols, term.rows);
     }
 
     // Helper: find word boundaries at buffer row + col
@@ -1120,10 +1118,7 @@
       const { w: cellW } = cellSize(term);
       const x = px - rect.left;
       const cell = touchToCell(px, py);
-      let col = cell.col;
-      const EDGE_SNAP_PX = Math.max(10, cellW * 0.6);
-      if (x <= EDGE_SNAP_PX) col = 0;
-      else if (x >= rect.width - SCROLLBAR_TOUCH_WIDTH - EDGE_SNAP_PX) col = term.cols - 1;
+      const col = snapHandleColumn(x, cell.col, rect.width, cellW, term.cols, SCROLLBAR_TOUCH_WIDTH);
       const row = term.buffer.active.viewportY + cell.row;
       moveHead(row, col);
     }
@@ -1274,12 +1269,11 @@
           // one row above the finger, which guaranteed a one-row jump on the
           // first frame of every drag.
           const r = termEl.getBoundingClientRect();
-          const { w: cw, h: ch } = cellSize(term);
+          const cell = cellSize(term);
           const ep = selection.head;
-          const epCenterX = r.left + (ep.col + 0.5) * cw;
-          const epCenterY = r.top + (ep.row - term.buffer.active.viewportY + 0.5) * ch;
-          handleGrabDx = cx - epCenterX;
-          handleGrabDy = cy - epCenterY;
+          const offset = handleGrabOffset(cx, cy, ep, term.buffer.active.viewportY, r, cell);
+          handleGrabDx = offset.dx;
+          handleGrabDy = offset.dy;
           // Pin content updates while dragging. preventDefault on touchmove
           // (which is non-passive) blocks the page from scrolling.
           touchScrolling = true;

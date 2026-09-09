@@ -141,6 +141,24 @@ real-component browser check. Android validation remains deferred.
 `hitHandle` and CSS rules from `7bf035c6`, not a new hit-target design. The
 former 22px-radius/44px-wrapper description had drifted from the implementation.
 
+### Numeric Geometry Ownership (#141, 2026-09-09)
+
+`terminal-gesture-geometry.ts` first takes the point-to-cell, grab-offset and
+horizontal-snap formulas. Inputs are measured numbers; the module does not
+read DOM, xterm or a clock. Terminal still reads the actual client rectangle
+and the one `cellSize` source at the original call sites, including the nested
+cell mapping during a handle drag. Nothing stores geometry between gestures.
+Buffer-row conversion and the existing writes to the drag state stay in
+their adapters.
+
+Boundary vectors pin flooring/clamping, nonzero origins, fractional and
+changed measurements, compensation in both axes, inclusive snap edges and
+the left-edge priority in overlapping zones. This is a mechanical move;
+it does not retune thresholds or change coordinate systems.
+The three formulas and metric-read order match the original AST. Moving
+the 10px snap minimum to 11px fails the just-inside boundary vector;
+restoring it returns green.
+
 ## Toolbar UI
 - Single "Copy" button (one job, one button).
 - Default: above the selection's first row, horizontally centered between start and end (or roughly above the start cell when the selection spans multiple rows).
