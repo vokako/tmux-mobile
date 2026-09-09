@@ -703,15 +703,10 @@ fn kiro_default_path() -> PathBuf {
     home_dir().join(".kiro/agents/kiro_default.json")
 }
 
-/// ALWAYS quotes — deliberately not the quote-if-needed `shell_quote` the
-/// launchers share (`projects::backends::shared`): this one writes hook command strings
-/// into the agents' config files, and the quoted form is what
-/// `patch_hooks`/`refresh_hooks` compare against on disk. Switching to the
-/// minimal form would mark every existing agent's hooks stale once. It is
-/// also the only quoter compiled on Android, where `team` does not exist.
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
+// The one quoter lives in `crate::shell` (board #125); the hook files on
+// disk carry the always-quoted form, byte-identical to what this alias
+// produced before the move.
+use crate::shell::quote_always as shell_quote;
 
 fn read_json_object(path: &Path) -> Result<Value, String> {
     if !path.exists() {

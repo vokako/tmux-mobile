@@ -387,13 +387,9 @@ fn validate_name(name: &str) -> Result<()> {
 /// Quote one argv element for `/bin/sh`, which is what tmux runs the command
 /// with. Building the string ourselves is the point: an agent passes argv, so
 /// nothing it contains can turn into shell syntax.
-fn sh_quote(arg: &str) -> String {
-    let safe = |c: char| c.is_ascii_alphanumeric() || "_-./=:,@+".contains(c);
-    if !arg.is_empty() && arg.chars().all(safe) {
-        return arg.to_string();
-    }
-    format!("'{}'", arg.replace('\'', r"'\''"))
-}
+// The one quoter (board #125). The old local safe set passed `,@+` bare;
+// the shared form quotes them — the equivalent shell word, one definition.
+use crate::shell::quote as sh_quote;
 
 fn join_cmd(argv: &[String]) -> String {
     argv.iter()

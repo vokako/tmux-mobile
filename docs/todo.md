@@ -102,9 +102,12 @@
   on its own tmux socket (`-S`): `pick_workspace` votes over ALL windows and
   the test's two windows have no majority, so anything another test leaves in
   the shared tmux can tip which directory wins (seen once, 2026-08-05).
-- [ ] Consolidate three shell quoters: `agent_notifications.rs` (the only one
-  compiled on Android, pinned by hook files on disk), `tasks.rs::sh_quote`,
-  and `projects/backends/shared.rs::shell_quote`.
+- [x] One shell quoter (board #125, 2026-09-09): `src/shell.rs` is a leaf
+  module with one escaping core and two documented forms — `quote_always`
+  (the hook-file byte-pinned form; a managed home's hooks diffed
+  byte-identical before/after) and `quote` (on-demand, the narrow safe set;
+  the old tasks `,@+` bare-passthrough bought nothing its tests exercised).
+  The three local definitions are aliases/re-exports of it.
 - [ ] `auto_adopt_with` invokes tmux while holding the store lock.
 - [ ] The `@all` recipient is stored as `'all'` but not restored by `pickLead`;
   `hubLog` drops `since_ts` when `before_seq` is present.

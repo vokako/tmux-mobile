@@ -310,17 +310,9 @@ pub(crate) fn claude_status_line_config() -> Value {
     })
 }
 
-/// Single-quote a string for the shell (the agent launch line is sent to a
-/// tmux pane's shell). Wraps in '…' and escapes embedded single quotes.
-pub(crate) fn shell_quote(s: &str) -> String {
-    if s.is_empty() {
-        return "''".to_string();
-    }
-    if s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'/' | b'=' | b':')) {
-        return s.to_string();
-    }
-    format!("'{}'", s.replace('\'', r"'\''"))
-}
+// The one quoter lives in `crate::shell` (board #125); this re-export keeps
+// the launcher family's import path stable.
+pub(crate) use crate::shell::quote as shell_quote;
 
 /// Build the PATH used by managed agent launch scripts. The server is often
 /// supervised with a deliberately small service PATH, while user-installed
