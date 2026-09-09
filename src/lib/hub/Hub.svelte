@@ -2116,7 +2116,9 @@
     // addressed to it, its own telemetry lane) — rules live in filterBlocks.
     return filterBlocks(all, filterAgent, agents.find((a) => a.name === filterAgent)?.name);
   });
-  const windowName = (w) => agents.find((a) => a.window === w)?.name ?? `#${w}`;
+  // A block's `window` IS the agent name since board #120; the lookup
+  // survives only as the fallback costume for a window with no live agent.
+  const windowName = (w) => agents.find((a) => a.name === w)?.name ?? `${w}`;
 
   // Disclosure lives outside the row: `undefined` means "nobody chose", and the
   // default is OPEN — what an agent is doing is the thing you came to watch
@@ -2145,7 +2147,7 @@
   }
   const isRunning = (b) =>
     b.key === newestSteps[b.window] &&
-    ['running', 'working'].includes(agents.find((a) => a.window === b.window)?.state);
+    ['running', 'working'].includes(agents.find((a) => a.name === b.window)?.state);
   const stepsOpen = (b) => stepsChoice[b.key] ?? true;
   const toggleSteps = (b, open) => { stepsChoice[b.key] = open; };
 
