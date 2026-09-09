@@ -371,6 +371,31 @@ test('the fold budget goes through foldLines, and the basis is the column', () =
     'a real window resize still re-enters through the reading anchor');
 });
 
+test('reading decisions use the pure module while Hub retains DOM and scheduling (#116)', () => {
+  // Parameterizing decisions must not move layout reads or reset the held state
+  // on a jump: reset only affects pickAnchor's seed, as before the extraction.
+  assert.match(source, /import \{ heldAnchor, readingDirection, refoldEligible \} from '\.\/hub-reading\.ts';/u);
+  const scroll = source.slice(source.indexOf('function onFeedScroll'), source.indexOf('let scrollFrame'));
+  assert.match(scroll, /const motion = readingDirection\(delta, askDir, askDirTravel\);\s*askDir = motion\.direction;\s*askDirTravel = motion\.travel;\s*syncAsk\(askDir\);/u,
+    'the rAF callback applies direction before choosing the anchor');
+  assert.match(scroll, /scrollFrame = requestAnimationFrame/u);
+  const refold = source.slice(source.indexOf('function autoRefold'), source.indexOf('function syncAsk'));
+  assert.match(refold, /el instanceof HTMLElement\s*&& refoldEligible\(\{ top: el\.offsetTop, height: el\.offsetHeight \}, top, bottom\)/u,
+    'Hub owns missing-element checks and supplies real layout boxes');
+  assert.match(refold, /withReadingAnchor\(\(\) => \{ expanded = next; \}\)/u);
+  const sync = source.slice(source.indexOf('function syncAsk'), source.indexOf('// Coming back to the page'));
+  assert.match(sync, /reset \? undefined : \{ key: askKey, edge: askEdge \}/u,
+    'pickAnchor is still the sole selector, with the original jump reset');
+  assert.match(sync, /heldAnchor\(picked, chosen,\s*\{ key: askKey, edge: askEdge, held: askHeld \},\s*feedEl\.scrollTop, feedEl\.scrollTop \+ feedEl\.clientHeight\)/u,
+    'held hysteresis receives the existing state even after a jump');
+  assert.match(sync, /askKey = anchor\.key;\s*askEdge = anchor\.edge;\s*askHeld = anchor\.held;/u);
+  const neutralize = sync.indexOf("el.style.position = 'static'");
+  const restore = sync.indexOf("removeProperty('position')");
+  assert.ok(neutralize >= 0 && neutralize < sync.indexOf('const items ='));
+  assert.ok(restore > neutralize && restore < sync.indexOf('const picked = pickAnchor('),
+    'sticky neutralization ends before the pure decisions');
+});
+
 test('the argument is wrapped in its own scroller, beside the name and the time', () => {
   // The markup IS the guarantee: text inside .st-scroll, name and time outside it.
   assert.match(

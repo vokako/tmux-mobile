@@ -35,6 +35,7 @@
   import { projectAgeLabel, sortRows } from '../projects/projects.ts';
   import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, stateNeedsYou, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, mentionedAgents, chipExtras, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, perLineOf, modelLabel } from './hub.ts';
   import { handlePathLinkClick, resolvePathRef } from '../core/path-links.ts';
+  import { heldAnchor, readingDirection, refoldEligible } from './hub-reading.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, popOrigin, viewBox } from '../ui/placement.ts';
@@ -630,20 +631,9 @@
       if (top < 120 && roomReady) loadOlder();
       const delta = top - askScrollTop;
       askScrollTop = top;
-      // Direction hysteresis: trackpad and touch momentum land 1–3px reversals at
-      // rest, and at the held boundary a direction flip re-picks the anchor — the
-      // reported flicker. A reversal only counts once it has travelled 16px.
-      if (delta !== 0) {
-        if ((delta > 0) === (askDir === 'down')) {
-          askDirTravel = 0;
-        } else {
-          askDirTravel += Math.abs(delta);
-          if (askDirTravel >= 16) {
-            askDir = delta > 0 ? 'down' : 'up';
-            askDirTravel = 0;
-          }
-        }
-      }
+      const motion = readingDirection(delta, askDir, askDirTravel);
+      askDir = motion.direction;
+      askDirTravel = motion.travel;
       syncAsk(askDir);
       if (following) {
         newBelow = false;
@@ -784,7 +774,7 @@
     const gone = keys.filter((k) => {
       const el = feedEl.querySelector(`[data-ask="${CSS.escape(k)}"]`);
       return el instanceof HTMLElement
-        && (el.offsetTop + el.offsetHeight < top - 120 || el.offsetTop > bottom + 120);
+        && refoldEligible({ top: el.offsetTop, height: el.offsetHeight }, top, bottom);
     });
     if (!gone.length) return;
     const next = { ...expanded };
@@ -818,33 +808,13 @@
       direction,
       reset ? undefined : { key: askKey, edge: askEdge },
     );
-    // Hysteresis on the HELD state, and it overrides direction re-edging: at
-    // the edge the bubble is simultaneously "naturally visible" (within 1px)
-    // and "touching the edge", so a micro scroll reversal (trackpad, touch
-    // momentum) flips the prepared edge top<->bottom and held with it, which
-    // made the held treatment blink on and off (the reported flicker). While
-    // the SAME bubble is within 8px of the edge it already holds, it keeps
-    // holding that edge regardless of instantaneous direction.
     const chosen = items.find((it) => it.key === picked.key);
-    let edge = picked.edge;
-    let held = false;
-    if (chosen) {
-      const top = feedEl.scrollTop;
-      const bottom = top + feedEl.clientHeight;
-      if (askHeld && askKey === picked.key && askEdge === 'top' && chosen.top <= top + 8) {
-        edge = 'top'; held = true;
-      } else if (askHeld && askKey === picked.key && askEdge === 'bottom'
-        && chosen.top + chosen.height >= bottom - 8) {
-        edge = 'bottom'; held = true;
-      } else {
-        held = edge === 'top' ? chosen.top <= top + 1
-          : edge === 'bottom' ? chosen.top + chosen.height >= bottom - 1
-          : false;
-      }
-    }
-    askKey = picked.key;
-    askEdge = edge;
-    askHeld = held;
+    const anchor = heldAnchor(picked, chosen,
+      { key: askKey, edge: askEdge, held: askHeld },
+      feedEl.scrollTop, feedEl.scrollTop + feedEl.clientHeight);
+    askKey = anchor.key;
+    askEdge = anchor.edge;
+    askHeld = anchor.held;
   }
   $effect(() => {
     void blocks;   // a new message changes both the set and the geometry

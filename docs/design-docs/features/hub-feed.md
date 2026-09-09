@@ -28,6 +28,18 @@ never render a separate pin, never hold one message at each edge, and never swap
 
 **One guard stays**: `.feed { overflow-anchor: none }` (Chromium's scrollTop compensation was the root of the `一闪一闪` blink — measured: assigning 2261 landed on 2221↔2298). The old second guard — a folded bubble reporting its UNFOLDED height to the boundary test (`naturalH`) — retired with fold-on-hold: folding no longer toggles at the hold boundary, so the box height only changes on an explicit unfold click and the real offsetHeight is the right answer. Direction commits only after 16px of travel against it (trackpad/touch rest jitter is 1–3px). Chromium moves sticky `offsetTop`, so `syncAsk` neutralizes `position` during its synchronous natural-position read; programmatic tail jumps call it explicitly. Pure transition rules live in `pickAnchor()` tests; live validation must scan DOM for `max(.ask-top,.ask-bottom) == 1` and observe one bubble's rect reach the edge before `.held`.
 
+**Reading decision ownership** (board #116, 2026-09-09): `hub-reading.ts`
+now owns the previously inline direction/travel update, held-edge hysteresis
+and refold eligibility. The extraction keeps the same thresholds: reversal
+at 16px, first contact within 1px, same-key held-edge retention through 8px,
+and refold only after the whole box passes the strict 120px margin.
+`pickAnchor`, `foldLines`, `perLineOf` and `elideTail` remain in `hub.ts`;
+Hub still owns the DOM reads, sticky neutralization, state, tick/rAF and CSS.
+A jump resets the `pickAnchor` seed, not the separately tracked held state.
+Unit boundary vectors exercise these decisions; the source contract pins
+their wiring. This separates testable arithmetic from layout without changing
+the reading behavior or claiming simulated geometry proves browser layout.
+
 ### A layout mutation goes through `withReadingAnchor`
 
 the terminal drawer regrids the columns and every message rewraps, so the same scrollTop points at different content and the reader's message drifts (owner, 2026-08-20). Scroll anchoring is OFF on purpose (`overflow-anchor: none` ended the held-ask blink), so the helper re-anchors by hand — topmost visible block, same element back at the same offset after `tick()`, sticky variants skipped as references (a pinned rect does not move with the flow), tail stays tail. All drawer toggles route through `openDrawer`/`closeDrawer`; `Hub.source.test.ts` counts bare `termOpen =` writes.
