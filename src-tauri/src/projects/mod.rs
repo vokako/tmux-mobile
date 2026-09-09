@@ -9,11 +9,13 @@
 //! server, so nothing here would ever run on Android/iOS.
 
 pub mod agents;
+pub(crate) mod backends;
 pub mod capture;
 pub mod global_prompt;
 pub mod models;
 pub mod reconcile;
 pub mod recovery;
+pub(crate) mod skills;
 pub mod spawn;
 pub mod store;
 pub mod teams;
@@ -897,11 +899,11 @@ fn sync_skill_files(name: &str, source: &str) -> Result<(), String> {
     }
     if source.starts_with("http://") || source.starts_with("https://") {
         // A refresh must see the remote's CURRENT state, not the clone cache.
-        crate::team::skills::invalidate_git_cache(source);
+        crate::projects::skills::invalidate_git_cache(source);
     } else if !std::path::Path::new(source).is_absolute() {
         return Err("local source must be an absolute path".into());
     }
-    let resolved = crate::team::skills::resolve_skills(&[source.to_string()], "");
+    let resolved = crate::projects::skills::resolve_skills(&[source.to_string()], "");
     let src_dir = resolved
         .first()
         .map(|r| r.dir.clone())
@@ -962,7 +964,7 @@ fn discover_skills(root: &std::path::Path) -> Vec<std::path::PathBuf> {
 /// A store-safe skill name off a discovered dir: frontmatter `name:` when it
 /// parses, else the directory basename — squeezed into [a-zA-Z0-9_-].
 fn discovered_name(dir: &std::path::Path) -> String {
-    let (meta_name, _) = crate::team::skills::read_skill_meta(dir);
+    let (meta_name, _) = crate::projects::skills::read_skill_meta(dir);
     let raw = if meta_name.trim().is_empty() { dir.file_name().and_then(|s| s.to_str()).unwrap_or("skill").to_string() } else { meta_name };
     let cleaned: String = raw
         .trim()
@@ -982,9 +984,9 @@ pub fn skill_import(source: &str) -> Result<Value, String> {
     let source = source.trim();
     let (root, mk_source): (std::path::PathBuf, Box<dyn Fn(&std::path::Path) -> String>) =
         if source.starts_with("http://") || source.starts_with("https://") {
-            crate::team::skills::invalidate_git_cache(source);
-            let (owner, repo, gitref, subpath) = crate::team::skills::parse_github(source)?;
-            let root = crate::team::skills::fetch_git_full(source)?;
+            crate::projects::skills::invalidate_git_cache(source);
+            let (owner, repo, gitref, subpath) = crate::projects::skills::parse_github(source)?;
+            let root = crate::projects::skills::fetch_git_full(source)?;
             let base = root.clone();
             (root.clone(), Box::new(move |dir: &std::path::Path| {
                 let rel = dir.strip_prefix(&base).ok().and_then(|p| p.to_str()).unwrap_or("");
@@ -1022,7 +1024,7 @@ pub fn skill_import(source: &str) -> Result<Value, String> {
             name = format!("{base}-{n}");
             n += 1;
         }
-        let (_, desc) = crate::team::skills::read_skill_meta(dir);
+        let (_, desc) = crate::projects::skills::read_skill_meta(dir);
         if let Err(e) = install_skill_files(&name, dir) {
             skipped.push(format!("{name} ({e})"));
             continue;

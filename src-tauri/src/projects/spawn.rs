@@ -23,7 +23,7 @@
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
-use crate::team::backends_shared as shared;
+use crate::projects::backends::shared;
 use crate::tmux;
 
 use super::store::RegAgent;
@@ -616,14 +616,14 @@ fn build_prompt(def: &RegAgent, name: &str, session: &str, _brief: &str, _by: &s
 /// Skills: each entry is either a central asset NAME (reg_skills → its ref)
 /// or a raw ref (local dir / github url) — central names win, raw refs keep
 /// working, nothing migrates.
-fn resolve_skill_refs(def: &RegAgent, home: &Path) -> Vec<crate::team::skills::ResolvedSkill> {
+fn resolve_skill_refs(def: &RegAgent, home: &Path) -> Vec<crate::projects::skills::ResolvedSkill> {
     let entries: Vec<String> = serde_json::from_str(&def.skills).unwrap_or_default();
     let central: std::collections::HashMap<String, String> = super::with_registry_skills();
     let refs: Vec<String> = entries
         .into_iter()
         .map(|e| central.get(&e).cloned().unwrap_or(e))
         .collect();
-    crate::team::skills::resolve_skills(&refs, &home.to_string_lossy())
+    crate::projects::skills::resolve_skills(&refs, &home.to_string_lossy())
 }
 
 /// Seed `<ws>/.tmm/mcp.json` from registry defs — MERGE, never clobber: the
@@ -972,7 +972,7 @@ fn effort_flag(def: &RegAgent) -> String {
 
 fn render_kiro(
     def: &RegAgent, name: &str, home: &Path, system_prompt: &str,
-    skills: &[crate::team::skills::ResolvedSkill],
+    skills: &[crate::projects::skills::ResolvedSkill],
 ) -> Result<Rendered, String> {
     std::fs::create_dir_all(home.join("agents")).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(home.join("settings")).map_err(|e| e.to_string())?;
@@ -1111,7 +1111,7 @@ fn ensure_claude_state(home: &Path, workspace: &Path) -> Result<bool, String> {
 
 fn render_claude(
     def: &RegAgent, _name: &str, home: &Path, workspace: &Path,
-    system_prompt: &str, skills: &[crate::team::skills::ResolvedSkill],
+    system_prompt: &str, skills: &[crate::projects::skills::ResolvedSkill],
 ) -> Result<Rendered, String> {
     let notifications = crate::agent_notifications::AgentNotificationHub::load();
     notifications.ensure_helper()?;
@@ -1159,7 +1159,7 @@ fn render_claude(
     let full_prompt = if skills.is_empty() {
         system_prompt.to_string()
     } else {
-        format!("{}\n\n{}", system_prompt, crate::team::skills::skills_index_text(skills))
+        format!("{}\n\n{}", system_prompt, crate::projects::skills::skills_index_text(skills))
     };
     // The prompt is a FILE, like every other backend now (owner, 2026-09-08:
     // "类似的 Claude omp grok 是不是也是这种文件形式的，保证更加稳定"):
@@ -1245,7 +1245,7 @@ fn ensure_claude_status_line(path: &Path) -> bool {
 
 fn render_codex(
     def: &RegAgent, _name: &str, home: &Path, system_prompt: &str,
-    skills: &[crate::team::skills::ResolvedSkill],
+    skills: &[crate::projects::skills::ResolvedSkill],
 ) -> Result<Rendered, String> {
     let codex_home = home.join("codex");
     std::fs::create_dir_all(&codex_home).map_err(|e| e.to_string())?;
@@ -1263,7 +1263,7 @@ fn render_codex(
     let full_prompt = if skills.is_empty() {
         system_prompt.to_string()
     } else {
-        format!("{}\n\n{}", system_prompt, crate::team::skills::skills_index_text(skills))
+        format!("{}\n\n{}", system_prompt, crate::projects::skills::skills_index_text(skills))
     };
     // The prompt is a FILE, not a launch argument (owner, 2026-09-08: "能类似
     // 通过 kiro 那样一个文件注入进去吗…这样更优雅一些"). codex reads the
@@ -1312,7 +1312,7 @@ fn render_codex(
 
 fn render_grok(
     def: &RegAgent, name: &str, home: &Path, system_prompt: &str,
-    skills: &[crate::team::skills::ResolvedSkill],
+    skills: &[crate::projects::skills::ResolvedSkill],
 ) -> Result<Rendered, String> {
     std::fs::create_dir_all(home.join("agents")).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(home.join("hooks")).map_err(|e| e.to_string())?;
@@ -1351,7 +1351,7 @@ fn render_grok(
     let full_prompt = if skills.is_empty() {
         system_prompt.to_string()
     } else {
-        format!("{}\n\n{}", system_prompt, crate::team::skills::skills_index_text(skills))
+        format!("{}\n\n{}", system_prompt, crate::projects::skills::skills_index_text(skills))
     };
     let mut fm = format!("---\nname: {name}\ndescription: {} (registry agent)\n", def.name);
     let model = def.model.trim();
@@ -1404,7 +1404,7 @@ fn grok_user_home() -> PathBuf {
 ///   shapes — only the `omp` backend arm.
 fn render_omp(
     def: &RegAgent, _name: &str, home: &Path, system_prompt: &str,
-    skills: &[crate::team::skills::ResolvedSkill],
+    skills: &[crate::projects::skills::ResolvedSkill],
 ) -> Result<Rendered, String> {
     std::fs::create_dir_all(home.join("extensions")).map_err(|e| e.to_string())?;
     let notifications = crate::agent_notifications::AgentNotificationHub::load();
@@ -1464,7 +1464,7 @@ fn render_omp(
     let full_prompt = if skills.is_empty() {
         system_prompt.to_string()
     } else {
-        format!("{}\n\n{}", system_prompt, crate::team::skills::skills_index_text(skills))
+        format!("{}\n\n{}", system_prompt, crate::projects::skills::skills_index_text(skills))
     };
     let prompt_path = home.join("system-prompt.md");
     std::fs::write(&prompt_path, full_prompt).map_err(|e| e.to_string())?;

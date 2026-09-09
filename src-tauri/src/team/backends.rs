@@ -2,196 +2,30 @@
 //! rendering, per-agent HOME seeding, hook wiring, and CLI arg assembly.
 //! Split from team.rs 2026-07-22 — content unchanged.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use serde_json::Value;
 
-use super::skills::{ResolvedSkill, skills_index_text};
+use crate::projects::skills::{ResolvedSkill, skills_index_text};
 use super::workspace::Paths;
 use super::workspace::prepare_kiro_home;
-use super::launch::{
-    build_agent_prompt, Prepared, StartupConfirmation,
-    CLAUDE_FOLDER_TRUST_MARKERS, CODEX_FOLDER_TRUST_MARKERS,
-};
+use super::launch::{build_agent_prompt, Prepared};
 use super::{TeamConfig, TEAM_MCP_TOOL_TIMEOUT_MS};
+// Backend-neutral launch helpers moved to the agents-v2 spawn path (board #100).
+use crate::projects::backends::shared::{
+    claude_mcp_value, claude_status_line_config, claude_user_env, codex_config_override,
+    codex_mcp_overrides, inherit_codex_system_files, kiro_mcp_value, shell_quote, McpDef,
+    StartupConfirmation, CLAUDE_FOLDER_TRUST_MARKERS, CODEX_FOLDER_TRUST_MARKERS,
+};
 
 // ---- Kiro ----
-#[allow(clippy::too_many_arguments)] // agent config genuinely needs all of these
-/// An extra MCP server attached to an agent (from the team.yaml `mcp:` list).
-/// Either a remote HTTP server (`url` [+ `headers`]) or a local stdio server
-/// (`command` [+ `args`/`env`]).
-#[derive(serde::Deserialize, Default, Clone)]
-pub(crate) struct McpDef {
-    /// serde default: central reg_mcp defs store the name as the table KEY,
-    /// not inside the JSON — the spawn resolver injects it after parsing.
-    /// team.yaml entries always carry it inline.
-    #[serde(default)]
-    pub(crate) name: String,
-    #[serde(default)]
-    pub(crate) url: Option<String>,
-    #[serde(default)]
-    pub(crate) headers: std::collections::BTreeMap<String, String>,
-    #[serde(default)]
-    pub(crate) command: Option<String>,
-    #[serde(default)]
-    pub(crate) args: Vec<String>,
-    #[serde(default)]
-    pub(crate) env: std::collections::BTreeMap<String, String>,
-}
-
-/// A skill resolved to a concrete local directory (containing SKILL.md), ready
-/// to wire into a backend.
 /// Per-agent extras threaded from the spec into each backend's launcher.
 #[derive(Default)]
 pub(super) struct Extras {
     pub(super) env: Vec<(String, String)>,
     pub(super) mcp: Vec<McpDef>,
     pub(super) skills: Vec<ResolvedSkill>,
-}
-
-fn env_reference(value: &str) -> Option<&str> {
-    let name = value
-        .strip_prefix("${")
-        .and_then(|s| s.strip_suffix('}'))
-        .or_else(|| value.strip_prefix('$'))?;
-    let mut chars = name.chars();
-    let first = chars.next()?;
-    if (first == '_' || first.is_ascii_alphabetic())
-        && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
-    {
-        Some(name)
-    } else {
-        None
-    }
-}
-
-fn header_env_reference(value: &str) -> Option<(&str, bool)> {
-    if let Some(name) = value.strip_prefix("Bearer ").and_then(env_reference) {
-        Some((name, true))
-    } else {
-        env_reference(value).map(|name| (name, false))
-    }
-}
-
-fn interpolated_headers(headers: &std::collections::BTreeMap<String, String>) -> Value {
-    let values: std::collections::BTreeMap<String, String> = headers
-        .iter()
-        .map(|(key, value)| {
-            let value = match header_env_reference(value) {
-                Some((name, true)) => format!("Bearer ${{{name}}}"),
-                Some((name, false)) => format!("${{{name}}}"),
-                None => value.clone(),
-            };
-            (key.clone(), value)
-        })
-        .collect();
-    serde_json::to_value(values).unwrap_or(Value::Null)
-}
-
-/// kiro mcpServers entry: remote = `{url,headers}`, local = `{command,args,env}`.
-pub(crate) fn kiro_mcp_value(m: &McpDef) -> Value {
-    if let Some(url) = &m.url {
-        let mut o = serde_json::json!({ "url": url });
-        if !m.headers.is_empty() {
-            o["headers"] = interpolated_headers(&m.headers);
-        }
-        o
-    } else if let Some(cmd) = &m.command {
-        let mut o = serde_json::json!({ "command": cmd, "args": m.args });
-        if !m.env.is_empty() {
-            o["env"] = serde_json::to_value(&m.env).unwrap_or(Value::Null);
-        }
-        o
-    } else {
-        serde_json::json!({})
-    }
-}
-
-/// claude mcpServers entry: remote gets explicit `type:"http"`.
-pub(crate) fn claude_mcp_value(m: &McpDef) -> Value {
-    if let Some(url) = &m.url {
-        let mut o = serde_json::json!({ "type": "http", "url": url });
-        if !m.headers.is_empty() {
-            o["headers"] = serde_json::to_value(&m.headers).unwrap_or(Value::Null);
-        }
-        o
-    } else {
-        kiro_mcp_value(m) // local stdio form is identical
-    }
-}
-
-fn codex_key_segment(value: &str) -> String {
-    if !value.is_empty()
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
-    {
-        value.to_string()
-    } else {
-        serde_json::to_string(value).unwrap()
-    }
-}
-
-pub(crate) fn codex_config_override(key: &str, value: Value) -> String {
-    let assignment = format!("{}={}", key, serde_json::to_string(&value).unwrap());
-    format!("-c {}", shell_quote(&assignment))
-}
-
-/// Codex CLI overrides for one extra MCP server. Team keeps the system
-/// config.toml intact and layers room-specific MCP settings at launch.
-pub(crate) fn codex_mcp_overrides(m: &McpDef) -> Vec<String> {
-    let name = codex_key_segment(&m.name);
-    let prefix = format!("mcp_servers.{}", name);
-    let mut args = Vec::new();
-    if let Some(url) = &m.url {
-        args.push(codex_config_override(&format!("{}.url", prefix), Value::String(url.clone())));
-        args.push(codex_config_override(&format!("{}.enabled", prefix), Value::Bool(true)));
-        args.push(codex_config_override(
-            &format!("{}.experimental_use_rmcp_client", prefix),
-            Value::Bool(true),
-        ));
-        for (key, value) in &m.headers {
-            match header_env_reference(value) {
-                Some((name, true)) if key.eq_ignore_ascii_case("authorization") => {
-                    args.push(codex_config_override(
-                        &format!("{}.bearer_token_env_var", prefix),
-                        Value::String(name.to_string()),
-                    ));
-                }
-                Some((name, false)) => {
-                    args.push(codex_config_override(
-                        &format!("{}.env_http_headers.{}", prefix, codex_key_segment(key)),
-                        Value::String(name.to_string()),
-                    ));
-                }
-                _ => {
-                    args.push(codex_config_override(
-                        &format!("{}.http_headers.{}", prefix, codex_key_segment(key)),
-                        Value::String(value.clone()),
-                    ));
-                }
-            }
-        }
-    } else if let Some(cmd) = &m.command {
-        args.push(codex_config_override(
-            &format!("{}.command", prefix),
-            Value::String(cmd.clone()),
-        ));
-        if !m.args.is_empty() {
-            args.push(codex_config_override(
-                &format!("{}.args", prefix),
-                serde_json::to_value(&m.args).unwrap(),
-            ));
-        }
-        for (key, value) in &m.env {
-            args.push(codex_config_override(
-                &format!("{}.env.{}", prefix, codex_key_segment(key)),
-                Value::String(value.clone()),
-            ));
-        }
-    }
-    args
 }
 
 fn codex_team_mcp_overrides(m: &McpDef) -> Vec<String> {
@@ -222,95 +56,6 @@ fn build_cli_system_prompt(
         prompt.push_str("\n</skills-system-prompt>");
     }
     prompt
-}
-
-fn system_codex_home() -> PathBuf {
-    std::env::var_os("CODEX_HOME")
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))
-        .unwrap_or_else(|| PathBuf::from(".codex"))
-}
-
-/// Keep Team runtime state isolated while sharing the system Codex provider and
-/// login. Links follow config/token refreshes without copying credentials.
-pub(crate) fn inherit_codex_system_files(home: &Path) -> Result<(), String> {
-    inherit_codex_system_files_from(home, &system_codex_home())
-}
-
-fn link_codex_system_file(
-    home: &Path,
-    system_home: &Path,
-    filename: &str,
-    replace_team_owned: bool,
-) -> Result<(), String> {
-    let source = system_home.join(filename);
-    if !source.is_file() {
-        if replace_team_owned {
-            let target = home.join(filename);
-            match std::fs::symlink_metadata(&target) {
-                Ok(metadata) if metadata.file_type().is_file() || metadata.file_type().is_symlink() => {
-                    std::fs::remove_file(target).map_err(|e| e.to_string())?;
-                }
-                Ok(_) => return Err(format!("refusing to replace Codex path: {}", target.display())),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error.to_string()),
-            }
-        }
-        return Ok(());
-    }
-    let source = std::fs::canonicalize(source).map_err(|e| e.to_string())?;
-
-    std::fs::create_dir_all(home).map_err(|e| e.to_string())?;
-    let target = home.join(filename);
-    match std::fs::symlink_metadata(&target) {
-        Ok(metadata) => {
-            if metadata.file_type().is_symlink()
-                && std::fs::read_link(&target).is_ok_and(|path| path == source)
-            {
-                return Ok(());
-            }
-            if replace_team_owned && (metadata.file_type().is_file() || metadata.file_type().is_symlink()) {
-                std::fs::remove_file(&target).map_err(|e| e.to_string())?;
-            } else {
-                return Err(format!(
-                    "refusing to replace existing Codex path: {}",
-                    target.display()
-                ));
-            }
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.to_string()),
-    }
-
-    symlink_file(&source, &target).map_err(|e| {
-        format!(
-            "failed to inherit Codex system file from {}: {}",
-            source.display(),
-            e
-        )
-    })
-}
-
-fn inherit_codex_system_files_from(home: &Path, system_home: &Path) -> Result<(), String> {
-    // config.toml in the private home was Team-generated before MCP settings
-    // moved to CLI overrides, so it is the one path Team may replace.
-    link_codex_system_file(home, system_home, "config.toml", true)?;
-    link_codex_system_file(home, system_home, ".env", false)?;
-    link_codex_system_file(home, system_home, "auth.json", false)?;
-    // Profile layers (`codex --profile <name>` reads `<name>.config.toml`).
-    // A machine whose codex auth lives in a profile (e.g. a Bedrock provider
-    // with the bearer token in .env, no ChatGPT login) needs these in the
-    // isolated home or the agent boots into the sign-in screen.
-    if let Ok(entries) = std::fs::read_dir(system_home) {
-        for entry in entries.flatten() {
-            let filename = entry.file_name();
-            let name = filename.to_string_lossy();
-            if name.ends_with(".config.toml") && entry.path().is_file() {
-                link_codex_system_file(home, system_home, &name, true)?;
-            }
-        }
-    }
-    Ok(())
 }
 
 fn codex_developer_instructions(home: &Path, team_instructions: &str) -> Result<String, String> {
@@ -346,16 +91,6 @@ fn codex_developer_instructions(home: &Path, team_instructions: &str) -> Result<
         Some(existing) => format!("{}\n\n{}", existing, team),
         None => team,
     })
-}
-
-#[cfg(unix)]
-fn symlink_file(source: &Path, target: &Path) -> std::io::Result<()> {
-    std::os::unix::fs::symlink(source, target)
-}
-
-#[cfg(windows)]
-fn symlink_file(source: &Path, target: &Path) -> std::io::Result<()> {
-    std::os::windows::fs::symlink_file(source, target)
 }
 
 /// Env the agent process exports so its `heartbeat.sh` hook can ping the daemon
@@ -452,37 +187,6 @@ pub(super) fn prepare_kiro(
 }
 
 // ---- Claude Code ----
-fn claude_user_env_from(path: &Path) -> Value {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-        .and_then(|v| v.get("env").cloned())
-        .filter(Value::is_object)
-        .unwrap_or_else(|| serde_json::json!({}))
-}
-
-/// The provider channel from the user's Claude settings. Managed homes copy
-/// only this block: Bedrock auth selection, region and model pins travel with
-/// the agent, while plugins and unrelated user preferences do not.
-pub(crate) fn claude_user_env() -> Value {
-    let path = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default()
-        .join(".claude")
-        .join("settings.json");
-    claude_user_env_from(&path)
-}
-
-/// Claude Code's official statusLine extension point. The colocated `tmm`
-/// command reads Claude's JSON stdin and prints the one canonical row that the
-/// pane sniffer recognizes; no jq/Python dependency and no API/token cost.
-pub(crate) fn claude_status_line_config() -> Value {
-    serde_json::json!({
-        "type": "command",
-        "command": "tmm claude-statusline"
-    })
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(super) fn prepare_claude(
     name: &str, role: &str, goal: &str, team_prompt: &str,
@@ -667,86 +371,12 @@ fn heartbeat_command(path: &Path, mode: &str) -> String {
     format!("{} {}", bash_script_command(path), mode)
 }
 
-/// Single-quote a string for the shell (the agent launch line is sent to a
-/// tmux pane's shell). Wraps in '…' and escapes embedded single quotes.
-pub(crate) fn shell_quote(s: &str) -> String {
-    if s.is_empty() {
-        return "''".to_string();
-    }
-    if s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'/' | b'=' | b':')) {
-        return s.to_string();
-    }
-    format!("'{}'", s.replace('\'', r"'\''"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::launch::{folder_trust_prompt_visible, startup_already_ready, startup_prompt_visible};
     use super::super::workspace::prepare_home;
-
-    #[test]
-    fn claude_channel_inherits_only_the_user_env_block() {
-        let root = std::env::temp_dir().join(format!(
-            "teamtest-claude-env-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        let settings = root.join("settings.json");
-        std::fs::write(
-            &settings,
-            r#"{"env":{"CLAUDE_CODE_USE_BEDROCK":"1","AWS_REGION":"us-west-2"},"enabledPlugins":{"private":true},"theme":"light"}"#,
-        )
-        .unwrap();
-        let inherited = claude_user_env_from(&settings);
-        assert_eq!(inherited["CLAUDE_CODE_USE_BEDROCK"], "1");
-        assert_eq!(inherited["AWS_REGION"], "us-west-2");
-        assert!(inherited.get("enabledPlugins").is_none());
-        assert!(inherited.get("theme").is_none());
-        std::fs::remove_dir_all(&root).ok();
-    }
-    #[test]
-    fn codex_system_files_link_config_env_and_auth_idempotently() {
-        let root = std::env::temp_dir().join(format!("teamtest-codex-system-{}", uuid::Uuid::new_v4()));
-        let system_home = root.join("system");
-        let agent_home = root.join("agent");
-        std::fs::create_dir_all(&system_home).unwrap();
-        std::fs::write(system_home.join("config.toml"), "model_provider = \"custom\"").unwrap();
-        std::fs::write(system_home.join(".env"), "PROVIDER_TOKEN=secret").unwrap();
-        std::fs::write(system_home.join("auth.json"), "{}").unwrap();
-        std::fs::write(system_home.join("personal.config.toml"), "model_provider = \"bedrock\"").unwrap();
-
-        inherit_codex_system_files_from(&agent_home, &system_home).unwrap();
-        inherit_codex_system_files_from(&agent_home, &system_home).unwrap();
-
-        for filename in ["config.toml", ".env", "auth.json", "personal.config.toml"] {
-            let target = agent_home.join(filename);
-            assert!(std::fs::symlink_metadata(&target)
-                .unwrap()
-                .file_type()
-                .is_symlink());
-        }
-        assert_eq!(
-            std::fs::read_to_string(agent_home.join("config.toml")).unwrap(),
-            "model_provider = \"custom\""
-        );
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn codex_system_files_missing_source_removes_only_team_config() {
-        let root = std::env::temp_dir().join(format!("teamtest-codex-no-auth-{}", uuid::Uuid::new_v4()));
-        let agent_home = root.join("agent");
-        std::fs::create_dir_all(&agent_home).unwrap();
-        std::fs::write(agent_home.join("config.toml"), "[mcp_servers.team]").unwrap();
-
-        inherit_codex_system_files_from(&agent_home, &root.join("system")).unwrap();
-
-        assert!(!agent_home.join("config.toml").exists());
-        assert!(!agent_home.join(".env").exists());
-        assert!(!agent_home.join("auth.json").exists());
-        let _ = std::fs::remove_dir_all(root);
-    }
+    use std::path::PathBuf;
+    use crate::projects::backends::shared::{folder_trust_prompt_visible, startup_already_ready, startup_prompt_visible};
 
     #[test]
     fn codex_team_instructions_follow_existing_user_instructions() {
@@ -771,23 +401,6 @@ mod tests {
             merged.find("Keep the user's convention.").unwrap()
                 < merged.find("Team contract.").unwrap()
         );
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn codex_auth_does_not_replace_an_existing_private_file() {
-        let root = std::env::temp_dir().join(format!("teamtest-codex-existing-auth-{}", uuid::Uuid::new_v4()));
-        let system_home = root.join("system");
-        let agent_home = root.join("agent");
-        std::fs::create_dir_all(&system_home).unwrap();
-        std::fs::create_dir_all(&agent_home).unwrap();
-        std::fs::write(system_home.join("auth.json"), "system").unwrap();
-        std::fs::write(agent_home.join("auth.json"), "private").unwrap();
-
-        let error = inherit_codex_system_files_from(&agent_home, &system_home).unwrap_err();
-
-        assert!(error.contains("refusing to replace"));
-        assert_eq!(std::fs::read_to_string(agent_home.join("auth.json")).unwrap(), "private");
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -1073,50 +686,6 @@ mod tests {
     }
 
     #[test]
-    fn mcp_value_remote_and_local_per_backend() {
-        let remote = McpDef {
-            name: "gh".into(),
-            url: Some("https://x/mcp".into()),
-            headers: [
-                ("Authorization".to_string(), "Bearer $API_TOKEN".to_string()),
-                ("X-Features".to_string(), "${FEATURES}".to_string()),
-                ("X-Static".to_string(), "literal".to_string()),
-            ]
-            .into_iter()
-            .collect(),
-            ..Default::default()
-        };
-        // kiro remote omits an explicit type; claude tags it http.
-        assert!(kiro_mcp_value(&remote).get("type").is_none());
-        assert_eq!(claude_mcp_value(&remote)["type"], "http");
-        assert_eq!(kiro_mcp_value(&remote)["url"], "https://x/mcp");
-        assert_eq!(
-            kiro_mcp_value(&remote)["headers"]["Authorization"],
-            "Bearer ${API_TOKEN}"
-        );
-        assert_eq!(
-            claude_mcp_value(&remote)["headers"]["X-Features"],
-            "${FEATURES}"
-        );
-        assert_eq!(kiro_mcp_value(&remote)["headers"]["X-Static"], "literal");
-
-        let remote_overrides = codex_mcp_overrides(&remote).join(" ");
-        assert!(remote_overrides.contains("mcp_servers.gh.bearer_token_env_var"));
-        assert!(remote_overrides.contains("API_TOKEN"));
-        assert!(remote_overrides.contains("mcp_servers.gh.env_http_headers.X-Features"));
-        assert!(remote_overrides.contains("FEATURES"));
-        assert!(remote_overrides.contains("mcp_servers.gh.http_headers.X-Static"));
-        assert!(!remote_overrides.contains("Bearer $API_TOKEN"));
-
-        let local = McpDef { name: "pg".into(), command: Some("mcp-pg".into()), args: vec!["--stdio".into()], ..Default::default() };
-        let overrides = codex_mcp_overrides(&local).join(" ");
-        assert!(overrides.contains("mcp_servers.pg.command"));
-        assert!(overrides.contains("mcp-pg"));
-        assert!(overrides.contains("mcp_servers.pg.args"));
-        assert!(overrides.contains("--stdio"));
-    }
-
-    #[test]
     fn team_tool_timeout_exceeds_coalesced_wait_budget() {
         let team = McpDef {
             name: "team".into(),
@@ -1137,27 +706,6 @@ mod tests {
 
     // Records seed_employee calls so we can assert the default roster.
     use super::super::test_util::cfg;
-
-    #[test]
-    fn shell_quote_plain_passthrough() {
-        assert_eq!(shell_quote("kiro-cli"), "kiro-cli");
-        assert_eq!(shell_quote("a/b_c.d"), "a/b_c.d");
-    }
-
-    #[test]
-    fn shell_quote_wraps_spaces_unicode_and_globs() {
-        assert_eq!(shell_quote("hello world"), "'hello world'");
-        assert_eq!(shell_quote("你是「经理」"), "'你是「经理」'");
-        assert_eq!(
-            shell_quote("global.anthropic.claude-fable-5-1[1m]"),
-            "'global.anthropic.claude-fable-5-1[1m]'"
-        );
-    }
-
-    #[test]
-    fn shell_quote_escapes_single_quote() {
-        assert_eq!(shell_quote("it's"), r"'it'\''s'");
-    }
 
     #[test]
     fn cli_skill_index_is_part_of_the_system_prompt() {

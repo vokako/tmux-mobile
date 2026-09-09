@@ -2,47 +2,25 @@
 //! inline kick prompt, and startup-prompt auto-confirmation (permissions /
 //! folder-trust dialogs). Split from team.rs 2026-07-22 — content unchanged.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use serde_json::Value;
 
-/// Build the PATH used by managed agent launch scripts. The server is often
-/// supervised with a deliberately small service PATH, while user-installed
-/// CLIs (`claude`, `uvx`, cargo tools) live under the standard per-user bin
-/// directories. A launch recipe must be self-sufficient: inheriting only the
-/// server PATH made a configured Claude agent open a shell and fail with
-/// `command not found: claude`.
-fn agent_launch_path_from(home: Option<&Path>, prepend: Option<&Path>, base: &str) -> String {
-    let mut parts: Vec<PathBuf> = Vec::new();
-    if let Some(p) = prepend.filter(|p| !p.as_os_str().is_empty()) {
-        parts.push(p.to_path_buf());
-    }
-    if let Some(home) = home {
-        parts.push(home.join(".local/bin"));
-        parts.push(home.join("bin"));
-        parts.push(home.join(".cargo/bin"));
-    }
-    parts.extend(std::env::split_paths(base));
-    let mut seen = std::collections::HashSet::new();
-    parts.retain(|p| seen.insert(p.as_os_str().to_os_string()));
-    std::env::join_paths(parts)
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned()
-}
-
-pub(crate) fn agent_launch_path(prepend: Option<&Path>, base: &str) -> String {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    agent_launch_path_from(home.as_deref(), prepend, base)
-}
-
 use crate::tmux;
 
-use super::backends::{prepare_claude, prepare_codex, prepare_kiro, shell_quote, Extras, McpDef};
-use super::skills::resolve_skills;
+use super::backends::{prepare_claude, prepare_codex, prepare_kiro, Extras};
+use crate::projects::backends::shared::{
+    agent_launch_path, confirm_startup_prompt, shell_quote, write_launch_script, McpDef,
+    StartupConfirmation,
+};
+use crate::projects::skills::resolve_skills;
 use super::workspace::Paths;
 use super::TeamConfig;
+
+/// What a backend `prepare_*` returns: (env vars, launch command, post-launch
+/// confirmation). Aliased to keep the per-backend signatures readable.
+pub(super) type Prepared = (Vec<(String, String)>, String, Option<StartupConfirmation>);
 
 /// Write the backend config for `name` and open a named tmux window running it.
 /// Returns the new pane id. Blocking tmux/fs work runs on the caller (the
@@ -132,88 +110,6 @@ pub(super) fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &st
     Ok(pane)
 }
 
-/// Write the full launch command to `<team home>/launch-<name>.sh`. The team
-/// home is self-gitignored, and the script carries the same data as the
-/// backend config files beside it (env values from team.yaml included), so
-/// this adds no new exposure. Overwritten on every (re)launch.
-pub(crate) fn write_launch_script(home: &std::path::Path, name: &str, full_cmd: &str) -> Result<std::path::PathBuf, String> {
-    let path = home.join(format!("launch-{}.sh", name));
-    std::fs::write(&path, format!("# tmux-mobile team launcher (regenerated on every launch)\n{}\n", full_cmd))
-        .map_err(|e| format!("write {}: {}", path.display(), e))?;
-    Ok(path)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct StartupConfirmation {
-    pub(crate) markers: Vec<&'static str>,
-    pub(crate) ready_markers: Vec<&'static str>,
-    /// Named tmux keys used to accept the detected prompt. Claude 2.1.258
-    /// defaults its folder-trust cursor to "No, exit", so Enter alone exits;
-    /// Codex still defaults to the affirmative row.
-    pub(crate) accept_keys: Vec<&'static str>,
-    pub(crate) timeout: Duration,
-}
-
-/// What a backend `prepare_*` returns: (env vars, launch command, post-launch
-/// confirmation). Aliased to keep the per-backend signatures readable.
-pub(super) type Prepared = (Vec<(String, String)>, String, Option<StartupConfirmation>);
-
-pub(crate) const CLAUDE_FOLDER_TRUST_MARKERS: &[&str] = &[
-    "Accessing workspace:",
-    "Yes, I trust this folder",
-    "Enter to confirm",
-];
-
-pub(crate) const CODEX_FOLDER_TRUST_MARKERS: &[&str] = &[
-    "Do you trust the contents of this directory?",
-    "1. Yes, continue",
-    "Press enter to continue",
-];
-
-fn prompt_markers_visible(content: &str, markers: &[&str]) -> bool {
-    markers.iter().all(|marker| content.contains(marker))
-}
-
-pub(super) fn startup_prompt_visible(content: &str, confirmation: &StartupConfirmation) -> bool {
-    prompt_markers_visible(content, &confirmation.markers)
-}
-
-pub(super) fn folder_trust_prompt_visible(content: &str) -> bool {
-    prompt_markers_visible(content, CLAUDE_FOLDER_TRUST_MARKERS)
-        || prompt_markers_visible(content, CODEX_FOLDER_TRUST_MARKERS)
-}
-
-pub(super) fn startup_already_ready(content: &str, confirmation: &StartupConfirmation) -> bool {
-    confirmation
-        .ready_markers
-        .iter()
-        .any(|marker| content.contains(marker))
-}
-
-/// Confirm a known first-use dialog without serializing the supervisor's launch
-/// loop. No key is sent when the workspace is already trusted or the UI differs.
-pub(crate) fn confirm_startup_prompt(pane: String, confirmation: StartupConfirmation) {
-    std::thread::spawn(move || {
-        let deadline = std::time::Instant::now() + confirmation.timeout;
-        while std::time::Instant::now() < deadline {
-            if let Ok(content) = tmux::capture_pane_plain(&pane, Some(80)) {
-                if startup_prompt_visible(&content, &confirmation) {
-                    println!("🜂 team: confirming folder trust in new pane {}", pane);
-                    for key in &confirmation.accept_keys {
-                        let _ = tmux::send_keys(&pane, key, false);
-                        std::thread::sleep(Duration::from_millis(100));
-                    }
-                    return;
-                }
-                if startup_already_ready(&content, &confirmation) {
-                    return;
-                }
-            }
-            std::thread::sleep(Duration::from_millis(500));
-        }
-    });
-}
-
 /// Build the complete agent system prompt with XML-structured layers.
 /// - `<team-system-prompt>`: global rules (from config) + team-specific prompt
 /// - `<role-system-prompt>`: this agent's role + goal
@@ -241,52 +137,6 @@ pub(super) fn build_agent_prompt(role: &str, goal: &str, team_prompt: &str, cfg:
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn managed_agent_path_includes_user_cli_bins_even_with_a_service_path() {
-        let home = Path::new("/home/tester");
-        let path = agent_launch_path_from(
-            Some(home),
-            Some(Path::new("/opt/tmm/bin")),
-            "/usr/bin:/home/tester/.local/bin:/usr/bin",
-        );
-        let parts: Vec<_> = std::env::split_paths(&path).collect();
-        assert_eq!(parts[0], PathBuf::from("/opt/tmm/bin"));
-        assert_eq!(parts[1], PathBuf::from("/home/tester/.local/bin"));
-        assert!(parts.contains(&PathBuf::from("/home/tester/bin")));
-        assert!(parts.contains(&PathBuf::from("/home/tester/.cargo/bin")));
-        assert_eq!(
-            parts.iter().filter(|p| *p == &PathBuf::from("/usr/bin")).count(),
-            1
-        );
-        assert_eq!(
-            parts
-                .iter()
-                .filter(|p| *p == &PathBuf::from("/home/tester/.local/bin"))
-                .count(),
-            1
-        );
-    }
-
-    #[test]
-    fn launch_script_keeps_typed_line_short() {
-        // The typed `. '<script>'` line must stay tiny no matter how large the
-        // inline system prompt grows — kiro-cli-term swallows ≥2 KB bursts.
-        let dir = std::env::temp_dir().join(format!("tmm-launch-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let huge_cmd = format!("TEAM_AGENT='x' claude --append-system-prompt '{}' 'kick'", "p".repeat(8000));
-        let script = write_launch_script(&dir, "planner", &huge_cmd).unwrap();
-        let written = std::fs::read_to_string(&script).unwrap();
-        assert!(written.contains(&huge_cmd));
-        assert!(script.file_name().unwrap().to_string_lossy() == "launch-planner.sh");
-        let typed = format!(". {}", shell_quote(&script.to_string_lossy()));
-        assert!(typed.len() < 200, "typed line must stay far below the ~2KB swallow threshold, got {}", typed.len());
-        // Relaunch overwrites, not appends.
-        let script2 = write_launch_script(&dir, "planner", "echo v2").unwrap();
-        let w2 = std::fs::read_to_string(&script2).unwrap();
-        assert!(w2.contains("echo v2") && !w2.contains("claude"));
-        std::fs::remove_dir_all(&dir).ok();
-    }
 
     #[test]
     fn build_agent_prompt_structure() {
