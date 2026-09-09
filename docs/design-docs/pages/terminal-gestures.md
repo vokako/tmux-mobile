@@ -294,6 +294,19 @@ toast timing. This is not a physical Android/IME verification. The controller
 boundary must be re-reviewed after these pure moves land, before moving its
 state, timers or listeners.
 
+## Controller Boundary Preparation (#148, 2026-09-09)
+
+Before moving the controller, Root groups its existing operations into the
+18 approved synchronous adapters. The three state queries read live values;
+constructing the adapter object invokes none of them. Compound selection
+and scrollbar commands retain their existing read/action order, including
+re-anchoring before grab measurement and inline keyboard unlock after the
+second touchend prevents default. This grouping does not move gesture state,
+timers, listeners, selection or rendering ownership.
+Expanding the adapters restores the original Root AST, including read/action
+order. The 92-state Chromium baseline matches; the four nonidentical Copy
+PNGs differ only in the existing toast timing.
+
 ## Characterization Before Extraction
 
 Board #139 (2026-09-09) adds source contracts and a real-Terminal Chromium

@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import ts from 'typescript';
 
 const source = await readFile(new URL('./Terminal.svelte', import.meta.url), 'utf8');
 
@@ -249,10 +250,10 @@ test('double-tap is the ONE terminal-area gesture that opens the keyboard (revie
   const down = /if \(endedMode === 'down'\) \{([\s\S]*?)\n        return;\n      \}/u.exec(end)?.[1] ?? '';
   assert.ok(down, 'the clean-tap branch must exist');
   assert.match(down, /doubleTap\.tap\(\{ x: t0\.clientX, y: t0\.clientY, t: Date\.now\(\) \}\)/u, 'fed from the clean tap');
-  assert.match(down, /if \(selection\) \{\s*doubleTap\.reset\(\);/u, 'a tap that cancels a selection never starts a pair');
+  assert.match(down, /if \(gestureHost\.hasSelection\(\)\) \{\s*doubleTap\.reset\(\);/u, 'a tap that cancels a selection never starts a pair');
   // The second tap suppresses the browser's synthetic dblclick, or xterm would
   // word-select under the keyboard and onSelChange would adopt it.
-  assert.match(down, /if \(e\.cancelable\) e\.preventDefault\(\);\s*(?:[^\n]*\n\s*)*?unlockKeyboard\(\); \/\/ double-tap/u);
+  assert.match(down, /if \(e\.cancelable\) e\.preventDefault\(\);\s*gestureHost\.openFromDoubleTap\(\);/u);
   assert.match(source, /addEventListener\('touchend', onTouchEnd, \{ passive: false \}\)/u, 'preventDefault needs a non-passive touchend');
   // Every non-tap gesture end breaks the pair.
   assert.match(end, /if \(endedMode !== 'down'\) doubleTap\.reset\(\);/u);
@@ -337,7 +338,8 @@ test('endpoint grab fixes the far endpoint and compensates both coordinates (#13
   const grab = /function beginEndpointDrag\(which\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1] ?? '';
   assert.match(grab, /if \(!selection\) return;\s*selection = selForDrag\(selection, which\);/u);
   assert.match(source, /selection = \{ anchor: selection\.anchor, head: \{ row: bufRow, col \} \};/u);
-  assert.match(source, /const offset = handleGrabOffset\(cx, cy, ep, term\.buffer\.active\.viewportY, r, cell\);\s*handleGrabDx = offset\.dx;\s*handleGrabDy = offset\.dy;/u);
+  assert.match(source, /return handleGrabOffset\(cx, cy, ep, term\.buffer\.active\.viewportY, r, cell\);/u);
+  assert.match(source, /const offset = gestureHost\.grabHandle\(which, cx, cy\);\s*handleGrabDx = offset\.dx;\s*handleGrabDy = offset\.dy;/u);
   assert.match(source, /lastDragX = t0\.clientX - handleGrabDx;\s*lastDragY = t0\.clientY - handleGrabDy;/u);
   // #141 gives numeric capsule/overlap boundaries unit vectors in geometry.
   assert.match(source, /return hitSelectionHandle\(clientX, clientY, rect, selection, selUI\);/u);
@@ -372,13 +374,40 @@ test('motion decisions are pure while state writes and scheduling stay in Termin
   assert.match(source, /import \{ scrollSamples, scrollStep, releaseVelocity, coastStep, edgeDirection, edgeStep \} from '\.\/terminal-gesture-motion\.ts';/u);
   assert.match(source, /const previousMoveTime = lastMoveTime;\s*touchY = y;\s*lastMoveTime = now;/u);
   assert.match(source, /velocitySamples = scrollSamples\(velocitySamples, dy, now, previousMoveTime\);\s*const step = scrollStep\(accumulatedDy, lh\);/u);
-  assert.match(source, /term\.scrollLines\(lines\);\s*accumulatedDy = step\.remainder;/u,
+  assert.match(source, /gestureHost\.scrollLines\(lines\);\s*accumulatedDy = step\.remainder;/u,
     'the scroll remainder is still published after the xterm call');
-  assert.match(source, /if \(touchScrolling && velocitySamples\.length > 0\) \{\s*const lh = lineHeight\(\);\s*let v = releaseVelocity\(velocitySamples, lh\);\s*if \(Math\.abs\(v\) > 0\.1\)/u);
+  assert.match(source, /if \(gestureHost\.isPinned\(\) && velocitySamples\.length > 0\) \{\s*const lh = gestureHost\.lineHeight\(\);\s*let v = releaseVelocity\(velocitySamples, lh\);\s*if \(Math\.abs\(v\) > 0\.1\)/u);
   assert.match(source, /const step = coastStep\(v, acc\);\s*v = step\.velocity;\s*acc = step\.accumulated;/u);
-  assert.match(source, /if \(step\.running\) \{\s*momentumId = requestAnimationFrame\(coast\);\s*\} else \{\s*momentumId = null;\s*scheduleEndTouchScroll\(200\);/u);
+  assert.match(source, /if \(step\.running\) \{\s*momentumId = requestAnimationFrame\(coast\);\s*\} else \{\s*momentumId = null;\s*gestureHost\.requestRenderRelease\(200\);/u);
   assert.match(source, /const dir = edgeDirection\(clientY, rect\.top, rect\.bottom\);\s*edgeScrollDir = dir;/u);
   assert.match(source, /const step = edgeStep\(acc, edgeScrollDir, lastDragY \+ handleGrabDy, rect2\.top, rect2\.bottom\);/u);
-  assert.match(source, /acc = step\.remainder;[\s\S]*?applyHandleDragAt\(lastDragX, lastDragY\);[\s\S]*?edgeScrollId = requestAnimationFrame\(tick\);/u);
+  assert.match(source, /acc = step\.remainder;[\s\S]*?gestureHost\.dragHeadAt\(lastDragX, lastDragY\);[\s\S]*?edgeScrollId = requestAnimationFrame\(tick\);/u);
   assert.doesNotMatch(source, /const MOMENTUM_|const EDGE_SCROLL_ZONE_PX/u, 'one owner for motion coefficients');
+});
+
+test('the gesture Root port has exactly eighteen inert operations and live queries (#148)', () => {
+  const file = ts.createSourceFile('Terminal.js', source.slice(source.indexOf('<script>') + 8, source.indexOf('</script>')),
+    ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  let port: ts.ObjectLiteralExpression | undefined;
+  function visit(node: ts.Node): void {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'gestureHost'
+      && node.initializer && ts.isObjectLiteralExpression(node.initializer)) port = node.initializer;
+    ts.forEachChild(node, visit);
+  }
+  visit(file);
+  assert.ok(port);
+  assert.deepEqual(port.properties.map(p => p.name!.getText(file)).sort(), [
+    'available', 'hasSelection', 'isPinned', 'pinUpdates', 'requestRenderRelease', 'hitHandle',
+    'grabHandle', 'dragHeadAt', 'extendHeadAt', 'tryWordSelection', 'clearSelectionOutside',
+    'isScrollbarPoint', 'scrollPosition', 'dragScrollbar', 'lineHeight', 'edgeBounds',
+    'scrollLines', 'openFromDoubleTap',
+  ].sort());
+  for (const property of port.properties) {
+    assert.ok(ts.isMethodDeclaration(property) || ts.isShorthandPropertyAssignment(property)
+      || (ts.isPropertyAssignment(property) && (ts.isArrowFunction(property.initializer) || ts.isIdentifier(property.initializer))),
+    'building the port must not invoke a Root operation');
+    if (['available', 'hasSelection', 'isPinned'].includes(property.name!.getText(file))) {
+      assert.ok(ts.isPropertyAssignment(property) && ts.isArrowFunction(property.initializer), 'query state on use, not at construction');
+    }
+  }
 });
