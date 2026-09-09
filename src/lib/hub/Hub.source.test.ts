@@ -1132,3 +1132,25 @@ test('a path reference in a bubble opens the file preview, not the void (board #
   // A relative path resolves against the project's cwd before it travels.
   assert.match(source, /fsCwd\(/u, 'relative refs resolve against the project cwd');
 });
+
+test('feed-lane identity comparisons match the window NAME, never the pane index (board #123)', async () => {
+  const source = await readFile(new URL('./Hub.svelte', import.meta.url), 'utf8');
+  // Board #120 made a feed block's `window` the agent NAME (a string), while
+  // HubAgent.window stays the numeric tmux index for terminal targeting.
+  // Two comparisons kept matching name-against-number — always false — so
+  // every lane label fell back to its costume and the tool lane's live pulse
+  // never showed. The lane lookups must compare a.name.
+  assert.match(
+    source,
+    /const windowName = \(w\) => agents\.find\(\(a\) => a\.name === w\)/u,
+    'windowName matches on the name',
+  );
+  assert.match(
+    source,
+    /includes\(agents\.find\(\(a\) => a\.name === b\.window\)\?\.state\)/u,
+    'isRunning matches on the name',
+  );
+  // The numeric index may not creep back into either lookup.
+  assert.doesNotMatch(source, /a\.window === b\.window/u, 'no index-vs-name comparison in the feed lanes');
+});
+
