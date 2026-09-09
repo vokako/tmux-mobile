@@ -9,7 +9,7 @@
 //! desktop-gated — messages live in its `hub_msgs` table since board #107),
 //! so mobile answers method-not-found and clients degrade gracefully.
 
-use super::rpc::{require_str, Request, Response, RpcError, ERR_INTERNAL, ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND};
+use super::rpc::{param, Request, Response, RpcError, ERR_INTERNAL, ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND};
 
 /// Bus room for a project's hub chat.
 ///
@@ -61,15 +61,9 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
     // param by design, so it answers before the session gate like the other
     // all-rooms reads; same authenticated reader as everything here.
     if req.method == "hub_board_counts" {
-        return match crate::projects::board_counts() {
-            Ok(v) => Ok(Response::ok(id, v)),
-            Err(e) => Err(RpcError::Internal(e)),
-        };
+        return Ok(Response::ok(id, crate::projects::board_counts().map_err(RpcError::Internal)?));
     }
-    let asked = match require_str(p, "session") {
-        Ok(s) => s,
-        Err(e) => return Err(RpcError::InvalidParams(e)),
-    };
+    let asked = param(p, "session")?;
     // Resolve the caller's session name to the project's CURRENT one, ONCE, here.
     // Renaming a project renames its tmux session, but a running agent carries
     // `TMM_PROJECT` from the moment it started — and half of these methods reach
@@ -101,14 +95,8 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
         // program, not something said to a person — and record-only, so the
         // mention scanner never sees it.
         "hub_command" => {
-            let agent = match require_str(p, "agent") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            let text = match require_str(p, "text") {
-                Ok(s) => s.trim(),
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
+            let agent = param(p, "agent")?;
+            let text = param(p, "text")?.trim();
             if !text.starts_with('/') {
                 return Err(RpcError::InvalidParams("a command must start with '/'".into()));
             }
@@ -142,10 +130,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
         }
 
         "hub_post" => {
-            let raw_body = match require_str(p, "body") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
+            let raw_body = param(p, "body")?;
             let from = p.get("from").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or("human");
             let is_status = p.get("status").and_then(|v| v.as_bool()).unwrap_or(false);
             let body = if is_status {
@@ -162,22 +147,18 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
             let record_only =
                 is_status || p.get("record_only").and_then(|v| v.as_bool()).unwrap_or(false);
             let recipients = mention_names(&body);
-            match rooms::post_routed(&room, from, &body, &recipients) {
-                Ok(msg) => {
-                    // DELIVERY: an idle agent sits at its prompt and reads
-                    // nothing — @mentions are typed into the mentioned agents'
-                    // panes so the chat actually reaches them. (An agent that
-                    // is mid-task sees the line queued in its input box.)
-                    // Hook-sourced posts skip delivery entirely to prevent
-                    // reply loops (see record_only comment above).
-                    if !record_only {
-                        let seq = msg.get("seq").and_then(|v| v.as_i64());
-                        deliver_mentions(session, from, &body, &room, seq);
-                    }
-                    Ok(Response::ok(id, msg))
-                }
-                Err(e) => Err(RpcError::Internal(e)),
+            let msg = rooms::post_routed(&room, from, &body, &recipients).map_err(RpcError::Internal)?;
+            // DELIVERY: an idle agent sits at its prompt and reads
+            // nothing — @mentions are typed into the mentioned agents'
+            // panes so the chat actually reaches them. (An agent that
+            // is mid-task sees the line queued in its input box.)
+            // Hook-sourced posts skip delivery entirely to prevent
+            // reply loops (see record_only comment above).
+            if !record_only {
+                let seq = msg.get("seq").and_then(|v| v.as_i64());
+                deliver_mentions(session, from, &body, &room, seq);
             }
+            Ok(Response::ok(id, msg))
         }
 
         // Read the project chat, optionally incremental (`since_ts`, exclusive)
@@ -332,20 +313,16 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
                     }
                     Ok(Response::ok(id, serde_json::json!({ "archived": done })))
                 }
-                "hub_msg_restore" => match crate::projects::unarchive_msgs(&room, &ids) {
-                    Ok(n) => Ok(Response::ok(id, serde_json::json!({ "restored": n }))),
-                    Err(e) => Err(RpcError::Internal(e)),
+                "hub_msg_restore" => {
+                    let n = crate::projects::unarchive_msgs(&room, &ids).map_err(RpcError::Internal)?;
+                    Ok(Response::ok(id, serde_json::json!({ "restored": n })))
                 },
                 _ => {
                     // Forget the message itself first: if that fails the archive row
                     // stays, so the message is still listed and can be tried again.
-                    match rooms::delete_messages(&room, &ids) {
-                        Ok(n) => {
-                            let _ = crate::projects::unarchive_msgs(&room, &ids);
-                            Ok(Response::ok(id, serde_json::json!({ "deleted": n })))
-                        }
-                        Err(e) => Err(RpcError::Internal(e)),
-                    }
+                    let n = rooms::delete_messages(&room, &ids).map_err(RpcError::Internal)?;
+                    let _ = crate::projects::unarchive_msgs(&room, &ids);
+                    Ok(Response::ok(id, serde_json::json!({ "deleted": n })))
                 }
             }
         }
@@ -369,18 +346,12 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
         // ---- the project task board (owner, 2026-08-29): the human writes
         // issues on the board page, agents read/update through `tmm board`.
         // Session-scoped like the chat room; note/move/save record WHO acted.
-        "hub_board_list" => match crate::projects::board_list(session) {
-            Ok(v) => Ok(Response::ok(id, v)),
-            Err(e) => Err(RpcError::InvalidParams(e)),
-        },
+        "hub_board_list" => Ok(Response::ok(id, crate::projects::board_list(session).map_err(RpcError::InvalidParams)?)),
         "hub_board_get" => {
             let Some(issue_id) = p.get("id").and_then(|v| v.as_i64()) else {
                 return Err(RpcError::InvalidParams("id required".into()));
             };
-            match crate::projects::board_get(session, issue_id) {
-                Ok(v) => Ok(Response::ok(id, v)),
-                Err(e) => Err(RpcError::InvalidParams(e)),
-            }
+            Ok(Response::ok(id, crate::projects::board_get(session, issue_id).map_err(RpcError::InvalidParams)?))
         }
         "hub_board_save" => {
             let issue_id = p.get("id").and_then(|v| v.as_i64());
@@ -396,77 +367,73 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
             // 完成交 review → 通过标 done). Reporter "human" reads the board
             // itself; the actor is never notified of its own move.
             let prev = issue_id.and_then(|iid| crate::projects::board_get(session, iid).ok());
-            match crate::projects::board_save(session, issue_id, s("title"), s("body"), s("status"), s("assignee"), who) {
-                Ok(saved) => {
-                    if let (Some(prev), Some(new_status)) = (&prev, s("status")) {
-                        let old_status = prev["status"].as_str().unwrap_or("");
-                        if old_status != new_status {
-                            // Titles are optional (board #31): every surface
-                            // that NAMES an issue speaks issue_ref's fallback
-                            // (title → body excerpt → #id), so a titleless
-                            // issue never renders an empty head or a dangling
-                            // separator.
-                            let title = crate::projects::issue_ref(
-                                prev["title"].as_str().unwrap_or(""),
-                                prev["body"].as_str().unwrap_or(""),
-                                saved,
-                            );
-                            let _ = rooms::post(&room, who, &format!("[tmm] board #{saved} {old_status} → {new_status} — {title}"));
-                            if new_status == "review" {
-                                let reporter = prev["created_by"].as_str().unwrap_or("");
-                                if !reporter.is_empty() && reporter != "human" && reporter != who {
-                                    // The handoff CARRIES the mover's last note —
-                                    // their own account of what was done — so the
-                                    // reviewer can usually decide from the message
-                                    // (owner, 2026-08-30: concise, no busywork).
-                                    let last_note = prev["notes"].as_array()
-                                        .and_then(|n| n.last())
-                                        .and_then(|n| n["body"].as_str())
-                                        .map(|b| format!(" — {}", excerpt(b, NOTICE_EXCERPT)))
-                                        .unwrap_or_default();
-                                    let line = format!(
-                                        "[tmm chat {}] {who}: [board #{saved} review] {title}{last_note}. `tmm board move {saved} done` to accept, or note what to fix + move doing.",
-                                        stamp_now()
-                                    );
-                                    deliver_chat_line(session, reporter, &line);
-                                }
-                            }
-                        }
-                    }
-                    // A change SOMEBODY ELSE made to your issue is only real
-                    // once you hear about it (owner, 2026-08-30: "不然这个更
-                    // 改就没有起任何作用。消息就是发给被 assign 的人"): the
-                    // ASSIGNEE gets the change typed into its pane. The pure
-                    // half (`board_change_notice`) decides; skips are part of
-                    // its contract — the actor never hears its own edit, an
-                    // unassigned issue and the human assignee have nobody to
-                    // wake, and a save that CHANGES the assignee is a
-                    // (re)assignment with its own dispatch channel (the UI
-                    // @message), where a second line would be noise.
-                    if let Some(prev) = &prev {
-                        if let Some(what) = board_change_notice(prev, who, s("title"), s("body"), s("status"), s("assignee").is_some()) {
-                            let assignee = prev["assignee"].as_str().unwrap_or("");
-                            // The head names the issue as it NOW reads (new
-                            // values win), through the same issue_ref fallback.
-                            let title = crate::projects::issue_ref(
-                                s("title").unwrap_or(prev["title"].as_str().unwrap_or("")),
-                                s("body").unwrap_or(prev["body"].as_str().unwrap_or("")),
-                                saved,
-                            );
-                            // The change itself travels in the line (values, not
-                            // "something changed"); the `…` in a long excerpt is
-                            // the one signal that `tmm board show` has more.
+            let saved = crate::projects::board_save(session, issue_id, s("title"), s("body"), s("status"), s("assignee"), who).map_err(RpcError::InvalidParams)?;
+            if let (Some(prev), Some(new_status)) = (&prev, s("status")) {
+                let old_status = prev["status"].as_str().unwrap_or("");
+                if old_status != new_status {
+                    // Titles are optional (board #31): every surface
+                    // that NAMES an issue speaks issue_ref's fallback
+                    // (title → body excerpt → #id), so a titleless
+                    // issue never renders an empty head or a dangling
+                    // separator.
+                    let title = crate::projects::issue_ref(
+                        prev["title"].as_str().unwrap_or(""),
+                        prev["body"].as_str().unwrap_or(""),
+                        saved,
+                    );
+                    let _ = rooms::post(&room, who, &format!("[tmm] board #{saved} {old_status} → {new_status} — {title}"));
+                    if new_status == "review" {
+                        let reporter = prev["created_by"].as_str().unwrap_or("");
+                        if !reporter.is_empty() && reporter != "human" && reporter != who {
+                            // The handoff CARRIES the mover's last note —
+                            // their own account of what was done — so the
+                            // reviewer can usually decide from the message
+                            // (owner, 2026-08-30: concise, no busywork).
+                            let last_note = prev["notes"].as_array()
+                                .and_then(|n| n.last())
+                                .and_then(|n| n["body"].as_str())
+                                .map(|b| format!(" — {}", excerpt(b, NOTICE_EXCERPT)))
+                                .unwrap_or_default();
                             let line = format!(
-                                "[tmm chat {}] {who}: [board #{saved}] {title}: {what}",
+                                "[tmm chat {}] {who}: [board #{saved} review] {title}{last_note}. `tmm board move {saved} done` to accept, or note what to fix + move doing.",
                                 stamp_now()
                             );
-                            deliver_chat_line(session, assignee, &line);
+                            deliver_chat_line(session, reporter, &line);
                         }
                     }
-                    Ok(Response::ok(id, serde_json::json!({ "ok": true, "id": saved })))
                 }
-                Err(e) => Err(RpcError::InvalidParams(e)),
             }
+            // A change SOMEBODY ELSE made to your issue is only real
+            // once you hear about it (owner, 2026-08-30: "不然这个更
+            // 改就没有起任何作用。消息就是发给被 assign 的人"): the
+            // ASSIGNEE gets the change typed into its pane. The pure
+            // half (`board_change_notice`) decides; skips are part of
+            // its contract — the actor never hears its own edit, an
+            // unassigned issue and the human assignee have nobody to
+            // wake, and a save that CHANGES the assignee is a
+            // (re)assignment with its own dispatch channel (the UI
+            // @message), where a second line would be noise.
+            if let Some(prev) = &prev {
+                if let Some(what) = board_change_notice(prev, who, s("title"), s("body"), s("status"), s("assignee").is_some()) {
+                    let assignee = prev["assignee"].as_str().unwrap_or("");
+                    // The head names the issue as it NOW reads (new
+                    // values win), through the same issue_ref fallback.
+                    let title = crate::projects::issue_ref(
+                        s("title").unwrap_or(prev["title"].as_str().unwrap_or("")),
+                        s("body").unwrap_or(prev["body"].as_str().unwrap_or("")),
+                        saved,
+                    );
+                    // The change itself travels in the line (values, not
+                    // "something changed"); the `…` in a long excerpt is
+                    // the one signal that `tmm board show` has more.
+                    let line = format!(
+                        "[tmm chat {}] {who}: [board #{saved}] {title}: {what}",
+                        stamp_now()
+                    );
+                    deliver_chat_line(session, assignee, &line);
+                }
+            }
+            Ok(Response::ok(id, serde_json::json!({ "ok": true, "id": saved })))
         }
         "hub_board_note" => {
             let Some(issue_id) = p.get("id").and_then(|v| v.as_i64()) else {
@@ -474,26 +441,22 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
             };
             let body = p.get("body").and_then(|v| v.as_str()).unwrap_or("");
             let author = p.get("who").and_then(|v| v.as_str()).unwrap_or("human");
-            match crate::projects::board_note(session, issue_id, author, body) {
-                Ok(()) => {
-                    // A Board reply is communication, not just storage (board
-                    // #26): after the note is durable, wake the issue's current
-                    // assignee with the same targeted pane delivery/receipt path
-                    // used by review handoffs. Every miss is fail-soft — an
-                    // unassigned/human/self-owned issue has nobody to notify,
-                    // and an offline or unmanaged target reads the persisted
-                    // thread later instead of turning a successful note into an
-                    // RPC failure.
-                    if let Ok(issue) = crate::projects::board_get(session, issue_id) {
-                        if let Some((assignee, notice)) = board_note_notice(&issue, author, body) {
-                            let line = format!("[tmm chat {}] {author}: {notice}", stamp_now());
-                            deliver_chat_line(session, &assignee, &line);
-                        }
-                    }
-                    Ok(Response::ok(id, serde_json::json!({ "ok": true })))
+            crate::projects::board_note(session, issue_id, author, body).map_err(RpcError::InvalidParams)?;
+            // A Board reply is communication, not just storage (board
+            // #26): after the note is durable, wake the issue's current
+            // assignee with the same targeted pane delivery/receipt path
+            // used by review handoffs. Every miss is fail-soft — an
+            // unassigned/human/self-owned issue has nobody to notify,
+            // and an offline or unmanaged target reads the persisted
+            // thread later instead of turning a successful note into an
+            // RPC failure.
+            if let Ok(issue) = crate::projects::board_get(session, issue_id) {
+                if let Some((assignee, notice)) = board_note_notice(&issue, author, body) {
+                    let line = format!("[tmm chat {}] {author}: {notice}", stamp_now());
+                    deliver_chat_line(session, &assignee, &line);
                 }
-                Err(e) => Err(RpcError::InvalidParams(e)),
             }
+            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
         }
         "hub_board_delete" => {
             let Some(issue_id) = p.get("id").and_then(|v| v.as_i64()) else {
@@ -569,10 +532,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
         // drops raw C0 bytes sent to a pane in extended mode. Server-side so
         // the CLI and the UI share ONE implementation.
         "hub_agent_interrupt" => {
-            let agent = match require_str(p, "agent") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
+            let agent = param(p, "agent")?;
             if crate::projects::managed_home(session, agent).is_none() {
                 return Err(RpcError::InvalidParams(format!("'{agent}' is not an agent this app started")));
             }
@@ -588,42 +548,28 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
             // indistinguishable from no reset at all, i.e. an interrupt that
             // looked like it never landed (owner, 2026-08-29).
             telemetry::record_interrupt(session, agent);
-            match crate::tmux::send_keys(&format!("{session}:{window}"), "Escape", false) {
-                Ok(()) => {
-                    // The room records what the app did on a person's behalf —
-                    // same rule as stop/restart/remove. The client's sys
-                    // grammar already speaks `interrupted` (amber: a turn was
-                    // cut short, not an ending); the feed row was the missing
-                    // half of the composer's interrupt affordance (owner,
-                    // 2026-08-24: "发送 interrupt 的状态在消息列表里也要展示").
-                    let _ = rooms::post(&room, agent, &format!("[tmm] interrupted {agent}"));
-                    Ok(Response::ok(id, serde_json::json!({ "interrupted": agent })))
-                }
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            crate::tmux::send_keys(&format!("{session}:{window}"), "Escape", false).map_err(RpcError::Internal)?;
+            // The room records what the app did on a person's behalf —
+            // same rule as stop/restart/remove. The client's sys
+            // grammar already speaks `interrupted` (amber: a turn was
+            // cut short, not an ending); the feed row was the missing
+            // half of the composer's interrupt affordance (owner,
+            // 2026-08-24: "发送 interrupt 的状态在消息列表里也要展示").
+            let _ = rooms::post(&room, agent, &format!("[tmm] interrupted {agent}"));
+            Ok(Response::ok(id, serde_json::json!({ "interrupted": agent })))
         }
 
         // Eject an agent from the project: stop it, drop its slot, remove its
         // isolated home. Stop is the pause button, this is the delete button.
         "hub_agent_remove" => {
-            let agent = match require_str(p, "agent") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            match crate::projects::agent_remove(session, agent) {
-                Ok(v) => {
-                    let _ = rooms::post(&room, agent, &format!("[tmm] removed {agent}"));
-                    Ok(Response::ok(id, v))
-                }
-                Err(e) => Err(RpcError::InvalidParams(e)),
-            }
+            let agent = param(p, "agent")?;
+            let v = crate::projects::agent_remove(session, agent).map_err(RpcError::InvalidParams)?;
+            let _ = rooms::post(&room, agent, &format!("[tmm] removed {agent}"));
+            Ok(Response::ok(id, v))
         }
 
         "hub_agent_stop" | "hub_agent_restart" => {
-            let agent = match require_str(p, "agent") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
+            let agent = param(p, "agent")?;
             if crate::projects::managed_home(session, agent).is_none() {
                 return Err(RpcError::InvalidParams(format!("'{agent}' is not an agent this app started")));
             }
@@ -685,57 +631,44 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
         // as an ordinary managed agent; the room records one `spawned` line
         // per member, in the grammar the client already reads.
         "hub_spawn_team" => {
-            let team = match require_str(p, "team") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
+            let team = param(p, "team")?;
             let brief = p.get("brief").and_then(|v| v.as_str()).unwrap_or("");
             let by = p.get("by").and_then(|v| v.as_str()).unwrap_or("");
-            match crate::projects::spawn::spawn_team(session, team, brief, by) {
-                Ok(result) => {
-                    let who = if by.is_empty() { "human" } else { by };
-                    let empty = Vec::new();
-                    for m in result.get("spawned").and_then(|v| v.as_array()).unwrap_or(&empty) {
-                        let win = m.get("window_name").and_then(|v| v.as_str()).unwrap_or("");
-                        let line = if brief.is_empty() {
-                            format!("[tmm] spawned {win} — team {team}")
-                        } else {
-                            format!("[tmm] spawned {win} — team {team}: {brief}")
-                        };
-                        let _ = rooms::post(&room, who, &line);
-                    }
-                    Ok(Response::ok(id, result))
-                }
-                Err(e) => Err(RpcError::InvalidParams(e)),
+            let result = crate::projects::spawn::spawn_team(session, team, brief, by).map_err(RpcError::InvalidParams)?;
+            let who = if by.is_empty() { "human" } else { by };
+            let empty = Vec::new();
+            for m in result.get("spawned").and_then(|v| v.as_array()).unwrap_or(&empty) {
+                let win = m.get("window_name").and_then(|v| v.as_str()).unwrap_or("");
+                let line = if brief.is_empty() {
+                    format!("[tmm] spawned {win} — team {team}")
+                } else {
+                    format!("[tmm] spawned {win} — team {team}: {brief}")
+                };
+                let _ = rooms::post(&room, who, &line);
             }
+            Ok(Response::ok(id, result))
         }
         "hub_spawn" => {
-            let agent = match require_str(p, "agent") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
+            let agent = param(p, "agent")?;
             let brief = p.get("brief").and_then(|v| v.as_str()).unwrap_or("");
             let by = p.get("by").and_then(|v| v.as_str()).unwrap_or("");
-            match crate::projects::spawn::spawn(&crate::projects::spawn::SpawnRequest {
+            let result = crate::projects::spawn::spawn(&crate::projects::spawn::SpawnRequest {
                 session, agent, brief, by, ..Default::default()
-            }) {
-                Ok(result) => {
-                    // The spawn is chat-visible: the room is the record.
-                    let who = if by.is_empty() { "human" } else { by };
-                    let win = result.get("window_name").and_then(|v| v.as_str()).unwrap_or(agent);
-                    // `[tmm] ` marks a lifecycle line: the client renders it
-                    // as a system row rather than a chat bubble. A machine
-                    // marker, not a glyph — how it LOOKS is the UI's call.
-                    let line = if brief.is_empty() {
-                        format!("[tmm] spawned {win}")
-                    } else {
-                        format!("[tmm] spawned {win} — {brief}")
-                    };
-                    let _ = rooms::post(&room, who, &line);
-                    Ok(Response::ok(id, result))
-                }
-                Err(e) => Err(RpcError::InvalidParams(e)),
-            }
+            })
+            .map_err(RpcError::InvalidParams)?;
+            // The spawn is chat-visible: the room is the record.
+            let who = if by.is_empty() { "human" } else { by };
+            let win = result.get("window_name").and_then(|v| v.as_str()).unwrap_or(agent);
+            // `[tmm] ` marks a lifecycle line: the client renders it
+            // as a system row rather than a chat bubble. A machine
+            // marker, not a glyph — how it LOOKS is the UI's call.
+            let line = if brief.is_empty() {
+                format!("[tmm] spawned {win}")
+            } else {
+                format!("[tmm] spawned {win} — {brief}")
+            };
+            let _ = rooms::post(&room, who, &line);
+            Ok(Response::ok(id, result))
         }
 
         other => Err(RpcError::MethodNotFound(format!("unknown hub method: {other}"))),
