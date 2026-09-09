@@ -4,7 +4,12 @@ Frontend tests and repository development-script tests run with `npm test`
 (`node --test`, no framework, no tmux needed). Rust tests: `cd src-tauri && cargo test -- --test-threads=1`
 (needs a running tmux). This file governs the frontend side.
 
-## Two kinds of tests, two naming schemes
+Client-mount tests require Node `^22.22.2 || ^24.15.0 || >=26.0.0`
+(jsdom 30's engine requirement; board #115, 2026-09-09). `node --test`
+remains the only runner. Install with real npm from `package-lock.json`;
+see [development.md](development.md#node-and-package-installation).
+
+## Three Test Tiers
 
 ### 1. Unit tests — `<module>.test.ts`
 
@@ -20,12 +25,11 @@ Runes modules (`*.svelte.ts`) are testable in node with the shim:
 globalThis.$state = value => value;
 ```
 
-### 2. Source-contract tests — `<Component>.source.test.ts`
+### 2. Component Contracts: Source and Rendered Markup
 
-Svelte components can't execute under `node --test`, but some component
-wiring is too important to leave unpinned (which notification query a
-template calls, which navigation states exist, a CSS overflow contract).
-These tests `readFile` the component source and assert with regexes.
+`<Component>.source.test.ts` reads source and asserts deliberate wiring or
+CSS contracts: which query a template calls, which navigation states exist,
+or which cell owns overflow. These assertions do not execute handlers.
 
 - Named after the component, colocated (`Terminal.source.test.ts` next
   to `Terminal.svelte`; `App.source.test.ts` next to `src/App.svelte`).
@@ -37,6 +41,67 @@ These tests `readFile` the component source and assert with regexes.
   an importable module — source regexes are a last resort, and each one
   should explain WHY the invariant matters.
 
+`<Component>.render.test.ts` compiles the real component through Vite SSR
+and asserts its emitted markup (`Board.render.test.ts` was the first).
+Prefer it over source regexes for rendered branches and attributes.
+SSR does not run client effects or event handlers; it cannot establish
+timing, listener order or reactive behavior after a click.
+
+### 3. Client Behavior: `<Component>.mount.test.ts`
+
+Board #115 adds one helper, `src/lib/test/mount.ts`, for executing the real
+Svelte client component under `node --test`. `compileMount(component,
+mockedModules)` builds once; its `mount(context, options)` creates a fresh
+jsdom window for each scenario. Module implementations in `options.modules`
+match the declared module order. Keep fixtures and assertions beside the
+component, not in a general mock framework.
+
+- Compile client output with browser export conditions, not `ssrLoadModule`.
+  The component and `mount`/`tick`/`flushSync`/`unmount` share one Svelte runtime.
+- Execute only the trusted test bundle in `getInternalVMContext()` with
+  `runScripts: outside-only`. Never assign `global.window` in Node or allow
+  document scripts/resources to execute.
+- Mock the RPC boundary with explicit responses or controlled promises.
+  Replies are JSON-cloned into the client realm. Unknown exports, network
+  calls and jsdom errors fail the fixture even if the component catches them.
+- Compile before enabling Node's mock clock. `advance(ms)` advances timers;
+  `flush()` settles Svelte and the queued rAF callbacks. Do not sleep for
+  timing assertions or run active mounts concurrently in one test process.
+- Always close the mount in `finally`: unmount, clear frames, close the
+  window and reset timers. Cleanup is also registered with the test context.
+  Fresh localStorage and a new realm prevent one scenario seeding the next.
+- Vite uses `configFile:false`, `write:false` and a unique temporary
+  `cacheDir`, removed after compilation. No listener, optimizer, live
+  `node_modules/.vite`, public assets or project `dist` is involved.
+- Heavy packages (`pdfjs-dist`, Mermaid, highlight.js, KaTeX and xterm)
+  are excluded at the test-build boundary; bare lazy package imports stay
+  deferred. Attempting to use them fails explicitly. Never modify production
+  components to make a fixture cheaper.
+
+The initial proof is one `Hub.mount.test.ts` characterization: actual card
+clicks select the recipient, defer its menu until 260ms, cancel a pending
+menu when another card is clicked, and release the push subscription on
+unmount. Three repeats of this same scenario reuse the bundle but not the DOM.
+Its negative control removed the per-card guard and failed with `bob` where
+the clicked recipient was `alice`.
+
+**Scope:** this tier proves synthetic DOM event wiring, closures, reactive
+updates, controlled async ordering, timers and cleanup. It does not prove
+layout, sticky geometry, paint, browser navigation, native selection/IME,
+clipboard/user activation or renderer output. jsdom has no layout engine;
+the inert ResizeObserver and matchMedia defaults are environment fixtures,
+not measured geometry. Use real Chromium for those claims.
+
+**Measured cost** (2026-09-09, Node 22.23.2, Svelte 5.53.5, Vite 6.4.1,
+jsdom 30.0.1, canonical npm lock): the initial all-dependency bundle took
+21.38s with observed RSS around 1.4 GiB. Excluding heavy packages gave five
+fresh-process runs at 7.56-7.88s wall time, including 5.13-5.45s compilation;
+additional fresh-DOM repeats took 76-87ms, with 388-413 MiB peak RSS on Linux.
+Each process had a fresh Vite cache; the OS page cache was not flushed.
+Keep added cold-test cost within 10s and additional bundled scenarios below
+500ms; remeasure before expanding the tier. These are budget evidence, not
+flaky wall-clock assertions in the test.
+
 ## Rules
 
 - New module → its `<module>.test.ts` lands in the same commit.
@@ -46,11 +111,9 @@ These tests `readFile` the component source and assert with regexes.
   once at the boundary (`as unknown as X`) with a comment; don't build
   full fakes just to satisfy the checker.
 - No test file without a clear subject; no subject with two test files of
-  the same kind. A component may have a `.source.test.ts` (regex over the
-  source) AND a `.render.test.ts` (the real component rendered through
-  vite's SSR pipeline, asserting on emitted markup — `Board.render.test.ts`
-  is the first); they answer different questions, and the render test is
-  the one to prefer when a contract is about what the user sees.
+  the same kind. A component may have source, SSR render and client-mount
+  files: structure, emitted markup and executing behavior are different
+  contracts. Use the cheapest tier that actually proves the claim.
 - Every regression fix starts with a failing test that reproduces it.
 
 ## Current source-contract inventory

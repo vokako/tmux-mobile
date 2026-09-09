@@ -2,6 +2,26 @@
 
 Everything about RUNNING and BUILDING the project. Testing conventions are in `testing.md`; frontend coding rules in `frontend.md`; runtime configuration in `../reference/config.md`.
 
+## Node and Package Installation
+
+Development tests require Node `^22.22.2 || ^24.15.0 || >=26.0.0`
+since the jsdom 30 client-mount tier (board #115, 2026-09-09).
+Verified here with Node 22.23.2. This is a development-tool prerequisite,
+not a change to the browser runtime.
+
+`package-lock.json` is canonical; install with `npm ci`. This host aliases
+`npm` to `pnpm` in its login shell, so use `bash -c 'npm ci'` (and real npm
+for dependency changes) to honor and regenerate the tracked lock.
+`pnpm-lock.yaml` is intentionally gitignored to avoid a second package
+manager's dependency graph. Do not upgrade unrelated locked packages when
+adding a test dependency.
+
+When changing dependencies in a worktree, use that worktree's own
+`node_modules`, not a symlink into the live checkout: installation must not
+rewrite the running Vite optimizer's dependency tree. The client-mount
+helper also uses its own disposable build cache and never starts another
+dev server; see [testing.md](testing.md#3-client-behavior-componentmounttestts).
+
 ## Commands
 
 ```bash
