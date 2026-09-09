@@ -85,8 +85,8 @@
   loss went with the index → name round-trip. Identical-body receipts and
   delivery backpressure followed (board #122, 2026-09-09: duplicates are
   distinct promises settled count-wise per echo, v21; one mutex per pane
-  target inside `send_command` serializes bursts). Still open from the
-  cluster: `SPAWN_CAP` includes windows we do not own.
+  target inside `send_command` serializes bursts). `SPAWN_CAP` counts managed
+  agents only since board #126 (2026-09-09) — the cluster is closed.
 - [ ] Backend parity, blocked on measurement rather than effort: claude's
   `/` palette is not transcribed (mechanical once captured — transcribe the
   popup with pinned captures like codex's); claude/codex/grok have no

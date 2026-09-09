@@ -35,6 +35,23 @@ use super::store::RegAgent;
 /// four plus its review board. Still counts every agent-looking window.
 pub const SPAWN_CAP: usize = 8;
 
+/// How many of the project's windows count against the spawn cap: MANAGED
+/// agents only (board #126). The cap is fan-out control — how many agents
+/// this app will run at once for one project (tmm-cli.md: "a resource gate
+/// on spawn — about fan-out control, not security") — so hand-started shells
+/// and adopted agents are none of its business: a project with six plain
+/// windows and two managed agents has room for six more hires. "Ours" is the
+/// ONE definition, `home_is_managed` via `is_managed_in` (#112), not the
+/// pane sniff, which counted anything that LOOKED like an agent.
+fn managed_window_count(workspace: &str, panes: &[tmux::TmuxPane]) -> usize {
+    let mut seen = std::collections::HashSet::new();
+    panes
+        .iter()
+        .filter(|p| seen.insert(p.window))
+        .filter(|p| super::is_managed_in(Some(workspace), &p.window_name))
+        .count()
+}
+
 pub struct SpawnRequest<'a> {
     pub session: &'a str,
     /// Registry definition name to spawn (ignored when `def` is given).
@@ -102,14 +119,9 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
         .ok_or_else(|| format!("no project for session '{}'", req.session))?;
     let workspace = project.path.clone();
 
-    // The cap counts existing agent windows (any backend), not shells.
+    // The cap counts MANAGED agents only (board #126) — see managed_window_count.
     let panes = tmux::list_panes(req.session).unwrap_or_default();
-    let mut seen = std::collections::HashSet::new();
-    let agent_windows = panes
-        .iter()
-        .filter(|p| seen.insert(p.window))
-        .filter(|p| super::agents::detect_pane(Some(workspace.as_str()), p).is_some())
-        .count();
+    let agent_windows = managed_window_count(&workspace, &panes);
     if agent_windows >= SPAWN_CAP {
         return Err(format!("project already has {agent_windows} agents (cap {SPAWN_CAP}) — finish or close one first"));
     }
@@ -380,12 +392,8 @@ pub fn spawn_team(session: &str, team_name: &str, brief: &str, by: &str) -> Resu
     let project = super::project_for_session(session)?
         .ok_or_else(|| format!("no project for session '{session}'"))?;
     let panes = tmux::list_panes(session).unwrap_or_default();
-    let mut seen = std::collections::HashSet::new();
-    let existing = panes
-        .iter()
-        .filter(|p| seen.insert(p.window))
-        .filter(|p| super::agents::detect_pane(Some(project.path.as_str()), p).is_some())
-        .count();
+    // Team expansion counts its LEAVES against the same cap, as before.
+    let existing = managed_window_count(&project.path, &panes);
     if existing + flat.len() > SPAWN_CAP {
         return Err(format!(
             "team '{team_name}' expands to {} agents and the project already has {existing} (cap {SPAWN_CAP}) — stop some first",
@@ -2537,4 +2545,45 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         super::super::teams_delete("rfteam").ok();
         std::fs::remove_dir_all(&ws).ok();
     }
+    /// Board #126: the cap counts MANAGED agents only. A project with a few
+    /// plain windows (shells, hand-started agents) must not refuse a hire it
+    /// has room for; a project at the cap in managed agents must refuse.
+    #[test]
+    fn spawn_cap_counts_only_managed_windows() {
+        let ws = std::env::temp_dir().join(format!("tmm-cap-{}", uuid::Uuid::new_v4()));
+        let pane = |w: usize, name: &str| crate::tmux::TmuxPane {
+            session: "s".into(), window: w, pane: 0, width: 80, height: 24,
+            current_command: "kiro-cli".into(), window_name: name.into(),
+            pane_title: String::new(), current_path: String::new(),
+            active: true, child_cmd: String::new(),
+        };
+        let managed = |name: &str| {
+            let home = ws.join(".tmm/agents").join(name);
+            std::fs::create_dir_all(&home).unwrap();
+            std::fs::write(home.join("launch.json"), "{}").unwrap();
+        };
+        // 2 managed + 6 plain windows: the plain ones (no recipe on disk —
+        // shells and hand-started agents alike) do not count, so there is
+        // still room to hire.
+        managed("dev");
+        managed("rev");
+        let mut panes: Vec<crate::tmux::TmuxPane> = vec![pane(1, "dev"), pane(2, "rev")];
+        for n in 3..9 {
+            panes.push(pane(n, &format!("shell{n}")));
+        }
+        let ws_str = ws.to_string_lossy().to_string();
+        assert_eq!(managed_window_count(&ws_str, &panes), 2, "six plain windows are not ours");
+        assert!(managed_window_count(&ws_str, &panes) < SPAWN_CAP, "room to hire remains");
+
+        // At the cap in MANAGED agents, the count says so.
+        for n in 0..6 {
+            let name = format!("m{n}");
+            managed(&name);
+            panes.push(pane(20 + n, &name));
+        }
+        assert_eq!(managed_window_count(&ws_str, &panes), 8, "eight managed agents");
+        assert!(managed_window_count(&ws_str, &panes) >= SPAWN_CAP, "the cap refuses here");
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
 }
