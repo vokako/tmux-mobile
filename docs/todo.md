@@ -52,10 +52,11 @@
 
 ## B. Correctness (P1)
 
-- [ ] Registry definition edits do not reach existing agents. Add
-  `slots.agent_def`; `refresh_hooks` should synchronize model/MCP/resources
-  without changing the prompt. `refresh_agent` partly addresses this;
-  verify what remains.
+- [x] Registry definition edits reach every already-spawned agent on restart
+  (board #113, 2026-09-09): provenance lives in `launch.json` (`agent_def` /
+  `team`+`member` — the recipe is the declaration, no slots column), and
+  `refresh_agent` resolves the CURRENT def through it, so uniquified windows
+  and team members re-materialize too; a deleted def degrades soft.
 - [x] `is_managed_in` no longer re-arms merely because kiro recreates the
   `KIRO_HOME` subtree after `agent_remove`. It now requires `launch.json`
   or a pre-recipe `agents/<name>.json` (board #112, 2026-09-09).

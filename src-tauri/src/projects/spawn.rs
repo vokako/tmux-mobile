@@ -49,6 +49,10 @@ pub struct SpawnRequest<'a> {
     /// The exact window name to use; the caller has already uniquified it.
     /// `None` = the def's name, uniquified here.
     pub window_name: Option<String>,
+    /// The member NAME inside the team definition (board #113) — with `team`,
+    /// the provenance a restart uses to re-resolve the CURRENT def for a
+    /// uniquified window. Empty for solo spawns.
+    pub member: &'a str,
     /// The team this spawn belongs to; recorded in the launch recipe so the
     /// Hub can group the cards.
     pub team: Option<String>,
@@ -62,7 +66,7 @@ impl Default for SpawnRequest<'_> {
     fn default() -> Self {
         SpawnRequest {
             session: "", agent: "", brief: "", by: "", def: None,
-            window_name: None, team: None, resume: false,
+            window_name: None, team: None, member: "", resume: false,
         }
     }
 }
@@ -122,7 +126,11 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
     // directory under `.tmm/agents/` and a tmux window name.
     super::agents::valid_name(&window_name)?;
 
-    let m = materialize(&def, &window_name, req.session, &workspace, req.brief, req.by, req.team.as_deref())?;
+    // Provenance for restarts (board #113): a registry-resolved spawn records
+    // the DEF name (the window may be uniquified past it); a team member
+    // records team+member instead and its def is re-derived on refresh.
+    let agent_def = if req.def.is_none() { def.name.as_str() } else { "" };
+    let m = materialize(&def, &window_name, req.session, &workspace, req.brief, req.by, req.team.as_deref(), agent_def, req.member)?;
     let home = m.home;
     let env = m.env;
 
@@ -176,6 +184,11 @@ fn materialize(
     brief: &str,
     by: &str,
     team: Option<&str>,
+    // Def provenance (board #113): the registry def name for a solo spawn
+    // (the window may be uniquified past it), or the member name inside the
+    // team definition for a team spawn. Both empty for pre-#113 recipes.
+    agent_def: &str,
+    member: &str,
 ) -> Result<Materialized, String> {
     let home = agent_home(workspace, window_name);
     std::fs::create_dir_all(&home).map_err(|e| format!("create agent home: {e}"))?;
@@ -227,26 +240,54 @@ fn materialize(
     // replays it). Written here, before the window exists, so a write failure
     // is a spawn failure with nothing left running — not a live agent that
     // restarts deaf on the generic launch path.
-    write_launch_recipe(&home, &def.backend, &env, &prepared.cmd, by, team)?;
+    write_launch_recipe(&home, &def.backend, &env, &prepared.cmd, by, team, agent_def, member)?;
     Ok(Materialized { home, cmd: prepared.cmd, env, confirmation: prepared.confirmation })
 }
 
-/// Re-materialize an existing managed agent from its CURRENT definition and
-/// the current app-wide AGENTS.md, preserving the recipe's spawner and team.
-/// This is what makes `restart` mean "come back up to date": the recipe replay
-/// itself is verbatim, so without this an agent restarted forever with its
-/// spawn-time prompt (global_prompt.rs promised otherwise — owner noticed,
-/// 2026-09-08). `false` when the window is not one we can refresh — no recipe
-/// on disk, or a name that resolves to no registry def (a uniquified teammate
-/// like `lead-2`, a team-role synthetic) — those keep replaying their
-/// spawn-time snapshot, exactly as before.
+/// Re-materialize a managed agent's home from its CURRENT definition, so a
+/// restart launches today's registry text instead of the spawn-time snapshot
+/// (owner, 2026-09-08). The def is resolved through the recipe's PROVENANCE
+/// (board #113): a team member re-derives its effective def from the current
+/// team (`team` + `member`), a solo spawn follows `agent_def` (so a
+/// uniquified `lead-2` still finds `lead`), and a pre-#113 recipe falls back
+/// to the window name, exactly as before. `false` when the window is not one
+/// we can refresh — no recipe on disk, a def that was deleted after the spawn
+/// (degrades soft: the spawn-time materials keep working, logged once per
+/// window), or a def edited into an invalid model (a config the backend
+/// would refuse must not brick the restart).
 pub fn refresh_agent(project_path: &str, session: &str, window_name: &str) -> bool {
-    let Ok(Some(def)) = super::registry_get(window_name) else { return false };
     let home = agent_home(project_path, window_name);
     let Ok(recipe) = std::fs::read_to_string(home.join("launch.json")) else { return false };
     let recipe: Value = match serde_json::from_str(&recipe) {
         Ok(v) => v,
         Err(_) => return false,
+    };
+    let field = |k: &str| recipe.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let by = field("spawned_by");
+    let team = field("team");
+    let member = field("member");
+    let agent_def = field("agent_def");
+
+    let resolved = if !team.is_empty() && !member.is_empty() {
+        refresh_team_def(project_path, &team, &member, window_name)
+    } else if !agent_def.is_empty() {
+        super::registry_get(&agent_def).ok().flatten()
+    } else {
+        // Pre-#113 recipe: the window name IS the def name or nothing.
+        super::registry_get(window_name).ok().flatten()
+    };
+    let Some(def) = resolved else {
+        // The def (or its team/base) is gone. Keep the spawn-time snapshot —
+        // the agent keeps working — and say so once per window, not per start.
+        static WARNED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+            std::sync::OnceLock::new();
+        let key = format!("{project_path}/{window_name}");
+        if WARNED.get_or_init(Default::default).lock().unwrap().insert(key) {
+            eprintln!(
+                "projects: definition behind agent '{window_name}' is gone (def '{agent_def}', team '{team}'); restarts keep its spawn-time materials"
+            );
+        }
+        return false;
     };
     // A def edited into an invalid model must not brick the restart: keep the
     // old materials rather than write a config the backend will refuse.
@@ -255,9 +296,61 @@ pub fn refresh_agent(project_path: &str, session: &str, window_name: &str) -> bo
     {
         return false;
     }
-    let by = recipe.get("spawned_by").and_then(|v| v.as_str()).unwrap_or("");
-    let team = recipe.get("team").and_then(|v| v.as_str()).filter(|t| !t.is_empty());
-    materialize(&def, window_name, session, project_path, "", by, team).is_ok()
+    let team_opt = (!team.is_empty()).then_some(team.as_str());
+    materialize(&def, window_name, session, project_path, "", &by, team_opt, &agent_def, &member).is_ok()
+}
+
+/// Re-derive a team member's effective def from the CURRENT team definition
+/// (board #113). The roster is reconstructed from the sibling recipes in this
+/// workspace — the recipes are the declaration of which window carries which
+/// member — with the member's own name as the fallback for a sibling that has
+/// no recipe here (removed, or spawned before provenance existed): that is
+/// the name spawn itself would have used had the window not been taken.
+fn refresh_team_def(workspace: &str, team_path: &str, member: &str, window_name: &str) -> Option<RegAgent> {
+    let root = team_path.split('/').next()?;
+    let team = super::team_get(root).ok().flatten()?;
+    let flat = super::teams::expand(&team, &|n| super::team_get(n), SPAWN_CAP).ok()?;
+    let f = flat
+        .iter()
+        .find(|f| f.path == team_path && f.member.name.trim() == member)?;
+    let assigned = team_windows_from_recipes(workspace, root);
+    let roster: Vec<super::teams::RosterEntry> = flat
+        .iter()
+        .map(|g| {
+            let key = (g.path.clone(), g.member.name.trim().to_string());
+            let w = assigned.get(&key).cloned().unwrap_or_else(|| g.member.name.trim().to_string());
+            (w, g.member.role.clone(), g.path.clone())
+        })
+        .collect();
+    let base = if f.member.base.trim().is_empty() {
+        None
+    } else {
+        super::registry_get(f.member.base.trim()).ok().flatten()
+    };
+    super::teams::effective_def(f, base.as_ref(), window_name, &roster).ok()
+}
+
+/// (team path, member name) -> window name, read off every recipe under
+/// `<ws>/.tmm/agents/` whose team path starts at `root`. Fail-soft: an
+/// unreadable recipe simply contributes nothing.
+fn team_windows_from_recipes(
+    workspace: &str,
+    root: &str,
+) -> std::collections::HashMap<(String, String), String> {
+    let mut map = std::collections::HashMap::new();
+    let dir = Path::new(workspace).join(".tmm").join("agents");
+    let Ok(entries) = std::fs::read_dir(dir) else { return map };
+    for entry in entries.flatten() {
+        let Ok(text) = std::fs::read_to_string(entry.path().join("launch.json")) else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(&text) else { continue };
+        let get = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+        let (team, member) = (get("team"), get("member"));
+        if member.is_empty() || team.split('/').next() != Some(root) {
+            continue;
+        }
+        map.insert((team, member), entry.file_name().to_string_lossy().into_owned());
+    }
+    map
 }
 
 /// Window name = agent name, uniquified if taken (lead, lead-2, …). The window
@@ -322,6 +415,7 @@ pub fn spawn_team(session: &str, team_name: &str, brief: &str, by: &str) -> Resu
                 def: Some(def),
                 window_name: Some(w.clone()),
                 team: Some(path.clone()),
+                member: m.name.trim(),
                 resume: false,
             })
         });
@@ -341,7 +435,7 @@ pub fn spawn_team(session: &str, team_name: &str, brief: &str, by: &str) -> Resu
 /// no auto-post, every delivery "unconfirmed" (owner report, 2026-08-18).
 /// The kick is NOT part of the recipe: it belongs to the first launch only;
 /// a restart resumes a conversation instead.
-fn write_launch_recipe(home: &Path, backend: &str, env: &[(String, String)], cmd: &str, by: &str, team: Option<&str>) -> Result<(), String> {
+fn write_launch_recipe(home: &Path, backend: &str, env: &[(String, String)], cmd: &str, by: &str, team: Option<&str>, agent_def: &str, member: &str) -> Result<(), String> {
     // `cmd` is the identity command with NO first prompt appended (spawn adds
     // that separately), so the recipe stores it verbatim. It used to strip a
     // trailing quoted argument to remove the kick — a guess that would have
@@ -350,12 +444,18 @@ fn write_launch_recipe(home: &Path, backend: &str, env: &[(String, String)], cmd
     // the live reply edge. Empty = the human.
     // `team` (board #74): the configured team this window was spawned as part
     // of, so the Hub can group the cards; absent for a solo spawn.
+    // `agent_def`/`member` (board #113): the def PROVENANCE, so a restart can
+    // re-resolve the CURRENT definition for a window whose name is not the
+    // def's (uniquified `lead-2`, a team member). In the recipe, not a slots
+    // column — the recipe is the declaration, one place (tenet 7).
     let recipe = json!({
         "backend": backend,
         "env": env.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(),
         "cmd": cmd.trim_end(),
         "spawned_by": by,
         "team": team.unwrap_or(""),
+        "agent_def": agent_def,
+        "member": member,
     });
     std::fs::write(
         home.join("launch.json"),
@@ -492,7 +592,7 @@ mod relaunch_tests {
             "kiro",
             &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())],
             "command kiro-cli chat --agent lead --model m --trust-all-tools",
-            "", None).unwrap();
+            "", None, "", "").unwrap();
         let line = relaunch_line(ws.to_str().unwrap(), "lead", Some("id-1")).unwrap();
         assert!(line.starts_with("KIRO_HOME="), "isolated home first: {line}");
         assert!(line.contains("--agent lead"), "identity: {line}");
@@ -522,7 +622,7 @@ mod relaunch_tests {
         ] {
             let ahome = agent_home(ws.to_str().unwrap(), name);
             std::fs::create_dir_all(&ahome).unwrap();
-            write_launch_recipe(&ahome, backend, &[], cmd, "", None).unwrap();
+            write_launch_recipe(&ahome, backend, &[], cmd, "", None, "", "").unwrap();
             let exact = relaunch_line(ws.to_str().unwrap(), name, Some("conv-1")).unwrap();
             assert!(exact.ends_with("--resume conv-1"), "{backend} exact resume: {exact}");
             let recent = relaunch_line(ws.to_str().unwrap(), name, None).unwrap();
@@ -540,7 +640,7 @@ mod relaunch_tests {
             "codex",
             &[("CODEX_HOME".to_string(), chome.to_string_lossy().to_string())],
             "command codex -c a=b --dangerously-bypass-approvals-and-sandbox",
-            "", None).unwrap();
+            "", None, "", "").unwrap();
         let cx = relaunch_line(ws.to_str().unwrap(), "cx", Some("01a0-abc")).unwrap();
         assert!(
             cx.contains("command codex resume 01a0-abc -c a=b --dangerously-bypass-approvals-and-sandbox"),
@@ -827,8 +927,9 @@ pub fn refresh_hooks(project_path: &str, window_name: &str) -> bool {
                 shared::shell_quote(window_name),
             ),
             // A backfilled recipe cannot know who spawned the agent — the
-            // provenance simply does not exist for pre-recipe spawns.
-            "", None)
+            // provenance simply does not exist for pre-recipe spawns. The
+            // def provenance likewise: refresh falls back to the window name.
+            "", None, "", "")
         .is_ok();
     }
     changed
@@ -1712,7 +1813,7 @@ mod tests {
         // A restart must replay the FULL identity, not the bare backend line:
         // the user-space config's hooks never fire (measured), so losing
         // KIRO_HOME/--agent makes a restarted agent observably deaf.
-        write_launch_recipe(&dir, "kiro", &r.env, &r.cmd, "", None).unwrap();
+        write_launch_recipe(&dir, "kiro", &r.env, &r.cmd, "", None, "", "").unwrap();
         let line = relaunch_line(
             dir.parent().unwrap().parent().unwrap().to_str().unwrap(),
             "tester", Some("abc-123"),
@@ -1995,7 +2096,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
             "kiro",
             &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())],
             "command kiro-cli chat --agent dev --model claude-haiku-4.5 --trust-all-tools",
-            "", None).unwrap();
+            "", None, "", "").unwrap();
 
         assert!(refresh_hooks(&ws.to_string_lossy(), "dev"), "a stale config is rewritten");
         let after: Value = serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
@@ -2031,7 +2132,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
             &[],
             // The owner's real value: one character off `claude-sonnet-4.5`.
             "command kiro-cli chat --agent dev --model claude-sonnet-4-5 --trust-all-tools",
-            "", None).unwrap();
+            "", None, "", "").unwrap();
 
         refresh_hooks(&ws.to_string_lossy(), "dev");
         let after: Value = serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
@@ -2312,7 +2413,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         let ws = std::env::temp_dir().join(format!("tmm-spawnedby-{}", std::process::id()));
         let home = ws.join(".tmm").join("agents").join("b");
         std::fs::create_dir_all(&home).unwrap();
-        write_launch_recipe(&home, "kiro", &[], "command kiro-cli chat --agent b", "lead", None).unwrap();
+        write_launch_recipe(&home, "kiro", &[], "command kiro-cli chat --agent b", "lead", None, "", "").unwrap();
         let recipe: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(home.join("launch.json")).unwrap()).unwrap();
         assert_eq!(recipe["spawned_by"], "lead");
@@ -2339,7 +2440,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         };
         save("Old persona.");
         let def = super::super::registry_get(name).unwrap().expect("saved def");
-        materialize(&def, name, "proj", &ws_str, "fix the login bug", "lead", None).unwrap();
+        materialize(&def, name, "proj", &ws_str, "fix the login bug", "lead", None, name, "").unwrap();
         let cfg = agent_home(&ws_str, name).join("agents").join(format!("{name}.json"));
         let read = |p: &Path| -> Value { serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap() };
         assert!(read(&cfg)["prompt"].as_str().unwrap().contains("Old persona."));
@@ -2359,6 +2460,81 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         std::fs::remove_dir_all(agent_home(&ws_str, name)).unwrap();
         assert!(!refresh_agent(&ws_str, "proj", name), "a home without a recipe is not ours to rewrite");
         super::super::registry_delete(name).ok();
+        std::fs::remove_dir_all(&ws).ok();
+    }
+
+    /// Board #113: a def edit must reach a window whose NAME is not the def's.
+    /// The recipe's provenance (`agent_def`, or `team`+`member`) is what the
+    /// restart resolves through; a def deleted after the spawn degrades soft.
+    #[test]
+    fn refresh_agent_follows_the_recipes_provenance_not_the_window_name() {
+        super::super::tests::use_test_store();
+        let ws = std::env::temp_dir().join(format!("tmm-refresh-prov-{}", uuid::Uuid::new_v4()));
+        let ws_str = ws.to_string_lossy().to_string();
+        let read = |p: &Path| -> Value { serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap() };
+        let save = |name: &str, persona: &str| {
+            super::super::registry_save(&json!({
+                "name": name, "backend": "kiro", "model": "", "effort": "",
+                "system": persona, "skills": "[]", "mcp": "[]", "can_hire": false
+            }))
+            .unwrap()
+        };
+
+        // A UNIQUIFIED solo window: def "rfuniq" spawned as window "rfuniq-2"
+        // (the name was taken). The window name resolves to no def; the
+        // recipe's agent_def is what finds it.
+        save("rfuniq", "Uniq old.");
+        let def = super::super::registry_get("rfuniq").unwrap().unwrap();
+        materialize(&def, "rfuniq-2", "proj", &ws_str, "", "", None, "rfuniq", "").unwrap();
+        save("rfuniq", "Uniq new.");
+        assert!(refresh_agent(&ws_str, "proj", "rfuniq-2"), "the uniquified window refreshes via agent_def");
+        let cfg = agent_home(&ws_str, "rfuniq-2").join("agents").join("rfuniq-2.json");
+        let prompt = read(&cfg)["prompt"].as_str().unwrap().to_string();
+        assert!(prompt.contains("Uniq new.") && !prompt.contains("Uniq old."), "{prompt}");
+
+        // A TEAM MEMBER: base def + role, spawned as window "dev-2" (member
+        // name "dev" was taken). The refresh re-derives the effective def from
+        // the CURRENT team, and the roster comes from the sibling recipes.
+        save("rfbase", "Base old.");
+        super::super::teams_save(&json!({
+            "name": "rfteam",
+            "description": "",
+            "members": r#"[{"name":"dev","base":"rfbase","role":"implement the change"},{"name":"rev","base":"rfbase","role":"review the diff"}]"#
+        }))
+        .unwrap();
+        let team = super::super::team_get("rfteam").unwrap().unwrap();
+        let flat = super::super::teams::expand(&team, &|n| super::super::team_get(n), SPAWN_CAP).unwrap();
+        let roster: Vec<super::super::teams::RosterEntry> = vec![
+            ("dev-2".into(), "implement the change".into(), "rfteam".into()),
+            ("rev".into(), "review the diff".into(), "rfteam".into()),
+        ];
+        let base = super::super::registry_get("rfbase").unwrap();
+        for (f, w) in flat.iter().zip(["dev-2", "rev"]) {
+            let d = super::super::teams::effective_def(f, base.as_ref(), w, &roster).unwrap();
+            materialize(&d, w, "proj", &ws_str, "", "lead", Some("rfteam"), "", f.member.name.trim()).unwrap();
+        }
+        save("rfbase", "Base new.");
+        assert!(refresh_agent(&ws_str, "proj", "dev-2"), "the team member refreshes via team+member");
+        let cfg = agent_home(&ws_str, "dev-2").join("agents").join("dev-2.json");
+        let prompt = read(&cfg)["prompt"].as_str().unwrap().to_string();
+        assert!(prompt.contains("Base new.") && !prompt.contains("Base old."), "{prompt}");
+        assert!(prompt.contains("Your role: implement the change"), "the role block is re-applied: {prompt}");
+        assert!(prompt.contains("@rev"), "the roster is reconstructed from sibling recipes: {prompt}");
+        let recipe = read(&agent_home(&ws_str, "dev-2").join("launch.json"));
+        assert_eq!(recipe["spawned_by"], "lead", "spawner provenance survives the refresh");
+        assert_eq!(recipe["team"], "rfteam");
+        assert_eq!(recipe["member"], "dev", "def provenance survives the refresh");
+
+        // A def deleted after the spawn: the refresh degrades soft — the
+        // spawn-time materials stay, nothing is rewritten.
+        super::super::registry_delete("rfuniq").unwrap();
+        let before = read(&agent_home(&ws_str, "rfuniq-2").join("agents").join("rfuniq-2.json"));
+        assert!(!refresh_agent(&ws_str, "proj", "rfuniq-2"), "a gone def is a soft no");
+        let after = read(&agent_home(&ws_str, "rfuniq-2").join("agents").join("rfuniq-2.json"));
+        assert_eq!(before, after, "the snapshot keeps working untouched");
+
+        super::super::registry_delete("rfbase").ok();
+        super::super::teams_delete("rfteam").ok();
         std::fs::remove_dir_all(&ws).ok();
     }
 }

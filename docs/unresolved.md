@@ -21,7 +21,7 @@
   work is slow while its response stays small — every current one couples the two,
   because the slow part *is* the payload.
 
-## A registry def change does not reach the agents already spawned from it
+## A registry def change does not reach the agents already spawned from it — RESOLVED (board #113, 2026-09-09: refresh_agent resolves the def through launch.json provenance — agent_def / team+member — so uniquified windows and team members re-materialize on restart too)
 - **Priority**: Medium
 - **Area**: Projects / agents-v2 (`projects/spawn.rs`)
 - **Details**: An agent's isolated home is rendered ONCE, at spawn. Editing its
