@@ -17,13 +17,13 @@ The touch handler is a single state machine driven by `touchMode`:
 | `idle` | default | nothing |
 | `down` | touchstart on terminal body (no selection-handle, no scrollbar) | starts long-press timer |
 | `scrollbar` | touchstart on right 30px edge | proportional scroll-by-drag |
-| `scroll` | `down` → vertical move > 1 line | inertial content scroll |
+| `scroll` | `down` → accumulated signed movement reaches one line | inertial content scroll |
 | `longpress-select` | `down` → 500ms hold | word-select; touchmove extends head |
-| `handle-drag` | touchstart on a selection handle's 22px-radius hit zone | moves that endpoint |
+| `handle-drag` | touchstart in a selection handle's capsule hit zone | moves that endpoint |
 
 ## Touchstart Hit-Test Order
 1. **Toolbar button**: bow out — the button has its own pointer handler.
-2. **Selection handle**: enter `handle-drag` if a handle exists and is within 22px of the touch.
+2. **Selection handle**: enter `handle-drag` inside its capsule, with same-row overlap divided at the midpoint and edge handles extending to the container edge.
 3. **Scrollbar edge** (right 30px): `scrollbar`.
 4. **Anywhere else**: `down`. Long-press timer arms.
 
@@ -103,9 +103,13 @@ The xterm.js API is converted at the boundary:
 - `onSelectionChange` reads `term.getSelectionPosition()` whose `pos.end.x` is exclusive, and converts to inclusive (`max(0, pos.end.x - 1)`).
 
 ## Handle UI
-- Visual: 14px filled circle in `var(--accent)`, stem extending 14px up to the selection edge.
-- Hit zone: 44px square centered on the visual anchor (matches Apple/Google touch-target guidelines), positioned via `left/top` on a 44×44 wrapper with negative margins.
-- Position: leading handle anchored at the bottom-left **outside** the start cell; trailing handle at the bottom-right **outside** the end cell. Stem points up into the selection. This matches both iOS and Material conventions.
+- Visual: 12px filled circle in `var(--accent)`, with a 2px-wide stem one cell high. The positioned wrapper has zero width/height; pseudo-elements draw the stem and dot.
+- Position: the leading anchor is the start cell's top-left corner, its stem runs down through the cell, and its dot sits below. The trailing anchor is the end cell's bottom-right corner, its stem runs up, and its dot also sits below. Edge dots shift 6px inward without moving the stem.
+- Hit zone: 28px half-width around each anchor. The leading Y interval is `startY - 11` through `startY + cellH + 22`; trailing is `endY - cellH - 11` through `endY + 22`. Same-row overlap divides at the horizontal midpoint (the leading handle is tested first). At column 0 / the final column, the respective X interval extends to the container edge. Handle hit testing precedes the scrollbar's 30px zone.
+
+**Documentation correction (#139, 2026-09-09):** these are the existing
+`hitHandle` and CSS rules from `7bf035c6`, not a new hit-target design. The
+former 22px-radius/44px-wrapper description had drifted from the implementation.
 
 ## Toolbar UI
 - Single "Copy" button (one job, one button).
@@ -114,23 +118,32 @@ The xterm.js API is converted at the boundary:
 - X is clamped to `[48, container_width - 48]` so the toolbar never escapes its container.
 - `pointerdown` handler stops propagation and calls `copySelection()` — the touchstart hit-test on the underlying `termEl` would otherwise treat it as a tap and try to cancel the selection.
 
-## Keyboard Control (unchanged from earlier design)
+## Keyboard Control
 
 ### States
-- `kbLocked = true` + `inputmode="none"` → keyboard cannot show
-- `kbLocked = false` + `inputmode="text"` → keyboard allowed
+- `inputmode="text"` is pinned at mobile textarea initialization.
+- `kbLocked = true` makes the focus handler immediately blur the textarea.
+- `kbLocked = false` permits focus; explicit unlock blurs an already-focused
+  textarea before focusing it again so a dismissed IME can reopen.
 
 ### Transitions
 | From | Event | To | Action |
 |------|-------|----|--------|
-| locked | keyboard toggle button | unlocked | inputmode=text, focus textarea, 1.5s grace |
-| locked | double-tap on terminal (two clean `down` taps ≤300ms, ≤40px apart, no selection) | unlocked | `unlockKeyboard()`; the second touchend is `preventDefault`ed so no synthetic dblclick reaches xterm |
+| either | keyboard toggle, IME hidden | unlocked | focus textarea, 1.5s grace |
+| either | double-tap on terminal (two clean `down` taps ≤300ms, ≤40px apart, no selection) | unlocked | `unlockKeyboard()`; the second touchend is `preventDefault`ed so no synthetic dblclick reaches xterm |
 | locked | single tap on terminal | locked | no-op |
 | unlocked | single tap on terminal | unlocked | no-op |
-| unlocked | textarea blur (150ms timer) | locked (or retry focus if in grace) | grace → re-focus; post-grace → inputmode=none |
-| unlocked | keyboard-shift kbH=0 (was >0, post-grace) | locked | inputmode=none, blur |
-| unlocked | keyboard toggle button | locked | blur |
+| unlocked | textarea blur (150ms timer) | locked (or retry focus if in grace) | grace → re-focus, at most twice; otherwise lock |
+| unlocked | keyboard-shift kbH=0 (was >0, post-grace) | locked | lock, blur |
+| either | keyboard toggle, IME visible | locked | end grace, lock, blur |
 | unlocked | pane switch | locked | reset |
+
+**Documentation correction (#139, 2026-09-09):** `a228b41c` records why
+none/text toggling was retired: Android's first InputConnection could cache
+the original `none` value and ignore the first attempt to open the IME.
+The toggle reads the actual `keyboard-open` class, not `kbLocked`, since a
+system IME close can leave the textarea focused. This documents the current
+focus-gated implementation; it does not claim a new Android verification.
 
 ### Key Rules
 1. **Two ways to open the keyboard, both through `unlockKeyboard()`: the toggle button and a double-tap on the terminal.** A single tap never opens or closes it. The double-tap is detected on `touchend` by `createDoubleTapDetector` (`terminal-keyboard.ts`) and fed ONLY from the clean-tap (`down`) branch — a scroll, scrollbar drag, long-press or handle drag between two taps resets the pair, and a tap that cancels a selection is spent on the cancel. (Until 2026-09-03 the docs promised this gesture while the toggle was the only caller; `Terminal.source.test.ts` now pins both callers.)
@@ -148,9 +161,60 @@ The App-level horizontal tab swipe is suppressed when:
 Mobile keyboards auto-pair quotes/brackets (`""`, `()`, `[]`). Force-clear textarea after each `onData` on mobile, EXCEPT during paste (detected via paste event flag, NOT `data.length`) and during active IME composition.
 
 ## Lessons Learned
-- `endTouchScroll` via setTimeout can fire after `pointerdown` unlock → removed kbLocked manipulation.
+- `endTouchScroll` via setTimeout can fire after explicit unlock → removed kbLocked manipulation.
 - `data.length <= 1` misclassifies auto-paired input as paste → use paste event flag.
 - Android `OnGlobalLayoutListener` can fire stale keyboard heights → guard with activeElement check.
 - "Tap inside selection to copy" looked clever but was ambiguous — users couldn't tell whether the selection was "live", and a stray tap could wipe their clipboard. Replaced with an explicit toolbar.
 - One-shot selection (no handles) made tmux text capture frustrating: misjudge by one cell and you re-select from scratch. Handles let users do the rough cut at long-press, then nudge.
 - `pos.end.x` from xterm is exclusive while our long-press path stored inclusive — mixing the two caused intermittent "tap copies anywhere" because the hit-test sometimes used a 1-cell-too-wide rect. Now `selection` is canonically inclusive everywhere; only the xterm boundary translates.
+
+## Fixed-Frame Motion
+
+The existing release calculation weights up to five velocity samples from
+the last 100ms, multiplies the average px/ms by 16 and caps it at
+`MOMENTUM_MAX_PX = 240` before converting to lines/frame. Coast starts above
+0.1 line/frame, multiplies velocity by 0.95 before accumulating each frame,
+and stops at 0.05 or below. Both scroll paths retain signed fractional
+remainders with `Math.trunc`. Edge dragging uses a 36px zone and ramps from
+0.25 to 2 rows/frame. These are current fixed-frame rules, not a claim of
+refresh-rate-independent physics.
+
+Documentation correction (#139, 2026-09-09): the release comment said 120px
+while the executable cap was already 240px. The comment now matches the
+constant. Characterization pins that value; extraction must not tune it or
+change the time model.
+
+## Characterization Before Extraction
+
+Board #139 (2026-09-09) adds source contracts and a real-Terminal Chromium
+baseline before moving these decisions. Five additional source cases pin
+text-mode focus gating, gesture priority/passivity/cleanup, inclusive selection
+and its render pin, endpoint/capsule geometry, and fixed-frame motion.
+They do not execute touch handlers or simulate layout.
+
+The browser fixture uses actual xterm 6.0.0 with controlled RPC replies and
+build-layer public-API trace wrappers, never replacement parsing/rendering
+logic. Eight desktop/compact, theme/motion and DOM/WebGL combinations record
+92 state signatures and viewport-sized PNGs: selection/viewport/handle/toolbar
+rectangles, action traces, crossing and edge-cancel, explicit Copy, input
+interrupting momentum, focus pairing, font/line-height/zoom, hidden replay
+and pane disposal. Touch events are constructed in Chromium with controlled
+timestamps; mouse selection/Copy and screenshots use Playwright. Both the
+real DOM fallback and WebGL renderer were exercised. The fixture, logs and
+images are referenced on #139.
+
+Measured versions: Chromium 152.0.7977.64, Node 22.23.2, Svelte 5.53.5 and
+Vite 6.4.1. Changing only the hit half-width from 28px to 8px fails the
+source contract and the 24px-offset grab: the endpoint remains at column 14
+instead of moving to 20. Restoring the original source returns green.
+Production behavior, markup and CSS are unchanged.
+
+The baseline deliberately retains a discovered defect (#143): a row-3
+selection anchors Copy at 26px, but its 42px height and upward transform put
+its top at -16px under the clipped container. Fix it separately rather than
+silently changing toolbar placement during extraction.
+
+No Android pass was performed. These results cannot establish physical
+touch batching, fling feel, user activation, IME composition/height ordering,
+haptics or OS suspension behavior; the owner pass in #138 remains a gate
+for the later controller move, not for these off-device characterizations.

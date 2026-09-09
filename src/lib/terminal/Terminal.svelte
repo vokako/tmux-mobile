@@ -1471,7 +1471,7 @@
         }
         const avgVelocity = wSum / wTotal; // px/ms
         const lh = lineHeight();
-        // Cap velocity at 120px/frame equivalent, then convert to lines/frame
+        // Cap velocity at 240px/frame equivalent, then convert to lines/frame
         const maxPxPerFrame = MOMENTUM_MAX_PX;
         const cappedPx = Math.max(-maxPxPerFrame, Math.min(maxPxPerFrame, avgVelocity * 16));
         let v = cappedPx / lh;

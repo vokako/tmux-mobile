@@ -15,7 +15,7 @@ See [Terminal Gestures Design Doc](terminal-gestures.md) for the full gesture pr
 - iOS-like momentum physics with velocity smoothing
 - **Double-tap to open keyboard** — single tap does nothing on terminal area. Two clean taps (`touchMode` was `down` at release, not scroll/long-press/drag) within 300ms and 40px; detected by `createDoubleTapDetector` (`terminal-keyboard.ts`) on `touchend`; the second `touchend` is `preventDefault`ed so xterm never sees a synthetic `dblclick` (which would word-select). Details: `terminal-keyboard.md` "Double-tap to open".
 - Keyboard toggle button as explicit open/close alternative
-- Keyboard controlled via `inputmode` attribute on xterm's hidden textarea + `kbLocked` flag
+- Mobile textarea `inputmode` stays `text`; `kbLocked` gates focus, with an explicit blur/focus cycle on unlock
 - `visualViewport` API for mobile browser, native `OnGlobalLayoutListener` for Android WebView
 
 ## Alternatives Considered
@@ -33,12 +33,12 @@ See [Terminal Gestures Design Doc](terminal-gestures.md) for the full gesture pr
 ## Lessons Learned
 - xterm.js DA responses (`\x1b[?62;22c`) must be filtered before forwarding to tmux
 - **endTouchScroll must NOT manipulate kbLocked** — it's called via setTimeout (200-500ms delay) and can fire after a pointerdown/double-tap unlock, overriding the user's intent. Keyboard state is managed only by: double-tap, toggle button, blur timer, keyboard-shift event.
-- **Android keyboard control** uses three layers:
-  1. `inputmode="none"` on xterm's textarea by default — browser-level hint to suppress keyboard.
-  2. `kbLocked` flag + `focus` event guard — immediately blurs textarea if focused while locked.
-  3. `keyboard-shift kbHeight=0` listener — catches keyboard dismissed by Android back/system.
-  - **Unlock flow**: double-tap terminal or keyboard toggle → `unlockKeyboard()` (clears timers, sets `kbLocked=false`, `inputmode=text`, focuses textarea).
-  - **Lock flow**: `blur` event schedules delayed lock (150ms); `keyboard-shift kbHeight=0` locks immediately; pane switch resets to locked.
+- **Android keyboard control** pins `inputmode="text"` and gates focus:
+  1. `kbLocked` + the focus guard immediately blur a textarea focused while locked.
+  2. `keyboard-shift kbHeight=0` locks only on the open-to-close edge after the unlock grace period.
+  - **Unlock flow**: double-tap or keyboard toggle → `unlockKeyboard()` (clears the blur timer, resumes live tail, unlocks, then blurs an already-focused textarea and focuses it).
+  - **Lock flow**: blur schedules a 150ms check (up to two re-focus attempts within the 1.5s unlock grace); the keyboard-height falling edge, pane switch and toggle close also use `lockKeyboard()`.
+  - **Documentation correction (#139, 2026-09-09)**: the retired none/text toggle could leave Android's first InputConnection believing the view did not want the IME (`a228b41c`). The toggle now reads real IME visibility via `keyboard-open`; it does not infer visibility from the lock flag. These are existing source contracts, not a new device-validation claim.
 - **Svelte 5 registers `touchstart`/`touchmove` as passive** — `e.preventDefault()` in `ontouchstart` is silently ignored. The `nonPassiveShortcuts` Svelte action registers non-passive handlers.
 - **Mobile auto-pair textarea accumulation** — Mobile keyboards auto-pair quotes/brackets. Fix: force-clear textarea after each `onData`, skip paste (detected via `paste` event flag, NOT `data.length`).
 - **Tab swipe vs child gestures** — App-level swipe suppressed when `e.defaultPrevented` or vertical movement > 10px.

@@ -8,7 +8,13 @@ Each entry is a decision with the reason it was made; treat them as normative. T
 
 ### Terminal keyboard
 
-Double-tap to open (NOT single-tap). `kbLocked` flag + `inputmode` attribute. `endTouchScroll` must NEVER change `kbLocked` (race condition with delayed timers). `kbLocked` has exactly two writers: `unlockKeyboard()` opens and `lockKeyboard()` closes; the sanctioned lock sites — pane switch (the lifecycle effect), the blur timer, the keyboard-shift open→close transition, and the close half of the keyboard toggle — all call `lockKeyboard()`, each labelled at the call site, so `grep lockKeyboard()` is the complete list. `Terminal.source.test.ts` pins the two writers and the four labelled callers (the toggle's close half was an unlisted fifth direct write until 2026-09-03).
+Double-tap to open (NOT single-tap). Mobile `inputmode` is pinned to `text`; `kbLocked` gates focus. `endTouchScroll` must NEVER change `kbLocked` (race condition with delayed timers). `kbLocked` has exactly two writers: `unlockKeyboard()` opens and `lockKeyboard()` closes; the sanctioned lock sites — pane switch (the lifecycle effect), the blur timer, the keyboard-shift open→close transition, and the close half of the keyboard toggle — all call `lockKeyboard()`, each labelled at the call site, so `grep lockKeyboard()` is the complete list. `Terminal.source.test.ts` pins the two writers and the four labelled callers (the toggle's close half was an unlisted fifth direct write until 2026-09-03).
+
+Documentation correction (#139, 2026-09-09): the older gesture/touch documents
+still described toggling `inputmode=none/text`. `a228b41c` records the
+InputConnection problem that retired that toggle. Explicit unlock instead
+creates a fresh focus transition; the toggle decides from actual
+`keyboard-open` visibility, since an OS keyboard close can leave focus intact.
 
 ### Double-tap to open
 
