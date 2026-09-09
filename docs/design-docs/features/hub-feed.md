@@ -58,23 +58,23 @@ The baseline also distinguishes a native viewport resize from a mutation
 inside the reading transaction: Chromium reflows before the `resize` listener
 can capture a reference. On 152.0.7977.64, the fixed compact fixture at
 390 -> 370px displaced its pre-resize row by 519.1875px on the original code;
-drawer open/close stayed within 1.25px. The extraction compares the existing
-resize displacement rather than claiming it is zero. Preserving a reference
-from before a native resize is a separate behavior change, tracked by #135
-after #134 lands.
+drawer open/close stayed within 1.25px. #134 deliberately preserved that
+displacement; #135 changes native resizing through the retained snapshot
+described below, in a separate behavior commit.
 
 **Feed view ownership** (board #134, 2026-09-09): `Feed.svelte` owns the
 unchanged `.feed-wrap`/`.feed` pair, direct rows, local disclosure/selection
 state and measurement/scroll adapters. `measureHeld` still reads the same
 `feedEl.parentElement`, physically `.feed-wrap`; no wrapper or per-project
-key changes its geometry or lifetime. The existing resize behavior above is
-preserved, not repaired during the move.
+key changes its geometry or lifetime. The move preserved the former resize
+behavior; the subsequent #135 fix is separate.
 
 Its only reading exports are `scrollToTail`, `withReadingAnchor` and
 `resetForRoom`. Hub retains blocks/feed/activity, RPC/push/poll/cache, paging,
 seen preferences and the two explicit `following`/`newBelow` bindings.
-Reset clears only expanded/message-action/raw choices, not tool disclosures,
-copied-label timing or geometry caches. Path, Board, Lightbox and filter
+Reset clears expanded/message-action/raw choices and, since #135, the
+room-owned resize snapshot; tool disclosures, copied-label timing and glyph
+caches keep their previous lifetime. Path, Board, Lightbox and filter
 actions are narrow intents; the empty-room preset remains a Hub-owned
 snippet at the same direct-child position, retaining spawn coordination and
 its existing CSS. `.feed > :global(*)` retains non-shrinking layout for that
@@ -95,6 +95,51 @@ negative control bypassed only the drawer-close reading transaction and
 failed at -1118.25px reference displacement. Restoring the call restored the
 strict drawer assertion. Real image clicks also reach the existing Lightbox,
 whose Back layer remains in Hub.
+
+### Native resizing retains the last stable reading snapshot (#135, 2026-09-09)
+
+Changing the callback alone cannot recover an old position. On Chromium
+152.0.7977.64, the same compact 390 -> 370px experiment measured
+519.1875px displacement with the old window callback, 519.1875px with only
+`ResizeObserver` substituted, and 0.1875px when the prior stable snapshot
+was supplied to the transaction. Both callbacks read the new box.
+
+Feed now keeps one room/element-tagged reading snapshot and observes the
+scrolling column's content box with one `ResizeObserver`. The window
+resize listener is removed. Explicit drawer/history mutations capture a
+fresh snapshot; native box changes supply the retained one to the SAME
+`withReadingAnchor` transaction. Once its two Svelte settles and fold
+measurement complete, a settled tail is written before paint, or the
+history row is restored. Each await checks the captured room and element.
+
+The snapshot uses the existing `ui/indicator.ts` `boxFromOffsets` layout
+coordinates, not transformed client rectangles: caching mid-intro left
+about 4.8px of animation in the initial prototype. Sticky rows, including
+the filter label, cannot be references. The search walks from its previous
+row, avoiding a whole-history scan on ordinary scroll frames. The native
+resize acceptance bar is 1 CSS pixel, including offset rounding.
+
+Scroll/settled render, disclosure, image and font updates maintain the
+snapshot but do not introduce another resize writer. While box dimensions
+differ, neither a queued capture nor a layout-generated scroll may replace
+the pre-resize snapshot or the live tail decision. A completed transaction
+records the new size, so the observer does not repeat a drawer's work.
+Hidden views disconnect the observer and retain the snapshot; reconnecting
+on show handles a size changed while hidden. A room reset clears it, and
+zero-sized boxes never replace a usable snapshot.
+
+The existing cached-image room-return gap/following issue is tracked
+separately in #137. Resize tail checks first establish the live-tail state;
+this change does not claim to fix that room-return behavior.
+
+Verification: the original 519.1875px regression fails the 1px check before
+the fix, then measures -0.8125px after it. Width/height changes, container-only
+resizing, hidden/show, a native scroll clamp, filtered history, room resets
+and established live tail pass across desktop/compact; the six-variant
+reading matrix still passes. The negative control keeps RO but drops its
+retained-snapshot argument: 519.1875px returns and fails. Restoring the
+argument returns green. A mounted observer spy verifies one registration
+across data updates and disposal on unmount; it does not simulate geometry.
 
 ### A layout mutation goes through `withReadingAnchor`
 

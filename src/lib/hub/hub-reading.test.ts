@@ -1,8 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { heldAnchor, readingDirection, refoldEligible } from './hub-reading.ts';
+import { heldAnchor, readingDirection, refoldEligible, sameReadingSize } from './hub-reading.ts';
 import type { HeldAnchor, ReadingDirection } from './hub-reading.ts';
 import { pickAnchor } from './hub.ts';
+
+test('reading size compares both dimensions and never treats unknown boxes as stable', () => {
+  const size = { width: 370.5, height: 600 };
+  assert.equal(sameReadingSize(null, null), false);
+  assert.equal(sameReadingSize(size, null), false);
+  assert.equal(sameReadingSize(null, size), false);
+  assert.equal(sameReadingSize(size, { ...size }), true);
+  assert.equal(sameReadingSize(size, { ...size, width: 370.25 }), false);
+  assert.equal(sameReadingSize(size, { ...size, height: 599.75 }), false);
+});
 
 test('direction keeps zero travel unchanged and clears reversals on forward motion', () => {
   for (const direction of ['up', 'down'] as const) {

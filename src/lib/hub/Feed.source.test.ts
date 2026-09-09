@@ -31,8 +31,8 @@ test('Feed exports three reading operations and owns its existing DOM lifecycle 
   assert.deepEqual([...source.matchAll(/export (?:async )?function (\w+)/gu)].map((m) => m[1]).sort(),
     ['resetForRoom', 'scrollToTail', 'withReadingAnchor']);
   assert.match(source, /following = \$bindable\(true\), newBelow = \$bindable\(false\)/u);
-  assert.match(source, /export function resetForRoom\(\) \{\s*expanded = \{\};\s*msgOpen = '';\s*rawOpen = '';\s*\}/u,
-    'only the original room-local choices reset');
+  assert.match(source, /export function resetForRoom\(\) \{\s*reading = null;\s*expanded = \{\};\s*msgOpen = '';\s*rawOpen = '';\s*\}/u,
+    'the resize snapshot now clears with the original room-local choices (#135)');
   assert.doesNotMatch(source, /hubPrefs|core\/ws|popstate|pushState|backLayers/u);
   assert.match(source, /registerActions\?\.\(\{\s*isOpen: \(\) => !!msgOpen,/u);
   assert.match(source, /if \(msgOpen && !t\?\.closest\?\.\('\.m-acts, \.bubble'\)\) msgOpen = '';/u);
@@ -44,10 +44,28 @@ test('Feed exports three reading operations and owns its existing DOM lifecycle 
     'all direct rows, including the parent empty snippet, retain non-shrinking layout');
   assert.match(source, /\{@render emptyFeed\?\.\(\)\}/u);
   assert.match(/\n  \.feed \{([^}]*)\}/u.exec(source)?.[1] ?? '', /overflow-anchor: none/u);
-  for (const selector of ['held', 'ask-top', 'ask-bottom']) {
-    assert.ok(source.includes(`!el.classList.contains('${selector}')`),
-      'the reading reference excludes every sticky variant');
-  }
+  assert.match(source, /getComputedStyle\(row\)\.position !== 'sticky'/u,
+    'no pinned bubble or fixed filter label can be a reading reference (#135)');
+});
+
+test('resize restores a retained layout snapshot through one observer and one transaction (#135)', () => {
+  assert.match(source, /import \{ boxFromOffsets \} from '\.\.\/ui\/indicator\.ts';/u);
+  assert.match(source, /boxFromOffsets\(row, feedEl\)\.offsetTop/u,
+    'cached positions exclude intro/press transforms using the existing helper');
+  assert.match(source, /ro\.observe\(feedEl\);/u);
+  assert.match(source, /ro\.disconnect\(\);/u);
+  assert.doesNotMatch(source, /window\.(?:add|remove)EventListener\('resize'/u);
+  assert.match(source, /if \(before && sameReadingSize\(before\.size, size\)\) return;/u,
+    'an explicit transaction already committed this size; RO must not repeat it');
+  assert.match(source, /void withReadingAnchor\(measureHeld, before\);/u);
+  assert.match(source, /if \(visible && resizePending\(\)\) return;/u,
+    'a resize-generated scroll cannot overwrite the old reading or tail intent');
+  assert.match(source, /if \(!acceptResize && reading\?\.session === selected && !sameReadingSize\(reading\.size, size\)\) return;/u);
+  assert.match(source, /Object\.values\(stepsChoice\); Object\.values\(stepsAll\);/u);
+  assert.match(source, /onloadcapture=\{queueReadingCapture\} onerrorcapture=\{queueReadingCapture\}/u);
+  assert.match(source, /if \(!feedEl \|\| !visible\) return;/u);
+  assert.match(source, /const current = \(\) => feedEl === element && selected === session;/u);
+  assert.match(source, /before\.ref\.parentElement === feedEl/u);
 });
 
 test('Feed preserves reveal gates and consumes the shared rendering and path mechanisms (#134)', () => {
@@ -121,14 +139,14 @@ test('the fold budget goes through foldLines, and the basis is the column', () =
     'the basis is the chat COLUMN (the feed parent), which the composer cannot shrink');
   const script = source.slice(0, source.indexOf('</script>'));
   assert.ok(!/\*\s*0\.2/u.test(script), 'no inline fifth — the fraction lives in foldLines only');
-  assert.match(source, /const onResize = \(\) => withReadingAnchor\(measureHeld\);/u,
+  assert.match(source, /void withReadingAnchor\(measureHeld, before\);/u,
     'a real window resize still re-enters through the reading anchor');
 });
 
 test('reading decisions use the pure module while Feed owns DOM and scheduling (#116)', () => {
   // Parameterizing decisions must not move layout reads or reset the held state
   // on a jump: reset only affects pickAnchor's seed, as before the extraction.
-  assert.match(source, /import \{ heldAnchor, readingDirection, refoldEligible \} from '\.\/hub-reading\.ts';/u);
+  assert.match(source, /import \{ heldAnchor, readingDirection, refoldEligible, sameReadingSize \} from '\.\/hub-reading\.ts';/u);
   const scroll = source.slice(source.indexOf('function onFeedScroll'), source.indexOf('let scrollFrame'));
   assert.match(scroll, /const motion = readingDirection\(delta, askDir, askDirTravel\);\s*askDir = motion\.direction;\s*askDirTravel = motion\.travel;\s*syncAsk\(askDir\);/u,
     'the rAF callback applies direction before choosing the anchor');
@@ -375,7 +393,7 @@ test('the fold measures its own line — perLine is never assumed (board #53 rev
   assert.match(source, /glyphCache\.get\(font\)/u, 'and cached per font string');
   // Both measurements ride the existing measureHeld path, so the resize
   // re-cut still routes through the reading anchor (2026-08-27 rule).
-  assert.match(source, /const onResize = \(\) => withReadingAnchor\(measureHeld\);/u,
+  assert.match(source, /void withReadingAnchor\(measureHeld, before\);/u,
     'resize re-measures through the reading anchor, unchanged');
 });
 
@@ -387,11 +405,12 @@ test('the anchor transaction re-measures the fold line it is about to restore (b
   // itself, in ORDER: mutate → settled (new grid) → measureHeld (new width/
   // glyph → heldPerLine → folds re-cut) → settled (re-cut rendered) → only
   // then take the tail or restore the reference offset. Both branches.
-  const tx = source.match(/async function withReadingAnchor\(mutate\) \{[\s\S]*?\n  \}/u)?.[0] || '';
+  const tx = source.match(/async function withReadingAnchor\(mutate, before = null\) \{[\s\S]*?\n  \}/u)?.[0] || '';
   const step = String.raw`(?:\s*//[^\n]*\n)*\s*`; // why-comments allowed between steps, order is not
-  assert.match(tx, new RegExp(String.raw`mutate\(\);\n\s*await settled\(\);\n${step}measureHeld\(\);\n${step}await settled\(\);\n${step}scrollToTail\(true\);`, 'u'),
+  const settledGuard = String.raw`await settled\(\);\n\s*if \(!current\(\)\) return;\n`;
+  assert.match(tx, new RegExp(String.raw`mutate\(\);\n\s*${settledGuard}${step}measureHeld\(\);\n\s*${settledGuard}${step}writeTail\(\);`, 'u'),
     'the FOLLOWING branch re-measures and lets folds re-cut before taking the tail');
-  assert.match(tx, new RegExp(String.raw`mutate\(\);\n\s*await settled\(\);\n${step}measureHeld\(\);\n${step}await settled\(\);\n${step}if \(ref\?\.isConnected\)`, 'u'),
+  assert.match(tx, new RegExp(String.raw`mutate\(\);\n\s*${settledGuard}${step}measureHeld\(\);\n\s*${settledGuard}${step}if \(before\?\.ref\?\.isConnected`, 'u'),
     'the HISTORY branch re-measures and lets folds re-cut before restoring the offset');
   // The width halves live in measureHeld, so ONE call is the whole re-read —
   // no second measurement dialect inside the transaction.

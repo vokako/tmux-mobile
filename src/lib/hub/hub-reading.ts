@@ -1,5 +1,15 @@
 export type ReadingDirection = 'up' | 'down';
 
+export interface ReadingSize {
+  width: number;
+  height: number;
+}
+
+/** Unknown geometry never confirms that the last painted box is unchanged. */
+export function sameReadingSize(a: ReadingSize | null, b: ReadingSize | null): boolean {
+  return !!a && !!b && a.width === b.width && a.height === b.height;
+}
+
 interface ReadingBox {
   top: number;
   height: number;

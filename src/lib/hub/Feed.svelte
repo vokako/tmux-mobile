@@ -8,7 +8,8 @@
   import { renderMarkdown } from '../core/markdown.ts';
   import { handlePathLinkClick } from '../core/path-links.ts';
   import { selectionClickGuard } from '../ui/native-context-menu.ts';
-  import { heldAnchor, readingDirection, refoldEligible } from './hub-reading.ts';
+  import { boxFromOffsets } from '../ui/indicator.ts';
+  import { heldAnchor, readingDirection, refoldEligible, sameReadingSize } from './hub-reading.ts';
   import { TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, mentionedAgents, splitImages, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, perLineOf, STEPS_ROWS } from './hub.ts';
 
   let {
@@ -22,9 +23,10 @@
     onclearfilter = () => {}, registerActions = null,
   } = $props();
 
-  // Only these choices were room-local before extraction. Tool disclosures,
-  // copied-label timing and measurement/anchor state retain their old lifetime.
+  // A resize snapshot belongs to one room. Tool disclosures, copied-label
+  // timing and glyph/held-anchor state retain their old lifetime.
   export function resetForRoom() {
+    reading = null;
     expanded = {};
     msgOpen = '';
     rawOpen = '';
@@ -42,6 +44,50 @@
   }));
 
   let feedEl = $state(null);
+  let reading = null;
+  let captureQueued = false;
+
+  function readingSize() {
+    if (!feedEl) return null;
+    const cs = getComputedStyle(feedEl);
+    const width = feedEl.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+    const height = feedEl.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
+  const rowTop = (row) => boxFromOffsets(row, feedEl).offsetTop;
+  const readableRow = (row) => row instanceof HTMLElement && getComputedStyle(row).position !== 'sticky';
+
+  function captureReading(size = readingSize()) {
+    if (!feedEl || !size) return null;
+    // Start at the previous row and walk only what the scroll crossed. A
+    // full-history scan on every scroll frame would make this cache costly.
+    let ref = reading?.session === selected && reading.ref?.parentElement === feedEl
+      ? reading.ref : feedEl.firstElementChild;
+    const top = feedEl.scrollTop;
+    while (ref?.previousElementSibling && (!readableRow(ref) || rowTop(ref) > top + 1)) {
+      ref = ref.previousElementSibling;
+    }
+    while (ref && (!readableRow(ref) || rowTop(ref) + ref.offsetHeight <= top + 1)) {
+      ref = ref.nextElementSibling;
+    }
+    return { session: selected, element: feedEl, size, ref, offset: ref ? rowTop(ref) - top : 0 };
+  }
+  function rememberReading(acceptResize = false) {
+    if (!visible) return;
+    const size = readingSize();
+    if (!size) return;
+    if (!acceptResize && reading?.session === selected && !sameReadingSize(reading.size, size)) return;
+    reading = captureReading(size);
+  }
+  function queueReadingCapture() {
+    if (captureQueued) return;
+    captureQueued = true;
+    settled().then(() => { captureQueued = false; rememberReading(); });
+  }
+  function resizePending() {
+    return reading?.session === selected && reading.element === feedEl
+      && !sameReadingSize(reading.size, readingSize());
+  }
 
   /** A click inside a bubble that landed on a PATH link (board #99). Returns
    * true when the click is ours — the caller stops the bubble's own toggle. */
@@ -55,22 +101,25 @@
    * want to see what you just sent. */
   export function scrollToTail(force = false) {
     if (!force && !following) return;
-    requestAnimationFrame(() => {
-      // Hidden, the jump is DEFERRED, not lost: data may update freely and the
-      // visible-restore effect forces the tail when the page comes back.
-      if (!feedEl || !visible) return;
-      feedEl.scrollTop = feedEl.scrollHeight;
-      // Programmatic jumps have no continuous path to preserve. Seed from the
-      // destination (latest passed message), and do not depend on a scroll event
-      // — assigning the same scrollTop emits none.
-      askScrollTop = feedEl.scrollTop;
-      askDir = 'down';
-      askDirTravel = 0;
-      syncAsk('down', true);
-      following = true;
-      newBelow = false;
-      markSeen();
-    });
+    requestAnimationFrame(writeTail);
+  }
+  function writeTail() {
+    // Hidden, the jump is DEFERRED, not lost: data may update freely and the
+    // visible-restore effect forces the tail when the page comes back.
+    if (!feedEl || !visible) return;
+    feedEl.scrollTop = feedEl.scrollHeight;
+    // Programmatic jumps have no continuous path to preserve. Seed from the
+    // destination (latest passed message), and do not depend on a scroll event
+    // — assigning the same scrollTop emits none.
+    askScrollTop = feedEl.scrollTop;
+    askDir = 'down';
+    askDirTravel = 0;
+    syncAsk('down', true);
+    following = true;
+    newBelow = false;
+    markSeen();
+    rememberReading(true);
+    queueReadingCapture();
   }
 
 
@@ -85,6 +134,9 @@
 
 
   function onFeedScroll() {
+    // Layout can clamp scrollTop before RO runs. It is not a new user intent,
+    // and must not overwrite either the old reference or the tail decision.
+    if (visible && resizePending()) return;
     // Tail intent goes through the ONE transition rule: a hidden page's
     // scroll events (layout noise from other tabs, content growing under a
     // hidden feed) must not pollute `following` in either direction — and
@@ -117,6 +169,7 @@
         markSeen();
       }
       autoRefold();
+      queueReadingCapture();
     });
   }
   let scrollFrame = 0;
@@ -179,8 +232,7 @@
     // source test so the two cannot drift apart), minus the bubble's own
     // horizontal padding. Never the sampled bubble's width: bubbles hug
     // their content, so a short message's bubble lies about the line.
-    const fcs = getComputedStyle(feedEl);
-    const feedW = feedEl.clientWidth - (parseFloat(fcs.paddingLeft) || 0) - (parseFloat(fcs.paddingRight) || 0);
+    const feedW = readingSize()?.width ?? 0;
     const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
     const w = Math.min(feedW * 0.84, 1360) - padX;
     if (w > 0) heldWidth = w;
@@ -190,11 +242,28 @@
   $effect(() => {
     void blocks; void visible;
     measureHeld();
-    // A REAL basis change (window resize) may re-cut every folded message, so
-    // it keeps the reader's line still the same way the drawer toggle does.
-    const onResize = () => withReadingAnchor(measureHeld);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    queueReadingCapture();
+  });
+  $effect(() => {
+    void expanded; void rawOpen;
+    Object.values(stepsChoice); Object.values(stepsAll);
+    queueReadingCapture();
+  });
+  $effect(() => {
+    if (!feedEl || !visible) return;
+    const ro = new ResizeObserver(() => {
+      const size = readingSize();
+      if (!size) return;
+      const before = reading?.session === selected && reading.element === feedEl ? reading : null;
+      if (before && sameReadingSize(before.size, size)) return;
+      void withReadingAnchor(measureHeld, before);
+    });
+    ro.observe(feedEl);
+    document.fonts?.addEventListener('loadingdone', queueReadingCapture);
+    return () => {
+      ro.disconnect();
+      document.fonts?.removeEventListener('loadingdone', queueReadingCapture);
+    };
   });
   /** How many whole lines a folded user message may show — the mapping is
    * `foldLines` in hub.ts (pure, tested; board #4): a flat small budget on
@@ -337,11 +406,14 @@
    * is the element itself; a pinned (sticky) ask is skipped as the reference
    * because its rect does not move with the flow. At the tail, just stay at the
    * tail — that is what "where I was" means there. */
-  export async function withReadingAnchor(mutate) {
+  export async function withReadingAnchor(mutate, before = null) {
     if (!feedEl) { mutate(); return; }
+    const element = feedEl, session = selected;
+    const current = () => feedEl === element && selected === session;
     if (following) {
       mutate();
       await settled();
+      if (!current()) return;
       // The mutation may have changed the COLUMN WIDTH without a window
       // resize (the drawer regrid is exactly that), and the fold budget is
       // MEASURED (board #46 second blocker): re-read the new line, let every
@@ -349,31 +421,28 @@
       // tail — a tail taken before the re-cut lands on heights about to move.
       measureHeld();
       await settled();
-      scrollToTail(true);
+      if (!current()) return;
+      writeTail();
       return;
     }
-    const feedTop = feedEl.getBoundingClientRect().top;
-    const ref = [...feedEl.children].find((el) =>
-      // Any sticky variant is a bad reference: its rect is its PINNED position,
-      // which does not move with the flow the way the content does.
-      !el.classList.contains('held') && !el.classList.contains('ask-top')
-      && !el.classList.contains('ask-bottom')
-      && el.getBoundingClientRect().bottom > feedTop + 1);
-    const delta = ref ? ref.getBoundingClientRect().top - feedTop : 0;
+    if (before?.session !== session || before?.element !== element) before = captureReading();
     mutate();
     await settled();
+    if (!current()) return;
     // Same rule for the history reader: the reference offset is only worth
     // restoring against FINAL heights, and heights are final only after the
     // measured fold has re-cut for the new width. One measureHeld call is
     // the whole re-read — width, glyph and line box all live there.
     measureHeld();
     await settled();
-    if (ref?.isConnected) {
-      const now = ref.getBoundingClientRect().top - feedEl.getBoundingClientRect().top;
-      feedEl.scrollTop += now - delta;
+    if (!current()) return;
+    if (before?.ref?.isConnected && before.ref.parentElement === feedEl) {
+      feedEl.scrollTop += rowTop(before.ref) - feedEl.scrollTop - before.offset;
     }
     // The anchor machinery reads geometry; it must re-decide for the new widths.
     syncAsk();
+    rememberReading(true);
+    queueReadingCapture();
   }
 
 
@@ -466,7 +535,8 @@
 </script>
 
 <div class="feed-wrap">
-<div class="feed subtle-scroll" class:reveal-tail={justLoaded} bind:this={feedEl} onscroll={onFeedScroll}>
+<div class="feed subtle-scroll" class:reveal-tail={justLoaded} bind:this={feedEl} onscroll={onFeedScroll}
+  onloadcapture={queueReadingCapture} onerrorcapture={queueReadingCapture}>
   <!-- The double-click filter is a MODE, so it says so (board #3, owner:
        "注意ui上体现我们现在的筛选状态，以及可以再退出"): a compact pill
        INSIDE the feed — as a feed-wrap sibling it became a full-height

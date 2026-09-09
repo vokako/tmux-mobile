@@ -746,3 +746,53 @@ test('Feed keeps native selection, Copy/Raw dismissal, path intents and room-loc
   } finally { await app.close(); }
   assert.equal(pushed.size, 0);
 });
+
+test('Feed observes its box once across data updates and releases the observer on unmount', { timeout: 60000 }, async (context) => {
+  const fixture = await compiledHub();
+  const { rpc, pushed } = roomFixture();
+  const observers: Array<{ targets: Set<Element>; disconnected: boolean; fire: () => void }> = [];
+  const app = await fixture.mount(context, {
+    props: { visible: true },
+    setup(window) {
+      window.HTMLCanvasElement.prototype.getContext = () => null;
+      window.document.hasFocus = () => true;
+      Object.assign(window, {
+        ResizeObserver: class {
+          targets = new Set<Element>();
+          disconnected = false;
+          fire: () => void;
+          constructor(callback: ResizeObserverCallback) {
+            // This spy proves registration/scheduling, not browser geometry.
+            this.fire = () => callback([], this as unknown as ResizeObserver);
+            observers.push(this);
+          }
+          observe(target: Element) { this.targets.add(target); }
+          unobserve(target: Element) { this.targets.delete(target); }
+          disconnect() { this.disconnected = true; this.targets.clear(); }
+        },
+      });
+    },
+    modules: [rpc],
+  });
+  let owner: typeof observers[number] | undefined;
+  try {
+    for (let i = 0; i < 10 && !app.document.querySelector('.to-name'); i++) await app.flush();
+    const feed = app.document.querySelector('.feed')!;
+    const owning = observers.filter((observer) => observer.targets.has(feed));
+    assert.equal(owning.length, 1);
+    owner = owning[0]!;
+    owner.fire();
+    await app.flush();
+    const message = app.window.JSON.parse(JSON.stringify({
+      id: 'new', seq: 1, room: 'proj:fixture', from: 'alice', ts: Date.now(), body: 'A new reply.',
+    }));
+    for (const listener of pushed) (listener as (message: unknown) => void)(message);
+    for (let i = 0; i < 10 && !app.document.querySelector('.msg'); i++) await app.flush();
+    assert.ok(app.document.querySelector('.msg'));
+    assert.deepEqual(observers.filter((observer) => observer.targets.has(feed)), [owner],
+      'data changes update the snapshot, not the observer lifetime');
+    assert.equal(owner.disconnected, false);
+  } finally { await app.close(); }
+  assert.equal(owner?.disconnected, true);
+  assert.equal(pushed.size, 0);
+});
