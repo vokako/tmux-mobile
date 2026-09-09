@@ -122,7 +122,7 @@
   The tmux half of an adoption is `adopt_facts`, read with no lock; the row
   half re-checks "already tracked" under the lock (0.4 ms). `list()` reads
   rows under the lock and probes tmux outside. A source test rejects any
-  `with_store` closure in `projects/mod.rs` that names `tmux::`; `rename`
+  `with_store` closure in `projects/*.rs` that names `tmux::`; `rename`
   is the one marked exception (session rename and row re-key under one lock).
 - [x] `with_store`'s first-use init was not race-safe (board #150, 2026-09-09):
   two first callers both opened and migrated the same file. The cold path is
@@ -148,8 +148,9 @@
   and one `impl Store` file per table family (board #147, 2026-09-09; a
   source test keeps the hub to open/open_memory/init/heal); spawn `render_*`
   and the vitals dialects moved into the backend files (board #128/#127).
-  Open: `projects/mod.rs` 2223 (move the skills half into `skills.rs`),
-  `bin/tmm.rs` 1312.
+  `projects/mod.rs` 2379 → a 200-line facade with seven family files (board
+  #152, 2026-09-09; guard: only the store handle and id helpers may live in
+  mod.rs). Open: `bin/tmm.rs` 1312.
 - [ ] The `hub_rpc.rs` match mixes dispatch, delivery and board notification
   policy. (The boilerplate half closed with board #146, 2026-09-09: both
   dispatchers are `?`-returning inner fns over `RpcError`, ~90 `match →

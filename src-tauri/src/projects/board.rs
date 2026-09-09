@@ -2,6 +2,12 @@
 //!
 //! One family of `projects` (board #152): moved whole from mod.rs, which stays
 //! the facade — every `projects::X` path is a re-export of this file.
+//!
+//! A kanban over the session, stored beside the projects it serves (owner,
+//! 2026-08-29: "借助软件工程，可以把我们的任务管理的更好"). Four fixed columns —
+//! a free-text status would fork the vocabulary per agent and the board would
+//! stop being readable at a glance. The HUMAN writes issues on the board page;
+//! agents read and update them through `tmm board`.
 
 use super::*;
 
