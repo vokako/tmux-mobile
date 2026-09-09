@@ -1,66 +1,102 @@
-# Guidance · 架构与边界 · Architecture & boundaries
+# Guidance: Architecture and Boundaries
 
-> 信条：二（壳）、四（无中心）、七（声明是真相）、八（推导不自报）。
-> 审这个维度的人问的是：**这段代码是否越出了壳的边界？真相在哪里？服务器死了会怎样？**
-> 草案 · 2026-09-09 · 中文讨论稿，定稿后英文化。
+> Tenets: 2 (shell), 4 (no central node), 7 (declaration is truth),
+> 8 (derive, never self-report).
+> Review questions: **Does this code cross the shell's boundary? Where is
+> the truth? What happens when the server dies?**
+> Draft · 2026-09-09 · English edition of the Chinese discussion draft.
 
-## 1 · 原则（信条的展开）
+## 1. Principles
 
-1. **壳的四样东西**：连接、房间、身份、窗口。代码新增的能力若不属于这四样，先找底层
-   工具的原生入口（env、配置文件、hooks、启动参数）；找不到时在 design doc 写明为何。
-2. **真相只有两处**：state.db 与 `<ws>/.tmm/`。tmux 窗口名、pane 文本、进程、内存缓存
-   都是投影，随时可丢、随时可重建。
-3. **服务器是观察者**：任何流程若在服务器进程死亡后让人或 agent 卡住，就是设计错误。
-4. **一个概念一个定义函数**：`managed_home`、`detect_pane`、`valid_name`、`SPAWNABLE_BACKENDS`
-   这类判定只存在一份，所有门共用。
-5. **后端差异封在一处**：五个 CLI 的配置格式、hooks 方言、状态行不同，各一份实现是必要的；
-   但"加一个后端"只能新增一个后端文件，下游不多一个分支。
-6. **外部系统按文档写**：tmux、各 CLI、SQLite 都有版本与解析规则；格式串、目标名、
-   迁移语义都要查文档并把版本写进注释。
+1. **The shell owns four things:** connection, room, identity and window.
+   For any other capability, first look for a native integration point in
+   the underlying tool: environment, configuration, hooks or launch arguments.
+   If none exists, explain why in the design document.
+2. **Truth has only two stores:** state.db and `<ws>/.tmm/`. Window names,
+   pane text, processes and in-memory caches are disposable, rebuildable projections.
+3. **The server is an observer:** a flow that leaves a person or agent
+   blocked when the server process dies is a design error.
+4. **One definition function per concept:** decisions such as `managed_home`,
+   `detect_pane`, `valid_name` and `SPAWNABLE_BACKENDS` have one implementation
+   shared by every entry point.
+5. **Contain backend differences:** each CLI needs its own configuration,
+   hook dialect and status-line implementation. Adding a backend must add
+   only one backend file, not another downstream branch.
+6. **Follow external systems' documentation:** tmux, CLIs and SQLite have
+   versions and parsing rules. Verify format strings, targets and migration
+   semantics against those rules, and record the version in comments.
 
-## 2 · 必须 / 禁止
+## 2. Required and Forbidden
 
-**必须**
-- 幂等：`up`、restart、refresh、迁移都可重复执行而结果不变。
-- 先记录再行动：`launch.json` 在窗口创建前写入，写失败即 spawn 失败。
-- 删除顺序：先成功 `down`，再删 home，再删行；忽略 `down` 错误会留下无主会话被 `auto_adopt` 复活。
-- tmux 目标用精确形式 `=name:`（`-t name` 是前缀/glob 匹配）；分隔符按 tmux 版本的转义规则。
-- 同步 I/O（rusqlite、tmux 子进程、sleep）跑在 `spawn_blocking`；`std::Mutex` guard 不跨 `await`；不持 store 锁去观察 tmux。
-- SQLite 迁移 `PRAGMA foreign_keys=OFF`；PATCH 用 COALESCE 逐字段更新。
-- 磁盘上的 agent 配置视为代码的一部分：改 hooks/prompt 结构必须让 `refresh_hooks`/`refresh_agent` 在下次启动自愈。
-- `#[cfg]` 平台 gate 绑定的是下一个 item：在 gate 下插入函数前确认 gate 仍指向原目标；桌面侧用源码契约测试守住 Android 编译面。
+**Required**
+- Idempotence: repeated `up`, restart, refresh and migration operations have
+  the same result.
+- Record before acting: write `launch.json` before creating the window;
+  failure to write it fails the spawn.
+- Delete in order: successfully `down`, then remove the home, then the row.
+  Ignoring a `down` failure leaves an orphan session that `auto_adopt` can revive.
+- Use exact tmux targets, `=name:`; `-t name` performs prefix/glob matching.
+  Escape delimiters according to the installed tmux version.
+- Run synchronous I/O (rusqlite, tmux subprocesses, sleep) in `spawn_blocking`.
+  Do not hold a `std::Mutex` guard across `await` or a store lock while observing tmux.
+- Use `PRAGMA foreign_keys=OFF` for SQLite migrations; PATCH updates each
+  field through COALESCE.
+- Treat agent configuration on disk as code. Hook/prompt structure changes
+  must make `refresh_hooks`/`refresh_agent` self-heal homes on the next launch.
+- A `#[cfg]` gate applies to the next item. Before inserting a function below
+  it, verify that the original item remains gated. Protect Android build
+  boundaries with desktop-side source-contract tests.
 
-**禁止**
-- 重写底层工具已有的能力（进程管理、会话恢复、工具循环、消息总线）。
-- 进程内总线、必须长连的守护进程、只有服务器能解读的私有协议。
-- 用窗口名、pane 文本或进程存在与否作为"身份"或"真相"。
-- 在两个地方写同一个后端事实（resume 方言、白名单、hook 事件名）。
-- 在通用模块（`tmux.rs`）里按 backend 字串分支；按屏幕内容触发的适配要有测量与测试。
+**Forbidden**
+- Reimplementing existing underlying capabilities: process management,
+  session recovery, tool loops or message buses.
+- In-process buses, daemons requiring persistent connections, or private
+  protocols only the server understands.
+- Treating a window name, pane text or process existence as identity or truth.
+- Defining the same backend fact twice: resume syntax, allowlists or hook names.
+- Branching on backend strings in a generic module such as `tmux.rs`.
+  Screen-triggered adaptations require measurements and tests.
 
-## 3 · Review 清单
+## 3. Review Checklist
 
-- [ ] 这个改动属于连接/房间/身份/窗口哪一样？若都不是，原生入口找过了吗？
-- [ ] 新增的状态存在哪里？能从 state.db + `.tmm/` 重建吗？重启后还对吗？
-- [ ] 服务器进程此刻被 kill，人或 agent 会卡住吗？
-- [ ] 是否出现了第二份判定逻辑（managed、detect、valid、backend 列表）？
-- [ ] 后端字面量（`"kiro"|"claude"|"codex"|"grok"|"omp"`）是否出现在后端文件之外？
-- [ ] tmux 命令的目标与格式串查过对应版本文档吗？
-- [ ] 有没有同步 I/O 落在 tokio worker 上？有没有锁跨 await？
-- [ ] 迁移能在旧库上跑吗？`foreign_keys=OFF` 了吗？
-- [ ] 改了 hooks/prompt/配置结构，已 spawn 的 agent 下次启动会自愈吗？
+- [ ] Does the change belong to connection, room, identity or window? If not,
+  were native integration points investigated?
+- [ ] Where is new state stored? Can state.db + `.tmm/` reconstruct it?
+  Is it still correct after restart?
+- [ ] Would killing the server now leave a person or agent blocked?
+- [ ] Is there a second definition of managed identity, detection, validation
+  or the backend list?
+- [ ] Do backend literals (`"kiro"|"claude"|"codex"|"grok"|"omp"`) appear outside backend files?
+- [ ] Were tmux targets and format strings checked against the relevant version?
+- [ ] Is synchronous I/O running on a tokio worker, or a lock held across await?
+- [ ] Does migration work on an old database with `foreign_keys=OFF`?
+- [ ] Will existing agents receive repaired hooks/prompts/configuration at next launch?
 
-## 4 · 教训记录（证据）
+## 4. Lessons and Evidence
 
-- 2026-08-18 无 recipe 的重启用用户空间配置启动 → agent "能答但聋" → `launch.json`。
-- 2026-09-03 `spawn` 曾最后写 recipe 且忽略错误 → 满盘时活着但重启即聋 → 先写后起。
-- 2026-09-08 重启原样重放 recipe → 新 AGENTS.md 永远到不了 → `refresh_agent` 重新物化。
-- 2026-09-03 `kill_session("dev")` 杀掉 `dev-2`（`-t` 前缀匹配）→ `=name:`。
-- 2026-06-15 tmux ≥3.4 八进制转义 `\x1f`，分隔符失效（前一天刚从 `|` 换过来）。
-- 2026-09-03 `@all` 扇出内联在 tokio worker 上，卡死所有连接的 push；capture tick 持 store 锁遍历 tmux。
-- 2026-08-30 `#[cfg]` 下插函数偷走 gate，两个 commit 后 Android 10 个编译错。
-- 2026-09-07 后端白名单两处，omp 能 spawn 但 `registry save` 拒绝 → `SPAWNABLE_BACKENDS`。
-- 2026-09-03 七处手拼检测 haystack 一处漏窗口名 → `detect_pane`。
-- 2026-09-03 `agent_remove("../..")` 可删工作区 → `valid_name` 白名单在入口。
-- snapshots 表：实测每项目 1 条、`restore` 不改投影 → 删除。
-- agora 总线：agent 靠 `wait` 长连，服务器死则全队失声 → 所有者决定整个删除。
-- `auto_adopt_once`：每个会话都是项目，服务器跟着 tmux 走。
+- 2026-08-18: recipe-free restart used user-space configuration, leaving the
+  agent "能答但聋"; this led to `launch.json`.
+- 2026-09-03: `spawn` wrote the recipe last and ignored failure. A full disk
+  produced a running agent that lost its input integration after restart;
+  the recipe now comes first.
+- 2026-09-08: replaying old recipes verbatim never delivered new AGENTS.md
+  instructions; `refresh_agent` rematerializes them.
+- 2026-09-03: `kill_session("dev")` killed `dev-2` through `-t` prefix
+  matching; exact `=name:` targets replaced it.
+- 2026-06-15: tmux >=3.4 octal-escaped `\x1f`, breaking a delimiter that
+  had replaced `|` only the previous day.
+- 2026-09-03: inline `@all` fan-out on a tokio worker blocked every
+  connection's pushes; capture ticks traversed tmux while holding the store lock.
+- 2026-08-30: inserting a function below `#[cfg]` moved the gate to the
+  wrong item; two commits later Android had ten compilation errors.
+- 2026-09-07: two backend allowlists let omp spawn but rejected
+  `registry save`; `SPAWNABLE_BACKENDS` unified them.
+- 2026-09-03: one of seven hand-built detection haystacks omitted the window
+  name; `detect_pane` replaced them.
+- 2026-09-03: `agent_remove("../..")` could delete the workspace;
+  `valid_name` now validates the allowlist at entry.
+- The snapshots table held one entry per project in measurement, and
+  `restore` did not update running state; the table was deleted.
+- The agora bus required persistent `wait` connections. Server failure
+  silenced the team, so the owner decided to delete the bus entirely.
+- `auto_adopt_once`: every session is a project; the server follows tmux.

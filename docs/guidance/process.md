@@ -1,77 +1,110 @@
-# Guidance · 流程、测试与文档 · Process, testing, documentation
+# Guidance: Process, Testing and Documentation
 
-> 信条：十二（规则挨着设计，带着理由和事故）、十三（隔离、验证、小步提交）、
-> 一（先问本质）。
-> 审这个维度的人问的是：**这个改动是怎么被验证的？在哪台设备、哪个构建上？文档跟上了吗？
-> 测试钉的是接线还是辅助函数？commit 是一个想法吗？**
-> 草案 · 2026-09-09。
+> Tenets: 12 (rules beside their design, with reasons and incidents),
+> 13 (isolate, verify, commit small), 1 (understand the root cause).
+> Review questions: **How was this verified, on which device and build?
+> Did the documentation follow? Do tests protect the wiring or only a helper?
+> Does each commit express one idea?**
+> Draft · 2026-09-09.
 
-## 1 · 原则
+## 1. Principles
 
-1. **worktree 隔离**：每个任务一个 worktree，launch checkout 只做读、协调、集成。
-2. **一个 commit 一个想法**：验证过就提交，追加不 amend，机械移动与逻辑改动分开。
-3. **测试钉接线，且负向验证**：辅助函数绿不代表组件接对了；改坏一处恰好红一个。
-   每个回归修复从失败的测试开始。
-4. **文档与代码同 commit**：改行为就改对应 design doc 的 Rules and their reasons；规则格式是
-   决定 + 原因 + 日期 + 事故/测量。
-5. **测量，不猜测**：外部系统的行为在真实版本上测，把版本号写进注释与文档。
-6. **"绿了"不等于验证了**：所有者看到的是他正用的客户端——旧 APK、旧桌面包、未硬刷新
-   发生过四次。修复要落到真实入口。
-7. **大改先讨论**：涉及架构、设计语言、删功能，先在房间给方案。
-8. **沟通**：先结论、少字、不重复；被 @ 必 @ 回；积压合并回复；上下文不清先查历史再问人；
-   面向所有者中文，文档/代码/commit/注入流程英文。
-9. **分工**：lead 拆任务避免冲突、不代劳；对抗评审；不以实现者自测代替独立验收；
-   board 流转 todo → doing → review → done，只有 reviewer 移到 done。
+1. **Worktree isolation:** one worktree per task. The launch checkout is
+   for reading, coordination and integration only.
+2. **One idea per commit:** commit after verification, append instead of
+   amending, and separate mechanical moves from logic changes.
+3. **Test wiring with negative controls:** a passing helper does not prove
+   its component is wired correctly. Break one thing and verify that exactly
+   one corresponding test fails. Every regression fix starts with a failing test.
+4. **Documentation and code share a commit:** behavior changes update the
+   design document's Rules and their reasons. Record decision, reason,
+   date and triggering incident or measurement.
+5. **Measure instead of guessing:** verify external-system behavior on real
+   versions and record those versions in comments and documentation.
+6. **Green is not proof:** acceptance concerns the client's actual build.
+   Four incidents involved an old APK, desktop binary or unrefreshed page.
+   A fix must reach the entry point the owner uses.
+7. **Discuss large changes first:** present architecture, design-language
+   and feature-removal plans in the room.
+8. **Communicate concisely:** lead with conclusions, do not repeat, answer
+   addressed messages and consolidate backlogs. Search history or ask
+   when context is unclear. Speak Chinese to the owner; use English for
+   documentation, code, commits and injected process instructions.
+9. **Divide work and review independently:** the lead prevents conflicts
+   without taking over implementation. Use adversarial review, not only
+   implementer self-tests. Board states are todo -> doing -> review -> done;
+   only the reviewer moves work to done.
 
-## 2 · 必须 / 禁止
+## 2. Required and Forbidden
 
-**必须**
-- 第一次编辑 tracked 文件前建 worktree（`~/work/worktrees/<repo>/<agent>-<task>`，分支
-  `agent/<agent>/<task>`），所有命令用绝对路径。
-- commit 正文：根因 → 修法 → 验证方式（含设备/版本）→ 关联 issue；co-author trailer。
-- 新模块同 commit 带 `<module>.test.ts`；source-contract 测试解释 WHY；能抽纯函数就不写正则。
-- i18n 两个语言分支同 commit；README/design doc/脚本随代码更新。
-- Rust 测试 `--test-threads=1`；共享 tmux 的 flaky 测试用独立 socket。
-- 涉及 UI 的改动附两端截图或实机描述；涉及 CLI 的改动写明测试的 CLI 版本。
-- `tmm status working` 随进度更新；完成 `tmm done`；board `move review` 交接。
+**Required**
+- Create a worktree before the first tracked-file edit:
+  `~/work/worktrees/<repo>/<agent>-<task>`, branch `agent/<agent>/<task>`.
+  Use absolute paths in commands.
+- Commit bodies contain root cause, remedy, verification with device/version,
+  related issue and co-author trailer.
+- New modules include `<module>.test.ts` in the same commit. Source-contract
+  tests explain why; prefer testable pure functions over regexes.
+- Update both i18n branches together. README, design documents and scripts
+  follow the code.
+- Run Rust tests with `--test-threads=1`; isolate flaky shared-tmux tests
+  on a separate socket.
+- UI changes include screenshots or device observations for both layouts.
+  CLI changes identify the tested CLI version.
+- Update progress through `tmm status working`, finish with `tmm done`,
+  and hand off through board `move review`.
 
-**禁止**
-- 在 launch checkout 改 tracked 文件；吸收别人的脏树；提交 `agent-team-page/`。
-- amend 已交接的 commit；一个 commit 里两个 issue 的 hunks。
-- 只改代码不改 doc；只改 doc 不改测试；测试钉实现文本而非不变量。
-- 自测通过即标 done；跳过 review 直接 done。
-- 没有测量就写"应该是"；没有版本号的外部行为断言。
-- 提示词、文档、文案里的冗余：写完再删三分之一。
+**Forbidden**
+- Editing tracked files in the launch checkout, absorbing another dirty
+  tree or committing `agent-team-page/`.
+- Amending handed-off commits or mixing two issues' hunks in one commit.
+- Updating code without its documentation, documentation without its
+  corresponding tests, or pinning implementation text instead of invariants.
+- Marking self-tested work done or bypassing review.
+- Asserting expected behavior without measurement or making external-behavior
+  claims without a version.
+- Redundant prompts, documentation or copy. After writing, remove a third.
 
-## 3 · Review 清单
+## 3. Review Checklist
 
-- [ ] 改动在 worktree 里做的吗？commit 只含这个任务的 hunks 吗？
-- [ ] commit 正文有根因、验证方式、设备/版本吗？
-- [ ] 失败测试先于修复存在吗？负向验证做了吗？
-- [ ] 测试钉的是组件接线/用户所见，还是辅助函数？
-- [ ] 对应 design doc 的规则更新了吗？格式含日期与事故吗？
-- [ ] 两端都验证了吗？在哪个构建上？所有者的客户端能看到吗？
-- [ ] 外部系统的断言有版本号吗？
-- [ ] `npm test`、`npm run check`、`test:rust` 结果贴了吗？
-- [ ] 房间里回应了每个 @ 你的人吗？`tmm done` 了吗？board 移到 review 了吗？
-- [ ] 方案级改动事先讨论过了吗？
+- [ ] Was the change developed in a worktree, with only this task's hunks committed?
+- [ ] Does the commit describe the root cause, verification and device/version?
+- [ ] Did a failing regression test precede the fix, and was a negative control used?
+- [ ] Do tests protect component wiring/user-visible behavior or only helper functions?
+- [ ] Is the design rule updated with its date and incident?
+- [ ] Were both layouts checked? Which build was tested, and can the owner's client see it?
+- [ ] Do external-system claims name a version?
+- [ ] Are `npm test`, `npm run check` and `test:rust` results reported?
+- [ ] Was every addressed message answered? Was `tmm done` used and the board moved to review?
+- [ ] Were design-level changes discussed beforehand?
 
-## 4 · 教训记录
+## 4. Lessons
 
-- 2026-09-01 共享 checkout：#43 的 commit 误带 #44 的 Hub hunks，中间两个 commit 样式裸奔；
-  并行 WIP 多次让别人的 check 变红；中断的编辑器插入落盘成重复测试。
-- 2026-08-31 "helpers being green must not cover a rewired component"；2026-08-20 修一个
-  "crying wolf" 的测试；8 月底起 fix 正文普遍含 "negative-controlled"。
-- 2026-05-03 签名变更后 `cargo test` 早已编不过；fetch-fonts.sh 产物与 index.html 不一致；
-  三份文档承诺的双击手势无实现；CLAUDE.md 规则命名不存在的符号。
-- 2026-08-30 board #22 source test 全绿但所有者看到旧 macOS 包；#31 #90 #97 #99 反复排查
-  "哪个入口/哪个构建"。
-- 开发环境陷阱：服务器注入 `release/` PATH 而 tmm 只编了 debug；gradle symlink 指向另一个
-  checkout 的 APK；vite 补丁 dev 不生效；版本戳与迁移块之间的构建让 DB 永久缺表 → `Store::heal`。
-- 2026-08-05 `adopt_then_down_then_up` 因共享 tmux 状态 flaky → 需 `-S` socket。
-- board 教训：#19 三轮才到根因；#97 kiro 三轮改 lang/栈序，claude 定位字体特性；#56 "点击
-  穿透"当遮挡修；#89 把"其他选项菜单"做成可见三点按钮；#38 lead 接受全局编号后被推翻。
-- 2026-09-02 CLAUDE.md 117KB → 11KB 地图；"源代码文件夹里不应该有 claude.md，入口太乱了"。
-- 所有者三次："先讨论方案，不要直接修改代码"；"保持中文语言风格干练，不啰嗦"；
-  "流程应该用英文，保持一致性"。
-- 2026-09-08 "大家要分工明确，lead 不要过分代劳，不同人要对抗评审，对立统一"。
+- 2026-09-01: shared-checkout work mixed #44 hunks into #43, left styles
+  incomplete between commits and broke other people's checks.
+  An interrupted editor inserted duplicate tests.
+- 2026-08-31: "helpers being green must not cover a rewired component".
+  A false-alarm test was fixed on 2026-08-20 ("crying wolf"); since late August,
+  fix commit bodies commonly state "negative-controlled".
+- By 2026-05-03 a signature change had already broken `cargo test`.
+  fetch-fonts.sh output disagreed with index.html; three documents promised
+  an unimplemented double-tap gesture; CLAUDE.md named nonexistent symbols.
+- 2026-08-30: board #22 source tests passed while the owner used an old
+  macOS bundle. #31/#90/#97/#99 repeatedly required identifying the actual
+  entry point and build: "哪个入口/哪个构建".
+- Development traps included a server-injected `release/` PATH with only
+  a debug tmm build, a Gradle symlink to another checkout's APK, a Vite patch
+  missing in dev, and a build between version stamping and migration that
+  permanently omitted a table until `Store::heal`.
+- 2026-08-05: shared tmux state made `adopt_then_down_then_up` flaky;
+  use an isolated `-S` socket.
+- Board lessons: #19 took three rounds to find the cause; #97 had three
+  kiro lang/stack changes before claude found font features; #56 treated
+  click-through ("点击
+  穿透") as an occlusion problem; #89 turned extra menu options
+  ("其他选项菜单") into a visible three-dot button; #38's global numbering decision was reversed.
+- 2026-09-02: CLAUDE.md shrank from 117KB to an 11KB map.
+  Owner: "源代码文件夹里不应该有 claude.md，入口太乱了".
+- Repeated owner guidance: "先讨论方案，不要直接修改代码";
+  "保持中文语言风格干练，不啰嗦"; "流程应该用英文，保持一致性".
+- 2026-09-08: "大家要分工明确，lead 不要过分代劳，不同人要对抗评审，对立统一".

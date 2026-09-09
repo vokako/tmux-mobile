@@ -1,410 +1,539 @@
-# tmux-mobile 信条 · Tenets
+# tmux-mobile Tenets
 
-> 草案 v7 · 2026-09-09 · 中文讨论稿，定稿后整理为英文（所有者决定）。
-> 本文是根：`docs/guidance/*.md` 按维度把信条展开为可执行准则与 review 清单，
-> `docs/todo.md` 记录现状与信条的差距。有冲突时以本文为准。
-> 每条信条的结构：**信条 → 为什么 → 例证（来自代码、文档、1251 个 commit、
-> 93 个 board issue 与房间记录）→ 推论**。例证说明信条有根，不说明代码已经合格：
-> 这些信条存在的目的就是提升代码质量。
+> Draft v7 · 2026-09-09 · English edition of the Chinese discussion draft,
+> translated at the owner's direction. Owner quotes remain in Chinese as evidence.
+> This is the root document: `docs/guidance/*.md` expands the tenets into
+> actionable rules and review checklists by discipline; `docs/todo.md` records
+> the gaps between them and today's implementation. This document takes precedence.
+> Each tenet follows **tenet -> why -> evidence (from code, documents, 1251 commits,
+> 93 board issues and room history) -> implications**. Evidence establishes where
+> a tenet came from, not that the code already meets it. These tenets exist to
+> improve code quality.
 
 ---
 
-## 初衷
+## Purpose
 
-我们做的是一层**壳**。壳把已经存在的东西串起来：tmux 管进程与会话，coding
-agent CLI（kiro / claude / codex / grok / omp）管智能，MCP 与 skills 管工具，
-手机或桌面是看进去的窗口。我们不维护 tmux 那样的后台，不实现 agent，不写工具，
-不给 agent 套一层看不见的协议壳；我们只定义它们如何相遇，并让一个人在任何设备
-上都能看见、说话、下令——而且随时可以走回工位，在 terminal 里直接接管。
+We build a **shell** connecting things that already exist: tmux owns processes
+and sessions, coding agent CLIs (kiro / claude / codex / grok / omp) own
+intelligence, MCP and skills own tools, and a phone or desktop provides the
+window into them. We do not maintain a tmux-like runtime, implement agents,
+build tools, or hide agents behind an invisible protocol wrapper. We define
+how they meet, so a person on any device can observe, talk and give orders,
+then return to the terminal and take over directly at any time.
 
-我们**真正拥有**的只有四样，其余都是别人的：
+We **own** only four things; everything else belongs elsewhere:
 
-| 我们拥有 | 内容 | 我们不拥有 |
+| We Own | Contents | We Do Not Own |
 |---|---|---|
-| 连接 | WebSocket JSON-RPC、token、E2E、多服务器切换 | 进程与会话（tmux） |
-| 房间 | 每个项目一个聊天室、看板、推导出的 agent 状态 | 智能与它的 harness（各家 agent CLI） |
-| 身份 | registry 定义、隔离 home、启动配方、团队 | 工具（MCP 服务器、skills） |
-| 窗口 | 手机与桌面同等完美的 UI、终端渲染、文件浏览 | 记忆（mem 等，作为 skill 接入） |
+| Connection | WebSocket JSON-RPC, token, E2E, switching between servers | Processes and sessions (tmux) |
+| Room | One chat room per project, board, derived agent status | Intelligence and its harness (each agent CLI) |
+| Identity | Registry definitions, isolated homes, launch recipes, teams | Tools (MCP servers, skills) |
+| Window | Equally complete phone and desktop UI, terminal rendering, file browsing | Memory (mem and similar tools, integrated as skills) |
 
-一个功能落在左列，我们做；落在右列，我们接入。分不清的时候，先问"底层工具
-有没有原生入口"。
+If a feature belongs on the left, we build it. If it belongs on the right,
+we integrate it. When the boundary is unclear, first ask whether the
+underlying tool offers a native integration point.
 
 ---
 
-## Zen（短句版，供 prompt 与 review 引用）
+## Zen
 
+Short form for prompts and reviews:
+
+```text
+Understand the root cause before acting; a symptom fix returns in another form.
+A shell, not an engine.
+The real CLI in a real pane; a human can take over at any time.
+If the server dies, the work keeps running.
+Three primitives: type into panes, observe hooks, let agents act through tmm.
+Humans and agents read the same record.
+What a human can do, an agent can do; add nothing an agent does not need.
+Declaration is truth; running state is disposable.
+Derive status from observation, never self-report.
+One definition per concept; a second copy is a bug.
+One mechanism per job; a new visual species is a regression.
+Adding a backend touches one file.
+Look for a native integration point first; build your own only with a recorded reason.
+Measure, do not guess; record the version.
+Keep rules beside their design, with reasons and incidents.
+Exercise restraint: delete rather than retain, use fewer words, do not overdesign.
+Phone and desktop must both be complete; compromising one fails both.
+Beauty is function: make it obvious who is running and who needs me.
+Motion guides attention; it does not decorate.
+Commit verified work; one idea per commit.
+Telemetry never blocks.
 ```
-先问本质，再动手；修症状的 fix 会以另一张脸回来。
-壳，不是引擎。
-真实的 CLI，真实的 pane；人随时接管。
-服务器死了，一切照跑。
-三个原语：往 pane 里打字，从 hooks 往外看，agent 用 tmm 主动出手。
-人读的和 agent 读的是同一份记录。
-人能做的，agent 也能做；agent 不需要的，不加。
-声明是真相，运行态可以丢。
-状态靠推导，不靠自报。
-一个概念一个定义；第二份就是 bug。
-一个任务一种机制；新物种就是回归。
-加一个后端，只碰一个文件。
-先找原生入口；找不到再自建，并写下为什么。
-测量，不猜测；把版本号写进文档。
-规则挨着设计，带着理由和事故。
-克制：删掉优于保留，少字优于多字，不过设计。
-手机和桌面，两端都要完美；一端将就就是两端失败。
-美是功能：一眼分清谁在跑、谁在等我。
-动效引导视线，不装饰画面。
-验证过就提交；一个 commit 一个想法。
-遥测永不阻塞。
-```
 
 ---
 
-# 零 · 我们怎么想
+# 0. How We Think
 
-## 信条一：第一性原理，抓住问题的本质 · First principles
+## Tenet 1: First Principles
 
-**为什么。** 这个仓库 1251 个 commit 里 454 个是 fix，其中投递确认一条链修了 7 次，
-键盘 resize 一天反转 4 次，Escape 丢焦点修了 6 个 commit 后发现是浏览器扩展。每一次
-只修症状，同一个问题就换一张脸回来。先问"真正的原因是什么、这个问题属于哪个概念、
-故障在哪一层"，再动手，是其他所有信条的前提：壳的边界、三个原语、一个概念一个定义，
-都是把问题还原到最少原语之后的结论，不是凭空定的规矩。
+**Why.** Of this repository's 1251 commits, 454 were fixes. One delivery
+acknowledgment chain needed seven fixes; keyboard resize direction reversed
+four times in one day; six Escape-focus commits preceded the discovery that
+a browser extension was responsible. Fixing symptoms lets the same problem
+return in another form. Before acting, ask for the real cause, the concept
+involved and the failing layer. This is the basis of every other tenet:
+the shell boundary, three primitives and one definition per concept follow
+from reducing the problem to its smallest set of primitives, not arbitrary rules.
 
-**例证。**
-- 模型放进配置而不是启动行：本质不是"修一个 `--model` 的 typo"，而是"模型属于身份，
-  身份属于配置"，于是 `up`、restart、resume 一并解决。
-- 运行态与空闲分不清：本质不是"换个颜色"，而是 5–7px 上色相不可分辨，答案是视觉
-  质量（光晕）而不是另一个色值。
-- 会话越积越多：本质不是"加个清理按钮"，而是"未跟踪会话"这个概念不该存在，于是
-  每个会话都是项目。
-- 网络健康度五次迭代（heavyRpc 计数 → lastRxAt → pending 规则 → …）最后改为协议层
-  WS PING/PONG——用应用层信号推断链路状态，从一开始就在错的层。
-- 工具栏"paint 盖住内容"三连败后的结论写在 commit 里："structure beats paint"。
+**Evidence.**
+- Moving the model into configuration instead of the launch command was not
+  about correcting a `--model` typo. The model belongs to identity, and identity
+  belongs in configuration. That resolved `up`, restart and resume together.
+- Indistinguishable running and idle states were not a request for another
+  color. Hue differences were unreadable at 5-7px; a halo changed the visible
+  quality of the mark instead of merely its color value.
+- Accumulating sessions did not call for a cleanup button. The concept of an
+  untracked session was unnecessary, so every session became a project.
+- Network health went through five approaches (heavyRpc counts, lastRxAt,
+  pending rules, and more) before moving to protocol-level WS PING/PONG.
+  Inferring link health from application signals started at the wrong layer.
+- Three failed toolbar attempts to fix paint covering content ended with the
+  commit's conclusion: "structure beats paint".
 
-**推论。**
-1. 修 bug 前写下根因一句话，并说明之前的现象为什么只是症状。同一区域第二次出问题
-   时，默认上一次修的是症状。
-2. 先确认故障在哪一层（浏览器、xterm、tmux、CLI、我们），再在那一层修。
-3. "这个概念应该存在吗"优先于"这个 if 该放哪"。删掉一个概念胜过给它加分支。
-4. 两个相似需求出现时，找它们共同的更底层的东西，只实现那一个。
-5. 不确定就去测，不要用防御性代码掩盖不确定。一个 bug 修完，排查同类
-   （所有者："你再检查一下其他类似操作逻辑"）。
+**Implications.**
+1. Before fixing a bug, state the root cause in one sentence and explain why
+   the earlier observations were symptoms. For a second failure in the same
+   area, start with the assumption that the previous fix addressed a symptom.
+2. Identify the failing layer (browser, xterm, tmux, CLI or our code), then
+   fix it at that layer.
+3. Ask whether a concept should exist before asking where to put its `if`.
+   Removing a concept is better than adding branches around it.
+4. When two similar requirements appear, find their shared underlying need
+   and implement that once.
+5. Measure uncertainty instead of hiding it behind defensive code. After a
+   fix, inspect related operations too. Owner: "你再检查一下其他类似操作逻辑".
 
 ---
 
-# A · 我们是什么
+# A. What We Are
 
-## 信条二：我们是壳，不是引擎 · A shell, not an engine
+## Tenet 2: A Shell, Not an Engine
 
-**为什么。** 每重写一份底层能力，就多一份要追着上游版本维护的代码，而上游改一次我们
-就坏一次。接入原生入口的成本是一次测量；重写的成本是永远。
+**Why.** Reimplementing an underlying capability creates another body of code
+that must track upstream versions and can break with each upstream change.
+Using a native integration point costs a measurement; rebuilding it costs
+ongoing maintenance.
 
-**例证。**
-- prompt 写进每个后端**自己的**指令文件：kiro 的 agent-config `prompt`、codex 的
-  `CODEX_HOME/AGENTS.md`、claude 的隔离 `CLAUDE.md`、grok 的 `agents/<name>.md`、
-  omp 的 `--append-system-prompt <file>`。所有者："一个文件注入…更优雅"、"保证更加稳定"。
-- MCP 走各后端原生配置，不做自己的工具面；`tmm mcp` 只作为可选 skill 存在。
-- 后台任务就是一个 `remain-on-exit` 的 tmux 窗口，不是我们的进程管理器。
-- 反例被推翻：agora MCP daemon 曾是 agent 消息底座，三套后端写法加握手，最后被
-  "system prompt 里一行 `tmm`"取代。
+**Evidence.**
+- Prompts go into each backend's **own** instruction surface: kiro's
+  agent-config `prompt`, codex's `CODEX_HOME/AGENTS.md`, claude's isolated
+  `CLAUDE.md`, grok's `agents/<name>.md`, and omp's
+  `--append-system-prompt <file>`. Owner: "一个文件注入…更优雅", "保证更加稳定".
+- MCP uses native backend configuration, not our own tool interface;
+  `tmm mcp` exists only as an optional skill.
+- A background task is a `remain-on-exit` tmux window, not our own process manager.
+- A rejected design used an agora MCP daemon as the agent message substrate,
+  with three backend-specific configurations and a handshake. A single `tmm`
+  line in the system prompt replaced it.
 
-**推论。**
-1. 新能力先找底层的原生入口；找不到才考虑自建，且要在 design doc 里写明为何找不到。
-2. 加一个后端只允许多一个后端文件；下游（hub、投递、状态、UI）不得为此多一个 `if`。
-   五个后端的配置、hooks 方言、状态行**确实不同**，各一份实现是必要的；问题在于散落
-   （见 todo）。
-3. 我们**不**替 agent 思考、不替 CLI 做决定：`/command` 原样转给 CLI，`Escape` 是
-   唯一的中断。
+**Implications.**
+1. Look for a native integration point first. Build your own only if there
+   is none, and record why in the design document.
+2. A new backend may add only one backend file; downstream hub, delivery,
+   status and UI code must not gain another `if`. The five backends really
+   do have different configuration, hook dialects and status lines, so
+   separate implementations are necessary. Their scattered placement is
+   the problem (see todo).
+3. We do **not** think for agents or make decisions for CLIs. Forward
+   `/command` unchanged; `Escape` is the only interrupt.
 
-## 信条三：真实的 CLI 跑在真实的 pane 里，人随时可以接管 · The real CLI, in a real pane
+## Tenet 3: The Real CLI in a Real Pane
 
-**为什么。** 一个 coding agent 的价值一半在模型，一半在它自己的 harness：TUI、审批流、
-工具循环、会话恢复、快捷键。用 ACP 一类协议把 CLI 封进看不见的进程，等于扔掉那一半，
-还要自己重新长出来。更重要的是：人走回工位，必须能在 tmux 窗口里看到和自己手动启动时
-**一模一样**的 CLI，接着敲字、按 Escape、翻历史，不需要知道有我们存在。**最原生的
-agent 体验**是底线，不是特性。
+**Why.** Half of a coding agent's value is its model; the other half is its
+own harness: TUI, approval flow, tool loop, session recovery and shortcuts.
+Wrapping the CLI in an invisible process through a protocol such as ACP
+throws away that second half and makes us rebuild it. More importantly,
+someone returning to their workstation must see **the same CLI** they
+would have launched manually in the tmux window. They can keep typing,
+press Escape and browse history without knowing we exist. **The native
+agent experience** is a baseline, not an optional feature.
 
-**例证。**
-- 每个 managed agent 就是 tmux 窗口里的一个真实 CLI 进程；隔离 home 只是通过
-  `KIRO_HOME` / `CODEX_HOME` / `--settings` / `PI_CODING_AGENT_DIR` 换了一个家。
-- omp 的 prompt 用 `--append-system-prompt` **追加**而不是替换——`--system-prompt`
-  会"lobotomize the tools"。
-- 我们只做两件事：**从外面看**（hooks），**往里面打字**（`tmux::send_command`，和人在
-  键盘上敲的是同一条路）。
-- 手动起的窗口也被识别（词边界检测），只是没有隔离 home；Terminal 页展示的就是那个
-  pane 本身，不是转写。
-- 200ms 的文本-Enter 间隔、kiro `@` 文件选择器的 footer 判定——这些怪癖之所以要测量
-  并适配，正因为我们**不**绕开 TUI。
+**Evidence.**
+- Each managed agent is a real CLI process in a tmux window. An isolated home
+  changes only its home through `KIRO_HOME` / `CODEX_HOME` / `--settings` /
+  `PI_CODING_AGENT_DIR`.
+- omp uses `--append-system-prompt` to **append**, not replace; replacing
+  with `--system-prompt` would "lobotomize the tools".
+- Our two actions toward the CLI are **observing from outside** through hooks
+  and **typing into it** through `tmux::send_command`, the same route as a keyboard.
+- Manually launched windows are recognized too, using word boundaries; they
+  simply lack an isolated home. The Terminal page shows the actual pane,
+  not a transcript.
+- The 200ms text-to-Enter interval and kiro `@` file-picker footer detection
+  require measurement and adaptation precisely because we do not bypass the TUI.
 
-**推论。**
-1. 不修改、不 fork、不代理任何 CLI 的默认 harness；我们的所有注入都是它文档化的入口：
-   环境变量、配置文件、hooks、启动参数。harness 指**行为**（工具循环、审批、会话、
-   快捷键）；只影响显示的设置——如给 managed Claude 写 `statusLine` 让状态行可被读取——
-   不改变 agent 做什么，完全允许（所有者，2026-09-09）。
-2. 凡是人在 pane 里能做的，我们不另造一条通道；凡是人在 pane 里看不到的，我们不得
-   偷偷做（不在后台替 agent 发消息、不静默注入 prompt 文本）。
-3. 一个 CLI 的 TUI 行为变了，适配它（测量、写进 doc、加测试），不要求它变回来。
+**Implications.**
+1. Do not modify, fork or proxy a CLI's default harness. Inject only through
+   documented environment variables, configuration files, hooks and launch
+   arguments. Harness means **behavior**: tool loops, approvals, sessions and
+   shortcuts. Display-only configuration, such as a managed Claude `statusLine`
+   that makes status readable, does not change what the agent does and is
+   permitted (owner, 2026-09-09).
+2. Do not create a separate channel for something a person can do in the pane.
+   Do not secretly perform actions a person cannot see there: no speaking
+   for agents in the background or silently injecting prompt text.
+3. When a CLI's TUI changes, adapt to it through measurement, documentation
+   and tests. Do not require it to change back.
 
-## 信条四：没有中心节点，会话活在 tmux 里 · No central node
+## Tenet 4: No Central Node
 
-**为什么。** 我们的服务器是观察者与信使，不是运行时。它可以崩、可以重启、可以没装。
-agent 继续跑，人继续在 terminal 里工作，什么都不丢。任何"必须经过我们才能工作"的
-设计，都把整个系统的可用性压到了我们一个进程上。
+**Why.** Our server observes and delivers messages; it is not the runtime.
+It may crash, restart or be absent. Agents keep running and people keep
+working in their terminals without losing their work. A design that makes
+our process a prerequisite concentrates the entire system's availability
+in that process.
 
-**例证。**
-- 服务器由 watch 脚本频繁重启，没有一个 agent 因此停下。
-- `tmm` 对服务器 fail-soft：~20ms 内退出 2，永不阻塞 agent；`tmm task` 干脆不开 socket。
-- 每个 tmux 会话都是项目（`auto_adopt_once`）：是服务器跟着 tmux 走，不是反过来。
-- 反例：桌面 Team 的 agora 总线——agent 靠 `wait` 长连总线，服务器一死全队失声。
-  所有者 2026-09-09 决定整个删除，不留冗余。
+**Evidence.**
+- The watch script restarts the server frequently without stopping agents.
+- `tmm` fails soft when the server is unavailable: exit 2 in about 20ms,
+  never blocking the agent. `tmm task` does not open a socket at all.
+- Every tmux session is a project (`auto_adopt_once`): the server follows
+  tmux, not the reverse.
+- Counterexample: the desktop Team agora bus required agents to maintain
+  a connection through `wait`; losing the server silenced the whole team.
+  On 2026-09-09 the owner decided to delete it entirely, with no redundant path.
 
-**推论。**
-1. 任何功能设计前先问：服务器进程死了，这个功能的**用户**（人或 agent）会卡住吗？
-   会，就改设计。
-2. 状态可以缓存在服务器里，但真相必须能从 tmux 与磁盘重新读出来（信条七）。
-3. 进程内总线、必须长连的守护进程、只有服务器能解读的私有协议，都是反模式。
+**Implications.**
+1. Before designing a feature, ask whether its user, human or agent, would
+   become stuck if the server process died. If so, change the design.
+2. The server may cache state, but truth must be recoverable from tmux and
+   disk (tenet 7).
+3. In-process buses, daemons that require persistent connections and private
+   protocols understood only by the server are antipatterns.
 
-## 信条五：一座原生的桥——三个原语 · One native bridge, three primitives
+## Tenet 5: One Native Bridge, Three Primitives
 
-**为什么。** 人↔agent 和 agent↔agent 用**同一套**原语沟通，一共三个：
+**Why.** Human-agent and agent-agent communication use **the same** three
+primitives:
 
-| 原语 | 方向 | 谁发起 | 实现 |
+| Primitive | Direction | Initiator | Implementation |
 |---|---|---|---|
-| 往 pane 里打字 | 进入 agent | 人、另一个 agent、系统 | `tmux::send_command`，带 `[tmm chat …]` 戳 |
-| hooks 观察 | 离开 agent，被动 | CLI 自己触发 | 各后端原生 hooks → `projects/telemetry.rs` |
-| `tmm` 命令 | 离开 agent，主动 | agent 自己决定 | `tmm send/done/spawn/board/…` |
+| Type into a pane | Into an agent | Human, another agent or system | `tmux::send_command`, with a `[tmm chat …]` stamp |
+| Observe hooks | Out of an agent, passively | The CLI itself | Native backend hooks -> `projects/telemetry.rs` |
+| Invoke `tmm` | Out of an agent, actively | The agent decides | `tmm send/done/spawn/board/…` |
 
-前两个是我们对 CLI 做的全部事（信条三）；第三个是 agent 自己的手（信条六）。不为
-agent 之间另造一种协议，是因为任何第二种协议都会让 agent 之间的对话对人不可见、
-不可插手。三个原语都落在同一个房间与同一批 pane 里，所以人随时可以顶替任何一方。
+The first two are everything we do to the CLI (tenet 3); the third is the
+agent's own means of acting (tenet 6). A separate agent-to-agent protocol
+would hide their conversation from people and prevent intervention. All
+three primitives use the same room and panes, so a person can replace
+either participant at any time.
 
-**例证。**
-- `@name` 就是把 `[tmm chat <时间>] <sender>: <text>` 打进那个 pane；`@all` 打进每个
-  managed agent；`@human` 就是通知人。
-- 最终回复由 hooks 捕获、记进房间、**只**回给开这一回合的那一方；`[reply]` 不造反向边。
-- agent 主动说话走 `tmm send "@name …"`，它最终也是把字打进对方的 pane；`tmm done`
-  回给下 brief 的人。
-- 被推翻的设计：`tmm done` 曾抑制 auto-post（丢了每个 turn 的最终回复）、`tmm status
-  waiting|blocked`（所有者："没有什么用处，给 agent 增加了理解成本"）、独立的通知
-  UI（"原来我用的感觉不是很好用"）。留下的只有三个原语和一个房间。
+**Evidence.**
+- `@name` types `[tmm chat <time>] <sender>: <text>` into that pane; `@all`
+  types into every managed agent; `@human` notifies the person.
+- Hooks capture every final response, record it in the room and return it
+  **only** to the party that opened the turn. `[reply]` creates no reverse edge.
+- An agent speaks actively through `tmm send "@name …"`, which ultimately
+  types into the recipient's pane. `tmm done` returns to the brief's sender.
+- Rejected designs included `tmm done` suppressing auto-post, which lost
+  final turn responses; `tmm status waiting|blocked`, about which the owner
+  said "没有什么用处，给 agent 增加了理解成本"; and a separate notification
+  UI, described as "原来我用的感觉不是很好用". Only three primitives and one
+  room remained.
 
-**推论。**
-1. 新的协作能力必须能还原为这三个原语之一："谁往谁的 pane 打了什么字"、"hooks 看到
-   了什么"、"谁执行了哪条 tmm"。还原不了，就是在造第二座桥。
-2. 房间是唯一的记录；人读的和 agent 读的是同一份，不做"仅 agent 可见"的消息。
-3. 打进 pane 的每一行都要让人读得懂——它同时是给 agent 的输入和给人的日志。
-4. `tmm` 永不阻塞、永不成为前提：它是 agent 的手，不是 agent 的氧气（信条四）。
-5. 用 prompt 约束的行为迟早失败，必须落到机制（codex "always end with wait" 写了仍失败
-   → Stop hook；`tmm done` 靠自觉 → hooks 自动捕获）。
+**Implications.**
+1. Every collaboration feature must reduce to one of these primitives:
+   who typed what into whose pane, what a hook observed, or who ran which
+   `tmm` command. Otherwise it is a second bridge.
+2. The room is the only record. Humans and agents read the same content;
+   there are no agent-only messages.
+3. Every line typed into a pane must be readable by a person. It is both
+   input to the agent and a human-readable log.
+4. `tmm` never blocks and never becomes a prerequisite for the agent's work
+   (tenet 4).
+5. Prompt-only constraints eventually fail; enforce them through mechanisms.
+   Codex still failed with "always end with wait" in its prompt, leading to
+   a Stop hook. Voluntary `tmm done` led to automatic hook capture.
 
-## 信条六：CLI 优先，agent 自己管理工作区 · CLI-first
+## Tenet 6: CLI First
 
-**为什么。** 只能被人管理的 agent 无法管理队友。目标是 agent 之间互相拉起、分派、
-review、关掉，人只在需要时介入。所以 agent 的"手"必须能触及全部管理面，而集成成本
-必须小到能塞进一行 system prompt。
+**Why.** An agent managed only by a human cannot manage teammates. Agents
+must be able to start one another, delegate, review and stop work, with
+humans intervening only when needed. Their commands must reach every
+management operation, and integration must fit in one system-prompt line.
 
-**例证。**
-- `tmm agent list` 理解当前会话与队友状态，`tmm log` 读房间（含 `--grep` 全史搜索），
-  `tmm spawn` / `tmm project up|down` 拉起与关闭，`tmm registry save` / `tmm teams save`
-  定义新的 agent 与团队。
-- 每个 project / agent / board 动词都有 `tmm` 命令，UI 与 CLI 对等。
-- brief 从谁那里来，`tmm done` 就回给谁：agent 可以像人一样分派并收到结果。
-- 所有者要求的高优先级指引：上下文不清时先 `tmm log --grep` 查历史、直接 `@` 问对方，
-  不要猜着干；被 `@` 就要 `@` 回去，事事有回应；积压消息合并回复。
+**Evidence.**
+- `tmm agent list` shows the session and teammates' state; `tmm log` reads
+  the room, including full-history `--grep`; `tmm spawn` and
+  `tmm project up|down` start and stop workspaces; `tmm registry save` and
+  `tmm teams save` define agents and teams.
+- Every project / agent / board verb has a `tmm` command, with CLI/UI parity.
+- `tmm done` returns to whoever provided the brief, so agents can delegate
+  and receive results just like people.
+- The owner's high-priority guidance: when context is unclear, search
+  history with `tmm log --grep` and ask the other party directly with `@`;
+  do not guess. Answer every addressed message and consolidate queued replies.
 
-**推论。**
-1. 新增一个 UI 动作时，同一个 commit 里给出对应的 `tmm` 子命令，反之亦然。
-2. `tmm` 的输出面向 agent 阅读：稳定、可 grep、无装饰。
-3. 每个新命令必须回答"agent 没有它就做不到什么"；答不出来就不加。`tmm-cli.md`
-   2300 行本身就是越界的信号（所有者：太长了不对，接下来优化）。
-
----
-
-# B · 我们怎么建
-
-## 信条七：声明是真相，运行态是可丢弃的投影 · Declaration is truth
-
-**为什么。** tmux 会话只活在 tmux 进程里，一次重启就全忘。如果关掉一个工作区要付出
-重建的代价，人就不会关，于是会话只增不减。让"关"零成本，是治理熵的唯一办法。与
-信条四互补：运行态**不依赖**我们（四），也**能由**我们重建（七）。
-
-**例证。**
-- Project = `{ path, name, session, slots[] }` 持久在 state.db；`up` 按名字匹配窗口、
-  幂等、只补缺，不重排不重启。
-- 每个 managed agent 的 `launch.json` 在窗口创建**之前**写入；写失败即 spawn 失败。
-  没有 recipe 的重启曾让 agent "能答但聋"（2026-08-18）。
-- 重启 = 从当前 registry 与 AGENTS.md **重新物化**后再重放，不是原样重放（2026-09-08）。
-- 被推翻：20 深的 `snapshots` 表——实测每项目只有 1 条，且 `restore` 改声明不改投影，
-  删除。
-
-**推论。**
-1. 任何会被"再来一次"的东西必须幂等；任何不能从声明重建的状态都是 bug。
-2. 持久状态只有两处：state.db 与 `<ws>/.tmm/`。tmux 窗口名、pane 内容、进程都不是存储。
-3. 磁盘上的 agent 配置是代码的一部分：代码修了 hook，已 spawn 的 home 要在下次启动
-   自愈（`refresh_hooks`），否则修了等于没修。
-4. 迁移永远向前兼容旧声明，且 `PRAGMA foreign_keys=OFF`。
-
-## 信条八：状态靠观察推导，从不靠自报 · Derive, never declare
-
-**为什么。** agent 会说错、会忘、会被中断；屏幕会动但不代表在工作。人能相信的只有我们
-亲眼看到的边：谁开了回合、谁收到了最终回复。一个概念若有两处定义，迟早分叉。
-
-**例证。**
-- 状态 `running | waiting | idle | failed` 全部由 hooks 的 turn edge 推导。`window_activity`
-  曾表示 working，结果 TUI 答完仍重绘、所有 agent 永远 working；Claude 的 `idle_prompt`
-  在 completed 后精确 60s 出现，曾被当成 ask。
-- "这个 agent 是我们创建的" = `projects::managed_home` 判定隔离 home 存在；三个门共用
-  这一个函数。七处手拼的检测 haystack 曾有一处漏读窗口名 → 统一为 `detect_pane`。
-- agent 名字在**进入**处校验一次，是四个解析器约束的交集白名单——起因是
-  `agent_remove("../..")` 差点删掉整个工作区。
-- 投递确认靠 `userPromptSubmit` 回显，`send-keys` 成功不算；这条链修了 7 次才把
-  队列、换行、截断、文件选择器都补上。
-
-**推论。**
-1. 每个概念一个定义函数，所有调用点引用它；review 时看到第二份判定逻辑即打回。
-2. 输入在进入边界处校验，之后的代码信任它；不要在内部层层重复检查。
-3. `tmm status` 是 agent 的自述，只用于展示"在做什么"，永不参与状态推导。
-4. 屏幕抓取（vitals、恢复检测）是"读别人的屏幕"，读人也看得见的东西，是合规的观察：
-   漏读是常态要记住上次值，匹配锚定到结构而不是全文扫词，无形状的字段绝不猜。
-
-## 信条九：一个任务只有一种机制 · One mechanism per job
-
-**为什么。** 复制一份组件的那一刻它就开始漂移，而且漂移是静默的：两页"各自看起来
-都对"却不一致。这是本仓库最常见的回归类型（侧栏标题漂移三次、to-tail 按钮两种、
-DirPicker 两份、平台检测五处、39 个组件各写 mono 字体栈）。同样的事发生在代码里：
-两份判定、两个渲染器、两个弹层定位，就是两倍的 bug 面。**重复实现是首要的质量债。**
-
-**例证。**
-- 下拉只有 `ui/Select`，右键/长按只有 `ui/ContextMenu` + `ui/longpress`，固定弹层只有
-  `menuPlacement`，回到末尾只有 `.to-tail`，状态点只有 `.live-dot`。
-- markdown 只走 `core/markedSafeUrl.ts` 注册过的那一个 `marked` 单例——Files 曾自带
-  `marked.parse`，README 里的 `<img onerror>` 在持有 token 的 origin 运行。
-- 新建项目只有 `CreateProjectDialog`；Sessions 页因此少了 120 行。
-- `*.source.test.ts` 把这些钉死：新出现的"视觉物种"会让测试失败，这是故意的。
-
-**推论。**
-1. 写新东西前先搜有没有现成机制；有则用，不合用则**改它**，不新建平行实现。
-2. 共享原子只住在 `app.css` / `ui/` 一处；组件的 scoped 规则不得重声明共享类
-   （scoped (0,2,0) 永远赢共享 (0,1,0)，且静默）。
-3. 一条 source-contract 测试失败意味着改动必须是有意的，先读测试再"修"。
-4. 删代码优先于加代码；一个 PR 若能让某个文件变短，是加分项。
-
-## 信条十：两端同等完美，美与易用是目标本身 · Two screens, one standard
-
-**为什么。** 使用场景有两个，缺一个都不成立：离开工位后在手机上看一眼、说一句；坐回
-桌前在大屏上并排看多个 agent、翻文件、读长对话。手机不是桌面的缩水版，桌面也不是
-手机的放大版，各自有各自的最佳形态，但共用**一套**设计语言。UI 的审美、交互的易用性、
-动效的引导性不是完成功能之后的抛光，而是功能的一部分：一个让人分不清"谁在跑、谁在
-等我"的界面，功能就是残缺的。所有者："注意当前我整体比较满意，不要大变样"。
-
-**例证。**
-- 一套 token 两端共用：六级字阶、三种字体角色、圆角尺度、两种 hover 家族、两个节拍。
-  760px 是形态切换点，不是降级点：桌面有 rail、并排 split、可拖的 `--sidebar-w`；手机
-  有 44px 触控、抽屉、边缘返回手势、sheet 弹层——各自完整。
-- 审美即功能：静止态无彩，运行态戴 `.live-dot` 光晕；状态点永不做透明度动画。颜色是
-  词典不是调色板：绿色只表示"ended well"，品牌色不动，同一 hue 5px 内不能有两个含义。
-- 动效有方向：向深处从右进、返回从左进，一种滑动语法；状态变化是运动不是替换
-  （箭头翻转旋转 90°，不是 180°——"180 度相当于没有变化"）；退出是切、布局永不动画。
-- 易用性有具体规则：破坏性动作二次确认、确认键在最右防误触、确认即离开、popover 点
-  别处即收起且左上角锚定、文字可用系统原生选择、屏幕左右占满、内容自身折叠不裁切。
-- 克制的审美：无细线边框、图标优先、hover 才出文字、不靠文字堆易用性、不过度着色
-  （"像一个系统状态的监控一样，不要过度占用人的注意力"）。
-
-**推论。**
-1. 每个功能在两端都要有完整、合适的形态；"桌面先做、手机以后再说"或反过来，都不算
-   完成。review 两端都看。
-2. 只用现有 token 与原子；写下一个原始 px、字面颜色或第二种滑动节拍即回归。
-3. 动效必须引导：告诉人方向、状态或进出。答不出"它引导了什么"的动效不加。切换不许
-   "闪出来"：旧页滑出、新页滑入、内容随之渐显。所有循环动画在 reduced-motion 下停止。
-4. 一个交互加进来时先问"怎么让人少想一步"：默认收件人、一键回到末尾、长按即菜单。
-5. 参照成熟手机 app 的惯例，不发明：iOS 圆角、微信式选中高亮、对勾在右、返回回到来处。
-
-## 信条十一：克制 · Restraint
-
-**为什么。** 所有者反复说的三个词是"克制"、"不留冗余"、"不过设计"。每一段多余的
-提示词都在消耗 agent 的上下文，每一个多余的按钮都在消耗人的注意力，每一个"以防万一"
-的功能都是以后要维护的债。这个项目里被彻底删掉的东西——消息删除、通知 UI、`status
-waiting|blocked`、agora 总线、snapshots 表、pull-to-refresh、气泡长按菜单——没有一个
-被要回来。
-
-**例证。**
-- CLAUDE.md 从 117KB 瘦到 11KB，成为地图；源码目录不放第二个入口。
-- 无 brief 时不发合成首条消息（"多此一举"）；agent 卡片不放三个点、不显示 Bedrock
-  后缀、不显示 effort 除非展开。
-- prompt："就说他是一个非常 powerful 的 developer 就行…人狠话不多"；"不用上价值，
-  就说明白大家是如何协作的流程就好"。
-- UI 文案："不要把你的很多设计直接写在文字上…不是靠多文字提示就易用性越强"。
-
-**推论。**
-1. 加之前先问能不能删。旧机制被新机制取代时，旧的整个删掉，不留兼容层。
-2. 注入 agent 的文字只说流程，不上价值、不重复工具自己的文档。
-3. UI 上每一个字、每一个按钮、每一块背景色都要回答"没有它人会做错什么"。
-4. 面向人的叙述：先结论，少字数，不重复。
+**Implications.**
+1. A new UI action and its corresponding `tmm` command land in the same
+   commit, in either direction.
+2. `tmm` output is for agents to read: stable, searchable with grep and
+   free of decoration.
+3. Every new command must explain what an agent cannot do without it.
+   Add nothing without an answer. A 2300-line `tmm-cli.md` is itself a sign
+   of excess. Owner: "太长了不对，接下来优化".
 
 ---
 
-# C · 我们怎么工作
+# B. How We Build
 
-## 信条十二：规则挨着它保护的设计，带着理由和事故 · Rules live with their design
+## Tenet 7: Declaration Is Truth
 
-**为什么。** 没有理由的规则会被下一个人"优化"掉；没有事故的规则没人相信。2026-09-03
-一天 70 个 fix 来自一次外部式 review，问题类型集中在"规则写在 docs 里但代码没执行"；
-"感觉之前修过，是不是文档里没写好，导致又改错了"是所有者的原话。AGENTS.md 只是地图，
-规则住在对应的 design doc 里，附带日期、量化数据和当时出错的案例。文档里反复出现的
-"measured on codex 0.148.0"不是修辞，是方法：**测量，不猜测**。
+**Why.** A tmux session exists only in the tmux process and disappears when
+that process restarts. If closing a workspace creates reconstruction work,
+people leave it open and sessions accumulate. Making closure cost nothing
+is the only way to control that accumulation. This complements tenet 4:
+running state does not depend on us (4), but we can rebuild it (7).
 
-**例证。**
-- `send_command` 在文本与 Enter 之间等 200ms：codex 0.148.0 把连发的 Enter 当粘贴内容。
-- tmux ≥3.4 把 `\x1f` 八进制转义；`-t name` 是前缀匹配，`kill_session("dev")` 杀掉
-  `dev-2`——外部系统有版本、有解析规则，按文档写，不凭直觉。
-- 每个 design doc 以 **Rules and their reasons** 收尾；每个回归修复从一个失败的测试开始，
-  且要负向验证（改坏一处恰好红一个）。
-- 文档、脚本、测试会静默过期：三份文档承诺的双击手势无实现；CLAUDE.md 规则命名了
-  不存在的符号；fetch-fonts.sh 产物与 index.html 加载的不同。
+**Evidence.**
+- Project = `{ path, name, session, slots[] }`, persisted in state.db.
+  `up` matches windows by name and idempotently fills gaps without reordering
+  or restarting existing windows.
+- A managed agent's `launch.json` is written **before** window creation;
+  failure to write it fails the spawn. A recipe-free restart once left an
+  agent able to answer but unable to receive messages: "能答但聋" (2026-08-18).
+- Restart **rematerializes** from the current registry and AGENTS.md before
+  replaying, rather than replaying an old recipe verbatim (2026-09-08).
+- Rejected: a `snapshots` table with depth 20. Measurement found only one
+  entry per project, and `restore` changed the declaration but not the
+  projection. It was deleted.
 
-**推论。**
-1. 改行为的 commit 同时更新对应 design doc；只改代码不改 doc 的 PR 不完整。
-2. 写规则的格式是：决定 + 原因 + 日期 + 触发事故（或测量值）。
-3. 不确定的事去测（在真实 CLI 版本、真实设备上），把版本号写进文档。"绿了"不等于
-   验证了：source test 全绿而所有者看到的是旧 APK 发生过四次。
-4. 一条规则如果能被测试钉住，就写成测试；只能靠文档的规则，说明它的边界还没找到。
+**Implications.**
+1. Anything that may be repeated must be idempotent. State that cannot be
+   reconstructed from a declaration is a bug.
+2. Persistent state lives only in state.db and `<ws>/.tmm/`. Window names,
+   pane contents and processes are not storage.
+3. Agent configuration on disk is part of the code. Fixing a hook must make
+   already-spawned homes self-heal at the next launch (`refresh_hooks`);
+   otherwise the fix has not reached its users.
+4. Migrations must accept older declarations and use `PRAGMA foreign_keys=OFF`.
 
-## 信条十三：隔离、验证、小步提交 · Isolate, verify, commit small
+## Tenet 8: Derive, Never Declare
 
-**为什么。** 多个 agent 同时在一棵树上工作，唯一不互相踩的方式是各自的 worktree：
-共享 checkout 曾让一个 commit 误带另一个 issue 的 hunks、让别人的 check 变红、让中断
-的编辑器插入落盘成重复测试。一个逻辑变更一次提交，让 review 与回滚都以"一个想法"为
-单位。大改先出方案讨论，不直接改代码。
+**Why.** Agents can be wrong, forget or be interrupted. Screen activity
+does not establish that work is happening. Trust the observed edges:
+who opened a turn and who received a final response. Two definitions of
+one concept will eventually diverge.
 
-**例证。**
-- 每个任务一个 worktree，launch checkout 只做协调与集成（所有者 2026-09-04）。
-- 测试与文档和代码同一个 commit；新模块的 `<module>.test.ts` 同 commit 落地；i18n 两个
-  语言分支同 commit 更新。
-- 机械拆分与逻辑改动不同 commit；追加 commit，不 amend。
-- 保留人的 Git author，agent 只加 co-author trailer。
-- 所有者三次说"先讨论方案，不要直接修改代码"。
+**Evidence.**
+- `running | waiting | idle | failed` are derived from hook turn edges.
+  `window_activity` once meant working, but TUI redraws after completion
+  left every agent permanently working. Claude's `idle_prompt`, appearing
+  exactly 60s after completion, was once mistaken for a question.
+- Managed identity is determined by an isolated home through
+  `projects::managed_home`, shared by all three entry points. Seven
+  separately assembled detection haystacks once included one that omitted
+  the window name; `detect_pane` unified them.
+- Agent names are validated once at the **entry boundary**, using the
+  intersection of four parsers' allowlists. The trigger was
+  `agent_remove("../..")` nearly deleting the workspace.
+- Delivery acknowledgment requires a matching `userPromptSubmit` echo,
+  not a successful `send-keys`. Seven fixes addressed queues, newlines,
+  truncation and file pickers.
 
-**推论。**
-1. 验证过就立刻提交，不让通过的工作在树里过夜。
-2. 一个 commit 只回答一个问题；混入的"顺手改"拆出去。改动范围要隔离——"你不是只改了
-   terminal 为什么其他页面也变了"。
-3. 不吸收别人的脏树，不提交无关的进行中工作。
-4. 涉及架构、设计语言或删除功能的改动，先在房间里给方案，得到所有者确认再动手。
-5. Lead 拆任务避免冲突、不代劳；不同人对抗评审；不以实现者自测代替独立验收。
+**Implications.**
+1. Give every concept one definition function and use it everywhere.
+   Reject a second copy of the decision logic in review.
+2. Validate inputs at their entry boundary and trust them inside.
+   Do not repeat validation at every internal layer.
+3. `tmm status` is an agent's account of what it is doing, for display only;
+   it never participates in status derivation.
+4. Reading screens for vitals or recovery is legitimate observation of
+   information a person can also see. Missed reads are normal: retain the
+   previous value, anchor matching to structure instead of scanning all text,
+   and never guess fields with no identifiable structure.
+
+## Tenet 9: One Mechanism per Job
+
+**Why.** A copied component begins drifting immediately and silently:
+two pages may each look correct while disagreeing with one another.
+This is the repository's most common regression pattern: sidebar titles
+drifted three times, to-tail buttons had two forms, DirPicker had two copies,
+platform detection had five, and 39 components declared their own mono stack.
+The same applies to decision logic, renderers and popover positioning.
+**Duplicate implementations are the leading source of quality debt.**
+
+**Evidence.**
+- Dropdowns use only `ui/Select`; right-click/long-press uses
+  `ui/ContextMenu` + `ui/longpress`; fixed popovers use `menuPlacement`;
+  back-to-tail uses `.to-tail`; status dots use `.live-dot`.
+- Markdown uses the one `marked` singleton registered by
+  `core/markedSafeUrl.ts`. Files once called its own `marked.parse`,
+  allowing README `<img onerror>` content to execute in the token-bearing origin.
+- New projects use only `CreateProjectDialog`, removing 120 lines from Sessions.
+- `*.source.test.ts` deliberately makes a new visual species fail tests.
+
+**Implications.**
+1. Search for an existing mechanism before writing another. Use it, or
+   **change it** if it does not fit; do not create a parallel implementation.
+2. Shared atoms live once in `app.css` / `ui/`. Component-scoped CSS must
+   not redeclare them: specificity (0,2,0) silently beats (0,1,0).
+3. A failing source-contract test means a change must be deliberate.
+   Read the test before fixing it.
+4. Prefer deleting code to adding it. Making a file shorter is a benefit.
+
+## Tenet 10: Two Screens, One Standard
+
+**Why.** Both use cases are essential: glance and speak from a phone away
+from the workstation, then compare agents, browse files and read long
+conversations on a desktop. A phone is not a reduced desktop; a desktop is
+not an enlarged phone. Each needs its own complete form of **one** design
+language. Aesthetics, usability and guiding motion are part of function,
+not finishing work. A UI that cannot distinguish a running agent from one
+waiting for the user is incomplete. Owner: "注意当前我整体比较满意，不要大变样".
+
+**Evidence.**
+- Both layouts share six type steps, three font roles, one radius scale,
+  two hover families and two timing constants. At 760px the form changes,
+  not the standard: desktop has a rail, splits and draggable `--sidebar-w`;
+  mobile has 44px touch targets, drawers, edge-back gestures and sheets.
+- Appearance conveys function: resting states are achromatic; running
+  states use a `.live-dot` halo. Status dots never animate opacity. Colors
+  form a vocabulary: green means only "ended well", brand colors stay fixed,
+  and a hue cannot have two meanings within a 5px mark.
+- Motion conveys direction: enter deeper views from the right, return
+  from the left, using one sliding grammar. State changes move instead of
+  swapping: rotate an arrow 90 degrees, not 180. Owner feedback:
+  "180 度相当于没有变化". Exits are cuts; layout never animates.
+- Usability has concrete rules: confirm destructive actions, put confirmation
+  on the far right, leave on confirmation, dismiss and top-left-anchor popovers,
+  preserve native text selection, fill the screen width and fold content
+  rather than crop it.
+- Restrained appearance uses no fine-line borders, prefers icons, reveals
+  text on hover and avoids excessive color or explanatory copy:
+  "像一个系统状态的监控一样，不要过度占用人的注意力".
+
+**Implications.**
+1. Every feature needs a complete, appropriate form on both screens.
+   Deferring either screen does not count as completion. Review both.
+2. Use existing tokens and atoms only. A raw px value, literal color or
+   second sliding tempo is a regression.
+3. Motion must communicate direction, state or entry/exit. Add none without
+   an answer to what it guides. Page switches must not flash into place:
+   the old page slides out, the new one slides in and content appears with it.
+   All looping animations stop under reduced-motion.
+4. Ask how an interaction can remove a decision: a default recipient,
+   one-tap return to tail, or a long-press menu.
+5. Follow mature mobile conventions instead of inventing them: iOS-style
+   radii, WeChat-style selection highlighting, a checkmark on the right
+   and Back returning to the origin.
+
+## Tenet 11: Restraint
+
+**Why.** The owner repeatedly asks for "克制", "不留冗余" and "不过设计":
+restraint, no redundancy and no overdesign. Extra prompt text consumes
+agent context, extra buttons consume attention, and speculative features
+create maintenance debt. None of the mechanisms removed outright has been
+requested back: message deletion, notification UI, `status waiting|blocked`,
+the agora bus, snapshots, pull-to-refresh or bubble long-press menus.
+
+**Evidence.**
+- CLAUDE.md shrank from 117KB to an 11KB map. Source directories have no
+  second instruction entry point.
+- No synthetic first message without a brief: "多此一举". Agent cards have
+  no three-dot button or Bedrock suffix; effort appears only when expanded.
+- Prompt feedback: "就说他是一个非常 powerful 的 developer 就行…人狠话不多";
+  "不用上价值，
+  就说明白大家是如何协作的流程就好".
+- UI copy feedback: "不要把你的很多设计直接写在文字上…不是靠多文字提示就易用性越强".
+
+**Implications.**
+1. Before adding, ask what can be removed. Remove a replaced mechanism
+   completely, without a compatibility layer.
+2. Inject process instructions only: no value speeches or duplication of
+   the tools' own documentation.
+3. Every UI word, button and background color must explain what the user
+   would get wrong without it.
+4. Lead human-facing explanations with the conclusion. Use fewer words
+   and do not repeat yourself.
 
 ---
 
-## 维度与指引
+# C. How We Work
 
-`docs/guidance/` 按低耦合的维度把信条展开，每份自带 review 清单，几个 agent 可以各
-审一个维度：
+## Tenet 12: Rules Live with Their Design
 
-| 维度 | 文件 | 主要信条 |
+**Why.** A rule without its reason gets optimized away; a rule without an
+incident is hard to trust. An outside-style review on 2026-09-03 produced
+70 fixes in one day, largely for rules documented but not implemented.
+The owner said "感觉之前修过，是不是文档里没写好，导致又改错了".
+AGENTS.md is only the map. Rules belong in the corresponding design
+document, with dates, measurements and the failures that triggered them.
+Repeated notes such as "measured on codex 0.148.0" describe a method,
+not rhetoric: **measure, do not guess**.
+
+**Evidence.**
+- `send_command` waits 200ms between text and Enter: codex 0.148.0 treats
+  immediately following Enter as part of a paste.
+- tmux >=3.4 octal-escapes `\x1f`; `-t name` is prefix matching, so
+  `kill_session("dev")` killed `dev-2`. External systems have versions and
+  parsing rules; consult their documentation instead of relying on intuition.
+- Each design document ends with **Rules and their reasons**. Every
+  regression fix starts with a failing test and uses a negative control:
+  deliberately break one thing and verify that exactly one corresponding test fails.
+- Documents, scripts and tests become stale silently: three documents
+  promised an unimplemented double-tap gesture, CLAUDE.md named nonexistent
+  symbols, and fetch-fonts.sh produced different files from those index.html loaded.
+
+**Implications.**
+1. Behavior changes and the corresponding design-document updates belong
+   in the same commit. A code-only behavior change is incomplete.
+2. Record rules as decision + reason + date + triggering incident or measurement.
+3. Measure uncertain behavior on real CLI versions and devices, then record
+   the version. Green tests are not proof: four times the source tests
+   passed while the owner was viewing an old APK.
+4. Make a rule executable as a test whenever possible. A rule that can only
+   live in prose still lacks a sufficiently precise boundary.
+
+## Tenet 13: Isolate, Verify, Commit Small
+
+**Why.** Separate worktrees prevent concurrent agents from interfering.
+A shared checkout once mixed another issue's hunks into a commit, broke
+someone else's checks and let an interrupted editor insert duplicate tests.
+One logical change per commit makes review and rollback operate on one idea.
+Discuss a plan before large changes instead of immediately editing code.
+
+**Evidence.**
+- One worktree per task; the launch checkout is only for coordination and
+  integration (owner, 2026-09-04).
+- Tests and documentation land with code. A new module's
+  `<module>.test.ts` and both i18n language branches land in the same commit.
+- Separate mechanical moves from logic changes. Append commits; do not amend.
+- Preserve the human Git author; the agent adds a co-author trailer only.
+- The owner said three times: "先讨论方案，不要直接修改代码".
+
+**Implications.**
+1. Commit as soon as verification passes; do not leave verified work uncommitted.
+2. Each commit answers one question. Separate incidental changes and keep
+   scope isolated. Owner: "你不是只改了
+   terminal 为什么其他页面也变了".
+3. Do not absorb another person's dirty tree or commit unrelated work in progress.
+4. Present a plan in the room and get owner confirmation before changes to
+   architecture, design language or feature removal.
+5. The lead divides work to avoid conflicts, not to take over implementation.
+   Different people perform adversarial review; self-testing does not replace
+   independent acceptance.
+
+---
+
+## Disciplines and Guidance
+
+`docs/guidance/` organizes these tenets into loosely coupled review disciplines,
+each with its own checklist, so agents can review separate dimensions:
+
+| Discipline | File | Main Tenets |
 |---|---|---|
-| 架构与边界 | `guidance/architecture.md` | 二、四、七、八 |
-| Agent 桥 | `guidance/agent-bridge.md` | 三、五、六 |
-| 代码质量 | `guidance/code-quality.md` | 一、九、十一 |
-| UI 与交互 | `guidance/ui-design.md` | 十、十一 |
-| 安全 | `guidance/security.md` | 八 |
-| 流程与测试 | `guidance/process.md` | 十二、十三 |
+| Architecture and boundaries | `guidance/architecture.md` | 2, 4, 7, 8 |
+| Agent bridge | `guidance/agent-bridge.md` | 3, 5, 6 |
+| Code quality | `guidance/code-quality.md` | 1, 9, 11 |
+| UI and interaction | `guidance/ui-design.md` | 10, 11 |
+| Security | `guidance/security.md` | 8 |
+| Process and testing | `guidance/process.md` | 12, 13 |
 
-现状与信条的差距、待办：`docs/todo.md`。
+Gaps between these tenets and the implementation, plus remaining work:
+`docs/todo.md`.

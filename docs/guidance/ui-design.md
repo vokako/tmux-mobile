@@ -1,89 +1,134 @@
-# Guidance · UI 与交互 · UI, interaction, motion
+# Guidance: UI, Interaction and Motion
 
-> 信条：十（两端同等完美，美与易用是目标本身）、十一（克制）、九（一种机制）。
-> 规范本体是 `docs/design-docs/features/design-language.md`（token、控件、菜单）与
-> `motion.md`（动效词汇）；本文是审这个维度时的**取舍与检查表**，不复述数值。
-> 审这个维度的人问的是：**两端都完整吗？它和现有语言是同一物种吗？这个动效在引导什么？
-> 人会不会点错、看不清、多想一步？**
-> 草案 · 2026-09-09。
+> Tenets: 10 (both screens complete; beauty and usability are goals),
+> 11 (restraint), 9 (one mechanism).
+> The normative specifications are `docs/design-docs/features/design-language.md`
+> for tokens/controls/menus and `motion.md` for motion vocabulary. This document
+> provides review tradeoffs and checklists rather than repeating their values.
+> Review questions: **Are both layouts complete? Does this belong to the
+> existing design language? What does the motion guide? Could a person
+> misclick, misread or need another unnecessary decision?**
+> Draft · 2026-09-09.
 
-## 1 · 原则
+## 1. Principles
 
-1. **两端同等完美**：手机与桌面各有最佳形态，共用一套语言。760px 是形态切换点，不是降级点。
-2. **一致性是第一审美**：同一部件全站一个样——顶栏、抽屉、侧栏、按钮、确认框、to-tail、
-   状态点、popover、词汇（`@all` 就叫 all）。自绘控件，不用系统下拉，不露浏览器右键。
-3. **克制**：无细线边框、图标优先、hover 才出文字、不靠文字堆易用性、不过度着色、不重复
-   信息、折叠无关项。"像一个系统状态的监控一样，不要过度占用人的注意力"。
-4. **颜色是词典**：accent = 在动，`--status-ok` = 结束得好，`--status-warn` = 需要人，
-   `--status-danger` = 失败/破坏，灰 = 静止且无彩。品牌色不动。同一 hue 5px 内一个含义。
-5. **动效引导**：方向即含义（深入从右、返回从左、横向跟随移动方向）；状态变化是运动
-   （旋转 90°、渐显、flip 重排）不是替换；退出是切；布局永不动画；不闪、不快、不装饰。
-6. **易用性有形状**：破坏性动作二次确认；确认键最右防误触；确认即离开、失败留原地；
-   popover 点别处收起、锚定左上角/与触发元素左边缘对齐；文字用系统原生选择；
-   返回手势回到来处（抽屉/上级/跳转源），永不落到 terminal；主要动作在右上角。
-7. **屏幕资源用满**：左右占满、内容自身折叠不裁切、名字优先显示全、路径区动态压缩、
-   列数 1/2/4 不出现 3+1 残行、列间对齐。
-8. **参照成熟 app 惯例**：iOS 圆角、微信/支付宝式选中高亮（前景着色，非灰底）。
+1. **Both screens are equally complete:** phone and desktop have distinct
+   optimal forms of one language. At 760px the form changes, not the standard.
+2. **Consistency comes first:** headers, drawers, sidebars, buttons,
+   confirmations, to-tail controls, status dots, popovers and vocabulary
+   stay consistent across the app (`@all` is called all). Use app controls,
+   not native dropdowns or browser context menus.
+3. **Restraint:** no fine-line borders; prefer icons, reveal text on hover,
+   avoid excessive explanation/color, remove repetition and fold secondary
+   content. Owner: "像一个系统状态的监控一样，不要过度占用人的注意力".
+4. **Color is vocabulary:** accent means activity, `--status-ok` means a
+   successful ending, `--status-warn` means human attention,
+   `--status-danger` means failure/destruction, and gray means achromatic rest.
+   Brand colors stay fixed; a hue has one meaning within a 5px mark.
+5. **Motion guides:** direction conveys depth, return or horizontal travel.
+   State changes move through 90-degree rotation, fading or flip reordering,
+   instead of replacement. Exits are cuts; layout never animates.
+   Avoid flashes, hurried motion and decoration.
+6. **Usability has concrete rules:** confirm destructive actions, put
+   confirmation at the far right, leave after success and remain after
+   failure. Dismiss popovers on outside interaction and align their top-left
+   edge with the trigger's left edge. Use native text selection. Back returns
+   to the drawer, parent or jump source, never Terminal. Primary actions
+   belong at the upper right.
+7. **Use the available space:** fill the width, fold instead of crop,
+   prioritize complete names, compress paths dynamically, use 1/2/4 columns
+   rather than a 3+1 remainder, and align columns.
+8. **Follow established app conventions:** iOS-style radii and WeChat/Alipay
+   selection highlighting, using foreground color rather than a gray background.
 
-## 2 · 必须 / 禁止
+## 2. Required and Forbidden
 
-**必须**
-- 字号、颜色、圆角、时长、间距全部走 token；mono 面全部 `var(--font-mono)`。
-- 字体特性只在 `@font-feature-values` 里按单一家族声明；Han 字形靠 `lang` 与 `hanLang()`。
-- 共享原子（`.side-h`、`.side-row`、`.to-tail`、`.live-dot`、`.chev`、`.appear*`、
-  `.state-ctl`、`sheet-up`、`drill-in-*`）只在 `app.css` 定义一次。
-- 每个 `infinite` 动画配 `prefers-reduced-motion` 规则；intro 只动 transform/opacity。
-- 固定弹层用 `menuPlacement`（除以 `--ui-zoom`），绝不放进横向滚动容器。
-- 测量用 `offsetParent` 链，不用 `getBoundingClientRect`（含 press scale、flip transform、zoom）。
-- `will-change` / `zoom` / `env(safe-area-*)` 这类全局几何属性只有一个 owner；
-  safe-area 用 `--sab` 变量。
-- feed：`overflow-anchor: none` 是唯一 guard，布局变更走 `withReadingAnchor`；始终跟尾，
-  切回位置稳定；折叠按字符不按行；后端全量记录、前端懒加载。
-- 页面切换：旧页滑出、新页滑入、内容随之渐显；不允许"切过去后闪出来"。
-- 中文文案短；界面不写教程；配置项所见即所得（字体选项本身用该字体渲染）。
+**Required**
+- Use tokens for font sizes, colors, radii, durations and spacing.
+  All mono surfaces use `var(--font-mono)`.
+- Declare font features only for individual families in `@font-feature-values`;
+  select Han glyph forms through `lang` and `hanLang()`.
+- Define shared atoms only once in `app.css`: `.side-h`, `.side-row`,
+  `.to-tail`, `.live-dot`, `.chev`, `.appear*`, `.state-ctl`, `sheet-up`,
+  and `drill-in-*`.
+- Give every `infinite` animation a `prefers-reduced-motion` rule.
+  Intro animations change only transform/opacity.
+- Position fixed popovers through `menuPlacement`, accounting for `--ui-zoom`;
+  never place them inside horizontally scrolling containers.
+- Measure through the `offsetParent` chain, not `getBoundingClientRect`,
+  which includes press scaling, flip transforms and zoom.
+- Give global geometry such as `will-change`, `zoom` and `env(safe-area-*)`
+  one owner; safe areas use `--sab`.
+- The feed's only anchoring guard is `overflow-anchor: none`; layout changes
+  use `withReadingAnchor`. Preserve tail-following and return positions,
+  fold by characters rather than lines, and keep complete backend records
+  with lazy frontend loading.
+- During page changes, the old page slides out, the new page slides in and
+  content appears with it. Avoid "切过去后闪出来".
+- Keep Chinese copy short and tutorials out of the interface. Configuration
+  options show their own result, such as font names rendered in that font.
 
-**禁止**
-- 原始 px 字号、字面颜色、第二种滑动节拍、`svelte/transition`。
-- scoped CSS 覆盖共享类（(0,2,0) 静默赢 (0,1,0)）。
-- 用 paint 盖内容（sticky 列、半透明背景、pointer-events 穿透）代替结构。
-- 状态点做透明度动画；静止态带色相。
-- 系统 `<select>`、浏览器原生右键菜单、自定义的选字菜单。
-- 3+1 残行；框截断文字；省略名字而保留装饰。
-- 卡片上放"以防万一"的按钮（三个点）、多余后缀（Bedrock、1M、stop）、默认展开的次级信息。
-- 只在桌面或只在手机验证过的 UI 改动标记为完成。
+**Forbidden**
+- Raw px font sizes, literal colors, a second sliding tempo or `svelte/transition`.
+- Scoped CSS overriding shared classes: (0,2,0) silently beats (0,1,0).
+- Hiding content with paint, sticky columns, translucent layers or
+  pointer-event tricks instead of fixing structure.
+- Opacity animation on status dots or color in resting states.
+- Native `<select>`, browser context menus or custom text-selection menus.
+- 3+1 grid remainders, cropped text or truncated names beside preserved decoration.
+- Speculative three-dot buttons, redundant Bedrock/1M/stop suffixes, or
+  secondary information expanded by default.
+- Calling a UI change complete after checking only desktop or only mobile.
 
-## 3 · Review 清单
+## 3. Review Checklist
 
-- [ ] 手机（<760px、单手）和桌面（rail、split、拖宽）都看过了吗？截图/实机？
-- [ ] 它和现有的同类部件是同一物种吗？还是第三种按钮/第二种抽屉？
-- [ ] 每个颜色都是 token 吗？含义对吗（绿只表示结束得好）？
-- [ ] 每个动效回答了"引导什么"吗？方向对吗？reduced-motion 停了吗？
-- [ ] 破坏性动作有二次确认吗？确认键在右吗？确认后离开了吗？
-- [ ] popover 点别处收起吗？锚点对吗？在横向滚动容器里吗？
-- [ ] 返回手势/按钮回到来处吗？
-- [ ] 有裁切、省略号、残行、留白浪费吗？
-- [ ] 能删掉哪个字、哪个按钮、哪块背景色而不让人做错？
-- [ ] `tokens.source.test`、`motion.source.test`、`statusdot.source.test`、`sidebar.source.test`
-  都过了吗？改了断言的话是有意的吗？
+- [ ] Were phone (<760px, one-handed) and desktop (rail, splits, resizing)
+  checked with screenshots or a real device?
+- [ ] Does this match existing controls, rather than adding a third button
+  style or second drawer mechanism?
+- [ ] Are colors tokens with the right meaning, including green only for successful endings?
+- [ ] Does every animation guide something, in the right direction, and stop
+  under reduced-motion?
+- [ ] Are destructive actions confirmed on the right, with navigation after confirmation?
+- [ ] Do popovers dismiss outside, anchor correctly and stay outside scrolling containers?
+- [ ] Do Back buttons and gestures return to the origin?
+- [ ] Is anything cropped, unnecessarily elided, left in a remainder row or wasting space?
+- [ ] Which word, button or background color could be removed without causing user errors?
+- [ ] Do `tokens.source.test`, `motion.source.test`, `statusdot.source.test`
+  and `sidebar.source.test` pass? Were changed assertions deliberate?
 
-## 4 · 教训记录
+## 4. Lessons
 
-- 2026-08-20 侧栏标题漂移三次（第三次绕过只查 `.dense` 前缀的守卫）；2026-08-30 共享
-  `.side-sheet` 的 `position:fixed` 被 scoped `relative` 压掉，半黑屏；2026-09-01 两种 to-tail。
-- 2026-08-25 `.page` 常驻 `will-change` 成为 fixed 后代的 containing block，所有 popover 右偏
-  46px；2026-08-30 在 sheet 上重犯。`vh` 不随 zoom；`env()` 三处双重叠加或 APK 上读 0。
-- 2026-08-20 工具栏 paint 三连败 → "structure beats paint"；2026-09-01 vitals 角标
-  `pointer-events` 三次打回 → flow footer。
-- 2026-08-21 palette pass 改了品牌色，撤回；2026-09-01 board done 颜色三次裁定（绿冲突 →
-  红橙黄紫 → 红蓝黄紫）；2026-09-08 "绿色好像是有点丑了…颜色调回以前的"。
-- 2026-08-26/29 运行与空闲的点分不清两次 → 无彩静止 + `.live-dot` 光晕；`s-pulse` 透明度
-  动画让运行态半个周期比空闲更暗。
-- 2026-09-08 中文字形怪异一天六次 → Inter 的 `cv05/cv08` 传给 PingFang SC 画出繁体形态；
-  所有者："这可是一个深藏的 bug，你一定记好"。
-- 2026-09-04 按钮旋转 180° "相当于没有变化" → 90°；"切换过去然后看到东西闪出来"（#86/#93）。
-- 2026-09-01/04/07 手机气泡自定义菜单四次 → 系统原生选字，只留点按 Copy/Raw。
-- 2026-08-24→09-01 返回手势四次：回抽屉/回上级/回跳转源，文件页是标杆。
-- board #26/#37 列数 1/2/4、不出 3+1、左侧点对齐；#96 左右占满；#92 折叠非 agent 窗口。
-- board #11 手机交互用抽屉不用二级页、主要动作右上角；#15/#28/#48/#77 二次确认与对勾在右。
-- 2026-08-25 "注意当前我整体比较满意，不要大变样"；2026-09-03 "按钮尺寸我觉得还好，不用
-  调整太大"——规范化，不重设计。
+- 2026-08-20: sidebar titles drifted three times, with the third bypassing
+  a `.dense`-only check. On 2026-08-30 scoped `relative` overrode the shared
+  `.side-sheet` `position:fixed`, leaving half the screen black.
+  Two to-tail styles existed on 2026-09-01.
+- 2026-08-25: persistent `.page` `will-change` became a containing block,
+  offsetting every popover by 46px. The sheet repeated this on 2026-08-30.
+  `vh` does not follow zoom; three `env()` writers doubled offsets or read 0 in the APK.
+- Three toolbar paint fixes on 2026-08-20 led to "structure beats paint".
+  Vitals `pointer-events` fixes were rejected three times before moving
+  the footer into normal flow on 2026-09-01.
+- A palette pass changed brand colors on 2026-08-21 and was reverted.
+  Board done colors were reconsidered three times on 2026-09-01:
+  conflicting green, then red/orange/yellow/purple, then red/blue/yellow/purple.
+  On 2026-09-08: "绿色好像是有点丑了…颜色调回以前的".
+- Running/idle dots were indistinguishable on 2026-08-26 and 08-29;
+  achromatic rest and a `.live-dot` halo resolved it. `s-pulse` opacity
+  made running darker than idle for half its cycle.
+- 2026-09-08: six rounds of unusual Chinese glyphs traced to Inter
+  `cv05/cv08` leaking into PingFang SC and selecting traditional forms.
+  Owner: "这可是一个深藏的 bug，你一定记好".
+- 2026-09-04: a 180-degree rotation was "相当于没有变化", so use 90 degrees.
+  Another report was "切换过去然后看到东西闪出来" (#86/#93).
+- Four rounds of mobile bubble selection menus on 2026-09-01/04/07 ended
+  with native text selection and tap-only Copy/Raw.
+- Four Back-gesture fixes from 2026-08-24 to 09-01 established return to
+  the drawer, parent or jump source. Files is the reference behavior.
+- Board #26/#37: 1/2/4 columns, no 3+1 remainder, left-side indicators aligned.
+  #96 fills the width; #92 folds non-agent windows.
+- Board #11 uses phone drawers instead of another page and upper-right
+  primary actions. #15/#28/#48/#77 require confirmation with the checkmark on the right.
+- 2026-08-25: "注意当前我整体比较满意，不要大变样".
+  2026-09-03: "按钮尺寸我觉得还好，不用
+  调整太大". Standardize; do not redesign.
