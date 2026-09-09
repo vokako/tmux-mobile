@@ -761,13 +761,6 @@ export const fsUpload = (path: string, data: string) => call('fs_upload', { path
 export const fsConvert = (path: string, format = 'html') => call('fs_convert', { path, format });
 export const gitCmd = (subcmd: string, args: string[] = [], cwd?: string) => call<{ code: number; stdout: string; stderr: string }>('git', { subcmd, args, cwd });
 
-// Team multi-agent bus (Team tab). Only available when the server has the
-// in-process bus wired (desktop); on a server without it these reject with a
-// method-not-found error, which the Team tab uses to hide itself.
-// All chat ops are scoped to a team `room`. team_status / team_teams are
-// team-agnostic (they list teams); the rest take the active room.
-export const teamStatus = () => call('team_status');
-export const teamTeams = () => call('team_teams');
 export const agentHooksStatus = () => call('agent_hooks_status');
 export const agentHooksInstall = () => call('agent_hooks_install');
 export const agentHooksRemove = () => call('agent_hooks_remove');
@@ -1041,21 +1034,6 @@ export const skillsFile = (name: string, path: string) => call<{ name: string; p
 export const mcpList = () => call<{ mcp: RegMcpServer[] }>('mcp_list');
 export const mcpSave = (def: RegMcpServer) => call('mcp_save', { def });
 export const mcpDelete = (name: string) => call('mcp_delete', { name });
-
-export const teamHistory = (room: string, limit = 100) => call('team_history', { room, limit });
-export const teamRoster = (room: string) => call('team_roster', { room });
-export const teamEmployees = (room: string) => call('team_employees', { room });
-export const teamPost = (room: string, body: string, requires_reply?: boolean) => call('team_post', { room, body, requires_reply });
-// Operator actions: spin up a team for a workspace (room = its slug) from a
-// named roster template, or close one.
-export const teamStartTeam = (workspace: string, template?: string) => call('team_start_team', { workspace, template });
-export const teamCloseTeam = (room: string) => call('team_close_team', { room });
-// Roster templates (named agent rosters; edited in the Templates settings panel).
-export const teamTemplates = () => call('team_templates');
-export const teamTemplateSave = (name: string, def: unknown) => call('team_template_save', { name, def });
-export const teamTemplateDelete = (name: string) => call('team_template_delete', { name });
-// Global system prompt prepended to every agent's brief (team_status returns it).
-export const teamSystemPromptSave = (text: string) => call('team_system_prompt_save', { text });
 
 // Subscription refcount per target. The server keeps ONE subscription entry
 // per target, so two split cells on the same window must NOT let the first

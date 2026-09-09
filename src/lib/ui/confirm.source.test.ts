@@ -59,7 +59,7 @@ test('every component with a destructive verb has a confirmation', async () => {
   // A page that can delete/kill/close something must import the dialog. Keyed on
   // the RPC verbs rather than on button labels, because the label is a
   // translation and the call is the thing that actually destroys.
-  const destructive = /\b(fsDelete|killSession|killWindow|registryDelete|skillsDelete|mcpDelete|projectDelete|projectDown|projectArchive|hubAgentRemove|hubAgentStop|teamCloseTeam|delete_download)\b/u;
+  const destructive = /\b(fsDelete|killSession|killWindow|registryDelete|skillsDelete|mcpDelete|projectDelete|projectDown|projectArchive|hubAgentRemove|hubAgentStop|delete_download)\b/u;
   const offenders = files
     .filter(({ text }) => destructive.test(text) && !text.includes('ConfirmDialog'))
     .map(({ rel }) => rel);

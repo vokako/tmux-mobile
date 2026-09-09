@@ -15,15 +15,11 @@ import { readdir, readFile } from 'node:fs/promises';
 
 const SRC = new URL('../../', import.meta.url);   // src/
 
-/** Raw px font sizes that are NOT typography and must stay raw. */
-const ALLOWED = [
-  // SVG user units inside a viewBox: the graph scales with its viewport, so a
-  // CSS px token would be measured against the wrong box.
-  { file: 'lib/team/CollabGraph.svelte', match: '.lbl { fill:' },
-  // Deliberately below --fs-input-touch: mono glyphs are wider and this
-  // textarea was tuned by eye. Changing it is a behaviour change, not cleanup.
-  { file: 'lib/team/TeamTemplates.svelte', match: '.ag-mono { font-size: 15px; }' },
-];
+/** Raw px font sizes that are NOT typography and must stay raw. Empty since
+ *  the Team page (SVG graph units, an eye-tuned mono textarea) was deleted
+ *  whole (board #100); the shape stays so the next justified exception has a
+ *  place to live. */
+const ALLOWED: { file: string; match: string }[] = [];
 
 async function* walk(dir: URL): AsyncGenerator<URL> {
   for (const entry of await readdir(dir, { withFileTypes: true })) {

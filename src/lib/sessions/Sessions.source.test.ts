@@ -21,12 +21,14 @@ test('the sidebar creates a project with the shared row, not its own button', ()
 });
 
 test('sidebar section headers speak the shared .side-h dialect', () => {
-  // Two header styles in ONE column (accent-bold TEAMS/SESSIONS above
-  // dense mono PROJECTS) is the drift the shared vocabulary exists to stop.
-  // The fix is to WEAR the class, not to restate its properties — restating
+  // Two header styles in ONE column (accent-bold group headers above dense
+  // mono PROJECTS) is the drift the shared vocabulary exists to stop. The
+  // fix is to WEAR the class, not to restate its properties — restating
   // them is how the tracking ended up at 1.05px next to Chat's 1.4px.
+  // (One header since board #100 deleted the Team group; the dialect rule
+  // is per header, not per count.)
   const labels = source.match(/<div class="group-label"[^>]*>/gu) ?? [];
-  assert.ok(labels.length >= 2, 'both group headers exist');
+  assert.ok(labels.length >= 1, 'the group header exists');
   for (const l of labels) assert.match(l, /class:side-h=\{!chips\}/u);
   const dense = /\.sessions\.sidebar-mode \.group-label \{([\s\S]*?)\}/u.exec(source)?.[1] ?? '';
   assert.doesNotMatch(dense, /font-family|font-size|letter-spacing/u, 'type comes from app.css');

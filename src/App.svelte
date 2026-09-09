@@ -13,12 +13,11 @@
   import Preferences from './lib/app/Preferences.svelte';
   import ConfirmDialog from './lib/ui/ConfirmDialog.svelte';
   import { copyText } from './lib/core/clipboard.ts';
-  import { teamStatus, systemStatus } from './lib/core/ws.ts';
+  import { hubRooms, systemStatus } from './lib/core/ws.ts';
   import SystemStatus from './lib/system/SystemStatus.svelte';
   import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable, listPanes, listSessions } from './lib/core/ws.ts';
   import { t } from './lib/core/i18n.svelte.ts';
   import { layout } from './lib/app/layout.svelte.ts';
-  import { teamState } from './lib/core/team.svelte.ts';
   import { applyFontVars } from './lib/app/fonts.svelte.ts';
   import { normalizeUiZoom, stepUiZoom, UI_ZOOM_DEFAULT } from './lib/app/ui-zoom.ts';
   import { agentsLivesInSettings, defaultPage, restoreNav, retarget } from './lib/app/nav-state.ts';
@@ -66,39 +65,35 @@
   let filesNavReq = $state(null);
   let boardIssueReq = $state(null); // a feed board-line tap: which issue to open // {path, n} — the Hub drawer's "open in Files tab" handover
   $effect(() => { if (terminalSession) filesSession = terminalSession; });
-  // Team (team multi-agent bus) is desktop-server-only. We probe once per
-  // connection: team_status rejects with method-not-found when the server has
-  // no bus, so a resolved probe means the tab should appear.
-  // Availability lives in the shared teamState (team.svelte.js) so session
-  // classification (Sessions, PanePicker) uses the same gate as the tab.
-  let teamAvailable = $derived(teamState.available);
-  // Imperative handle on the always-mounted Team component (bind:this), so the
-  // Sessions page can jump straight to a given team's chat via its exported
-  // selectTeam(). A function call (not a prop change) so clicking the same team
-  // session twice still re-selects it; nulled automatically on unmount.
-  async function probeTeam() {
-    try { await teamStatus(); teamState.available = true; teamState.probed = true; }
+  // The Hub (project rooms, agents, board) is desktop-server-only. We probe
+  // once per connection: hub_rooms rejects with method-not-found on a server
+  // without the projects store (mobile), so a resolved probe means the Hub
+  // tabs should appear.
+  let hubState = $state({ available: false, probed: false });
+  let hubAvailable = $derived(hubState.available);
+  async function probeHub() {
+    try { await hubRooms(); hubState.available = true; hubState.probed = true; }
     catch (e) {
-      // Only a definitive server answer (method-not-found: no team bus) may
-      // flip the flag off. Transient failures (RPC timeout, reconnect blip)
-      // keep the current value — flipping to false unmounts the always-mounted
-      // Team component and destroys the state it exists to preserve.
-      if (e?.code === -32601) { teamState.available = false; teamState.probed = true; }
+      // Only a definitive server answer (method-not-found: no hub) may flip
+      // the flag off. Transient failures (RPC timeout, reconnect blip) keep
+      // the current value — flipping to false unmounts the always-mounted Hub
+      // and destroys the state it exists to preserve.
+      if (e?.code === -32601) { hubState.available = false; hubState.probed = true; }
     }
   }
-  // The Team page-layer only mounts when teamAvailable, so page === 'team'
+  // The Hub page-layers only mount when hubAvailable, so page === 'hub'
   // without it would render an empty main area (the state restore sets `page`
-  // before the probe resolves, and a reconnect can land on a busless server).
-  // Once the probe has definitively answered "no bus", fall back to Sessions.
+  // before the probe resolves, and a reconnect can land on a hubless server).
+  // Once the probe has definitively answered "no hub", fall back to Terminal.
   // While the probe is still pending we leave `page` alone — a brief blank
   // beats kicking the user off the tab they were on.
   $effect(() => {
-    if (page === 'team') page = 'hub'; // Team tab retired — the Hub replaced it
+    if (page === 'team') page = 'hub'; // the retired Team tab's saved state lands on its successor
     // Sessions tab retired 2026-08-18: the list is Terminal's sidebar now, so
     // a persisted/deep-linked 'sessions' lands on the terminal it belonged to.
     if (page === 'sessions') page = 'terminal';
-    // Same for the Hub: it needs the bus. Only redirect once the probe answered.
-    if ((page === 'hub' || page === 'agents' || page === 'board') && teamState.probed && !teamState.available) page = 'terminal';
+    // The Hub needs the desktop server. Only redirect once the probe answered.
+    if ((page === 'hub' || page === 'agents' || page === 'board') && hubState.probed && !hubState.available) page = 'terminal';
     // On touch the agent configuration is a Settings CATEGORY, so `agents` as a
     // page has no tab icon and no swipe stop — whatever route set it (a saved
     // state, a deep link, an older build), it becomes Settings opened there.
@@ -157,9 +152,9 @@
     root.setProperty('--shell-left', connected && !layout.isTouchDevice ? '46px' : '0px');
   });
   // The Hub needs only the server-side bus (hub_* degrades method-not-found
-  // without it, same probe as Team). Its LAYOUT adapts: three columns on
+  // without it, same probe). Its LAYOUT adapts: three columns on
   // desktop, a single chat column on touch devices.
-  let hubEligible = $derived(teamAvailable);
+  let hubEligible = $derived(hubAvailable);
   let splitActive = $derived(splitEligible && splitLayout > 1 && splitCells.length > 0);
 
   function setLayout(n) {
@@ -672,7 +667,7 @@
       });
     } catch {}
     resubscribeAll();
-    probeTeam();
+    probeHub();
     // Tell Terminal to reset stale resize state + re-fit against the new server.
     window.dispatchEvent(new Event('ws-reconnected'));
   }
@@ -690,7 +685,7 @@
     // (send_keys still works — it's a plain RPC) until a full reload.
     // Mirrors onReconnectSuccess; on a first-ever connect both are no-ops.
     resubscribeAll();
-    probeTeam();
+    probeHub();
     window.dispatchEvent(new Event('ws-reconnected'));
   }
 
@@ -735,7 +730,6 @@
     if (page === 'terminal' && layout.isTouchDevice) sessListOpen = true;
   }
 
-  // Jump to the Team tab and select a specific room (from a team session row in
   function doDisconnect() {
     reconnectMachine.cancel();
     disconnect();
@@ -1052,7 +1046,7 @@
           localStorage.setItem('tmux_machine_id', mid);
         }
       } catch {}
-      probeTeam();
+      probeHub();
       try {
         const s = JSON.parse(localStorage.getItem('tmux_state') || '{}');
         // A saved target names a session that may not exist any more — killed
@@ -1612,19 +1606,12 @@
     {#if page === 'settings'}
       <Settings {onConnected} />
     {/if}
-    <!-- Team is kept mounted (like Files/Terminal below) and merely hidden when
-         inactive, so switching tabs preserves its state — the selected team
-         (activeRoom), loaded history, scroll position, and the embedded agent
-         terminals all survive. Putting it in the {#if} chain above would
-         destroy + recreate it on every tab switch, resetting activeRoom to the
-         first team and reloading everything. Gated on teamAvailable so it never
-         mounts on a server without the team bus (e.g. mobile). The visible prop
-         pauses its polling while hidden and triggers a refresh when shown. -->
     {#if hubEligible}
-      <!-- Hub (agents-v2 desktop three-column view): kept mounted like Team so
-           the selected project, chat scroll, and embedded terminal survive tab
-           switches. Desktop-eligible only (needs width + the bus): mobile
-           keeps the tab layout untouched. -->
+      <!-- Hub (agents-v2 desktop three-column view): kept mounted (like
+           Files/Terminal below) and merely hidden when inactive, so the
+           selected project, chat scroll, and embedded terminal survive tab
+           switches. Desktop-eligible only (needs width + the desktop server):
+           mobile keeps the tab layout untouched. -->
       <div class="page-layer" class:hidden={page !== 'hub'}>
         <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} openAgentConfig={(name) => openAgentsConfig(name)} openFilesTab={(s, path, file) => { if (s) filesSession = s; if (path || file) filesNavReq = { path, file, n: (filesNavReq?.n ?? 0) + 1 }; switchTab('files'); jumpedFrom = 'hub'; }} openBoardTab={(s, issue) => { if (s) filesSession = s; if (issue) boardIssueReq = { session: s, id: issue, n: (boardIssueReq?.n ?? 0) + 1 }; switchTab('board'); jumpedFrom = 'hub'; }} />
       </div>

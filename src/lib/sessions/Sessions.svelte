@@ -15,13 +15,6 @@
   import { flip } from 'svelte/animate';
   import { moveMs } from '../ui/motion.ts';
   import { sessionHasAgent, paneAgent, AGENTS } from '../core/agents.ts';
-  // Team-mode sessions (`tmm-team-<room>`) are grouped apart from regular
-  // sessions and their clicks route to the Team chat instead of a raw terminal.
-  // isTeamSession is gated on the shared teamState.available, so on a server
-  // without the team bus these fall back to ordinary sessions (consistently
-  // with PanePicker and the Team tab).
-  import { isTeamSession, teamLabel } from '../core/team.svelte.ts';
-
   // `onPick` lets the host close its slide-over after a choice — this list is
   // Terminal's sidebar now, not a page that navigates away by itself.
   // `chips`: the MRU quick-switch strip at the top. It earns its place when
@@ -145,7 +138,7 @@
     if (activity) lines.push({ label: t('hoverActivity'), value: relTime(activity) });
     if (s.last_opened) lines.push({ label: t('hoverLastOpened'), value: relTime(s.last_opened) });
     if (sum.cmd) lines.push({ label: t('hoverCommand'), value: sum.cmd });
-    return { title: isTeamSession(s.name) ? teamLabel(s.name) : s.name, lines };
+    return { title: s.name, lines };
   }
   function paneInfo(p: TmuxPane): HoverInfo {
     const lines: HoverLine[] = [
@@ -288,7 +281,6 @@
   let mruChips = $derived.by(() => {
     const activeName = activeTarget.split(':')[0];
     const eligible = sessions.filter(s =>
-      !isTeamSession(s.name) &&            // team sessions live in their own group + the Team tab
       sessionHasAgent(panes[s.name]) &&
       (s.name === activeName || s.last_opened)
     );
@@ -331,8 +323,7 @@
   // Every session becomes a project on its own now (the server auto-tracks
   // anything older than two minutes), so what is left in this list is the
   // short-lived and the deliberately untracked: a session you just made outside
-  // the app, team sessions (Team owns their lifecycle), and any project you
-  // removed from the list on purpose.
+  // the app, and any project you removed from the list on purpose.
   let trackedSessions = $state<string[]>([]);
   let reloadProjects = $state<(() => Promise<void>) | null>(null);
   /** Does the Projects section above have anything to show? Its rows are the
@@ -351,13 +342,6 @@
   let filtered = $derived(
     sessions.filter(s => sessionMatches(s, query) && !trackedSessions.includes(s.name)),
   );
-
-  // Split the (filtered) list into team-mode sessions and the rest. When team
-  // sessions are present we render the two as labelled groups; otherwise the
-  // list stays a flat, headerless list exactly as before.
-  let teamGroup = $derived(filtered.filter(s => isTeamSession(s.name)));
-  let regularGroup = $derived(filtered.filter(s => !isTeamSession(s.name)));
-  let grouped = $derived(teamGroup.length > 0);
 
   // Auto-expand during search so panes matching the query are visible.
   let isSearching = $derived(!!query.trim());
@@ -455,36 +439,30 @@
       <div class="error">{error}</div>
     {/if}
 
-  <!-- Session row template — shared by both groups (team + regular). The
-       `team` flag flips the leading icon, the displayed name (room vs the raw
-       tmm-team-* session), the trailing affordance (chat hint vs kill), and
-       disables pane expansion (a team row always opens the chat). -->
+  <!-- Session row template. Rows keep a short cmd/AI marker, but NOT the cwd
+       path — in the cramped row it was squeezed to the point of being
+       unreadable. The full path lives on the window rows below
+       (right-aligned, scrollable). -->
   {#snippet sessionItem(s: TmuxSession)}
-    {@const team = isTeamSession(s.name)}
     {@const sum = sessionSummary(s)}
     {@const isActive = activeTarget.startsWith(s.name + ':')}
-    {@const isExpanded = !team && ((isSearching && s.windows > 1) || expanded[s.name])}
+    {@const isExpanded = (isSearching && s.windows > 1) || expanded[s.name]}
     {@const ps = panes[s.name] || []}
     {@const visiblePanes = isSearching ? ps.filter(p => paneMatches(p, query)) : ps}
-    <div class="session" class:active={isActive} class:team-session={team}>
+    <div class="session" class:active={isActive}>
       <div
         class="session-row"
         role="button"
         tabindex="0"
         onclick={() => activateSession(s)}
         onkeydown={(e) => e.key === 'Enter' && activateSession(s)}
-        oncontextmenu={(e) => { if (team) return; e.preventDefault(); openSessionMenu(pointOf(e), s); }}
-        use:longpress={{ onlongpress: (pt) => { if (!team) openSessionMenu(pt, s); } }}
+        oncontextmenu={(e) => { e.preventDefault(); openSessionMenu(pointOf(e), s); }}
+        use:longpress={{ onlongpress: (pt) => { openSessionMenu(pt, s); } }}
         use:hoverInfo={() => sessionInfo(s)}
       >
         <span class="dot" class:attached={s.attached}></span>
-        <span class="name" class:name-grow={team}>{team ? teamLabel(s.name) : s.name}</span>
-        <!-- Team rows show only the title. Regular rows keep a short cmd/AI
-             marker, but NOT the cwd path — in the cramped row it was squeezed
-             to the point of being unreadable. The full path lives on the
-             window rows below (right-aligned, scrollable). -->
-        {#if !team}
-          <span class="meta">
+        <span class="name">{s.name}</span>
+        <span class="meta">
             {#if sum.agents.length}
               <span class="session-agents" aria-label={sum.agents.map(item => `${item.agent.tag}${item.count > 1 ? ` ×${item.count}` : ''}`).join(', ')}>
                 {#each sum.agents as item (item.agent.tag)}
@@ -497,26 +475,21 @@
             {:else if sum.cmd}
               <span class="cmd">{sum.cmd}</span>
             {/if}
-          </span>
-        {/if}
+        </span>
         <span class="trailing">
-          {#if team}
-            <span class="go-chat" aria-hidden="true"><Icon name="chat" size={13} /></span>
-          {:else}
-            {#if s.last_opened}
-              <span class="ago">{relTime(s.last_opened)}</span>
-            {/if}
-            {#if s.windows > 1}
-              <span class="w-badge">{s.windows}w</span>
-            {/if}
-            <button
-              class="kill"
-              onclick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); openSessionMenu({ x: r.right, y: r.bottom }, s); }}
-              aria-label={t('hubProjectMenu')}
-            >
-              <Icon name="dots" size={13} />
-            </button>
+          {#if s.last_opened}
+            <span class="ago">{relTime(s.last_opened)}</span>
           {/if}
+          {#if s.windows > 1}
+            <span class="w-badge">{s.windows}w</span>
+          {/if}
+          <button
+            class="kill"
+            onclick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); openSessionMenu({ x: r.right, y: r.bottom }, s); }}
+            aria-label={t('hubProjectMenu')}
+          >
+            <Icon name="dots" size={13} />
+          </button>
         </span>
       </div>
 
@@ -561,8 +534,7 @@
     </div>
   {/snippet}
 
-  <!-- Session list. When team sessions are present we split into two labelled
-       groups (Teams first, then Sessions); otherwise it's the flat list. -->
+  <!-- Session list. -->
   <div class="list">
     <!-- Declarative projects sit above the raw session list: a project is the
          thing you keep, a session is only its current projection. The section
@@ -605,44 +577,23 @@
          owner, 2026-08-25). -->
     {#if trackedReady}
     <div class="rows" class:reveal={listReady}>
-    {#if grouped}
+    <!-- One header per group is the sidebar rule (ui-unification: "every
+         sidebar speaks the same language"): the flat list showed bare rows
+         under the PROJECTS header, so the sessions looked like more projects.
+         Page mode keeps the flat list headerless — there the page title
+         already says what it is. -->
+    {#if !chips && filtered.length > 0}
       <div class="group-label" class:side-h={!chips}>
-        <Icon name="bot" size={12} />
-        {t('groupTeams')}
-        <span class="group-count">{teamGroup.length}</span>
+        <Icon name="terminal" size={12} />
+        {t('groupSessions')}
+        <span class="group-count">{filtered.length}</span>
       </div>
-      {#each teamGroup as s (s.name)}
-        <div animate:flip={{ duration: moveMs() }}>{@render sessionItem(s)}</div>
-      {/each}
-      {#if regularGroup.length > 0}
-        <div class="group-label" class:side-h={!chips}>
-          <Icon name="terminal" size={12} />
-          {t('groupSessions')}
-          <span class="group-count">{regularGroup.length}</span>
-        </div>
-        {#each regularGroup as s (s.name)}
-          <div animate:flip={{ duration: moveMs() }}>{@render sessionItem(s)}</div>
-        {/each}
-      {/if}
-    {:else}
-      <!-- One header per group is the sidebar rule (ui-unification: "every
-           sidebar speaks the same language"). The grouped branch above always
-           had them; the flat list showed bare rows under the PROJECTS header,
-           so the sessions looked like more projects. Page mode keeps the flat
-           list headerless — there the page title already says what it is. -->
-      {#if !chips && filtered.length > 0}
-        <div class="group-label" class:side-h={!chips}>
-          <Icon name="terminal" size={12} />
-          {t('groupSessions')}
-          <span class="group-count">{filtered.length}</span>
-        </div>
-      {/if}
-      <!-- A row that changes rank (an activation re-sorts by recency) MOVES
-           there (motion.md, animate:flip on the each's one child). -->
-      {#each filtered as s (s.name)}
-        <div animate:flip={{ duration: moveMs() }}>{@render sessionItem(s)}</div>
-      {/each}
     {/if}
+    <!-- A row that changes rank (an activation re-sorts by recency) MOVES
+         there (motion.md, animate:flip on the each's one child). -->
+    {#each filtered as s (s.name)}
+      <div animate:flip={{ duration: moveMs() }}>{@render sessionItem(s)}</div>
+    {/each}
 
     <!-- "No sessions" is about the UNTRACKED list only. With projects above it
          (every session is a project now) the column is not empty at all, and
@@ -750,7 +701,7 @@
   .sessions.sidebar-mode .name { font-weight: 550; }
   /* Section headers in the sidebar speak `.side-h` — the class is on the
      element (see the markup), so mono/10.5px/uppercase/1.4px/--text3 come
-     from app.css and cannot drift. Leaving TEAMS/SESSIONS in the page's
+     from app.css and cannot drift. Leaving the group headers in the page's
      accent-bold dialect put two header styles in ONE column, which is the
      drift the shared vocabulary exists to prevent (owner, 2026-08-19). Only
      the sidebar's tighter gutter stays local; page mode keeps the accent
@@ -898,10 +849,9 @@
     background: var(--accent-bg);
   }
 
-  /* ─── Group headers (team vs regular sessions) ─────── */
-  /* Both headers share this one style. Accent-highlighted text + icon (the
-     Icon inherits the colour via currentColor) so the two section dividers
-     read identically and stand out from the rows.
+  /* ─── Group headers ─────── */
+  /* Accent-highlighted text + icon (the Icon inherits the colour via
+     currentColor) so the section divider stands out from the rows.
      Qualified to PAGE mode: a scoped `.group-label` rule outranks the shared
      `.side-h` class (0,2,0 vs 0,1,0), so an unqualified one would quietly
      override the sidebar vocabulary these headers are supposed to inherit. */
@@ -932,16 +882,7 @@
     letter-spacing: 0;
     font-variant-numeric: tabular-nums;
   }
-  /* Team rows reuse the same status dot + title style as regular rows (no
-     leading bot glyph); only the trailing chat glyph hints that a tap opens
-     the conversation. The "Teams" group header is what marks the section. */
-  .go-chat {
-    display: inline-flex;
-    align-items: center;
-    padding: 6px;
-    color: var(--text3);
-  }
-  .session.team-session .session-row:hover .go-chat { color: var(--accent); }
+
 
   .session-row {
     display: flex;
@@ -978,10 +919,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  /* Team rows carry no meta sub-text, so let the title use the full row width
-     (the 40% cap would otherwise leave an odd empty gap and clip the name). */
-  .name.name-grow { max-width: none; flex: 1; min-width: 0; }
-
   .meta {
     flex: 1;
     min-width: 0;

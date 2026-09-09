@@ -16,11 +16,6 @@
   import { listSessionsWithPanes, newWindow } from '../core/ws.ts';
   import type { TmuxPane } from '../core/ws.ts';
   import { paneAgent, paneChipLabel } from '../core/agents.ts';
-  // Team sessions (tmm-team-<room>) are grouped apart from regular sessions and
-  // labelled by their workspace basename. Shared helpers, gated on the server
-  // actually having the team bus — consistent with the Sessions page.
-  import { isTeamSession, teamLabel } from '../core/team.svelte.ts';
-
   type SessionGroup = { name: string; panes: TmuxPane[] };
 
   let {
@@ -94,10 +89,6 @@
   let sessions = $state<SessionGroup[]>([]);
   let busySession = $state(''); // session whose "+" is mid-create (disable it)
 
-  let teamSessions = $derived(sessions.filter(s => isTeamSession(s.name)));
-  let regularSessions = $derived(sessions.filter(s => !isTeamSession(s.name)));
-  let grouped = $derived(teamSessions.length > 0);
-
   let currentMatch = $derived(/^(.+):(\d+)\./u.exec(currentTarget));
   let currentSession = $derived(currentMatch?.[1] || '');
 
@@ -151,17 +142,6 @@
     <div class="picker-empty">…</div>
   {:else if sessions.length === 0}
     <div class="picker-empty">{t('noSessions')}</div>
-  {:else if grouped}
-    <div class="picker-group">{t('groupTeams')}</div>
-    {#each teamSessions as s}
-      {@render sessionBlock(s)}
-    {/each}
-    {#if regularSessions.length > 0}
-      <div class="picker-group">{t('groupSessions')}</div>
-      {#each regularSessions as s}
-        {@render sessionBlock(s)}
-      {/each}
-    {/if}
   {:else}
     {#each sessions as s}
       {@render sessionBlock(s)}
@@ -170,9 +150,8 @@
 </div>
 
 {#snippet sessionBlock(s: SessionGroup)}
-  {@const team = isTeamSession(s.name)}
   <div class="picker-session">
-    <span class="picker-session-name" title={team ? s.name : null}>{team ? teamLabel(s.name) : s.name}</span>
+    <span class="picker-session-name">{s.name}</span>
   </div>
   <div class="picker-panes">
     {#each s.panes as p}
@@ -215,16 +194,6 @@
     padding: 6px;
     /* Visibility and the intro are the shared .pop-layer atom (app.css). */
   }
-  /* Group dividers and per-session headers share one type treatment (size /
-     weight / case / spacing); only colour marks the hierarchy — the
-     Teams/Sessions dividers are accent-highlighted, individual session names
-     are muted. All session names (team + regular) use the same style. */
-  .picker-group {
-    padding: 6px 6px 2px;
-    font-size: var(--fs-meta); font-weight: 600; color: var(--accent);
-    text-transform: uppercase; letter-spacing: 0.5px;
-  }
-  .picker-group:first-child { padding-top: 2px; }
   .picker-session {
     display: flex; align-items: center; gap: 6px;
     font-size: var(--fs-meta); font-weight: 600; color: var(--text3);
