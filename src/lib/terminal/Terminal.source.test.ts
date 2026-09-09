@@ -339,9 +339,8 @@ test('endpoint grab fixes the far endpoint and compensates both coordinates (#13
   assert.match(source, /selection = \{ anchor: selection\.anchor, head: \{ row: bufRow, col \} \};/u);
   assert.match(source, /const offset = handleGrabOffset\(cx, cy, ep, term\.buffer\.active\.viewportY, r, cell\);\s*handleGrabDx = offset\.dx;\s*handleGrabDy = offset\.dy;/u);
   assert.match(source, /lastDragX = t0\.clientX - handleGrabDx;\s*lastDragY = t0\.clientY - handleGrabDy;/u);
-  assert.match(source, /const HIT_HALF_W = 28;/u);
-  assert.match(source, /const HIT_DOT_PAD = 22;/u);
-  assert.match(source, /const midX = sameRow \? \(selUI\.startX \+ selUI\.endX\) \/ 2 : null;/u);
+  // #141 gives numeric capsule/overlap boundaries unit vectors in geometry.
+  assert.match(source, /return hitSelectionHandle\(clientX, clientY, rect, selection, selUI\);/u);
   assert.match(source, /\.sel-handle \{[^}]*width: 0; height: 0;/u,
     'the CSS anchor is not the old 44px hit wrapper');
   assert.match(source, /\.sel-handle::after \{[^}]*width: 12px;\s*height: 12px;/u);
@@ -360,6 +359,12 @@ test('geometry adapters read the live rectangle and the single cellSize source (
   assert.match(drag, /const rect = termEl\.getBoundingClientRect\(\);\s*const \{ w: cellW \} = cellSize\(term\);/u);
   assert.match(drag, /const cell = touchToCell\(px, py\);\s*const col = snapHandleColumn\(x, cell\.col, rect\.width, cellW, term\.cols, SCROLLBAR_TOUCH_WIDTH\);/u);
   assert.match(drag, /const row = term\.buffer\.active\.viewportY \+ cell\.row;\s*moveHead\(row, col\);/u);
+  const view = /function recomputeSelUI\(\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1] ?? '';
+  assert.match(view, /if \(!selection \|\| !term \|\| !termEl\) \{ selUI = null; return; \}/u);
+  assert.match(view, /const \{ w: cellW, h: cellH \} = cellSize\(term\);\s*if \(!cellW \|\| !cellH\) \{ selUI = null; return; \}/u);
+  assert.match(view, /const rect = termEl\.getBoundingClientRect\(\);\s*selUI = selectionView\(selection, \{ w: cellW, h: cellH \}, \{ top, rows, cols, width: rect\.width \}\);/u);
+  const hit = /function hitHandle\(clientX, clientY\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1] ?? '';
+  assert.match(hit, /if \(!selection \|\| !selUI \|\| !termEl\) return null;\s*const rect = termEl\.getBoundingClientRect\(\);\s*return hitSelectionHandle/u);
 });
 
 test('gesture motion keeps signed remainder and the measured fixed-frame rules (#139)', () => {

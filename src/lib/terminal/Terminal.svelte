@@ -18,8 +18,8 @@
   import { terminalPrefs } from '../app/terminal-prefs.svelte.ts';
   import { adaptAnsiColors } from './ansi-colors.ts';
   import { compactLineGeometry } from './terminal-line-geometry.ts';
-  import { selStart, selEnd, selContains, selLength, selForDrag, selFromExclusive, wordBounds } from './selection-model.ts';
-  import { pointToCell, handleGrabOffset, snapHandleColumn } from './terminal-gesture-geometry.ts';
+  import { selStart, selContains, selLength, selForDrag, selFromExclusive, wordBounds } from './selection-model.ts';
+  import { pointToCell, handleGrabOffset, snapHandleColumn, selectionView, hitSelectionHandle } from './terminal-gesture-geometry.ts';
   import { computeCursorLayout } from './cursor-layout.ts';
   import { restoreViewportAfterPaneSwitch } from './terminal-viewport.ts';
   import { cycleItem } from '../app/shortcuts.ts';
@@ -950,9 +950,6 @@
     }
     resumeLiveTailRef = resumeLiveTail;
 
-    // Cell at touch coords, allowing 1 cell of overshoot in each direction so
-    // drags out of the visible area still hit the closest edge. Caller decides
-    // whether to clamp; default clamp matches the legacy touchToCell behavior.
     // Recompute pixel positions for handles + toolbar from current selection
     // and viewport. Called whenever selection, scroll, resize, or render
     // geometry changes.
@@ -964,72 +961,8 @@
       const top = buf.viewportY;
       const rows = term.rows;
       const cols = term.cols;
-      const a = selStart(selection);
-      const b = selEnd(selection);
-      // viewport-relative rows; null if off-screen on that side
-      const aRowV = a.row - top;
-      const bRowV = b.row - top;
-      const startInView = aRowV >= 0 && aRowV < rows;
-      const endInView = bRowV >= 0 && bRowV < rows;
-      // Handle anchor points (iOS-style lollipop):
-      //   start handle anchored at the TOP-LEFT corner of the start cell —
-      //     a 2px bar runs DOWN through the cell's left edge, with a dot
-      //     ABOVE the line.
-      //   end handle anchored at the BOTTOM-RIGHT corner of the end cell —
-      //     a 2px bar runs UP through the cell's right edge, with a dot
-      //     BELOW the line.
-      // Stems align exactly with the cell border so the handle reads as part
-      // of the selection rather than floating UI.
-      const startX = a.col * cellW;
-      const startY = aRowV * cellH;
-      const endX = (b.col + 1) * cellW;
-      const endY = (bRowV + 1) * cellH;
-      // Edge-of-screen dot shifts. When the selection touches column 0 the
-      // start dot would sit half off-screen with `translateX(-50%)`, leaving
-      // a thin 6 px target the user can't reliably grab. Same on the right
-      // edge for the end dot, which additionally collides with the
-      // scrollbar's 30 px touch zone. Push the dot ~7 px inward in those
-      // cases — the stem stays on the cell border (visual anchor preserved)
-      // but the dot is fully in the touchable area.
-      const DOT_R = 6; // approximately half the dot's visual diameter
-      const startAtLeftEdge = a.col === 0;
-      const endAtRightEdge = b.col >= cols - 1;
-      const startDotShiftX = startAtLeftEdge ? DOT_R : 0;
-      const endDotShiftX = endAtRightEdge ? -DOT_R : 0;
-      // Toolbar placement: must clear the start handle's dot (which sits
-      // ~14px ABOVE the start row) and the end handle's dot (~14px BELOW
-      // the end row). We keep an extra 8px of breathing room so the user
-      // can comfortably grab the dot without the toolbar getting in the way.
-      const HANDLE_DOT_CLEARANCE = 22; // dot radius + gap
-      let toolbarX, toolbarY, toolbarBelow = false, toolbarVisible = true;
       const rect = termEl.getBoundingClientRect();
-      const innerW = rect.width;
-      if (startInView) {
-        // Center between start and (if same line) end; else over start col.
-        const cx = a.row === b.row
-          ? ((a.col + b.col + 1) / 2) * cellW
-          : (a.col * cellW + cellW * Math.min(8, cols - a.col) / 2);
-        toolbarX = cx;
-        // Above the start row, beyond the start dot.
-        toolbarY = aRowV * cellH - HANDLE_DOT_CLEARANCE;
-        if (toolbarY < 8) {
-          // Not enough room above — place below the end row, beyond the end dot.
-          toolbarY = (Math.min(rows - 1, bRowV) + 1) * cellH + HANDLE_DOT_CLEARANCE;
-          toolbarBelow = true;
-        }
-      } else if (endInView) {
-        const cx = (b.col + 1) * cellW - cellW;
-        toolbarX = cx;
-        toolbarY = (bRowV + 1) * cellH + HANDLE_DOT_CLEARANCE;
-        toolbarBelow = true;
-      } else {
-        toolbarVisible = false;
-        toolbarX = 0;
-        toolbarY = 0;
-      }
-      // Clamp toolbar X within container with 8px padding
-      toolbarX = Math.max(48, Math.min(innerW - 48, toolbarX));
-      selUI = { startX, startY, endX, endY, toolbarX, toolbarY, toolbarBelow, startInView, endInView, toolbarVisible, cellH, startDotShiftX, endDotShiftX, startAtLeftEdge, endAtRightEdge };
+      selUI = selectionView(selection, { w: cellW, h: cellH }, { top, rows, cols, width: rect.width });
     }
 
     // Drive xterm.js native selection from our selection model. xterm.select
@@ -1192,42 +1125,7 @@
     function hitHandle(clientX, clientY) {
       if (!selection || !selUI || !termEl) return null;
       const rect = termEl.getBoundingClientRect();
-      const px = clientX - rect.left;
-      const py = clientY - rect.top;
-      const HIT_HALF_W = 28;       // half the touchable width, ≈ thumb pad
-      const HIT_DOT_PAD = 22;      // buffer past the dot end of the capsule
-      const cellH = selUI.cellH || 16;
-      const innerW = rect.width;
-
-      // Compute X overlap-resolution boundary. If both handles are in view
-      // on the same row, anything between them belongs to whichever is
-      // closer (split at midpoint).
-      const sameRow =
-        selection.anchor.row === selection.head.row &&
-        selUI.startInView && selUI.endInView;
-      const midX = sameRow ? (selUI.startX + selUI.endX) / 2 : null;
-
-      if (selUI.startInView) {
-        // X bounds with edge / overlap adjustments.
-        let xMin = selUI.startAtLeftEdge ? 0 : selUI.startX - HIT_HALF_W;
-        let xMax = selUI.startX + HIT_HALF_W;
-        if (midX !== null) xMax = Math.min(xMax, midX);
-        // Y bounds: stem runs DOWN through the selection's first row; the
-        // dot now sits BELOW that (mirrors the end handle), so the dot-side
-        // buffer extends past startY + cellH.
-        const yMin = selUI.startY - HIT_DOT_PAD * 0.5;
-        const yMax = selUI.startY + cellH + HIT_DOT_PAD;
-        if (px >= xMin && px <= xMax && py >= yMin && py <= yMax) return 'start';
-      }
-      if (selUI.endInView) {
-        let xMin = selUI.endX - HIT_HALF_W;
-        let xMax = selUI.endAtRightEdge ? innerW : selUI.endX + HIT_HALF_W;
-        if (midX !== null) xMin = Math.max(xMin, midX);
-        const yMin = selUI.endY - cellH - HIT_DOT_PAD * 0.5;
-        const yMax = selUI.endY + HIT_DOT_PAD;
-        if (px >= xMin && px <= xMax && py >= yMin && py <= yMax) return 'end';
-      }
-      return null;
+      return hitSelectionHandle(clientX, clientY, rect, selection, selUI);
     }
     // Hit-test the toolbar copy button (handled by the button's own pointer
     // events; we just need to know to skip terminal-touch handling when the

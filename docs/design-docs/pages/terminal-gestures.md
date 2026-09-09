@@ -159,6 +159,31 @@ The three formulas and metric-read order match the original AST. Moving
 the 10px snap minimum to 11px fails the just-inside boundary vector;
 restoring it returns green.
 
+The second mechanical commit moves `selectionView` and `hitSelectionHandle`.
+They reuse the canonical selection ordering and return the existing derived
+UI coordinates or handle identity; `SelectionUI` is a projection, not another
+selection store or a saved measurement. Missing selection/element and
+zero-cell-metric guards remain in Terminal, before the same live reads.
+The five formula bodies, the `cellSize` implementation and measurement-call
+order match the pre-extraction code; markup/CSS and gesture scheduling stay
+unchanged.
+
+Projection/hit vectors cover independent offscreen endpoints, strict toolbar
+flip boundaries, horizontal clamping, fractional metrics, capsule edges,
+same-row midpoint ties and the handle occupying the scrollbar touch zone.
+The existing row-3 Copy anchor (26px, producing the measured -16px clipping)
+is pinned deliberately; #143 remains a separate behavior fix.
+
+Chromium 152.0.7977.64 with real xterm 6.0.0 reproduces #140's 92
+state/geometry signatures and selection-call arguments. 88 PNGs are
+byte-identical; the four Copy captures differ only in the unchanged toast's
+1.5s lifetime. A separate touch 3px inside the right edge still drags the
+handle. The negative control excludes that scrollbar-width region from the
+end capsule: the unit vector fails and the real component calls
+`scrollToLine`, leaving column 40 instead of moving to 36. Restoring the
+capsule restores the drag. These are off-device checks, not Android IME or
+physical-touch verification.
+
 ## Toolbar UI
 - Single "Copy" button (one job, one button).
 - Default: above the selection's first row, horizontally centered between start and end (or roughly above the start cell when the selection spans multiple rows).
