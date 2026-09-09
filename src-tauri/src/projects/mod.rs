@@ -23,6 +23,7 @@ pub mod telemetry;
 pub mod vitals;
 pub mod board;
 pub use board::{BOARD_STATUSES, ISSUE_REF_CHARS, issue_ref, board_list, board_counts, board_get, board_save, board_note, board_delete};
+pub use rooms::{archived_ids, archived_msgs, archive_msg, unarchive_msgs};
 
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
@@ -40,7 +41,7 @@ const CAPTURE_INTERVAL: Duration = Duration::from_secs(20);
 /// something you come back to, a two-minute shell is not.
 pub const SESSION_SETTLE_SECS: u64 = 120;
 
-fn now() -> u64 {
+pub(super) fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -1222,36 +1223,6 @@ pub fn spawned_by(workspace: Option<&str>, window_name: &str) -> Option<String> 
     let v: serde_json::Value = serde_json::from_str(&text).ok()?;
     let by = v.get("spawned_by")?.as_str()?.trim().to_string();
     (!by.is_empty()).then_some(by)
-}
-
-// ---- archived messages ---------------------------------------------------
-//
-// The archive is OUR state (state.db), not the bus's: `agora` is a faithful copy
-// of an upstream crate, and hiding a message is this app's idea. These are the
-// four verbs the hub RPCs need, each fail-soft in the direction that keeps the UI
-// honest — a read that fails hides nothing, a write that fails is reported.
-
-/// Ids hidden in a room. A failure here must not blank the conversation, so it
-/// degrades to "nothing is hidden".
-pub fn archived_ids(room: &str) -> Vec<String> {
-    with_store(|s| s.archived_ids(room)).unwrap_or_default()
-}
-
-/// The archive itself, newest first, each row carrying its own copy of the
-/// message.
-pub fn archived_msgs(room: &str) -> Vec<(String, u64, String, String, u64)> {
-    with_store(|s| s.archived_msgs(room)).unwrap_or_default()
-}
-
-/// Hide one message.
-pub fn archive_msg(room: &str, msg_id: &str, ts: u64, sender: &str, body: &str) -> Result<(), String> {
-    with_store(|s| s.archive_msg(room, msg_id, ts, sender, body, now()))
-}
-
-/// Take messages out of the archive — a restore, or the bookkeeping half of a
-/// purge once the messages themselves are gone.
-pub fn unarchive_msgs(room: &str, ids: &[String]) -> Result<usize, String> {
-    with_store(|s| s.unarchive_msgs(room, ids))
 }
 
 pub fn registry_get(name: &str) -> Result<Option<store::RegAgent>, String> {
