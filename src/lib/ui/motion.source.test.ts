@@ -66,7 +66,7 @@ test('every placed popover wears .pop-layer and no component keeps a private opa
     assert.match(src, /class="[^"]*\bpop-layer\b[^"]*" class:ready=/u, `${rel}: the placed layer wears .pop-layer with the ready gate`);
     assert.match(src, /style:--pop-origin=/u, `${rel}: tells the atom which corner it grows from`);
   }
-  for (const rel of ['src/lib/hub/Hub.svelte', 'src/App.svelte']) {
+  for (const rel of ['src/lib/hub/Roster.svelte', 'src/App.svelte']) {
     const src = readFileSync(join(root, rel), 'utf8');
     assert.match(src, /class="(a-menu|server-menu) pop-layer" class:ready=/u, `${rel}: its menu wears .pop-layer`);
   }

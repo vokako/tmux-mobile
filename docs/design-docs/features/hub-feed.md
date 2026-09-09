@@ -132,6 +132,21 @@ the roster, composer, receipt and drawer. Its Hub/parent-scoped selector has
 the former rule's specificity; the 9px receipt override still wins, and
 embedded pages do not receive a generic `.st` style. `.live-dot` motion and
 state colors remain the existing app-wide mechanisms.
+`Roster.svelte` owns the roster and fixed tap-menu roots, timer, anchor and
+measurements as one Hub-length lifetime. Its selected gate stays internal;
+there is no per-project key or wrapper. Hub still owns recipient/filter and
+agent verbs. Two controlled bindings (`menuFor`, `cardsEl`) preserve project
+reset, Back and the existing dismissal effect without a second open-state
+copy or moving window capture listeners. Shared state-label/tone formatters
+remain in Hub. The original 260ms mounted characterization is unchanged.
+Verification on Chromium 152.0.7977.64 used nested/live/stopped cards in
+1440x900 and 390x844 layouts, light/dark and reduced-motion spots. All 36
+captured text/rectangle/style signatures matched; 29 PNGs were byte-identical,
+with 3-39 edge pixels differing in the others (under 0.0031% of a frame).
+The 44 moved private rule bodies and Hub effects/order were unchanged.
+An intentionally premature menu on first selection failed the original
+mounted characterization. A separate mounted case covers double-click
+filter toggling and the stopped card's explicit Resume control.
 
 ### An unsent line belongs to its project
 

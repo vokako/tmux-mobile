@@ -322,3 +322,64 @@ test('Hub Sidebar keeps row identity, free restore, confirmed purge and the comp
   }
   context.diagnostic(`Sidebar scenario after shared compilation ${(performance.now() - started).toFixed(1)}ms`);
 });
+
+test('Roster double-click filters without a menu and a stopped surface never resumes', { timeout: 60000 }, async (context) => {
+  const fixture = await compiledHub();
+  const started = performance.now();
+  const { rpc } = roomFixture();
+  const restarts: Array<[string, string]> = [];
+  let resumed = false;
+  const app = await fixture.mount(context, {
+    props: { visible: true },
+    setup(window) {
+      // The stopped card leaves a keyed list; jsdom has no active animations.
+      window.Element.prototype.getAnimations = () => [];
+    },
+    modules: [{
+      ...rpc,
+      projectList: async () => ({ projects: [{
+        project: { id: 'fixture', name: 'Fixture', session: 'fixture', path: '/fixture' },
+        live: true, slots: [{ window_name: 'paused', kind: 'agent', command: 'codex' }],
+      }] }),
+      hubAgents: async () => ({ agents: [
+        ...(await rpc.hubAgents()).agents,
+        ...(resumed ? [{ name: 'paused', window: 2, managed: true, agent: 'codex', state: 'idle' }] : []),
+      ] }),
+      hubAgentRestart: async (session: string, name: string) => {
+        restarts.push([session, name]); resumed = true; return {};
+      },
+    }],
+  });
+  try {
+    for (let i = 0; i < 10 && !app.document.querySelector('.acard.off'); i++) await app.flush();
+    const off = app.document.querySelector<HTMLElement>('.acard.off')!;
+    assert.ok(off);
+    off.click();
+    await app.flush();
+    assert.deepEqual(restarts, []);
+    assert.equal(app.document.querySelector('.am-who')?.textContent, 'paused');
+    app.window.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await app.flush();
+    assert.equal(app.document.querySelector('.a-menu'), null);
+    off.querySelector<HTMLButtonElement>('.a-start')!.click();
+    for (let i = 0; i < 10 && app.document.querySelector('.acard.off'); i++) await app.flush();
+    assert.deepEqual(restarts, [['fixture', 'paused']]);
+    assert.equal(app.document.querySelector('.acard.off'), null);
+    const bob = [...app.document.querySelectorAll<HTMLElement>('.acard')]
+      .find((card) => card.querySelector('.a-name')?.textContent === 'bob')!;
+    assert.ok(bob);
+    for (const shouldFilter of [true, false]) {
+      bob.click();
+      bob.click();
+      bob.dispatchEvent(new app.window.MouseEvent('dblclick', { bubbles: true }));
+      await app.flush();
+      await app.advance(260);
+      assert.equal(app.document.querySelector('.a-menu'), null, 'double-click cancels the pending menu');
+      assert.equal(!!app.document.querySelector('.filter-pill'), shouldFilter);
+      assert.equal(app.document.querySelector('.to-name')?.textContent, 'bob');
+    }
+  } finally {
+    await app.close();
+  }
+  context.diagnostic(`Roster scenario after shared compilation ${(performance.now() - started).toFixed(1)}ms`);
+});

@@ -66,9 +66,8 @@ test('an uncached room unfolds: skeletons while it loads, then the feed from its
   // The skeletons stand in ONLY while the room is not ready (an uncached
   // room; a cached one is ready at once and stays a cut) and are aria-hidden.
   assert.match(source, /\{#if selected && !roomReady\}\s*<div class="skel-wrap sk-feed" aria-hidden="true">/u, 'the feed\u2019s bubble skeletons');
-  assert.match(source, /\{#if !roomReady\}\s*<div class="skel-wrap sk-cards" aria-hidden="true">/u, 'the roster\u2019s card skeletons');
   assert.match(source, /class="feed subtle-scroll" class:reveal-tail=\{justLoaded\}/u, 'the feed unfolds from its newest row');
-  assert.match(source, /class="cards" class:chips=\{compact\} class:reveal=\{justLoaded\}/u, 'the roster unfolds from the left');
+  assert.match(source, /<Roster[\s\S]*?\{roomReady\} \{justLoaded\} \{rosterBase\}/u, 'the roster receives the same readiness and reveal gates');
   // Only an UNCACHED load sets it, and a timer clears it: the atoms animate
   // whatever mounts while the class is on, and an older page must not.
   assert.match(source, /if \(!c\) unfold\(\);\s*\n\s*roomReady = true;/u, 'the unfold is the uncached first fill\u2019s');
@@ -79,17 +78,7 @@ test('an uncached room unfolds: skeletons while it loads, then the feed from its
   assert.match(rule('.sk-feed'), /margin-top: auto/u, 'the skeleton sits where the tail will be');
 });
 
-test('hover reports facts with no gesture tutorial (board #87)', () => {
-  // Live facts belong in the card; click/right-click instructions do not.
-  // The aria-label keeps the one-line reading for screen readers.
-  const live = source.slice(source.indexOf('class="acard" class:sel'), source.indexOf('class="acard off"'));
-  assert.match(live, /use:hoverInfo=\{\(\) => cardInfo\(a\)\}/u, 'the live card opens the hover card');
-  assert.match(live, /aria-label=\{\[`\$\{a\.name\} · \$\{stateLabel\(a\.state\)\}`, a\.detail, vitalsLine\(a\.vitals\)\]/u, 'its one-line reading is the aria-label');
-  assert.ok(!/<div class="acard" class:sel[^>]*\stitle=/u.test(live), 'no native title on the live card');
-  const off = source.slice(source.indexOf('class="acard off"'), source.indexOf('{/each}', source.indexOf('class="acard off"')));
-  assert.match(off, /use:hoverInfo=\{\(\) => offCardInfo\(name\)\}/u, 'the stopped card too');
-  const cardFns = source.slice(source.indexOf('function cardInfo'), source.indexOf('function pillInfo'));
-  assert.doesNotMatch(cardFns, /\bnote\s*:/u, 'agent cards carry facts, never a click/right-click footer');
+test('Hub hover surfaces keep the shared status vocabulary (board #87)', () => {
   assert.match(source, /class="win-pill state-ctl"[\s\S]{0,200}?use:hoverInfo=\{\(\) => pillInfo\(a\)\}/u, 'the drawer window pill');
   const chip = /<button class="to-chip"[\s\S]*?>/u.exec(source)?.[0] ?? '';
   assert.match(chip, /use:hoverInfo=\{toChipInfo\}/u, 'the recipient chip explains its destination');
@@ -97,9 +86,8 @@ test('hover reports facts with no gesture tutorial (board #87)', () => {
   // The tone of the state row is the SAME family the dot paints — no second
   // colour language (rule 6).
   assert.match(source, /function stateTone\(state\) \{\s*switch \(stateDotColor\(state\)\)/u, 'the hover tone derives from stateDotColor');
-  for (const fmt of ['modelLabel(a.vitals.model)', 'fmtElapsed(a.since, tick)']) {
-    assert.ok(source.includes(fmt), `the hover card reuses ${fmt} — no second formatter`);
-  }
+  assert.match(source, /bind:menuFor bind:cardsEl \{stateLabel\} \{stateTone\}/u,
+    'Roster consumes the existing shared formatters');
 });
 
 test('Hub keeps selection, Back and consequential actions around the extracted Sidebar (#121)', () => {
@@ -115,6 +103,19 @@ test('Hub keeps selection, Back and consequential actions around the extracted S
   assert.match(source, /backLayers\.register\('sidebar', \(\) => \{ if \(compact && !sideOpen\)/u);
   assert.doesNotMatch(source, /<aside class="sidebar"|function rowInfo|let trashOpen/u,
     'the old view and private fold state have one new owner');
+});
+
+test('Hub retains roster actions and the original dismissal state (#132)', () => {
+  const start = source.indexOf('<Roster ');
+  const roster = source.slice(start, source.indexOf('/>', start));
+  assert.match(roster, /bind:menuFor bind:cardsEl/u);
+  assert.match(roster, /onselect=\{setRecipient\} onfilter=\{toggleFilter\} onwatch=\{openDrawer\}/u);
+  assert.match(roster, /onstart=\{startAgent\} oninterrupt=\{interrupt\} onrestart=\{restartAgent\}/u);
+  assert.match(roster, /onaction=\{askAction\} onconfigure=\{openAgentConfig\}/u);
+  assert.match(roster, /oncontext=\{\(at, name\) => openCtx\(at, name, agentItems\(name\)\)\}/u);
+  assert.match(source, /cardsEl\?\.addEventListener\('scroll', close, \{ passive: true \}\)/u);
+  assert.match(source, /backLayers\.register\('agentMenu', \(\) => \{ if \(menuFor\)/u);
+  assert.doesNotMatch(source, /function cardClick|function toggleAgentMenu|class="roster"|class="a-menu pop-layer"/u);
 });
 
 test('the composer\u2019s two upward menus grow from the chip like every other popover (motion.md wave 6)', () => {
@@ -135,30 +136,7 @@ test('the composer\u2019s two upward menus grow from the chip like every other p
   assert.match(rule('.cmd-menu'), /position: absolute; bottom: calc\(100% \+ 6px\)/u, 'the palette keeps its own placement');
 });
 
-test('the agent card speaks the three-stage machine: select, then options, dblclick filters', () => {
-  // Board #3: a click on an UNSELECTED card must only select; the menu is the
-  // SECOND click's job; a double click enters the one-agent filter with the
-  // menu suppressed (the 260ms defer is what keeps it from flashing).
-  const live = source.slice(source.indexOf('class="acard" class:sel'), source.indexOf('class="acard off"'));
-  assert.match(live, /onclick=\{\(e\) => cardClick\(a\.name, e\.currentTarget\)\}/u, 'one click handler, the machine');
-  assert.match(live, /ondblclick=\{\(\) => cardDbl\(a\.name\)\}/u, 'double-click enters the filter');
-  assert.match(live, /onkeydown=[^\n]*cardClick\(a\.name, e\.currentTarget\)/u, 'keyboard mirrors the machine');
-  const machine = source.slice(source.indexOf('function cardClick'), source.indexOf('function setRecipient'));
-  assert.match(machine, /if \(recipient !== name\) \{ setRecipient\(name\); return; \}/u,
-    'an unselected card only selects — no menu on the first click');
-  // Review fix: the pending-menu swallow is per CARD. A click on a DIFFERENT
-  // card inside the 260ms window cancels the stale menu and still acts —
-  // a global swallow ate the selection of the next card.
-  assert.match(machine, /if \(cardTimerFor === name\) return;/u,
-    'only the SAME card\u2019s second click is swallowed');
-  assert.match(machine, /cardTimerFor = name;\s*\n\s*cardTimer = setTimeout/u,
-    'the timer records which card it belongs to');
-  const swallow = /if \(cardTimer\) \{\s*\n\s*clearTimeout\(cardTimer\); cardTimer = null;\s*\n\s*if \(cardTimerFor === name\) return;/u;
-  assert.match(machine, swallow, 'a different card cancels the stale timer and falls through');
-  assert.match(machine, /setTimeout\([\s\S]*?toggleAgentMenu\(name, el\)/u,
-    'the selected card defers the menu one double-click window');
-  assert.match(machine, /filterAgent = filterAgent === name \? '' : name/u,
-    'double-click toggles the filter, so it is also an exit');
+test('the agent filter remains visible and leavable inside the feed (board #3)', () => {
   // The mode is visible and leavable: a compact pill INSIDE the feed names
   // the agent (reopened #3: as a feed-wrap sibling it rendered as a
   // full-height left column — feed-wrap is row flex), ✕ clears it, and the
@@ -177,7 +155,7 @@ test('the agent card speaks the three-stage machine: select, then options, dblcl
 });
 
 test('Back registers the original live guards and publishes one local dispatcher (#119)', () => {
-  const region = source.slice(source.indexOf('const backLayers ='), source.indexOf('/** A pointer event'));
+  const region = source.slice(source.indexOf('const backLayers ='), source.indexOf('function agentItems'));
   const guards = {
     lightbox: "if (shotView) { shotView = ''; return true; }",
     contextMenu: 'if (ctxAt) { closeCtx(); return true; }',
@@ -255,23 +233,6 @@ test('selecting an agent retargets an OPEN terminal partition (board #91)', () =
   assert.ok(!body.includes('termOpen = true'), 'following never opens a closed drawer');
 });
 
-test('a waiting agent\u2019s card carries the cue, in the dot\u2019s own amber, without motion', () => {
-  // Review, 2026-09-03: running got a breathing halo, waiting a 6px static dot
-  // — the state that needs the human most was the weakest signal. The CARD
-  // wears it now (frame + wash + word), in the one status language: the same
-  // --status-warn token stateDotColor paints, chosen by stateNeedsYou (pinned
-  // against stateDotColor in hub.test.ts), and static — .live-dot's breathe
-  // means "a turn is open", which a suspended turn is not.
-  const live = source.slice(source.indexOf('class="acard" class:sel'), source.indexOf('class="acard off"'));
-  assert.match(live, /class:needs=\{stateNeedsYou\(a\.state\)\}/u, 'the card class comes from the ONE definition');
-  assert.match(live, /\{#if stateNeedsYou\(a\.state\)\}<span class="ac-needs appear">/u, 'and the word is gated by the same one');
-  const needs = rule('.acard.needs');
-  assert.match(needs, /var\(--status-warn\)/u, 'the frame is the dot\u2019s amber token');
-  assert.ok(!/animation/u.test(needs), 'no motion: waiting is not in motion');
-  assert.ok(!/#[0-9a-f]{3,8}\b/iu.test(needs), 'no literal colour — tokens only');
-  assert.match(rule('.ac-needs'), /var\(--status-warn\)/u, 'the word speaks the same token');
-});
-
 test('the filter and the detail level are reachable from menus, not only from a gesture and Settings', () => {
   // Review, 2026-09-03: filtering by agent existed only as an undocumented
   // double-click; the detail level only in Settings (cycleFeedLevel was dead).
@@ -281,53 +242,21 @@ test('the filter and the detail level are reachable from menus, not only from a 
   // levels with the current one ticked.
   const items = source.slice(source.indexOf('function agentItems'), source.indexOf('function projectItems'));
   assert.equal([...items.matchAll(/filterItem\(name\)/g)].length, 2, 'live AND stopped agents get the filter verb');
-  const menu = source.slice(source.indexOf('{#if menuFor}'), source.indexOf("t('hubRemoveHint')"));
-  assert.match(menu, /onclick=\{\(\) => toggleFilter\(menuFor\)\}/u, 'the tap menu uses the same toggle');
+  assert.match(source, /onfilter=\{toggleFilter\}/u, 'Roster uses the same parent filter toggle');
   assert.match(source, /function toggleFilter\(name\) \{\s*\n\s*menuFor = '';\s*\n\s*filterAgent = filterAgent === name \? '' : name;/u,
     'the menu toggle is the double-click\u2019s rule, minus the recipient change');
   assert.match(source, /projectItems\(selectedRow, true\)/u, 'the title caret asks for the view rows');
-  const lv = source.slice(source.indexOf('function feedLevelItems'), source.indexOf('function toggleAgentMenu'));
+  const lv = source.slice(source.indexOf('function feedLevelItems'), source.indexOf('// Any click elsewhere'));
   assert.match(lv, /hubPrefs\.feedLevel === level \? 'check' : 'circle'/u, 'radio semantics through the menu\u2019s own icons');
   assert.match(lv, /hubPrefs\.setFeedLevel\(level\)/u, 'and it writes the one pref Settings reads');
   assert.ok(!source.includes('cycleFeedLevel'), 'the dead cycle control stays gone');
 });
 
-test('a stopped agent keeps its backend face, greyed — not an anonymous letter (owner, 2026-09-05)', () => {
-  // "关闭的 Agent 卡片是灰色的，但它的头像…只是一个字母头像。这个头像应该
-  // 使用我们正常设定的 Agent 头像，并且变成灰色" — the slot declares its
-  // backend (`command`), so the stopped card can wear the SAME icon the live
-  // card wears; grey comes from a filter, never a second icon set. The
-  // letter tile remains only as the fallback a backend without an icon
-  // already has.
-  assert.match(source, /const slotBackend = \(name\) => \(selectedRow\?\.slots \?\? \[\]\)\.find\(\(s\) => s\.window_name === name\)\?\.command;/u,
-    'the declared slot is the identity source');
-  assert.match(source, /\{#each stopped as name \(name\)\}\s*\{@const backend = slotBackend\(name\)\}/u,
-    'each stopped card resolves its declared backend');
-  assert.match(source,
-    /\{#if backendIcon\(backend\)\}<img class="ava dim" src=\{backendIcon\(backend\)\} alt=\{backend\} \/>\{:else\}<span class="ava dim">\{name\.slice\(0, 1\)\.toUpperCase\(\)\}<\/span>\{\/if\}/u,
-    'the stopped card resolves the icon exactly like the live card, with the letter tile as fallback');
-  assert.match(source, /img\.ava\.dim \{ background: none !important; filter: grayscale\(1\); opacity: 0\.55; \}/u,
-    'the icon greys by filter — identity stays, colour goes');
-});
-
-test('agent cards keep their space and the existing menu can restart (board #89)', async () => {
-  const live = source.slice(source.indexOf('class="acard" class:sel'), source.indexOf('{/snippet}', source.indexOf('class="acard" class:sel')));
-  const off = source.slice(source.indexOf('class="acard off"'), source.indexOf('{/each}', source.indexOf('class="acard off"')));
-  assert.doesNotMatch(live, /class="a-more"|name="dots"/u,
-    'the live card has no redundant dots control');
-  assert.doesNotMatch(off, /class="a-more"|name="dots"/u,
-    'the stopped card spends no width on dots either');
-  assert.match(live, /onclick=\{\(e\) => cardClick\(a\.name, e\.currentTarget\)\}/u,
-    'the live card surface still reaches its menu interaction');
-  assert.match(off, /onclick=\{\(e\) => toggleAgentMenu\(name, e\.currentTarget\)\}/u,
-    'the stopped card surface opens its menu without restarting');
-
+test('agent restart remains one parent action for roster and context menu (board #89)', async () => {
   const items = source.slice(source.indexOf('function agentItems'), source.indexOf('function projectItems'));
   assert.match(items, /label: t\('hubRestart'\), icon: 'refresh', onselect: \(\) => restartAgent\(name\)/u,
     'right-click and long-press keep the same restart action');
-  const tapMenu = source.slice(source.indexOf('{#if menuFor}'), source.indexOf('<div class="feed-wrap">'));
-  assert.match(tapMenu, /restartAgent\(n\)[\s\S]*?t\('hubRestart'\)/u,
-    'the card menu still exposes Restart');
+  assert.match(source, /onstart=\{startAgent\} oninterrupt=\{interrupt\} onrestart=\{restartAgent\}/u);
 
   const action = source.slice(source.indexOf('async function restartAgent'), source.indexOf('// Live pushes'));
   assert.match(action, /await hubAgentRestart\(selected, name\)/u, 'Restart calls the existing lifecycle RPC');
@@ -602,10 +531,8 @@ test('the add-agent button is reachable in every project', () => {
   // twice — "test 这个 project"). So the row hangs off the SELECTION and the
   // button off nothing: `projects::spawn` calls `tmux::ensure_session`, so a
   // spawn into a project that is down opens it.
-  const roster = source.match(/\{#if ([^}]*)\}\s*(?:<!--[\s\S]*?-->\s*)*<div class="roster">/u)?.[1];
-  assert.equal(roster, 'selected', 'the roster row is gated on the selection alone');
-  assert.match(source, /(?:<!--[\s\S]*?-->\s*)<button class="acard add"/u,
-    'the add button has no {#if} of its own');
+  assert.match(source, /<Roster \{selected\} \{compact\}/u, 'the child owns its selected gate');
+  assert.match(source, /onadd=\{\(\) => openPicker\('add'\)\}/u);
   assert.doesNotMatch(source, /\{#if liveSelected\}/u, 'no live gate stands between a project and its first agent');
   // The empty-room preset panel is the same entry point in another shape: it
   // must not disagree with the button about when adding an agent is possible.
@@ -654,20 +581,6 @@ test('a confirmed project verb runs on the row it was asked on, never on `select
     assert.match(body, /const s = selected;/u, `${head} freezes its project`);
     assert.match(body, /if \(selected !== s\) return;/u, `${head} drops a stale answer`);
   }
-});
-
-test('a stopped agent restarts only from its refresh button, never the card', () => {
-  // The whole stopped card used to be onclick=startAgent — brushing it
-  // restarted the agent (owner, 2026-08-24: "已经停止的agent我只要点击就自动
-  // 重启了 并没有点到重启的那个圆圈箭头上"). The surface now opens the agent
-  // MENU (owner, 2026-08-25: the dots were retired for a card-wide tap) —
-  // showing options is safe; the one start trigger stays the .a-start button.
-  const off = source.slice(source.indexOf('class="acard off"'), source.indexOf('{/each}', source.indexOf('class="acard off"')));
-  assert.match(off, /class="a-start"/u, 'the refresh icon is a real button');
-  assert.match(off, /stopPropagation\(\); startAgent\(name\)/u, 'and it is what starts the agent');
-  const surface = off.slice(0, off.indexOf('<div class="ac-top">'));
-  assert.match(surface, /onclick=\{\(e\) => toggleAgentMenu\(name, e\.currentTarget\)\}/u, 'the card surface opens the menu');
-  assert.doesNotMatch(surface, /startAgent/u, 'and never starts the agent itself');
 });
 
 test('a board move renders in the sys grammar, transition visible (board #13)', () => {
@@ -961,7 +874,7 @@ test('the title caret expands the NAME — left-aligned on its real rect (board 
   const opens = [...source.matchAll(/openCtx\((?!at, who)/g)].length; // call sites, not the definition
   const leftAligned = [...source.matchAll(/openCtx\(\{ anchor:[^}]*align: 'left'/g)].length;
   assert.equal(leftAligned, 1, 'ONE explicitly left-aligned entry');
-  assert.equal(opens - leftAligned, 5, 'four card entries plus one Sidebar callback carry no explicit align (#121 moved its three doors)');
+  assert.equal(opens - leftAligned, 2, 'Sidebar and Roster context callbacks carry no explicit align (#121/#132)');
   assert.ok(!/getBoundingClientRect\(\)[^]{0,80}openCtx/u.test(source),
     'no raw client rect reaches openCtx — anchorOf owns the zoom correction');
   // The narrowed caret resets the BROWSER's button padding (Chromium: 1px 6px,
@@ -1107,17 +1020,6 @@ test('the anchor transaction re-measures the fold line it is about to restore (b
   // The width halves live in measureHeld, so ONE call is the whole re-read —
   // no second measurement dialect inside the transaction.
   assert.ok(!/withReadingAnchor[\s\S]*?heldWidth =/u.test(tx), 'the transaction never writes measurements directly');
-});
-
-test('the agent-card menu opens on the CARD’s left edge (board #47)', () => {
-  // Owner: "点击 agent 卡片，出来的选项卡应该和 agent 卡片左边缘对齐，而不是
-  // 右边缘对齐" (2026-09-01). The tap menu anchors on the card rect
-  // (toggleAgentMenu → anchorOf) and menuPos passes the LEFT alignment to the
-  // shared menuPlacement — the same reading the title menu chose in #32, same
-  // flip and clamp, so the two alignments cannot drift apart. The right-click/
-  // long-press context menu stays pointer-anchored (pinned in the #32 test).
-  assert.match(source, /menuPlacement\(menuAnchor, \{ w: menuW, h: menuH \}, viewBox\(\), 6, 8, 'left'\)/u,
-    'the card tap menu is left-aligned via the shared placement math');
 });
 
 test('a path reference in a bubble opens the file preview, not the void (board #99)', async () => {
