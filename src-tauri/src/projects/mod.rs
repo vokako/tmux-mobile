@@ -23,10 +23,12 @@ pub mod telemetry;
 pub mod vitals;
 pub mod board;
 pub mod registry;
+pub mod managed;
 pub use board::{BOARD_STATUSES, ISSUE_REF_CHARS, issue_ref, board_list, board_counts, board_get, board_save, board_note, board_delete};
 pub use rooms::{archived_ids, archived_msgs, archive_msg, unarchive_msgs};
 pub use registry::{registry_list, registry_save, registry_delete, registry_get, teams_list, team_get, teams_save, teams_delete, global_prompt_get, global_prompt_set};
 pub(crate) use registry::{with_registry_mcp, with_registry_skills};
+pub use managed::{managed_home, is_managed_in, spawned_by, team_of, agent_remove};
 
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
@@ -553,79 +555,11 @@ pub fn delete(id: &str) -> Result<Value, String> {
     Ok(json!({ "id": id, "deleted": deleted, "agent_homes_removed": homes_removed }))
 }
 
-/// Remove ONE agent from a project: kill its window if it is running, drop its
-/// slot so `up` never recreates it, and delete its isolated home so it stops
-/// counting as "an agent this app created". Stop is the pause button; this is
-/// the eject button (owner: "stop 以外，也可以删除 Agent").
-///
-/// It removes whatever of those three the agent still has, and only refuses when
-/// there is NOTHING of it left in this project. The narrower rule — a managed
-/// home must exist — made two ordinary cases unremovable (owner report,
-/// 2026-08-19: "停止的 agent，没办法 remove"):
-///
-/// * a STOPPED agent still holds a slot, and the roster offers it exactly
-///   because starting it resumes its conversation; refusing to remove it left
-///   the declaration as the only way to get rid of it;
-/// * an agent whose home was deleted by hand (or that was never ours — a window
-///   the user started, which the capturer adopts into a slot all the same) could
-///   never be dropped, so `up` kept recreating a window nobody wanted.
-///
-/// The slot is what makes it a member of the project, so the slot is what
-/// authorizes the removal. `home_removed` reports whether there was a home.
-pub fn agent_remove(session: &str, agent: &str) -> Result<Value, String> {
-    // Before anything is looked up or killed: the name is about to be a
-    // `remove_dir_all` target under `.tmm/agents/`, and `managed_home` would
-    // answer "yes, a directory" for `..`.
-    agents::valid_name(agent)?;
-    let project = project_for_session(session)?
-        .ok_or_else(|| format!("no project for session '{session}'"))?;
-    let home = managed_home(session, agent);
-    let declared = with_store(|store| store.slots(&project.id))?
-        .iter()
-        .any(|s| s.window_name == agent);
-    // Kill the window first, or the capture loop would re-add the slot we are
-    // about to delete from a window that is still alive.
-    let mut window_killed = false;
-    if let Ok(panes) = crate::tmux::list_panes(session) {
-        if let Some(p) = panes.iter().find(|p| p.window_name == agent) {
-            if home.is_some() || declared {
-                // A window that will not die keeps the agent alive and the
-                // capture loop re-adopting it; removing the slot and home
-                // anyway would leave a running agent that is no longer ours.
-                crate::tmux::kill_window(&format!("{session}:{}", p.window))
-                    .map_err(|e| format!("'{agent}' was not removed — its window did not close: {e}"))?;
-                window_killed = true;
-            }
-        }
-    }
-    if home.is_none() && !declared && !window_killed {
-        return Err(format!("'{agent}' is not an agent of project '{}'", project.name));
-    }
-    let slot_removed = with_store(|store| store.delete_slot(&project.id, agent))?;
-    let home_removed = home.is_some_and(|h| std::fs::remove_dir_all(h).is_ok());
-    Ok(json!({
-        "session": session,
-        "agent": agent,
-        "slot_removed": slot_removed,
-        "home_removed": home_removed,
-    }))
-}
-
 pub fn set_autostart(id: &str, autostart: bool) -> Result<Value, String> {
     with_store(|store| {
         store.set_autostart(id, autostart)?;
         Ok(json!({ "id": id, "autostart": autostart }))
     })
-}
-
-/// The team a managed window was spawned as part of, read off its launch
-/// recipe — `None` for a solo agent or a pre-recipe home. The Hub groups
-/// same-team cards on this.
-pub fn team_of(workspace: Option<&str>, window_name: &str) -> Option<String> {
-    let recipe = agents::home_dir(workspace?, window_name)?.join("launch.json");
-    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(recipe).ok()?).ok()?;
-    let t = v.get("team")?.as_str()?.trim().to_string();
-    (!t.is_empty()).then_some(t)
 }
 
 // ---- central skills / MCP assets ----------------------------------------
@@ -1008,63 +942,6 @@ pub fn project_for_session(session: &str) -> Result<Option<store::Project>, Stri
         }
         store.project_by_prev_session(session)
     })
-}
-
-/// The isolated home of a MANAGED agent, or `None` when this window is not one.
-///
-/// This is THE definition of "an agent this app created", and it has to be one
-/// function because three unrelated places gate on it and they must not drift:
-/// `hub_agents` (who is a chat participant), `maybe_auto_post` (whose replies
-/// get posted to the room) and `deliver_mentions` (whose pane we are allowed to
-/// type into). The marker is the directory `spawn` materialized — a window the
-/// user started by hand can share a name with a registry agent, but it has no
-/// isolated home, and typing into it or publishing its replies would reach into
-/// a session this app does not own.
-///
-/// The name goes through `agents::home_dir`, so a window called `..` (or any
-/// other name that is not a plain word — see `agents::valid_name`) is never
-/// managed: `<ws>/.tmm/agents/../..` IS a directory — the workspace — and this
-/// function's answer is what authorises `agent_remove` to `remove_dir_all` it.
-pub fn managed_home(session: &str, window_name: &str) -> Option<std::path::PathBuf> {
-    let project = project_for_session(session).ok().flatten()?;
-    let dir = agents::home_dir(&project.path, window_name)?;
-    home_is_managed(&dir, window_name).then_some(dir)
-}
-
-/// Same question, when the caller already knows the workspace path (it is
-/// listing every window of one session and must not hit the store per row).
-pub fn is_managed_in(workspace: Option<&str>, window_name: &str) -> bool {
-    workspace
-        .and_then(|ws| agents::home_dir(ws, window_name))
-        .is_some_and(|dir| home_is_managed(&dir, window_name))
-}
-
-/// The marker itself (board #112): the home is managed iff it carries what
-/// SPAWN wrote — `launch.json` (every backend, written before the window
-/// exists), or the pre-recipe kiro `agents/<name>.json` (refresh_hooks only
-/// backfills the recipe at the next start, and a continuously-running old
-/// agent must not be demoted meanwhile; no CLI ever re-creates either file).
-/// The directory alone stopped being the marker on 2026-09-09: `agent_remove`
-/// deletes the home while the kiro process keeps running with its KIRO_HOME
-/// env, and its next write re-created the subtree (`settings/`, `sessions/`) —
-/// the gate said "managed" again for a window the user had removed, so
-/// stop-hook auto-post and `@all` delivery resumed for it (observed
-/// 2026-08-19).
-fn home_is_managed(dir: &std::path::Path, window_name: &str) -> bool {
-    dir.join("launch.json").is_file()
-        || dir.join("agents").join(format!("{window_name}.json")).is_file()
-}
-
-/// Who spawned this managed agent, read off its launch recipe. `None` means
-/// the human did — or the recipe predates the field / the agent is not
-/// managed — and in every one of those cases there is nobody to deliver a
-/// done summary to, which is the only question this answers.
-pub fn spawned_by(workspace: Option<&str>, window_name: &str) -> Option<String> {
-    let recipe = agents::home_dir(workspace?, window_name)?.join("launch.json");
-    let text = std::fs::read_to_string(recipe).ok()?;
-    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let by = v.get("spawned_by")?.as_str()?.trim().to_string();
-    (!by.is_empty()).then_some(by)
 }
 
 fn load(id: &str) -> Result<(Project, Vec<Slot>), String> {
@@ -1493,144 +1370,6 @@ pub(crate) mod tests {
         assert!(delete(&id).is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn removing_an_agent_drops_its_slot_and_home() {
-        use_test_store();
-        let dir = std::env::temp_dir().join(format!("tmm-rm-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.to_string_lossy().to_string();
-        let made = create(&path, Some("rmtest"), None, None).unwrap();
-        let id = made.get("id").and_then(|v| v.as_str()).unwrap().to_string();
-        let session = made.get("session").and_then(|v| v.as_str()).unwrap().to_string();
-
-        // A managed agent: a slot in the declaration plus the isolated home
-        // that makes it "ours" — marked by the recipe spawn always writes
-        // (board #112: the directory alone is not the marker).
-        let home = dir.join(".tmm").join("agents").join("dev");
-        std::fs::create_dir_all(&home).unwrap();
-        std::fs::write(home.join("launch.json"), "{}").unwrap();
-        with_store(|store| {
-            store.replace_slots(&id, &[store::Slot {
-                id: None, ord: 0, window_name: "dev".into(), cwd: String::new(),
-                kind: store::SlotKind::Agent, command: Some("kiro".into()),
-                auto_run: true, agent_session_id: None,
-                first_seen_at: now(), settled_at: Some(now()),
-            }])
-        })
-        .unwrap();
-
-        let r = agent_remove(&session, "dev").unwrap();
-        assert_eq!(r.get("slot_removed").and_then(|v| v.as_bool()), Some(true));
-        assert_eq!(r.get("home_removed").and_then(|v| v.as_bool()), Some(true));
-        assert!(!home.exists());
-        // `up` must not bring it back: the slot is gone from the declaration.
-        let slots = with_store(|store| store.slots(&id)).unwrap();
-        assert!(!slots.iter().any(|s| s.window_name == "dev"), "slot is gone");
-        // A name that was never ours is rejected rather than half-handled.
-        assert!(agent_remove(&session, "nope").is_err());
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// `agent_remove("../..")` used to resolve `<ws>/.tmm/agents/../..` — the
-    /// workspace itself, which `is_dir()` — and hand it to `remove_dir_all`.
-    /// The name rule (`agents::valid_name`) refuses before any lookup, and the
-    /// two "is it managed" gates answer no for the same names.
-    #[test]
-    fn a_name_that_is_a_path_removes_nothing() {
-        use_test_store();
-        let dir = std::env::temp_dir().join(format!("tmm-rmpath-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.to_string_lossy().to_string();
-        let made = create(&path, Some("rmpath"), None, None).unwrap();
-        let session = made["session"].as_str().unwrap().to_string();
-        std::fs::write(dir.join("user-file.txt"), "precious").unwrap();
-        let home = dir.join(".tmm").join("agents").join("dev");
-        std::fs::create_dir_all(&home).unwrap();
-
-        for bad in ["../..", "..", ".", "dev/../..", "a b", "-dev", "dev.json"] {
-            let err = agent_remove(&session, bad).unwrap_err();
-            assert!(err.contains("agent name"), "{bad:?} is refused by the name rule, got: {err}");
-            assert!(managed_home(&session, bad).is_none(), "{bad:?} is never a managed home");
-            assert!(!is_managed_in(Some(&path), bad), "{bad:?} is never managed");
-        }
-        assert!(dir.join("user-file.txt").exists(), "the workspace survived");
-        assert!(home.exists(), "the real agent's home survived");
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// A STOPPED agent is the ordinary case: no window, no reason its home has
-    /// to be intact, but a slot that keeps `up` recreating it. Requiring a
-    /// managed home made those unremovable (owner, 2026-08-19).
-    #[test]
-    fn a_stopped_agent_can_be_removed_by_its_declaration_alone() {
-        use_test_store();
-        let dir = std::env::temp_dir().join(format!("tmm-rmstop-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let made = create(&dir.to_string_lossy(), Some("rmstop"), None, None).unwrap();
-        let id = made["id"].as_str().unwrap().to_string();
-        let session = made["session"].as_str().unwrap().to_string();
-        let slot = |name: &str| store::Slot {
-            id: None, ord: 0, window_name: name.into(), cwd: String::new(),
-            kind: store::SlotKind::Agent, command: Some("kiro".into()),
-            auto_run: true, agent_session_id: None,
-            first_seen_at: now(), settled_at: Some(now()),
-        };
-        // Declared, never started (or started and stopped): no home on disk.
-        with_store(|store| store.replace_slots(&id, &[slot("ghost")])).unwrap();
-        assert!(managed_home(&session, "ghost").is_none(), "no home — that is the point");
-
-        let r = agent_remove(&session, "ghost").unwrap();
-        assert_eq!(r["slot_removed"].as_bool(), Some(true), "the declaration is what we can remove");
-        assert_eq!(r["home_removed"].as_bool(), Some(false), "there was nothing to delete");
-        let slots = with_store(|store| store.slots(&id)).unwrap();
-        assert!(slots.is_empty(), "`up` cannot bring it back");
-        // Nothing left of it anywhere: now it IS an unknown name.
-        assert!(agent_remove(&session, "ghost").is_err());
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// The one definition of "an agent this app created". Three gates share it
-    /// (chat participants, stop-hook auto-post, pane delivery), so it is worth
-    /// a test of its own: the marker is the isolated home `spawn` materialized,
-    /// NOT the window name — a hand-started window may share the name.
-    #[test]
-    fn managed_is_the_recipe_not_the_directory() {
-        let ws = std::env::temp_dir().join(format!("tmm-managed-{}", uuid::Uuid::new_v4()));
-        let path = ws.to_string_lossy().to_string();
-        // spawn writes launch.json for every backend before the window exists —
-        // THAT is the marker, not the directory.
-        std::fs::create_dir_all(ws.join(".tmm/agents/dev")).unwrap();
-        std::fs::write(ws.join(".tmm/agents/dev/launch.json"), "{}").unwrap();
-        std::fs::write(ws.join(".tmm/agents/dev/launch.json"), "{}").unwrap();
-        assert!(is_managed_in(Some(&path), "dev"), "spawn materialized this one");
-        assert!(!is_managed_in(Some(&path), "byhand"), "same session, no isolated home");
-        assert!(!is_managed_in(None, "dev"), "a session with no project owns nothing");
-        // The board #112 re-arm: agent_remove deleted the home, but the still-
-        // running kiro process re-creates its KIRO_HOME subtree (settings/,
-        // sessions/) on its next write. A directory without a recipe is a
-        // GHOST, never a managed agent (observed 2026-08-19).
-        std::fs::create_dir_all(ws.join(".tmm/agents/removed/settings")).unwrap();
-        std::fs::write(ws.join(".tmm/agents/removed/settings/cli.json"), "{}").unwrap();
-        assert!(
-            !is_managed_in(Some(&path), "removed"),
-            "a CLI-recreated subtree must not re-arm the gate"
-        );
-        // Pre-recipe kiro homes (spawned before launch.json existed) keep their
-        // agents/<name>.json config; refresh_hooks only backfills the recipe at
-        // the NEXT start, so a continuously-running old agent must not be
-        // demoted meanwhile.
-        std::fs::create_dir_all(ws.join(".tmm/agents/old/agents")).unwrap();
-        std::fs::write(ws.join(".tmm/agents/old/agents/old.json"), "{}").unwrap();
-        assert!(is_managed_in(Some(&path), "old"), "pre-recipe kiro home stays managed");
-        // A file where the directory should be is not a home either.
-        std::fs::write(ws.join(".tmm/agents/file"), "x").unwrap();
-        assert!(!is_managed_in(Some(&path), "file"));
-        let _ = std::fs::remove_dir_all(&ws);
     }
 
     #[test]
