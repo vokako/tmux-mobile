@@ -287,3 +287,71 @@ test('the Ctrl one-shot lives in terminal-keyboard.ts; ctrlArmed is only its mir
   // The armed state is visible on the bar and drops with the expiry.
   assert.match(source, /<button class="modifier" class:active=\{ctrlArmed\} aria-pressed=\{ctrlArmed\}/u);
 });
+
+// #139: characterize the existing boundaries before extracting the gesture
+// decisions. These protect wiring, not Android touch/IME or measured geometry.
+test('mobile inputmode stays text while the keyboard lock gates focus (#139)', () => {
+  assert.match(source, /kbTa\.setAttribute\('inputmode', 'text'\);/u);
+  assert.doesNotMatch(source, /setAttribute\('inputmode', 'none'\)/u,
+    'the old none/text toggle broke the first Android InputConnection');
+  const focus = source.slice(source.indexOf('onTaFocus = () =>'), source.indexOf("kbTa.addEventListener('focus'"));
+  assert.match(focus, /if \(kbLocked\) \{[\s\S]*?kbTa\.blur\(\);\s*return;/u);
+});
+
+test('touch priority, passive options and cleanup keep the current owner (#139)', () => {
+  const start = source.slice(source.indexOf('const onTouchStart ='), source.indexOf('const findTouch ='));
+  const priorities = ['isOnToolbar(e.target)', 'hitHandle(cx, cy)', 'onScrollbar =', "touchMode = 'down'"]
+    .map((text) => start.indexOf(text));
+  assert.ok(priorities.every((index) => index >= 0));
+  assert.deepEqual(priorities, [...priorities].sort((a, b) => a - b),
+    'toolbar and handles win over the scrollbar and body gesture');
+  for (const [event, handler, passive] of [
+    ['touchstart', 'onTouchStart', true], ['touchmove', 'onTouchMove', false],
+    ['touchend', 'onTouchEnd', false], ['touchcancel', 'onTouchCancel', true],
+  ] as const) {
+    assert.ok(source.includes(`termEl.addEventListener('${event}', ${handler}, { passive: ${passive} });`));
+    assert.ok(source.includes(`termEl.removeEventListener('${event}', ${handler});`));
+  }
+});
+
+test('selection uses inclusive buffer endpoints and cannot release its rendering pin (#139)', () => {
+  const apply = /function applySelectionToXterm\(\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1] ?? '';
+  assert.match(apply, /isApplyingSelection = true;/u);
+  assert.match(apply, /\(b\.row - a\.row\) \* term\.cols \+ \(b\.col - a\.col \+ 1\)/u);
+  assert.match(apply, /finally \{\s*isApplyingSelection = false;/u);
+  const adopt = source.slice(source.indexOf('const onSelChange ='), source.indexOf('let followedTailBeforeHide'));
+  assert.match(adopt, /if \(isApplyingSelection\) return;/u);
+  assert.match(adopt, /Math\.max\(0, pos\.end\.x - 1\)/u,
+    'pin the existing end.x=0 clamp; correcting it is not a mechanical move');
+  const end = /function endTouchScroll\(\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1] ?? '';
+  assert.match(end, /if \(selection\) return;\s*touchScrolling = false;/u);
+  const cancel = source.slice(source.indexOf('const onTouchCancel ='), source.indexOf("termEl.addEventListener('touchstart'"));
+  assert.doesNotMatch(cancel, /clearSelection\(\)/u, 'touchcancel commits the latest endpoint, not a selection clear');
+  assert.match(cancel, /stopMomentum\(\);\s*stopEdgeScroll\(\);/u);
+});
+
+test('endpoint grab fixes the far endpoint and compensates both coordinates (#139)', () => {
+  const grab = /function beginEndpointDrag\(which\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1] ?? '';
+  assert.match(grab, /\? \{ anchor: \{ \.\.\.b \}, head: \{ \.\.\.a \} \}\s*: \{ anchor: \{ \.\.\.a \}, head: \{ \.\.\.b \} \}/u);
+  assert.match(source, /selection = \{ anchor: selection\.anchor, head: \{ row: bufRow, col \} \};/u);
+  assert.match(source, /handleGrabDx = cx - epCenterX;\s*handleGrabDy = cy - epCenterY;/u);
+  assert.match(source, /lastDragX = t0\.clientX - handleGrabDx;\s*lastDragY = t0\.clientY - handleGrabDy;/u);
+  assert.match(source, /const HIT_HALF_W = 28;/u);
+  assert.match(source, /const HIT_DOT_PAD = 22;/u);
+  assert.match(source, /const midX = sameRow \? \(selUI\.startX \+ selUI\.endX\) \/ 2 : null;/u);
+  assert.match(source, /\.sel-handle \{[^}]*width: 0; height: 0;/u,
+    'the CSS anchor is not the old 44px hit wrapper');
+  assert.match(source, /\.sel-handle::after \{[^}]*width: 12px;\s*height: 12px;/u);
+});
+
+test('gesture motion keeps signed remainder and the measured fixed-frame rules (#139)', () => {
+  assert.match(source, /const MOMENTUM_MAX_PX = 240;/u);
+  assert.match(source, /const MOMENTUM_FRICTION = 0\.95;/u);
+  assert.match(source, /const MOMENTUM_MIN_V = 0\.05;/u);
+  assert.match(source, /velocitySamples\.length > 5 \|\| \(velocitySamples\.length > 1 && now - velocitySamples\[0\]\.t > 100\)/u);
+  assert.match(source, /const lines = Math\.trunc\(accumulatedDy \/ lh\);/u);
+  assert.match(source, /accumulatedDy -= lines \* lh;/u);
+  assert.match(source, /v \*= friction;\s*acc \+= v;\s*const lines = Math\.trunc\(acc\);/u);
+  assert.match(source, /const EDGE_SCROLL_ZONE_PX = 36;/u);
+  assert.match(source, /const speed = 0\.25 \+ \(1 - Math\.min\(1, dist \/ EDGE_SCROLL_ZONE_PX\)\) \* 1\.75;/u);
+});
