@@ -23,7 +23,7 @@ You're running [Kiro CLI](https://kiro.dev), Claude Code, or any coding agent in
 - **Terminal view** — watch and interact with your tmux session right from your phone, with touch scrolling, on-screen shortcut keys, and quick window switching
 - **File browser** — browse, preview, and edit project files from the phone, bookmark the directories you visit often, and run common git actions in place
 - **Sessions** — browse all tmux sessions/windows/panes, create or kill sessions, pull-to-refresh
-- **Team (multi-agent)** — spin up a roster of coding agents (Kiro / Claude Code / Codex / Grok / OMP) that collaborate in a shared group chat; watch them work live, tap any agent to preview its pane
+- **Hub (multi-agent)** — one chat room per project: spawn coding agents (Kiro / Claude Code / Codex / Grok / OMP) or whole configured teams, talk to them with `@name`/`@all`, follow their derived status live, and manage the project task board
 - **Settings** — terminal font/family/line-spacing controls, native desktop interface scaling, light/dark/auto theme, language switching (EN/中文), connection info, and diagnostics
 - **Named servers** — save several server machines, switch from the desktop rail, and restore each server's own page/terminal state; each machine still keeps its LAN/Tailscale/WAN failover addresses together
 - **Message alerts** — an away running client can play a cue and, when permitted, use system Web Notifications; replay/history batches are deduplicated
@@ -114,21 +114,6 @@ Browse the project on your Mac from the phone:
 - On macOS, Cmd `+` / `-` / `0` scales the complete interface; terminal font size remains an independent setting
 - Reload the page and you come back to where you were — same session, same view
 - Works with a custom tmux socket if you use `-S`
-
-### Team (multi-agent)
-
-<img width="3232" height="1816" alt="longshot_2235-2248_2x" src="https://github.com/user-attachments/assets/095b0a83-2e09-4cec-8f00-0861a2a97cee" />
-
-Spin up a **roster of coding agents** that collaborate on a shared task and watch
-them work from your phone. Desktop-server only (the agent bus runs in-process).
-
-![Team architecture](docs/design-docs/features/team-architecture.svg)
-
-- **One group chat, many agents** — you and several agents (Kiro CLI / Claude Code / Codex / Grok) work in the same conversation. Talk to one with `@name`; use `@all` when every agent must reply. Each agent has its own pane, so you can tap any of them to watch what it's doing live.
-- **One team per project folder** — bind a team to a working directory; run several teams in parallel for different projects, each kept neatly separate.
-- **Ready-made and your own** — start from a built-in roster (`mixed-engineering` combines Kiro, Claude, and Codex; `software-dev` covers a larger delivery team; research/content/data rosters are also included), or design your own team — pick the roles, goals, tools, and skills you want — directly in the in-app template editor.
-- **A live collaboration graph** — a ring of participants with breathing, status-coloured nodes; arcs trace the messages between them.
-- **They keep themselves alive** — agents quietly report whether they're idle, thinking, working, or stuck; the system nudges a stuck one back on track automatically.
 
 ## npm Scripts
 

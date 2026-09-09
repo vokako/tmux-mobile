@@ -9,12 +9,11 @@
 
 ## A · 信条落地（P0）
 
-- [ ] **删除桌面 Team / agora 总线，不留冗余**（所有者 2026-09-09）。范围：`src-tauri/crates/agora/`
-  (2547 行)、`src-tauri/src/team/`、`team_bridge.rs`、`server/team_rpc.rs`、`src/lib/team/`、
-  `team/` 目录（hooks、templates）、`TEAM_*` 配置、README Team 段、`docs/design-docs/features/team.md`
-  与 `exec-plans/team-*.md`（归档为历史）。**前置**：`projects/` 借用 `team::backends_shared`
-  （3 处）与 `team::skills`（18 处），`team/backends.rs` 1185 行同时服务两套系统——先把这些
-  搬到中立模块（如 `projects/backends/shared.rs`、`projects/skills.rs`）。
+- [x] **删除桌面 Team / agora 总线，不留冗余**（所有者 2026-09-09；board #100/#107，2026-09-09 完成）。
+  前置搬移落在 `projects/backends/shared.rs` 与 `projects/skills.rs`；Hub 消息底座迁入
+  state.db `hub_msgs`（`projects/rooms.rs`，含 proj:* 历史一次性导入）；agora crate、
+  `src-tauri/src/team/`、`team_bridge.rs`、`server/team_rpc.rs`、`src/lib/team/`、`team/`
+  目录与 `TEAM_*` 配置整体删除；`team.md` 等归档进 `exec-plans/`。
 - [ ] **后端知识集中**：一个 `Backend` trait/enum，每个后端一个文件，集中检测 needle、启动命令、
   resume 方言、render、装 hooks、读 hooks 载荷、effort 枚举、状态行 sniff、图标与颜色名。
   `materialize`/`refresh_hooks`/`normalize`/`resume_command` 退化为 trait 调用；前端从服务器取

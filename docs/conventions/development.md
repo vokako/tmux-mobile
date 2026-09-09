@@ -64,8 +64,8 @@ to run the Rust tests anywhere, because none of them touch the Tauri shell.
 
 Two things the gate has to preserve, both easy to break:
 - `build.rs` emits the `desktop` / `mobile` cfg aliases itself when `gui` is
-  off. They are not cosmetic — `mod team_bridge`, `mod team` and the `Config`
-  import are gated on `desktop`. It cannot just call `tauri_build::build()`,
+  off. They are not cosmetic — the `Config` import (and other desktop-only
+  items) are gated on `desktop`. It cannot just call `tauri_build::build()`,
   which panics looking for the `cargo:dev` instruction `tauri`'s own build
   script would have emitted.
 - The `tmux-mobile` bin still has to compile, so `main.rs` keeps a stub `main`
@@ -158,7 +158,6 @@ tmux new-session -d -s test
 npm run test:rust
 ```
 Rust tests are sequential (shared tmux state), spread across `src-tauri/src/*.rs`
-(`main.rs`, `tmux.rs`, `team_bridge.rs`, and the `server/` and `team/`
-modules — unit tests live in the submodule they test) plus
-`src-tauri/crates/agora/tests/`. Frontend tests: `npm test` (node --test,
+(`main.rs`, `tmux.rs`, and the `server/` and `projects/` modules — unit tests
+live in the submodule they test). Frontend tests: `npm test` (node --test,
 `src/**/*.test.{js,ts}`, no tmux needed; conventions in

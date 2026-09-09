@@ -93,8 +93,8 @@
 
 ## Team feature
 
-### Team delivery cursor advances before client acknowledgement
-- **Priority**: Medium · **Area**: Team / agora bus
+### Team delivery cursor advances before client acknowledgement — RESOLVED (board #100: the Team/agora bus was deleted whole)
+- **Priority**: Medium · **Area**: Team / agora bus (retired)
 - `Bus::wait` advances an agent's SQLite cursor before the MCP HTTP response is
   delivered. If the connection drops after cursor advancement but before the
   Agent CLI receives the ToolResult, reconnecting `wait` skips that message.
@@ -138,8 +138,8 @@
   recent heartbeat) before marking launched; otherwise kill the bare window
   and relaunch through the normal failure-counting path.
 
-### Manager hire() launches on a hardcoded backend, no model/x-room nuance
-- **Priority**: Low · **Area**: Team / agora hire + supervisor
+### Manager hire() launches on a hardcoded backend, no model/x-room nuance — RESOLVED (board #100: the Team/agora bus was deleted whole)
+- **Priority**: Low · **Area**: Team / agora hire + supervisor (retired)
 - `agora::bus::hire` seeds an employee with `backend` absent; our supervisor
   defaults hires to "kiro" (the recovery/seed path) — a hire can't pick
   claude/codex, and the hired spec has no `model`. Acceptable for now; revisit
@@ -250,7 +250,7 @@ left them, each for a stated reason:
   diagram, and the Hub. The browser/PWA build has no CSP header at all.
 - **`hub_rpc.rs` is one 750-line `match`** mixing dispatch, delivery and
   board-notice policy; the `require_str → match → Response::err` boilerplate
-  repeats ~40× across `rpc.rs`/`hub_rpc.rs`/`team_rpc.rs` and would collapse
+  repeats ~40× across `rpc.rs`/`hub_rpc.rs` and would collapse
   under a `?`-returning inner fn like `handle_project_request` already has.
   Same class: `store.rs` 2665 / `projects/mod.rs` 2121 / `spawn.rs` 1888
   lines with clean cuts (store → projects/registry/board/activity; mod.rs

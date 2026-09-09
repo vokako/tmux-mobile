@@ -40,7 +40,6 @@ const msgs: Record<string, Record<string, string>> = {
     editorWrap: 'Wrap lines',
     editorNoWrap: 'No wrap',
     previewShowAllLines: 'Show all {n} lines',
-    team: 'Team',
     groupSessions: 'Sessions',
     // Projects: a workspace declaration you can close and reopen.
     projects: 'Projects',
@@ -582,7 +581,6 @@ const msgs: Record<string, Record<string, string>> = {
     editorWrap: '自动换行',
     editorNoWrap: '不换行',
     previewShowAllLines: '显示全部 {n} 行',
-    team: '团 队',
     groupSessions: '会话',
     projects: '项目',
     projectUp: '打开',

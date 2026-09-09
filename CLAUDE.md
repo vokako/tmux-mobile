@@ -50,10 +50,10 @@ WebSocket JSON-RPC with token auth + optional E2E encryption. Targets: Android
 (primary), macOS desktop, browser/PWA.
 
 - **Frontend**: Svelte 5 runes (`$state`, `$derived`, `$effect`, `$props`), Vite 6, TypeScript (migration in progress), xterm.js v6
-- **Backend**: Rust (Tauri 2), tokio, tokio-tungstenite, rusqlite (`state.db`), vendored `agora` bus (`team.db`)
+- **Backend**: Rust (Tauri 2), tokio, tokio-tungstenite, rusqlite (`state.db`)
 - **Preview / rendering**: highlight.js, marked (+ KaTeX in chat), mermaid, pdfjs-dist
 - **Agent side**: the `tmm` CLI (`src-tauri/src/bin/tmm.rs`) + hooks telemetry; no MCP for the integration itself
-- **Layout**: `src/lib/{app,core,files,hub,projects,sessions,system,team,terminal,ui}` · `src-tauri/src/{server,projects,team,bin}` (backend map: [docs/reference/backend-map.md](docs/reference/backend-map.md))
+- **Layout**: `src/lib/{app,core,files,hub,projects,sessions,system,terminal,ui}` · `src-tauri/src/{server,projects,bin}` (backend map: [docs/reference/backend-map.md](docs/reference/backend-map.md))
 
 ## Commands
 
@@ -90,7 +90,6 @@ Each links to the doc that holds the reason and the details.
 12. **Delivery is typing into a pane**: `@name` types into one agent, `@all` into every managed agent, no recipient records only; a Team agent also gets the routed room delta since its previous delivery as background; a `/command` goes verbatim to the CLI; `Escape` is the only interrupt. → [hub-composer.md](docs/design-docs/features/hub-composer.md)
 13. **Chat markdown escapes `&` and `<`, never `>`**; images are references, never bytes; messages are not deletable in the UI. → [conventions/frontend.md](docs/conventions/frontend.md), [hub-feed.md](docs/design-docs/features/hub-feed.md)
 14. **CLI/UI parity**: every project/agent/board verb exists as a `tmm` command, because an agent that can only be managed by a human cannot manage a teammate. → [tmm-cli.md](docs/design-docs/features/tmm-cli.md)
-15. **Team is desktop-only and JSON-gated**: `server/` never names an agora type; mobile passes `None`. → [team.md](docs/design-docs/features/team.md)
 
 ## Documentation map
 
@@ -107,7 +106,7 @@ Each links to the doc that holds the reason and the details.
 | `docs/todo.md` · `docs/unresolved.md` | the gap between tenets and code; known open problems | before filing a duplicate |
 
 ### Requirements (the WHAT)
-- Pages: [Terminal](docs/requirements/pages/terminal.md) · [File Browser](docs/requirements/pages/file-browser.md) · [Sessions](docs/requirements/pages/sessions.md) · [Settings](docs/requirements/pages/settings.md) · [Hub (chat, agents, board)](docs/requirements/pages/hub.md) · [Team](docs/requirements/pages/team.md)
+- Pages: [Terminal](docs/requirements/pages/terminal.md) · [File Browser](docs/requirements/pages/file-browser.md) · [Sessions](docs/requirements/pages/sessions.md) · [Settings](docs/requirements/pages/settings.md) · [Hub (chat, agents, board)](docs/requirements/pages/hub.md)
 - Features: [i18n](docs/requirements/features/i18n.md) · [Message notifications](docs/requirements/features/notifications.md) · [System status](docs/requirements/features/system-status.md)
 - Contracts: [WebSocket RPC API](docs/requirements/api-contracts/websocket-rpc.md) · [WebSocket server](docs/requirements/backend/services/websocket-server.md) · [tmux wrapper](docs/requirements/backend/services/tmux-wrapper.md) · [Filesystem service](docs/requirements/backend/services/filesystem.md)
 
@@ -121,7 +120,7 @@ Each links to the doc that holds the reason and the details.
 
 ### Design — projects, agents, hub
 - [Projects (declarative workspaces)](docs/design-docs/features/projects.md) · [Agents overview (CLI substrate, hooks, isolated homes, registry)](docs/design-docs/features/agents-overview.md) · [Agent status (derived state, deliveries, vitals, recovery)](docs/design-docs/features/agent-status.md) · [Agent lifecycle](docs/design-docs/features/agent-lifecycle.md) ([中文](docs/design-docs/features/agent-lifecycle.zh.md)) · [Agent notifications (hooks)](docs/design-docs/features/agent-notifications.md)
-- [tmm CLI (the agent's hands — exhaustive)](docs/design-docs/features/tmm-cli.md) · [Agent teams (§ in agents overview)](docs/design-docs/features/agents-overview.md#agent-teams-board-74) · [Hub feed](docs/design-docs/features/hub-feed.md) · [Hub composer](docs/design-docs/features/hub-composer.md) · [Task board](docs/design-docs/features/board.md) · [Team (multi-agent bus)](docs/design-docs/features/team.md)
+- [tmm CLI (the agent's hands — exhaustive)](docs/design-docs/features/tmm-cli.md) · [Agent teams (§ in agents overview)](docs/design-docs/features/agents-overview.md#agent-teams-board-74) · [Hub feed](docs/design-docs/features/hub-feed.md) · [Hub composer](docs/design-docs/features/hub-composer.md) · [Task board](docs/design-docs/features/board.md)
 
 ### Conventions, reference, history
 - [Development (commands, dev loop, build gotchas)](docs/conventions/development.md) · [Frontend conventions](docs/conventions/frontend.md) · [Testing](docs/conventions/testing.md)

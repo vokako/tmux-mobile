@@ -118,16 +118,14 @@ Rejected: too much magic, too many false groupings, and users with a flat
 naming scheme get no benefit. The search box subsumes this: if you prefix
 your sessions `work-`, typing `work` already filters them.
 
-**Exception — Teams grouping (added 2026-07).** Team sessions
-(`tmm-team-<room>`, created by the team bus) ARE split into a labelled
-"Teams" group above "Sessions". This does not reopen the rejection above:
-the prefix here is not a user naming heuristic but an app-owned protocol
-(the server creates these names, `src-tauri/src/team/workspace.rs`), classification
-is additionally gated on the server actually having the team bus
-(`teamState.available` in `src/lib/core/team.svelte.ts` — shared with
-PanePicker so all surfaces agree), and the rows behave differently (tap →
-Team chat, not a terminal), so mixing them into the flat list would mislead.
-False groupings are impossible short of a user hand-naming a session
+**Exception, retired — Teams grouping (added 2026-07, removed 2026-09-09
+with the Team system, board #100).** Team sessions (`tmm-team-<room>`) were
+split into a labelled "Teams" group above "Sessions". It did not reopen the
+rejection above because the prefix was an app-owned protocol, not a user
+naming heuristic — the record stays because that distinction is the rule
+this section teaches. With the Team feature deleted no such sessions exist
+and the list is flat again.
+False groupings were impossible short of a user hand-naming a session
 `tmm-team-*` on a bus-enabled server.
 
 ### "Task board" view with per-session cards & live previews
