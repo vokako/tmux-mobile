@@ -1,10 +1,45 @@
 # AGENTS.md — tmux-mobile
 
-This file is the MAP, not the manual. It says what the project is, the dozen
-rules every change must respect, and where everything else is written down.
-A rule belongs next to the design it protects (`docs/design-docs/…`), never
-here: when you verify a change, update that design doc and commit together.
-(`AGENTS.md` is a symlink to this file — they are one document.)
+This file is the MAP, not the manual. It says why the project exists, the
+tenets every decision answers to, the rules every change must respect, and
+where everything else is written down. A rule belongs next to the design it
+protects (`docs/design-docs/…`), never here: when you verify a change, update
+that design doc and commit together. (`AGENTS.md` is a symlink to this file —
+they are one document.)
+
+## Tenets
+
+We are a **shell, not an engine**. tmux owns processes and sessions, the agent
+CLIs (kiro, claude, codex, grok, omp) own intelligence and their own harness,
+MCP and skills own tools. We own four things — the **connection**, the
+**room**, the **identity**, the **window** — and a person can always walk back
+to the terminal and take over. Full text with reasons and evidence:
+[docs/tenet.md](docs/tenet.md) · per-dimension rules and review checklists:
+[docs/guidance/](docs/guidance/) · the gap between them and today's code:
+[docs/todo.md](docs/todo.md).
+
+**How we think**
+1. **First principles.** Name the root cause and the layer it lives in before touching code; a fix for a symptom returns wearing another face. → [code-quality](docs/guidance/code-quality.md)
+
+**What we are**
+2. **A shell, not an engine.** Reach the CLI through its documented doors (env, config files, hooks, flags); never rebuild what tmux or a CLI already does. Adding a backend touches one file. → [architecture](docs/guidance/architecture.md)
+3. **The real CLI in a real pane.** No ACP-style invisible wrapper, no modified harness; we only watch through hooks and type into the pane, and a human can take over any session at any time. → [agent-bridge](docs/guidance/agent-bridge.md)
+4. **No central node.** Sessions live in tmux; if our server dies, every agent and every human keeps working. `tmm` never blocks. → [architecture](docs/guidance/architecture.md)
+5. **One native bridge, three primitives.** Text typed into a pane, hooks observed, `tmm` invoked by the agent — for human↔agent and agent↔agent alike. One room; humans and agents read the same record. → [agent-bridge](docs/guidance/agent-bridge.md)
+6. **CLI first.** Whatever a human can do in the UI an agent can do with `tmm`: read the room, see who is working, spawn and stop teammates. A command that no agent needs is not added. → [agent-bridge](docs/guidance/agent-bridge.md)
+
+**How we build**
+7. **Declaration is truth; the running state is a disposable projection.** state.db and `<ws>/.tmm/` are the only stores; everything else can be killed and rebuilt idempotently. → [architecture](docs/guidance/architecture.md)
+8. **Derive, never declare.** Status comes from turn edges, not pane activity or an agent's own words; one definition function per concept; inputs validated once, at the door. → [architecture](docs/guidance/architecture.md) · [security](docs/guidance/security.md)
+9. **One mechanism per job.** A second implementation drifts silently; a new visual species is a regression. Delete before you add. → [code-quality](docs/guidance/code-quality.md)
+10. **Two screens, one standard.** Phone and desktop each get a complete form of one design language; beauty, usability and guiding motion are function, not polish. → [ui-design](docs/guidance/ui-design.md)
+11. **Restraint.** Fewer words, fewer buttons, fewer rules; a replaced mechanism is removed whole. → [ui-design](docs/guidance/ui-design.md) · [code-quality](docs/guidance/code-quality.md)
+
+**How we work**
+12. **Rules live with their design, with the reason and the incident.** Measure on the real version, write the version down; a rule that can be a test is a test. → [process](docs/guidance/process.md)
+13. **Isolate, verify, commit small.** One worktree per task, one idea per commit, docs and tests in the same commit; discuss before large changes. → [process](docs/guidance/process.md)
+
+The non-negotiables below are the tenets' enforced, mechanizable form.
 
 ## What this is
 
@@ -63,12 +98,13 @@ Each links to the doc that holds the reason and the details.
 
 | directory | answers | when to read |
 |---|---|---|
+| `docs/tenet.md` · `docs/guidance/` | WHY we exist and what every decision answers to; per-dimension rules + review checklists | before any design decision, and when reviewing |
 | `docs/requirements/` | WHAT the product does (pages, features, API contracts, backend services) | before changing behaviour a user sees |
 | `docs/design-docs/` | WHY it is built this way and HOW — `features/` cross-cutting, `pages/` per screen; each ends with **Rules and their reasons** | before touching that area |
 | `docs/conventions/` | how we WORK: development loop, frontend rules, testing | first day, and whenever a build misbehaves |
 | `docs/reference/` | FACTS to look up: configuration keys, the backend module map | when configuring or deploying |
 | `docs/exec-plans/` | HISTORY: dated plans and prototypes that led here | to understand a past decision |
-| `docs/unresolved.md` | known open problems | before filing a duplicate |
+| `docs/todo.md` · `docs/unresolved.md` | the gap between tenets and code; known open problems | before filing a duplicate |
 
 ### Requirements (the WHAT)
 - Pages: [Terminal](docs/requirements/pages/terminal.md) · [File Browser](docs/requirements/pages/file-browser.md) · [Sessions](docs/requirements/pages/sessions.md) · [Settings](docs/requirements/pages/settings.md) · [Hub (chat, agents, board)](docs/requirements/pages/hub.md) · [Team](docs/requirements/pages/team.md)
