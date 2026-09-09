@@ -105,14 +105,14 @@ impl AgentNotificationHub {
 
     /// Record who should receive this turn's final reply. Human requests need
     /// no pane delivery; the Hub already shows the room.
-    fn start_turn(&self, session: &str, window: usize, prompt: &str) {
+    fn start_turn(&self, session: &str, window: &str, prompt: &str) {
         self.state.lock().unwrap().reply_targets.insert(
             window_key(session, window),
             reply_targets(prompt),
         );
     }
 
-    fn take_reply_targets(&self, session: &str, window: usize) -> Vec<String> {
+    fn take_reply_targets(&self, session: &str, window: &str) -> Vec<String> {
         let key = window_key(session, window);
         if let Some(targets) = self.state.lock().unwrap().reply_targets.remove(&key) {
             return targets;
@@ -133,7 +133,7 @@ impl AgentNotificationHub {
     /// The agent conversation id last reported by a hook in this tmux window,
     /// if any. Used by the project capturer to stamp the slot, so `up` can
     /// resume that conversation rather than open a fresh one.
-    pub fn agent_session_for(&self, session: &str, window: usize) -> Option<String> {
+    pub fn agent_session_for(&self, session: &str, window: &str) -> Option<String> {
         self.state
             .lock()
             .ok()?
@@ -181,10 +181,10 @@ impl AgentNotificationHub {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 let (session, window, _) = tmux::resolve_pane_id(&envelope.pane_id)?;
-                crate::projects::telemetry::record_tool(&session, window, &tool, &detail);
+                crate::projects::telemetry::record_tool(&session, &window, &tool, &detail);
                 // The pane just painted a tool row — the freshest moment to
                 // read its status furniture. Throttled + async inside.
-                crate::projects::vitals::sniff_window_soon(&session, window);
+                crate::projects::vitals::sniff_window_soon(&session, &window);
             }
             return Ok(());
         }
@@ -196,12 +196,12 @@ impl AgentNotificationHub {
             let (session, window, _) = tmux::resolve_pane_id(&envelope.pane_id)?;
             if let Some(prompt) = envelope.payload.get("prompt").and_then(Value::as_str) {
                 if !prompt.trim().is_empty() {
-                    self.start_turn(&session, window, prompt);
-                    crate::projects::telemetry::record_prompt(&session, window, prompt);
+                    self.start_turn(&session, &window, prompt);
+                    crate::projects::telemetry::record_prompt(&session, &window, prompt);
                 }
             }
             // A turn just opened: sniff while the pane is fresh.
-            crate::projects::vitals::sniff_window_soon(&session, window);
+            crate::projects::vitals::sniff_window_soon(&session, &window);
             return Ok(());
         }
         // Claude's `idle_prompt` is a NUDGE, not an ask (board #75, measured
@@ -224,7 +224,7 @@ impl AgentNotificationHub {
         // restart the in-memory edge is gone, so the durable activity log
         // recovers the prompt newer than the previous turn end.
         let reply_to = if normalized.kind == "completed" {
-            self.take_reply_targets(&session, window)
+            self.take_reply_targets(&session, &window)
         } else {
             Vec::new()
         };
@@ -232,10 +232,10 @@ impl AgentNotificationHub {
         // concern; status derivation wants every observed fact.
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
-            crate::projects::telemetry::record_notification(&session, window, &normalized.kind, timestamp);
+            crate::projects::telemetry::record_notification(&session, &window, &normalized.kind, timestamp);
             // A turn edge (stop, ask) means the CLI just repainted its footer —
             // the context-usage number is at its freshest right here.
-            crate::projects::vitals::sniff_window_soon(&session, window);
+            crate::projects::vitals::sniff_window_soon(&session, &window);
         }
 
         // Stop hook final: record the answer and deliver it to the sender whose
@@ -246,7 +246,7 @@ impl AgentNotificationHub {
         //   3. `[reply]` inputs create no reverse edge, so delivery is one hop.
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         if normalized.kind == "completed" {
-            self.maybe_auto_post(&session, window, &normalized, &reply_to);
+            self.maybe_auto_post(&session, &window, &normalized, &reply_to);
         }
 
         // Remember the agent's own conversation id (even across duplicate
@@ -261,7 +261,7 @@ impl AgentNotificationHub {
                 .lock()
                 .unwrap()
                 .sessions
-                .insert(window_key(&session, window), id);
+                .insert(window_key(&session, &window), id);
         }
         Ok(())
     }
@@ -272,7 +272,7 @@ impl AgentNotificationHub {
     fn maybe_auto_post(
         &self,
         session: &str,
-        window: usize,
+        window: &str,
         normalized: &Normalized,
         reply_to: &[String],
     ) {
@@ -284,13 +284,11 @@ impl AgentNotificationHub {
         // Constraint 3: managed-only gate. `projects::managed_home` is the ONE
         // definition of "an agent this app created" — shared with hub_agents'
         // participant list and with delivery, so the three cannot drift apart.
-        let window_name = match tmux::list_panes(session).ok().and_then(|panes| {
-            panes.into_iter().find(|p| p.window == window).map(|p| p.window_name)
-        }) {
-            Some(n) => n,
-            None => return, // session or window vanished between hook and poll
-        };
-        if crate::projects::managed_home(session, &window_name).is_none() {
+        // The resolved window IS the name now (board #120), so the old
+        // index → list_panes → name round-trip (which lost the post when a
+        // rename landed between hook fire and consume) is gone.
+        let window_name = window;
+        if crate::projects::managed_home(session, window_name).is_none() {
             return;
         }
         // Truncate at the chat-path budget.
@@ -409,7 +407,7 @@ exit 0
 /// names the notification types — it only knows its own trait.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl crate::projects::capture::AgentSessions for AgentNotificationHub {
-    fn agent_session_for(&self, session: &str, window: usize) -> Option<String> {
+    fn agent_session_for(&self, session: &str, window: &str) -> Option<String> {
         AgentNotificationHub::agent_session_for(self, session, window)
     }
 }
@@ -667,7 +665,7 @@ fn truncate(input: &str, max: usize) -> String {
     out
 }
 
-fn window_key(session: &str, window: usize) -> String {
+fn window_key(session: &str, window: &str) -> String {
     format!("{session}:{window}")
 }
 fn unix_seconds() -> u64 {
@@ -996,7 +994,7 @@ mod tests {
         assert!(!root.join("unread.json").exists(), "legacy file removed at load");
         assert!(root.join("inbox").is_dir(), "the hook inbox is still provisioned");
         // The surviving surfaces still answer.
-        assert!(hub.agent_session_for("none", 0).is_none());
+        assert!(hub.agent_session_for("none", "w0").is_none());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -1336,7 +1334,7 @@ mod tests {
         let hub = AgentNotificationHub::load_at(root.clone());
         // What deliver_mentions types into the pane.
         let line = "[tmm chat] human: @dev ship it";
-        crate::projects::telemetry::record_delivery(&session, pane.window, line);
+        crate::projects::telemetry::record_delivery(&session, &pane.window_name, line);
 
         std::fs::create_dir_all(root.join("inbox")).unwrap();
         let envelope = json!({
@@ -1403,7 +1401,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("tmm-restart-hub-{}", uuid::Uuid::new_v4()));
         let hub = AgentNotificationHub::load_at(root.clone());
         let line = "[tmm chat] human: @dev restart proof";
-        crate::projects::telemetry::record_delivery(&session, pane.window, line);
+        crate::projects::telemetry::record_delivery(&session, &pane.window_name, line);
         // ── the restart: a fresh process has no telemetry records at all.
         crate::projects::telemetry::forget_process_state(&session);
 
@@ -1478,7 +1476,7 @@ mod tests {
         let hub = AgentNotificationHub::load_at(root.clone());
         hub.set_room_poster(spy.clone());
         let (_, win, _) = crate::tmux::resolve_pane_id(&pane_id).expect("pane resolves");
-        hub.start_turn(&session, win, "[tmm chat 2026-09-08 08:00] lead: @dev fix it");
+        hub.start_turn(&session, &win, "[tmm chat 2026-09-08 08:00] lead: @dev fix it");
         std::fs::create_dir_all(root.join("inbox")).unwrap();
         // Exactly the payload measured from kiro-cli 2.16.2.
         std::fs::write(
@@ -1533,12 +1531,12 @@ mod tests {
         let session = format!("reply-restart-{}", uuid::Uuid::new_v4());
         crate::projects::telemetry::record_prompt(
             &session,
-            2,
+            "w2",
             "[tmm chat 2026-09-08 08:06] lead: @worker finish it",
         );
         let root = std::env::temp_dir().join(format!("tmm-reply-edge-{}", uuid::Uuid::new_v4()));
         let restarted = AgentNotificationHub::load_at(root.clone());
-        assert_eq!(restarted.take_reply_targets(&session, 2), vec!["lead"]);
+        assert_eq!(restarted.take_reply_targets(&session, "w2"), vec!["lead"]);
         let _ = std::fs::remove_dir_all(root);
     }
 

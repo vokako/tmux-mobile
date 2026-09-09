@@ -108,7 +108,7 @@ export function mergeMessages<T extends { id?: string; ts?: number; seq?: number
  * in log order. Returns the EXISTING array when nothing new arrived, so the
  * poll path can skip a re-render. No length cap: the initial page is bounded
  * by the server, and everything past it was loaded on purpose. */
-export function mergeEvents<T extends { ts: number; id?: number; window?: number; kind?: string; text?: string }>(
+export function mergeEvents<T extends { ts: number; id?: number; window?: string; kind?: string; text?: string }>(
   existing: T[],
   incoming: T[],
 ): T[] {
@@ -1112,10 +1112,10 @@ export function draftUpdate(
 export type FeedBlock =
   | { type: 'msg'; ts: number; msg: any; delivered: boolean }
   | { type: 'sys'; ts: number; key: string; items: string[] }
-  | { type: 'prompt'; ts: number; window: number; text: string }
-  | { type: 'progress'; ts: number; window: number; state: string; text: string }
-  | { type: 'note'; ts: number; window: number; event: HubActivityEvent }
-  | { type: 'steps'; ts: number; window: number; key: string; events: HubActivityEvent[] };
+  | { type: 'prompt'; ts: number; window: string; text: string }
+  | { type: 'progress'; ts: number; window: string; state: string; text: string }
+  | { type: 'note'; ts: number; window: string; event: HubActivityEvent }
+  | { type: 'steps'; ts: number; window: string; key: string; events: HubActivityEvent[] };
 
 /** The two halves of a `tmm status` event: what the agent DECLARED and the note
  * it wrote. Older servers glued them into one string (`"working — 重写状态机"`)
@@ -1127,7 +1127,7 @@ export function statusParts(e: HubActivityEvent): { state: string; text: string 
 }
 
 /** Internal: a tool call before consecutive ones are folded into a group. */
-type ToolItem = { type: 'tool'; ts: number; window: number; event: HubActivityEvent };
+type ToolItem = { type: 'tool'; ts: number; window: string; event: HubActivityEvent };
 
 /** ONE truth per agent dot (board #8): the sidebar's project rows colour
  * their chips from the `hub_rooms` snapshot (all projects, 20s poll) while
@@ -1148,12 +1148,13 @@ type ToolItem = { type: 'tool'; ts: number; window: number; event: HubActivityEv
 export function mergeStates(
   snapshot: Record<string, string>,
   session: string,
-  agents: readonly { window: number; state?: string; managed?: boolean }[],
+  agents: readonly { name: string; state?: string; managed?: boolean }[],
 ): Record<string, string> {
   const out: Record<string, string> = { ...snapshot };
   for (const a of agents) {
     if (!a.managed || !a.state) continue;
-    out[`${session}:${a.window}`] = a.state;
+    // Keyed by the window NAME — the agent's identity (board #120).
+    out[`${session}:${a.name}`] = a.state;
   }
   return out;
 }
@@ -1219,7 +1220,7 @@ export function chipExtras(body: string, recipient: string, names: readonly stri
  *   word (`spawned builder-2` must not surface for `builder`), and disappear
  *   when none do.
  * Pure so the rules are testable without a DOM. */
-export function filterBlocks(blocks: FeedBlock[], name: string, window?: number): FeedBlock[] {
+export function filterBlocks(blocks: FeedBlock[], name: string, window?: string): FeedBlock[] {
   const word = new RegExp(`(?<![\\w-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'u');
   const out: FeedBlock[] = [];
   for (const b of blocks) {
@@ -1271,7 +1272,7 @@ function squashOf(obj: object | null | undefined, text: string | null | undefine
  * is consumed as a receipt (rule 1) so it never renders, but it is still the
  * moment `userPromptSubmit` opened a new turn, and a new turn must not pour its
  * tool calls into the previous turn's group. */
-type TurnMark = { type: 'turn'; ts: number; window: number };
+type TurnMark = { type: 'turn'; ts: number; window: string };
 
 /** `tmm` subcommands whose EFFECT is already a row in this timeline: the
  * message, the status change, the completion, the spawn notice. Showing the
@@ -1384,7 +1385,7 @@ export function feedBlocks(
   feed: any[],
   activity: readonly HubActivityEvent[],
   level: FeedLevel,
-  windowOf?: (from: string) => number | undefined,
+  windowOf?: (from: string) => string | undefined,
 ): FeedBlock[] {
   // Lifecycle lines ("[tmm] spawned dev") are the app's record, not the
   // conversation: at the chat-only level they disappear, and elsewhere they
@@ -1432,7 +1433,7 @@ export function feedBlocks(
   }
 
   const stream: (FeedBlock | ToolItem | TurnMark)[] = [...msgs, ...turns];
-  const lastTool = new Map<number, string>();
+  const lastTool = new Map<string, string>();
   for (const e of activity) {
     if (consumed.has(e)) continue;
     // A line that never came back is about the message, not about telemetry:
@@ -1493,7 +1494,7 @@ export function feedBlocks(
   // the group each window is still adding to; a row from that window closes it,
   // a row from any other window is a different lane and is ignored.
   const out: FeedBlock[] = [];
-  const open = new Map<number, Extract<FeedBlock, { type: 'steps' }>>();
+  const open = new Map<string, Extract<FeedBlock, { type: 'steps' }>>();
   for (const item of stream) {
     if (item.type === 'tool') {
       const group = open.get(item.window);

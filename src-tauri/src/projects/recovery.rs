@@ -275,7 +275,7 @@ pub enum Decision {
 /// testable without tmux or real hooks.
 #[derive(Default)]
 pub struct Tracker {
-    map: HashMap<(String, usize), Rec>,
+    map: HashMap<(String, String), Rec>,
 }
 
 impl Tracker {
@@ -291,12 +291,12 @@ impl Tracker {
     pub fn decide(
         &mut self,
         session: &str,
-        window: usize,
+        window: &str,
         now: u64,
         sig: &str,
         verified: impl FnOnce(u64) -> bool,
     ) -> Decision {
-        let key = (session.to_string(), window);
+        let key = (session.to_string(), window.to_string());
         if self.map.get(&key).is_some_and(|r| r.sig != sig) {
             self.map.remove(&key);
         }
@@ -333,8 +333,8 @@ impl Tracker {
     /// made the next tick open a brand-new incident and type `continue` into
     /// the now-working agent — the repeat-send the owner reported
     /// (2026-08-26: "系统会反复发送好几次 auto recovery").
-    pub fn confirm(&mut self, session: &str, window: usize) {
-        if let Some(rec) = self.map.get_mut(&(session.to_string(), window)) {
+    pub fn confirm(&mut self, session: &str, window: &str) {
+        if let Some(rec) = self.map.get_mut(&(session.to_string(), window.to_string())) {
             rec.confirmed = true;
         }
     }
@@ -342,12 +342,12 @@ impl Tracker {
     /// The error is no longer on the window's screen: the incident is over,
     /// whatever its state was. The record is dropped so a FRESH error later
     /// starts a fresh incident with a full budget.
-    pub fn clear(&mut self, session: &str, window: usize) {
-        self.map.remove(&(session.to_string(), window));
+    pub fn clear(&mut self, session: &str, window: &str) {
+        self.map.remove(&(session.to_string(), window.to_string()));
     }
 
     /// Housekeeping: drop records for windows that no longer exist.
-    pub fn retain_windows(&mut self, session: &str, live: &[usize]) {
+    pub fn retain_windows(&mut self, session: &str, live: &[String]) {
         self.map.retain(|(s, w), _| s != session || live.contains(w));
     }
 }
@@ -360,7 +360,7 @@ fn tracker() -> &'static Mutex<Tracker> {
 /// Called by telemetry on every observed tool call: work is proof the model
 /// answered, so an open incident is CONFIRMED (never erased — see
 /// `Tracker::confirm` for the repeat-send that erasing caused).
-pub fn note_tool_activity(session: &str, window: usize) {
+pub fn note_tool_activity(session: &str, window: &str) {
     tracker().lock().unwrap().confirm(session, window);
 }
 
@@ -386,7 +386,7 @@ pub fn check_once() {
             continue;
         }
         let Ok(panes) = crate::tmux::list_panes(&project.session) else { continue };
-        let live: Vec<usize> = panes.iter().map(|p| p.window).collect();
+        let live: Vec<String> = panes.iter().map(|p| p.window_name.clone()).collect();
         tracker().lock().unwrap().retain_windows(&project.session, &live);
         let mut seen = std::collections::HashSet::new();
         for p in &panes {
@@ -418,22 +418,22 @@ pub fn check_once() {
                 // The error left the screen: the incident (if any) is over.
                 // Dropping the record here is what scopes "one incident" to
                 // one CONTINUOUS sighting — a fresh error later starts fresh.
-                tracker().lock().unwrap().clear(&project.session, p.window);
+                tracker().lock().unwrap().clear(&project.session, &p.window_name);
                 continue;
             };
             let decision = tracker().lock().unwrap().decide(
                 &project.session,
-                p.window,
+                &p.window_name,
                 now_secs(),
                 &sig,
-                |sent_at| super::telemetry::turn_fact_since(&project.session, p.window, sent_at),
+                |sent_at| super::telemetry::turn_fact_since(&project.session, &p.window_name, sent_at),
             );
             match decision {
                 Decision::Send { attempt } => {
                     if crate::tmux::send_command(&target, CONTINUE_LINE).is_ok() {
                         super::telemetry::record_recovery(
                             &project.session,
-                            p.window,
+                            &p.window_name,
                             &format!(
                                 "auto-continue {attempt}/{MAX_ATTEMPTS} — transient model error in {}",
                                 p.window_name
@@ -444,14 +444,14 @@ pub fn check_once() {
                 Decision::Confirmed { first: true } => {
                     super::telemetry::record_recovery(
                         &project.session,
-                        p.window,
+                        &p.window_name,
                         &format!("auto-continue took effect — {} resumed its turn", p.window_name),
                     );
                 }
                 Decision::GiveUp { first: true } => {
                     super::telemetry::record_recovery(
                         &project.session,
-                        p.window,
+                        &p.window_name,
                         &format!(
                             "auto-continue gave up after {MAX_ATTEMPTS} attempts — {} needs a person",
                             p.window_name
@@ -647,20 +647,20 @@ mod tests {
     fn a_verified_send_is_never_repeated() {
         let mut t = Tracker::default();
         let t0 = 1_000_000;
-        assert_eq!(t.decide("s", 1, t0, "1|a", silent), Decision::Send { attempt: 1 });
+        assert_eq!(t.decide("s", "w1", t0, "1|a", silent), Decision::Send { attempt: 1 });
         // Next tick, error still painted, but a turn fact arrived after the
         // send: confirmed ONCE, then silence for as long as the error shows.
         assert_eq!(
-            t.decide("s", 1, t0 + 20, "1|a", |sent| sent == t0),
+            t.decide("s", "w1", t0 + 20, "1|a", |sent| sent == t0),
             Decision::Confirmed { first: true }
         );
         assert_eq!(
-            t.decide("s", 1, t0 + 40, "1|a", |_| true),
+            t.decide("s", "w1", t0 + 40, "1|a", |_| true),
             Decision::Confirmed { first: false }
         );
         // Even hours later, the painted error must not re-trigger a send.
         assert_eq!(
-            t.decide("s", 1, t0 + 10_000, "1|a", |_| true),
+            t.decide("s", "w1", t0 + 10_000, "1|a", |_| true),
             Decision::Confirmed { first: false }
         );
     }
@@ -670,12 +670,12 @@ mod tests {
         let mut t = Tracker::default();
         let t0 = 1_000_000;
         for i in 0..MAX_ATTEMPTS as u64 {
-            t.decide("s", 1, t0 + i * 10_000, "1|a", silent);
+            t.decide("s", "w1", t0 + i * 10_000, "1|a", silent);
         }
         // The budget is spent — but the 4th send finally landed: that is a
         // success, not a give-up.
         assert_eq!(
-            t.decide("s", 1, t0 + 40_000, "1|a", |_| true),
+            t.decide("s", "w1", t0 + 40_000, "1|a", |_| true),
             Decision::Confirmed { first: true }
         );
     }
@@ -685,37 +685,37 @@ mod tests {
         let mut t = Tracker::default();
         let t0 = 1_000_000;
         // Attempt 1 is immediate.
-        assert_eq!(t.decide("s", 1, t0, "1|a", silent), Decision::Send { attempt: 1 });
+        assert_eq!(t.decide("s", "w1", t0, "1|a", silent), Decision::Send { attempt: 1 });
         // Still inside the 30s backoff: wait.
-        assert_eq!(t.decide("s", 1, t0 + 29, "1|a", silent), Decision::Wait);
-        assert_eq!(t.decide("s", 1, t0 + 30, "1|a", silent), Decision::Send { attempt: 2 });
+        assert_eq!(t.decide("s", "w1", t0 + 29, "1|a", silent), Decision::Wait);
+        assert_eq!(t.decide("s", "w1", t0 + 30, "1|a", silent), Decision::Send { attempt: 2 });
         // The ladder doubles: 60s after attempt 2, 120s after attempt 3.
-        assert_eq!(t.decide("s", 1, t0 + 89, "1|a", silent), Decision::Wait);
-        assert_eq!(t.decide("s", 1, t0 + 90, "1|a", silent), Decision::Send { attempt: 3 });
-        assert_eq!(t.decide("s", 1, t0 + 209, "1|a", silent), Decision::Wait);
-        assert_eq!(t.decide("s", 1, t0 + 210, "1|a", silent), Decision::Send { attempt: 4 });
+        assert_eq!(t.decide("s", "w1", t0 + 89, "1|a", silent), Decision::Wait);
+        assert_eq!(t.decide("s", "w1", t0 + 90, "1|a", silent), Decision::Send { attempt: 3 });
+        assert_eq!(t.decide("s", "w1", t0 + 209, "1|a", silent), Decision::Wait);
+        assert_eq!(t.decide("s", "w1", t0 + 210, "1|a", silent), Decision::Send { attempt: 4 });
         // The budget is spent with nothing verified — warned ONCE, then silence.
-        assert_eq!(t.decide("s", 1, t0 + 10_000, "1|a", silent), Decision::GiveUp { first: true });
-        assert_eq!(t.decide("s", 1, t0 + 20_000, "1|a", silent), Decision::GiveUp { first: false });
+        assert_eq!(t.decide("s", "w1", t0 + 10_000, "1|a", silent), Decision::GiveUp { first: true });
+        assert_eq!(t.decide("s", "w1", t0 + 20_000, "1|a", silent), Decision::GiveUp { first: false });
     }
 
     #[test]
     fn a_tool_call_confirms_the_incident_without_erasing_it() {
         let mut t = Tracker::default();
         let t0 = 1_000_000;
-        assert_eq!(t.decide("s", 1, t0, "1|a", silent), Decision::Send { attempt: 1 });
+        assert_eq!(t.decide("s", "w1", t0, "1|a", silent), Decision::Send { attempt: 1 });
         // telemetry::record_tool → note_tool_activity → confirm. The record
         // SURVIVES: erasing it here re-opened the incident on the next tick
         // (the error is still painted) and re-sent `continue` into a working
         // agent — the owner's repeat-send report (2026-08-26).
-        t.confirm("s", 1);
+        t.confirm("s", "w1");
         assert_eq!(
-            t.decide("s", 1, t0 + 60, "1|a", silent),
+            t.decide("s", "w1", t0 + 60, "1|a", silent),
             Decision::Confirmed { first: false }
         );
         // A tool call with no open incident is a no-op, not a new record.
-        t.confirm("s", 2);
-        assert_eq!(t.decide("s", 2, t0, "1|a", silent), Decision::Send { attempt: 1 });
+        t.confirm("s", "w2");
+        assert_eq!(t.decide("s", "w2", t0, "1|a", silent), Decision::Send { attempt: 1 });
     }
 
     #[test]
@@ -723,14 +723,14 @@ mod tests {
         let mut t = Tracker::default();
         let t0 = 1_000_000;
         for i in 0..MAX_ATTEMPTS as u64 {
-            t.decide("s", 1, t0 + i * 10_000, "1|a", silent);
+            t.decide("s", "w1", t0 + i * 10_000, "1|a", silent);
         }
-        assert_eq!(t.decide("s", 1, t0 + 99_000, "1|a", silent), Decision::GiveUp { first: true });
+        assert_eq!(t.decide("s", "w1", t0 + 99_000, "1|a", silent), Decision::GiveUp { first: true });
         // The screen moved on (check_once calls clear when scan_tail misses):
         // whatever the incident's state, it is over.
-        t.clear("s", 1);
+        t.clear("s", "w1");
         // A NEW error later opens a fresh incident with a full budget.
-        assert_eq!(t.decide("s", 1, t0 + 100_000, "1|a", silent), Decision::Send { attempt: 1 });
+        assert_eq!(t.decide("s", "w1", t0 + 100_000, "1|a", silent), Decision::Send { attempt: 1 });
     }
 
     #[test]
@@ -741,25 +741,25 @@ mod tests {
         // NEW request_id says this is a new failure.
         let mut t = Tracker::default();
         let t0 = 1_000_000;
-        assert_eq!(t.decide("s", 1, t0, "1|a", silent), Decision::Send { attempt: 1 });
+        assert_eq!(t.decide("s", "w1", t0, "1|a", silent), Decision::Send { attempt: 1 });
         assert_eq!(
-            t.decide("s", 1, t0 + 20, "1|a", |_| true),
+            t.decide("s", "w1", t0 + 20, "1|a", |_| true),
             Decision::Confirmed { first: true }
         );
         // Same painted error, hours later: still silent.
         assert_eq!(
-            t.decide("s", 1, t0 + 5_000, "1|a", |_| true),
+            t.decide("s", "w1", t0 + 5_000, "1|a", |_| true),
             Decision::Confirmed { first: false }
         );
         // The resumed turn dies again — both errors on screen: new signature,
         // fresh incident, immediate send with a full budget.
         assert_eq!(
-            t.decide("s", 1, t0 + 6_000, "2|a,b", silent),
+            t.decide("s", "w1", t0 + 6_000, "2|a,b", silent),
             Decision::Send { attempt: 1 }
         );
         // And the new incident verifies independently.
         assert_eq!(
-            t.decide("s", 1, t0 + 6_020, "2|a,b", |sent| sent == t0 + 6_000),
+            t.decide("s", "w1", t0 + 6_020, "2|a,b", |sent| sent == t0 + 6_000),
             Decision::Confirmed { first: true }
         );
     }
@@ -769,16 +769,16 @@ mod tests {
         let mut t = Tracker::default();
         let t0 = 1_000_000;
         // Mid-backoff: a new instance replaces the wait.
-        assert_eq!(t.decide("s", 1, t0, "1|a", silent), Decision::Send { attempt: 1 });
-        assert_eq!(t.decide("s", 1, t0 + 10, "1|a", silent), Decision::Wait);
-        assert_eq!(t.decide("s", 1, t0 + 20, "1|b", silent), Decision::Send { attempt: 1 });
+        assert_eq!(t.decide("s", "w1", t0, "1|a", silent), Decision::Send { attempt: 1 });
+        assert_eq!(t.decide("s", "w1", t0 + 10, "1|a", silent), Decision::Wait);
+        assert_eq!(t.decide("s", "w1", t0 + 20, "1|b", silent), Decision::Send { attempt: 1 });
         // Spent budget: a new instance starts a fresh one.
         let mut t = Tracker::default();
         for i in 0..MAX_ATTEMPTS as u64 {
-            t.decide("s", 1, t0 + i * 10_000, "1|a", silent);
+            t.decide("s", "w1", t0 + i * 10_000, "1|a", silent);
         }
-        assert_eq!(t.decide("s", 1, t0 + 90_000, "1|a", silent), Decision::GiveUp { first: true });
-        assert_eq!(t.decide("s", 1, t0 + 91_000, "1|c", silent), Decision::Send { attempt: 1 });
+        assert_eq!(t.decide("s", "w1", t0 + 90_000, "1|a", silent), Decision::GiveUp { first: true });
+        assert_eq!(t.decide("s", "w1", t0 + 91_000, "1|c", silent), Decision::Send { attempt: 1 });
     }
 
     #[test]
@@ -806,14 +806,14 @@ mod tests {
     #[test]
     fn dead_windows_are_forgotten() {
         let mut t = Tracker::default();
-        t.decide("s", 1, 1_000, "1|a", silent);
-        t.decide("s", 7, 1_000, "1|a", silent);
-        t.decide("other", 1, 1_000, "1|a", silent);
-        t.retain_windows("s", &[7]);
+        t.decide("s", "w1", 1_000, "1|a", silent);
+        t.decide("s", "w7", 1_000, "1|a", silent);
+        t.decide("other", "w1", 1_000, "1|a", silent);
+        t.retain_windows("s", &["w7".to_string()]);
         // Window 1 was dropped: a new agent at the same index starts fresh.
-        assert_eq!(t.decide("s", 1, 1_001, "1|a", silent), Decision::Send { attempt: 1 });
+        assert_eq!(t.decide("s", "w1", 1_001, "1|a", silent), Decision::Send { attempt: 1 });
         // Window 7 and the other session were untouched.
-        assert_eq!(t.decide("s", 7, 1_001, "1|a", silent), Decision::Wait);
-        assert_eq!(t.decide("other", 1, 1_001, "1|a", silent), Decision::Wait);
+        assert_eq!(t.decide("s", "w7", 1_001, "1|a", silent), Decision::Wait);
+        assert_eq!(t.decide("other", "w1", 1_001, "1|a", silent), Decision::Wait);
     }
 }

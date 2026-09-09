@@ -71,10 +71,10 @@ const VITALS_TTL_SECS: u64 = 3600;
 /// each miss as "no information" is what made the card flicker (owner, 2026-08-19:
 /// "context window 和模型状态信息，有时候会闪没了 … 可以多维持缓存一会儿").
 fn cache() -> &'static std::sync::Mutex<
-    std::collections::HashMap<(String, usize), (Vitals, u64)>,
+    std::collections::HashMap<(String, String), (Vitals, u64)>,
 > {
     static C: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<(String, usize), (Vitals, u64)>>,
+        std::sync::Mutex<std::collections::HashMap<(String, String), (Vitals, u64)>>,
     > = std::sync::OnceLock::new();
     C.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
@@ -122,7 +122,7 @@ impl Vitals {
 /// another CLI's grammar yields confident nonsense, which is worse than nothing.
 pub fn sniff_remembered(
     session: &str,
-    window: usize,
+    window: &str,
     pane: &str,
     agent: &str,
     backend: &str,
@@ -135,7 +135,7 @@ pub fn sniff_remembered(
         _ => sniff_kiro(pane, agent),
     };
     let now = now_secs();
-    let key = (session.to_string(), window);
+    let key = (session.to_string(), window.to_string());
     let mut map = cache().lock().unwrap();
     if let Some((prev, at)) = map.get(&key) {
         if now.saturating_sub(*at) <= VITALS_TTL_SECS {
@@ -153,16 +153,16 @@ pub fn sniff_remembered(
 
 /// Forget readings for windows that no longer exist — the same housekeeping
 /// telemetry does, called from the same place.
-pub fn retain_windows(session: &str, live: &[usize]) {
+pub fn retain_windows(session: &str, live: &[String]) {
     cache().lock().unwrap().retain(|(s, w), _| s != session || live.contains(w));
 }
 
 /// When each (session, window) was last SCHEDULED for an event sniff, for the
 /// throttle below. Separate from the reading cache: a throttled request is not
 /// a reading.
-fn sniff_times() -> &'static std::sync::Mutex<std::collections::HashMap<(String, usize), u64>> {
+fn sniff_times() -> &'static std::sync::Mutex<std::collections::HashMap<(String, String), u64>> {
     static TIMES: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<(String, usize), u64>>,
+        std::sync::Mutex<std::collections::HashMap<(String, String), u64>>,
     > = std::sync::OnceLock::new();
     TIMES.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
@@ -177,7 +177,7 @@ fn sniff_times() -> &'static std::sync::Mutex<std::collections::HashMap<(String,
 /// needs a beat to repaint; telemetry may never block what it observes), and
 /// is throttled per window so a burst of tool hooks costs one capture, not
 /// thirty. Fail-soft everywhere: an unresolvable window is a no-op.
-pub fn sniff_window_soon(session: &str, window: usize) {
+pub fn sniff_window_soon(session: &str, window: &str) {
     if cfg!(test) {
         // Tests must not reach for a real tmux or spawn sniffer threads.
         return;
@@ -185,7 +185,7 @@ pub fn sniff_window_soon(session: &str, window: usize) {
     let now = now_secs();
     {
         let mut times = sniff_times().lock().unwrap();
-        let key = (session.to_string(), window);
+        let key = (session.to_string(), window.to_string());
         if let Some(at) = times.get(&key) {
             if now.saturating_sub(*at) < 3 {
                 return;
@@ -195,29 +195,33 @@ pub fn sniff_window_soon(session: &str, window: usize) {
         times.retain(|_, at| now.saturating_sub(*at) < 600);
     }
     let session = session.to_string();
+    let window = window.to_string();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(1200));
-        sniff_window_now(&session, window);
+        sniff_window_now(&session, &window);
     });
 }
 
 /// The synchronous half: resolve the window, apply the same managed-only gate
 /// as `hub_agents` (we only know OUR agents' status-line shapes), capture, and
 /// remember. The reading lands in the same cache `hub_agents` reads.
-fn sniff_window_now(session: &str, window: usize) {
+fn sniff_window_now(session: &str, window: &str) {
     let ws = crate::projects::project_for_session(session)
         .ok()
         .flatten()
         .map(|p| p.path);
     let Ok(panes) = crate::tmux::list_panes(session) else { return };
-    let Some(p) = panes.iter().find(|p| p.window == window && p.active) else { return };
+    // The name is the key (board #120); the capture target still uses the
+    // window's CURRENT index, read fresh off list_panes — transient use of an
+    // index is fine, storing under it was the bug.
+    let Some(p) = panes.iter().find(|p| p.window_name == window && p.active) else { return };
     if !crate::projects::is_managed_in(ws.as_deref(), &p.window_name) {
         return;
     }
     let Some(agent) = crate::projects::agents::detect_pane(ws.as_deref(), p) else {
         return;
     };
-    let Ok(text) = crate::tmux::capture_pane_plain(&format!("{session}:{window}"), Some(0)) else {
+    let Ok(text) = crate::tmux::capture_pane_plain(&format!("{session}:{}", p.window), Some(0)) else {
         return;
     };
     sniff_remembered(session, window, &text, &p.window_name, agent.backend);
@@ -1073,28 +1077,28 @@ mod tests {
     fn a_missed_capture_keeps_the_last_reading() {
         let session = format!("vitals-test-{}", std::process::id());
         let good = "bot · claude-opus-5 · ◔ 12%\n/w/x ·\n(main)\n";
-        let first = sniff_remembered(&session, 7, good, "bot", "kiro");
+        let first = sniff_remembered(&session, "w7", good, "bot", "kiro");
         assert_eq!(first.model.as_deref(), Some("claude-opus-5"));
         assert_eq!(first.context_pct, Some(12));
 
         // A capture with nothing in it — a repaint, a tool's output, a panel.
-        let blind = sniff_remembered(&session, 7, "\n\n$ ls\n", "bot", "kiro");
+        let blind = sniff_remembered(&session, "w7", "\n\n$ ls\n", "bot", "kiro");
         assert_eq!(blind.model.as_deref(), Some("claude-opus-5"), "remembered, not blank");
         assert_eq!(blind.context_pct, Some(12));
         assert_eq!(blind.branch.as_deref(), Some("main"));
 
         // A fresh number replaces the remembered one immediately.
-        let moved = sniff_remembered(&session, 7, "bot · claude-opus-5 · ◑ 44%\n", "bot", "kiro");
+        let moved = sniff_remembered(&session, "w7", "bot · claude-opus-5 · ◑ 44%\n", "bot", "kiro");
         assert_eq!(moved.context_pct, Some(44));
 
         // Another window's reading is its own.
-        let other = sniff_remembered(&session, 9, "\n", "bot", "kiro");
+        let other = sniff_remembered(&session, "w9", "\n", "bot", "kiro");
         assert!(other.is_empty(), "window 9 was never read");
 
         // A window that goes away is forgotten, so a new agent in the same index
         // cannot inherit its numbers.
-        retain_windows(&session, &[9]);
-        let after = sniff_remembered(&session, 7, "\n", "bot", "kiro");
+        retain_windows(&session, &["w9".to_string()]);
+        let after = sniff_remembered(&session, "w7", "\n", "bot", "kiro");
         assert!(after.is_empty());
     }
 
@@ -1251,10 +1255,10 @@ mod tests {
         assert!(sniff_claude(fake).is_empty(), "ordinary output is inert");
 
         let good = "[CC] · Fable 5.1 · 12% ctx · 24K/200K\n";
-        let first = sniff_remembered(&session, 3, good, "bot", "claude");
+        let first = sniff_remembered(&session, "w3", good, "bot", "claude");
         assert_eq!(first.model.as_deref(), Some("Fable 5.1"));
         assert_eq!(first.context_pct, Some(12));
-        let missed = sniff_remembered(&session, 3, "\n❯ ", "bot", "claude");
+        let missed = sniff_remembered(&session, "w3", "\n❯ ", "bot", "claude");
         assert_eq!(missed.model.as_deref(), Some("Fable 5.1"));
         assert_eq!(missed.context_pct, Some(12));
         retain_windows(&session, &[]);

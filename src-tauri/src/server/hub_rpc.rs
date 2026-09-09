@@ -588,7 +588,7 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
             // `running` — so a reset that raced the next turn would be
             // indistinguishable from no reset at all, i.e. an interrupt that
             // looked like it never landed (owner, 2026-08-29).
-            telemetry::record_interrupt(session, window);
+            telemetry::record_interrupt(session, agent);
             match crate::tmux::send_keys(&format!("{session}:{window}"), "Escape", false) {
                 Ok(()) => {
                     // The room records what the app did on a person's behalf —
@@ -821,8 +821,8 @@ pub(super) fn deliver_chat_line(session: &str, target_name: &str, line: &str) ->
         }
         let target = format!("{}:{}.{}", session, p.window, p.pane);
         if crate::tmux::send_command(&target, line).is_ok() {
-            crate::projects::telemetry::record_delivery(session, p.window, line);
-            crate::projects::vitals::sniff_window_soon(session, p.window);
+            crate::projects::telemetry::record_delivery(session, &p.window_name, line);
+            crate::projects::vitals::sniff_window_soon(session, &p.window_name);
             return true;
         }
         return false;
@@ -1215,10 +1215,10 @@ fn deliver_mentions(
             // confirmed when that agent's userPromptSubmit hook echoes the line
             // back; until then it is pending, and telemetry reports it if the
             // echo never comes.
-            crate::projects::telemetry::record_delivery(session, p.window, &line);
+            crate::projects::telemetry::record_delivery(session, &p.window_name, &line);
             // A line just landed in this pane: sniff its vitals once the TUI
             // has repainted (delayed + throttled inside).
-            crate::projects::vitals::sniff_window_soon(session, p.window);
+            crate::projects::vitals::sniff_window_soon(session, &p.window_name);
         }
     }
 }
@@ -1254,7 +1254,7 @@ fn agent_states(session: &str) -> serde_json::Value {
             })
             .or_insert(p);
     }
-    let live: Vec<usize> = windows.keys().copied().collect();
+    let live: Vec<String> = windows.values().map(|p| p.window_name.clone()).collect();
     telemetry::retain_windows(session, &live);
     crate::projects::vitals::retain_windows(session, &live);
 
@@ -1262,7 +1262,7 @@ fn agent_states(session: &str) -> serde_json::Value {
         .values()
         .map(|p| {
             let agent = agents::detect_pane(ws.as_deref(), p);
-            let st = telemetry::derive(session, p.window, activity.get(&p.window).copied().unwrap_or(0));
+            let st = telemetry::derive(session, &p.window_name, activity.get(&p.window).copied().unwrap_or(0));
             let managed = agent.is_some() && crate::projects::is_managed_in(ws.as_deref(), &p.window_name);
             // What the agent's own status line says: model, context used, effort,
             // branch. There is no API for a CLI's live state, so it is SNIFFED
@@ -1281,7 +1281,7 @@ fn agent_states(session: &str) -> serde_json::Value {
                     .map(|text| {
                         crate::projects::vitals::sniff_remembered(
                             session,
-                            p.window,
+                            &p.window_name,
                             &text,
                             &p.window_name,
                             agent.map(|a| a.backend).unwrap_or(""),
@@ -1622,7 +1622,7 @@ mod tests {
         crate::projects::tests::use_test_store();
         let session = format!("act-rpc-{}", uuid::Uuid::new_v4());
         for n in 0..6 {
-            telemetry::record_tool(&session, 1, "Edit", &format!("f{n}.rs"));
+            telemetry::record_tool(&session, "w1", "Edit", &format!("f{n}.rs"));
         }
         // An older client sends only since_ts and gets the newest page.
         let r = handle_hub_request(
@@ -1980,9 +1980,8 @@ mod tests {
         }
         let created_project = crate::projects::adopt(&session, Some("int-test")).is_ok();
         // A turn is OPEN on that window: the state we are interrupting.
-        let window = window_of_agent(&session, "dev").unwrap_or(0);
-        telemetry::record_prompt(&session, window, "do the long thing");
-        assert_eq!(telemetry::derive(&session, window, 0).state, "running");
+        telemetry::record_prompt(&session, "dev", "do the long thing");
+        assert_eq!(telemetry::derive(&session, "dev", 0).state, "running");
 
         let r = handle_hub_request(
             &req("hub_agent_interrupt", serde_json::json!({ "session": session, "agent": "dev" })),
@@ -1995,7 +1994,7 @@ mod tests {
             let panes = crate::tmux::list_panes(&session).unwrap_or_default();
             assert!(panes.iter().any(|p| p.window_name == "dev"), "the window survives an interrupt");
             assert_eq!(
-                telemetry::derive(&session, window, 0).state,
+                telemetry::derive(&session, "dev", 0).state,
                 "idle",
                 "the cancelled turn is closed by the interrupt itself — no stop hook is coming"
             );

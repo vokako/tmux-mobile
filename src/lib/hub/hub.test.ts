@@ -5,7 +5,7 @@ import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, upl
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
-  ts: 0, window: 1, kind: 'tool', text: '', ...e,
+  ts: 0, window: 'w1', kind: 'tool', text: '', ...e,
 });
 
 test('gapWalkStep walks before_seq pages back to the poll cursor and no further', () => {
@@ -141,7 +141,7 @@ test('a reply between tool calls splits the group in two', () => {
   );
   // With one, it ends the lane it came from — the same split, now for a reason.
   assert.deepEqual(
-    feedBlocks(feed, activity, 'tools', (from) => (from === 'dev' ? 1 : undefined)).map((b) => b.type),
+    feedBlocks(feed, activity, 'tools', (from) => (from === 'dev' ? 'w1' : undefined)).map((b) => b.type),
     ['steps', 'msg', 'steps'],
   );
 });
@@ -150,16 +150,16 @@ test('two agents working at once keep one lane each', () => {
   // The churn this replaces: folding only CONSECUTIVE events turned an
   // interleaved run into one group per call (owner report, 2026-08-19).
   const activity = [
-    ev({ ts: 100, window: 1, kind: 'tool', text: 'Read a.rs' }),
-    ev({ ts: 110, window: 2, kind: 'tool', text: 'Read b.rs' }),
-    ev({ ts: 120, window: 1, kind: 'tool', text: 'Edit a.rs' }),
-    ev({ ts: 130, window: 2, kind: 'tool', text: 'Edit b.rs' }),
-    ev({ ts: 140, window: 1, kind: 'tool', text: 'Bash cargo test' }),
+    ev({ ts: 100, window: 'w1', kind: 'tool', text: 'Read a.rs' }),
+    ev({ ts: 110, window: 'w2', kind: 'tool', text: 'Read b.rs' }),
+    ev({ ts: 120, window: 'w1', kind: 'tool', text: 'Edit a.rs' }),
+    ev({ ts: 130, window: 'w2', kind: 'tool', text: 'Edit b.rs' }),
+    ev({ ts: 140, window: 'w1', kind: 'tool', text: 'Bash cargo test' }),
   ];
   const blocks = feedBlocks([], activity, 'tools');
-  assert.deepEqual(blocks.map((b) => b.type === 'steps' && b.window), [1, 2], 'two lanes, not five rows');
-  const w1 = blocks.find((b) => b.type === 'steps' && b.window === 1);
-  const w2 = blocks.find((b) => b.type === 'steps' && b.window === 2);
+  assert.deepEqual(blocks.map((b) => b.type === 'steps' && b.window), ['w1', 'w2'], 'two lanes, not five rows');
+  const w1 = blocks.find((b) => b.type === 'steps' && b.window === 'w1');
+  const w2 = blocks.find((b) => b.type === 'steps' && b.window === 'w2');
   assert.deepEqual(
     w1?.type === 'steps' ? w1.events.map((e) => e.text) : [],
     ['Read a.rs', 'Edit a.rs', 'Bash cargo test'],
@@ -172,7 +172,7 @@ test('two agents working at once keep one lane each', () => {
     [{ ts: 115, from: 'other', body: 'done over here' }],
     activity,
     'tools',
-    (from) => (from === 'other' ? 2 : undefined),
+    (from) => (from === 'other' ? 'w2' : undefined),
   );
   const lanes = withReply.filter((b) => b.type === 'steps');
   assert.equal(lanes.length, 3, 'window 2 was split by its own reply, window 1 was not');
@@ -181,16 +181,16 @@ test('two agents working at once keep one lane each', () => {
 
 test('concurrent windows never share a tool group', () => {
   const activity = [
-    ev({ ts: 100, window: 1, kind: 'tool', text: 'Read a.rs' }),
-    ev({ ts: 110, window: 2, kind: 'tool', text: 'Read b.rs' }),
-    ev({ ts: 120, window: 1, kind: 'tool', text: 'Edit a.rs' }),
+    ev({ ts: 100, window: 'w1', kind: 'tool', text: 'Read a.rs' }),
+    ev({ ts: 110, window: 'w2', kind: 'tool', text: 'Read b.rs' }),
+    ev({ ts: 120, window: 'w1', kind: 'tool', text: 'Edit a.rs' }),
   ];
   const blocks = feedBlocks([], activity, 'tools');
-  assert.deepEqual(blocks.map((b) => b.type === 'steps' && b.window), [1, 2], 'one lane per window');
+  assert.deepEqual(blocks.map((b) => b.type === 'steps' && b.window), ['w1', 'w2'], 'one lane per window');
   // Per-window dedup: window 2 repeating window 1's line is not a duplicate.
   const same = feedBlocks([], [
-    ev({ ts: 100, window: 1, kind: 'tool', text: 'Read a.rs' }),
-    ev({ ts: 110, window: 2, kind: 'tool', text: 'Read a.rs' }),
+    ev({ ts: 100, window: 'w1', kind: 'tool', text: 'Read a.rs' }),
+    ev({ ts: 110, window: 'w2', kind: 'tool', text: 'Read a.rs' }),
   ], 'tools');
   assert.equal(same.length, 2, 'two windows doing the same thing are two facts');
 });
@@ -199,9 +199,9 @@ test('a status note is a spoken line at every level, and never breaks a lane', (
   // What the owner could not see: hooks report that a turn is open, never what
   // it is about (2026-08-19). The note is the only account of the work.
   const activity = [
-    ev({ ts: 100, window: 1, kind: 'tool', text: 'Read a.rs' }),
-    { ts: 110, window: 1, kind: 'status', text: '重写状态机', state: 'working' } as HubActivityEvent,
-    ev({ ts: 120, window: 1, kind: 'tool', text: 'Edit a.rs' }),
+    ev({ ts: 100, window: 'w1', kind: 'tool', text: 'Read a.rs' }),
+    { ts: 110, window: 'w1', kind: 'status', text: '重写状态机', state: 'working' } as HubActivityEvent,
+    ev({ ts: 120, window: 'w1', kind: 'tool', text: 'Edit a.rs' }),
   ];
   for (const level of ['chat', 'status', 'tools'] as const) {
     const kinds = feedBlocks([], activity, level).map((b) => b.type);
@@ -220,8 +220,8 @@ test('a status note is a spoken line at every level, and never breaks a lane', (
   // the server sends an empty text for it, and an older one echoed the state
   // word into the text.
   for (const bareEv of [
-    { ts: 100, window: 1, kind: 'status', text: '', state: 'working' } as HubActivityEvent,
-    { ts: 100, window: 1, kind: 'status', text: 'working', state: 'working' } as HubActivityEvent,
+    { ts: 100, window: 'w1', kind: 'status', text: '', state: 'working' } as HubActivityEvent,
+    { ts: 100, window: 'w1', kind: 'status', text: 'working', state: 'working' } as HubActivityEvent,
     ev({ ts: 100, kind: 'status', text: 'waiting' }),
   ]) {
     assert.deepEqual(feedBlocks([], [bareEv], 'tools'), [], `no content, no row: ${JSON.stringify(bareEv)}`);
@@ -1148,17 +1148,17 @@ test('filterBlocks keeps one agent\u2019s world and nobody else\u2019s (board #3
     msg('lead', '@builder-2 yours'),                             // addressed to a LONGER name
     msg('human', '@all everyone'),                               // broadcast reaches it
     msg('builder-2', 'concurrent reply'),                        // someone else talking
-    { type: 'steps' as const, ts: 2, window: 2, key: 's2', events: [] },
-    { type: 'steps' as const, ts: 3, window: 4, key: 's4', events: [] },
-    { type: 'prompt' as const, ts: 4, window: 2, text: 'typed locally' },
-    { type: 'progress' as const, ts: 5, window: 4, state: 'working', text: 'other lane' },
-    { type: 'note' as const, ts: 6, window: 2, event: {} as never },
+    { type: 'steps' as const, ts: 2, window: 'w2', key: 's2', events: [] },
+    { type: 'steps' as const, ts: 3, window: 'w4', key: 's4', events: [] },
+    { type: 'prompt' as const, ts: 4, window: 'w2', text: 'typed locally' },
+    { type: 'progress' as const, ts: 5, window: 'w4', state: 'working', text: 'other lane' },
+    { type: 'note' as const, ts: 6, window: 'w2', event: {} as never },
     { type: 'sys' as const, ts: 7, key: 'sys1', items: ['[tmm] spawned builder — brief', '[tmm] spawned builder-2 — other', '[tmm] interrupted lead'] },
     { type: 'sys' as const, ts: 8, key: 'sys2', items: ['[tmm] board #1 todo → doing — title'] },
   ];
-  const out = filterBlocks(blocks as never, 'builder', 2);
+  const out = filterBlocks(blocks as never, 'builder', 'w2');
   const kinds = out.map((b) => (b.type === 'msg' ? `msg:${b.msg.from}` : b.type === 'sys' ? `sys:${b.items.length}` : `${b.type}:${'window' in b ? b.window : ''}`));
-  assert.deepEqual(kinds, ['msg:builder', 'msg:human', 'msg:human', 'steps:2', 'prompt:2', 'note:2', 'sys:1'],
+  assert.deepEqual(kinds, ['msg:builder', 'msg:human', 'msg:human', 'steps:w2', 'prompt:w2', 'note:w2', 'sys:1'],
     'from-agent + addressed + own-window telemetry + the one sys line naming it');
   const sys = out.find((b) => b.type === 'sys');
   assert.deepEqual(sys && 'items' in sys ? sys.items : [], ['[tmm] spawned builder — brief'],
@@ -1193,36 +1193,39 @@ test('foldLines: a phone fold is small and IMMOVABLE, a desktop fold keeps its f
 });
 
 test('mergeStates: one truth per dot — the roster overlays its own project only (board #8)', () => {
-  const snapshot = { 'proj:2': 'idle', 'proj:3': 'running', 'other:1': 'waiting' };
+  // Keys are `session:window-NAME` since board #120 — the name is the agent's
+  // identity; the index the keys used to carry is reassigned by
+  // renumber-windows.
+  const snapshot = { 'proj:dev': 'idle', 'proj:rev': 'running', 'other:lead': 'waiting' };
   const roster = [
-    { window: 2, state: 'running', managed: true },   // fresher than the snapshot
-    { window: 5, state: 'waiting', managed: true },   // new window the snapshot missed
-    { window: 7, state: 'running', managed: false },  // a shell asserts nothing
-    { window: 8, state: '', managed: true },          // no reading, no key
+    { name: 'dev', state: 'running', managed: true },   // fresher than the snapshot
+    { name: 'qa', state: 'waiting', managed: true },    // new window the snapshot missed
+    { name: 'sh', state: 'running', managed: false },   // a shell asserts nothing
+    { name: 'mute', state: '', managed: true },         // no reading, no key
   ];
   const out = mergeStates(snapshot, 'proj', roster);
-  assert.equal(out['proj:2'], 'running', 'the roster wins for its project');
-  assert.equal(out['proj:5'], 'waiting', 'a window the snapshot lacked appears');
-  assert.equal(out['other:1'], 'waiting', 'other projects keep the snapshot');
-  assert.ok(!('proj:7' in out) && !('proj:8' in out), 'unmanaged / stateless write nothing');
-  assert.equal(out['proj:3'], 'running', 'a stopped/unlisted window\u2019s key passes through — absence is not invented');
+  assert.equal(out['proj:dev'], 'running', 'the roster wins for its project');
+  assert.equal(out['proj:qa'], 'waiting', 'a window the snapshot lacked appears');
+  assert.equal(out['other:lead'], 'waiting', 'other projects keep the snapshot');
+  assert.ok(!('proj:sh' in out) && !('proj:mute' in out), 'unmanaged / stateless write nothing');
+  assert.equal(out['proj:rev'], 'running', 'a stopped/unlisted window\u2019s key passes through — absence is not invented');
   assert.notEqual(out, snapshot, 'pure: a new map, the input untouched');
-  assert.equal(snapshot['proj:2'], 'idle');
+  assert.equal(snapshot['proj:dev'], 'idle');
 
   // Polling order: a STALE rooms response landing after a fresh roster must
   // not roll the selected project back — reload overlays the roster on top.
-  const staleRooms = { 'proj:2': 'idle', 'other:1': 'idle' };
+  const staleRooms = { 'proj:dev': 'idle', 'other:lead': 'idle' };
   const afterReload = mergeStates(staleRooms, 'proj', roster);
-  assert.equal(afterReload['proj:2'], 'running', 'stale snapshot cannot overwrite the newer roster');
-  assert.equal(afterReload['other:1'], 'idle', 'while other projects take the fresh snapshot');
+  assert.equal(afterReload['proj:dev'], 'running', 'stale snapshot cannot overwrite the newer roster');
+  assert.equal(afterReload['other:lead'], 'idle', 'while other projects take the fresh snapshot');
 
   // Legacy vocabulary passes through untranslated — stateDotColor/stateIsLive
   // already read \'working\'; normalizing here would fork the one status language.
-  assert.equal(mergeStates({}, 'p', [{ window: 1, state: 'working', managed: true }])['p:1'], 'working');
+  assert.equal(mergeStates({}, 'p', [{ name: 'dev', state: 'working', managed: true }])['p:dev'], 'working');
 });
 
 test('mergeEvents: a prepended page and a poll meet without doubles (board #9)', () => {
-  const e = (id: number, ts: number, text = 't') => ({ id, ts, window: 1, kind: 'tool', text });
+  const e = (id: number, ts: number, text = 't') => ({ id, ts, window: 'w1', kind: 'tool', text });
   const current = [e(10, 1000), e(11, 1000), e(12, 1200)];
   // An older page arrives (walked backwards): lands IN FRONT, log order.
   const older = mergeEvents(current, [e(8, 900), e(9, 950)]);
@@ -1237,7 +1240,7 @@ test('mergeEvents: a prepended page and a poll meet without doubles (board #9)',
   assert.equal(mergeEvents(older, [e(10, 1000)]), older);
   assert.equal(mergeEvents(older, []), older);
   // Pre-paging rows (no id) fall back to a content key: no doubles either.
-  const legacy = [{ ts: 500, window: 2, kind: 'status', text: 'w' }];
+  const legacy = [{ ts: 500, window: 'w2', kind: 'status', text: 'w' }];
   assert.equal(mergeEvents(legacy as never, legacy as never).length, 1);
 });
 

@@ -367,17 +367,23 @@ pub fn list_all_panes() -> Result<Vec<TmuxPane>, String> {
 /// Resolve tmux's stable pane id (for example `%18`) to the current target.
 /// Agent lifecycle hooks inherit `TMUX_PANE`, so this is the authoritative
 /// association between an agent event and the window shown by the client.
-pub fn resolve_pane_id(pane_id: &str) -> Result<(String, usize, usize), String> {
+/// Returns the window NAME, not its index (board #120): the name is the
+/// agent's identity everywhere (managed_home, launch.json, the roster), and
+/// with `renumber-windows on` an index shifts when a lower window dies — a
+/// store keyed by it hands one agent's turn edges to whichever window
+/// inherits the number (measured 2026-09-09: kill index 1 and window @788
+/// "dev" resolves 2 → 1 while a newcomer takes the freed high index).
+pub fn resolve_pane_id(pane_id: &str) -> Result<(String, String, usize), String> {
     if !pane_id.starts_with('%') || !pane_id[1..].chars().all(|c| c.is_ascii_digit()) {
         return Err("invalid tmux pane id".into());
     }
     let output = run_tmux(&[
         "display-message", "-t", pane_id, "-p",
-        "#{session_name}<TMM_SEP>#{window_index}<TMM_SEP>#{pane_index}",
+        "#{session_name}<TMM_SEP>#{window_name}<TMM_SEP>#{pane_index}",
     ])?;
     let mut fields = output.trim().split("<TMM_SEP>");
     let session = fields.next().filter(|s| !s.is_empty()).ok_or("missing session")?.to_string();
-    let window = fields.next().ok_or("missing window")?.parse().map_err(|_| "invalid window")?;
+    let window = fields.next().filter(|s| !s.is_empty()).ok_or("missing window")?.to_string();
     let pane = fields.next().ok_or("missing pane")?.parse().map_err(|_| "invalid pane")?;
     Ok((session, window, pane))
 }

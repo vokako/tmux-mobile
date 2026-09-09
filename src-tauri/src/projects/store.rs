@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 19;
+const SCHEMA_VERSION: i64 = 20;
 
 /// One stored hub message (board #107) — the row shape of `hub_msgs`, column
 /// names mirroring the agora `messages` table it replaced so the legacy
@@ -167,7 +167,9 @@ impl Slot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActivityRow {
     pub id: i64,
-    pub window: usize,
+    /// The window NAME (board #120); pre-v20 rows read back their index as a
+    /// decimal string.
+    pub window: String,
     pub ts: u64,
     pub kind: String,
     pub text: String,
@@ -261,7 +263,11 @@ impl Store {
                    value TEXT NOT NULL
                  );",
             )
-            .map_err(|e| format!("heal deliveries: {e}"))
+            .map_err(|e| format!("heal deliveries: {e}"))?;
+        // Board #120: a binary built between the v20 stamp and its migration
+        // block must still get the name columns (the v13 lesson, same floor).
+        self.ensure_activity_names()?;
+        self.ensure_delivery_names()
     }
 
     /// Ensure the durable half of Board editability exists, then
@@ -869,7 +875,74 @@ impl Store {
                 )
                 .map_err(|e| format!("migrate to 19: {e}"))?;
         }
+        if version < 20 {
+            // v20 (board #120): telemetry rows are keyed by the window NAME —
+            // the agent's identity — instead of the tmux window INDEX, which
+            // `renumber-windows` reassigns (kill a lower window and every
+            // higher one shifts; the store then paints one agent's edges on
+            // whichever window inherited the number; measured 2026-09-09).
+            // Readable migration: activity gains a `win` TEXT column (old rows
+            // keep their index in `window` and read back as its decimal
+            // string); deliveries are REBUILT because their UNIQUE key must
+            // move to the name — old pending rows carry their index as the
+            // name, never match a name-keyed echo, and are swept once as
+            // unconfirmed, which is the honest reading of a cross-upgrade
+            // delivery.
+            self.ensure_activity_names()?;
+            self.ensure_delivery_names()?;
+        }
         Ok(())
+    }
+
+    /// The v20 activity shape (also a heal floor — see `heal`): a `win` TEXT
+    /// column holding the window NAME for rows written after board #120.
+    fn ensure_activity_names(&self) -> Result<(), String> {
+        let has: bool = self
+            .conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('activity') WHERE name = 'win')",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("inspect activity shape: {e}"))?;
+        if !has {
+            self.conn
+                .execute_batch("ALTER TABLE activity ADD COLUMN win TEXT NOT NULL DEFAULT '';")
+                .map_err(|e| format!("add activity.win: {e}"))?;
+        }
+        Ok(())
+    }
+
+    /// The v20 deliveries shape (also a heal floor): keyed by window NAME.
+    fn ensure_delivery_names(&self) -> Result<(), String> {
+        let has: bool = self
+            .conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('deliveries') WHERE name = 'win')",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("inspect deliveries shape: {e}"))?;
+        if has {
+            return Ok(());
+        }
+        self.conn
+            .execute_batch(
+                "CREATE TABLE deliveries_v20 (
+                   id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                   session TEXT NOT NULL,
+                   win     TEXT NOT NULL,
+                   line    TEXT NOT NULL,
+                   ts      INTEGER NOT NULL,
+                   UNIQUE (session, win, line)
+                 );
+                 INSERT INTO deliveries_v20 (session, win, line, ts)
+                   SELECT session, CAST(window AS TEXT), line, ts FROM deliveries;
+                 DROP TABLE deliveries;
+                 ALTER TABLE deliveries_v20 RENAME TO deliveries;
+                 CREATE INDEX IF NOT EXISTS deliveries_session ON deliveries(session, win);",
+            )
+            .map_err(|e| format!("rebuild deliveries for names: {e}"))
     }
 
     // ---- archived messages ----------------------------------------------
@@ -1182,7 +1255,7 @@ impl Store {
     pub fn insert_activity(
         &self,
         session: &str,
-        window: usize,
+        window: &str,
         ts: u64,
         kind: &str,
         text: &str,
@@ -1190,11 +1263,13 @@ impl Store {
         via: &str,
         state: &str,
     ) -> Result<(), String> {
+        // `window` (the INDEX column) is 0 for name-keyed rows; `win` carries
+        // the identity (board #120). Old rows read back via the COALESCE below.
         self.conn
             .execute(
-                "INSERT INTO activity (session, window, ts, kind, text, tool, via, state)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                rusqlite::params![session, window as i64, ts as i64, kind, text, tool, via, state],
+                "INSERT INTO activity (session, window, win, ts, kind, text, tool, via, state)
+                 VALUES (?1, 0, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                rusqlite::params![session, window, ts as i64, kind, text, tool, via, state],
             )
             .map(|_| ())
             .map_err(|e| format!("insert activity: {e}"))
@@ -1214,18 +1289,18 @@ impl Store {
 
     /// The prompt that opened the currently unclosed turn, if any. Used to
     /// recover an automatic reply edge after a server restart.
-    pub fn current_turn_prompt(&self, session: &str, window: usize) -> Result<Option<String>, String> {
+    pub fn current_turn_prompt(&self, session: &str, window: &str) -> Result<Option<String>, String> {
         self.conn
             .query_row(
                 "SELECT text FROM activity
-                 WHERE session = ?1 AND window = ?2 AND kind = 'prompt'
+                 WHERE session = ?1 AND COALESCE(NULLIF(win, ''), CAST(window AS TEXT)) = ?2 AND kind = 'prompt'
                    AND id > COALESCE((
                      SELECT MAX(id) FROM activity
-                     WHERE session = ?1 AND window = ?2 AND kind = 'notif'
+                     WHERE session = ?1 AND COALESCE(NULLIF(win, ''), CAST(window AS TEXT)) = ?2 AND kind = 'notif'
                        AND text IN ('completed', 'failed')
                    ), 0)
                  ORDER BY id DESC LIMIT 1",
-                rusqlite::params![session, window as i64],
+                rusqlite::params![session, window],
                 |r| r.get(0),
             )
             .optional()
@@ -1266,7 +1341,7 @@ impl Store {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, window, ts, kind, text, tool, via, state FROM activity
+                "SELECT id, COALESCE(NULLIF(win, ''), CAST(window AS TEXT)), ts, kind, text, tool, via, state FROM activity
                  WHERE session = ?1 AND ts > ?2
                    AND (ts < ?3 OR (ts = ?3 AND id < ?4))
                  ORDER BY ts DESC, id DESC LIMIT ?5",
@@ -1278,7 +1353,7 @@ impl Store {
                 |r| {
                     Ok(ActivityRow {
                         id: r.get(0)?,
-                        window: r.get::<_, i64>(1)? as usize,
+                        window: r.get::<_, String>(1)?,
                         ts: r.get::<_, i64>(2)? as u64,
                         kind: r.get(3)?,
                         text: r.get(4)?,
@@ -1337,15 +1412,15 @@ impl Store {
     pub fn insert_delivery(
         &self,
         session: &str,
-        window: usize,
+        window: &str,
         line: &str,
         ts: u64,
     ) -> Result<(), String> {
         self.conn
             .execute(
-                "INSERT INTO deliveries (session, window, line, ts) VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(session, window, line) DO UPDATE SET ts = ?4",
-                rusqlite::params![session, window as i64, line, ts as i64],
+                "INSERT INTO deliveries (session, win, line, ts) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(session, win, line) DO UPDATE SET ts = ?4",
+                rusqlite::params![session, window, line, ts as i64],
             )
             .map(|_| ())
             .map_err(|e| format!("insert delivery: {e}"))
@@ -1356,16 +1431,16 @@ impl Store {
     pub fn pending_deliveries(
         &self,
         session: &str,
-        window: Option<usize>,
-    ) -> Result<Vec<(usize, String, u64)>, String> {
+        window: Option<&str>,
+    ) -> Result<Vec<(String, String, u64)>, String> {
         let (sql, args): (&str, Vec<Box<dyn rusqlite::ToSql>>) = match window {
             Some(w) => (
-                "SELECT window, line, ts FROM deliveries
-                 WHERE session = ?1 AND window = ?2 ORDER BY id",
-                vec![Box::new(session.to_string()), Box::new(w as i64)],
+                "SELECT win, line, ts FROM deliveries
+                 WHERE session = ?1 AND win = ?2 ORDER BY id",
+                vec![Box::new(session.to_string()), Box::new(w.to_string())],
             ),
             None => (
-                "SELECT window, line, ts FROM deliveries WHERE session = ?1 ORDER BY id",
+                "SELECT win, line, ts FROM deliveries WHERE session = ?1 ORDER BY id",
                 vec![Box::new(session.to_string())],
             ),
         };
@@ -1375,7 +1450,7 @@ impl Store {
             .map_err(|e| format!("prepare deliveries: {e}"))?;
         let rows = stmt
             .query_map(rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())), |r| {
-                Ok((r.get::<_, i64>(0)? as usize, r.get::<_, String>(1)?, r.get::<_, i64>(2)? as u64))
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)? as u64))
             })
             .map_err(|e| format!("query deliveries: {e}"))?;
         Ok(rows.filter_map(Result::ok).collect())
@@ -1383,11 +1458,11 @@ impl Store {
 
     /// A line is settled — acknowledged by its echo, or reported as unconfirmed.
     /// Either way it stops being outstanding.
-    pub fn delete_delivery(&self, session: &str, window: usize, line: &str) -> Result<bool, String> {
+    pub fn delete_delivery(&self, session: &str, window: &str, line: &str) -> Result<bool, String> {
         self.conn
             .execute(
-                "DELETE FROM deliveries WHERE session = ?1 AND window = ?2 AND line = ?3",
-                rusqlite::params![session, window as i64, line],
+                "DELETE FROM deliveries WHERE session = ?1 AND win = ?2 AND line = ?3",
+                rusqlite::params![session, window, line],
             )
             .map(|n| n > 0)
             .map_err(|e| format!("delete delivery: {e}"))
@@ -1395,11 +1470,11 @@ impl Store {
 
     /// Forget every outstanding line of a window (it no longer exists, so it can
     /// never ack) or of a whole session.
-    pub fn clear_deliveries(&self, session: &str, window: Option<usize>) -> Result<usize, String> {
+    pub fn clear_deliveries(&self, session: &str, window: Option<&str>) -> Result<usize, String> {
         match window {
             Some(w) => self.conn.execute(
-                "DELETE FROM deliveries WHERE session = ?1 AND window = ?2",
-                rusqlite::params![session, w as i64],
+                "DELETE FROM deliveries WHERE session = ?1 AND win = ?2",
+                rusqlite::params![session, w],
             ),
             None => self
                 .conn
@@ -2343,28 +2418,28 @@ mod tests {
     #[test]
     fn outstanding_deliveries_are_kept_per_window_and_settle_once() {
         let store = Store::open_memory().unwrap();
-        store.insert_delivery("s", 1, "hello", 100).unwrap();
+        store.insert_delivery("s", "w1", "hello", 100).unwrap();
         // Re-typing the same line is the same outstanding line with a new clock,
         // never a second row that could never be acked twice.
-        store.insert_delivery("s", 1, "hello", 150).unwrap();
-        store.insert_delivery("s", 2, "other", 120).unwrap();
-        store.insert_delivery("t", 1, "elsewhere", 130).unwrap();
+        store.insert_delivery("s", "w1", "hello", 150).unwrap();
+        store.insert_delivery("s", "w2", "other", 120).unwrap();
+        store.insert_delivery("t", "w1", "elsewhere", 130).unwrap();
 
         let all = store.pending_deliveries("s", None).unwrap();
-        assert_eq!(all, vec![(1, "hello".to_string(), 150), (2, "other".to_string(), 120)]);
-        assert_eq!(store.pending_deliveries("s", Some(2)).unwrap().len(), 1);
+        assert_eq!(all, vec![("w1".to_string(), "hello".to_string(), 150), ("w2".to_string(), "other".to_string(), 120)]);
+        assert_eq!(store.pending_deliveries("s", Some("w2")).unwrap().len(), 1);
         assert_eq!(store.pending_deliveries("t", None).unwrap().len(), 1, "sessions never cross");
 
         // Acked or reported, a line leaves — and leaving twice is not an error.
-        assert!(store.delete_delivery("s", 1, "hello").unwrap());
-        assert!(!store.delete_delivery("s", 1, "hello").unwrap());
+        assert!(store.delete_delivery("s", "w1", "hello").unwrap());
+        assert!(!store.delete_delivery("s", "w1", "hello").unwrap());
         // A window that no longer exists can never echo: drop its whole queue.
-        assert_eq!(store.clear_deliveries("s", Some(2)).unwrap(), 1);
+        assert_eq!(store.clear_deliveries("s", Some("w2")).unwrap(), 1);
         assert!(store.pending_deliveries("s", None).unwrap().is_empty());
 
         // The recovery horizon: a line nobody ever acked is forgotten rather
         // than resurrected days later, and the fresh one stays.
-        store.insert_delivery("t", 2, "ancient", 10).unwrap();
+        store.insert_delivery("t", "w2", "ancient", 10).unwrap();
         assert_eq!(store.prune_deliveries(100).unwrap(), 1);
         assert_eq!(store.pending_deliveries("t", None).unwrap().len(), 1);
     }
@@ -2543,7 +2618,7 @@ mod tests {
             assert!(store.pending_deliveries("s", None).is_err(), "the table really is gone");
         }
         let store = Store::open(&path).unwrap();
-        store.insert_delivery("s", 1, "hello", 100).unwrap();
+        store.insert_delivery("s", "w1", "hello", 100).unwrap();
         assert_eq!(store.pending_deliveries("s", None).unwrap().len(), 1, "healed on open");
         assert_eq!(store.issue_get("legacy", 1).unwrap().unwrap()["editable"], false, "legacy workflow evidence is locked during repair");
         assert_eq!(
@@ -3108,11 +3183,11 @@ mod tests {
         let store = Store::open_memory().unwrap();
         for n in 0..5u64 {
             store
-                .insert_activity("s1", 3, 1000 + n, "tool", &format!("file{n}.rs"), "Edit", "", "")
+                .insert_activity("s1", "w3", 1000 + n, "tool", &format!("file{n}.rs"), "Edit", "", "")
                 .unwrap();
         }
         // Another session's rows never leak into this one's feed.
-        store.insert_activity("s2", 1, 1002, "tool", "other.rs", "Read", "", "").unwrap();
+        store.insert_activity("s2", "w1", 1002, "tool", "other.rs", "Read", "", "").unwrap();
 
         let all = store.activity_since("s1", 0, 100).unwrap();
         assert_eq!(all.len(), 5);
@@ -3147,15 +3222,15 @@ mod tests {
     #[test]
     fn current_turn_prompt_survives_the_server_process() {
         let store = Store::open_memory().unwrap();
-        store.insert_activity("s", 2, 1000, "notif", "completed", "", "", "").unwrap();
-        store.insert_activity("s", 2, 1100, "prompt", "[tmm chat] lead: work", "", "app", "").unwrap();
-        store.insert_activity("s", 2, 1200, "tool", "file.rs", "Edit", "", "").unwrap();
+        store.insert_activity("s", "w2", 1000, "notif", "completed", "", "", "").unwrap();
+        store.insert_activity("s", "w2", 1100, "prompt", "[tmm chat] lead: work", "", "app", "").unwrap();
+        store.insert_activity("s", "w2", 1200, "tool", "file.rs", "Edit", "", "").unwrap();
         assert_eq!(
-            store.current_turn_prompt("s", 2).unwrap().as_deref(),
+            store.current_turn_prompt("s", "w2").unwrap().as_deref(),
             Some("[tmm chat] lead: work")
         );
-        store.insert_activity("s", 2, 1300, "notif", "completed", "", "", "").unwrap();
-        assert_eq!(store.current_turn_prompt("s", 2).unwrap(), None);
+        store.insert_activity("s", "w2", 1300, "notif", "completed", "", "", "").unwrap();
+        assert_eq!(store.current_turn_prompt("s", "w2").unwrap(), None);
     }
 
     /// Paging backwards through a complete log (board #9). The cursor is (ts, id)
@@ -3166,7 +3241,7 @@ mod tests {
         let store = Store::open_memory().unwrap();
         // Six events, and three of them share ts 1002 — the shape a real turn has.
         for (n, ts) in [1000u64, 1001, 1002, 1002, 1002, 1003].into_iter().enumerate() {
-            store.insert_activity("s", 1, ts, "tool", &format!("e{n}"), "Edit", "", "").unwrap();
+            store.insert_activity("s", "w1", ts, "tool", &format!("e{n}"), "Edit", "", "").unwrap();
         }
         assert_eq!(store.activity_stats("s").unwrap(), (6, 1000, 1003));
 

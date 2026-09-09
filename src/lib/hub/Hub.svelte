@@ -240,7 +240,7 @@
         if (!agent) continue;
         out.push({
           icon: agent.icon, name: p.window_name,
-          state: agentStates[`${row.project.session}:${p.window}`] ?? 'idle',
+          state: agentStates[`${row.project.session}:${p.window_name}`] ?? 'idle',
         });
       }
       return out.slice(0, 4);
@@ -2110,11 +2110,11 @@
   // `windowOf` is what lets a reply close the lane it belongs to, so two agents
   // working at once keep ONE growing group each instead of interleaving.
   const blocks = $derived.by(() => {
-    const all = feedBlocks(feed, activity, hubPrefs.feedLevel, (from) => agents.find((a) => a.name === from)?.window);
+    const all = feedBlocks(feed, activity, hubPrefs.feedLevel, (from) => agents.find((a) => a.name === from)?.name);
     if (!filterAgent) return all;
     // The double-click filter: one agent's world (its replies, what was
     // addressed to it, its own telemetry lane) — rules live in filterBlocks.
-    return filterBlocks(all, filterAgent, agents.find((a) => a.name === filterAgent)?.window);
+    return filterBlocks(all, filterAgent, agents.find((a) => a.name === filterAgent)?.name);
   });
   const windowName = (w) => agents.find((a) => a.window === w)?.name ?? `#${w}`;
 

@@ -78,9 +78,12 @@
 - [x] #109: full snapshots restore history. The false-tail event, lost news
   flag and repeated redraw caused by synchronous `clear()` are fixed by
   in-frame `CSI 3J`.
-- [ ] Telemetry uses window INDEX while identity uses NAME, causing
-  `renumber-windows` mismatches. Renaming between hook and consumption loses
-  a post; identical bodies confuse receipts; delivery lacks backpressure;
+- [x] Telemetry keyed by window INDEX (board #120, 2026-09-09): every store
+  (turn edges, deliveries, activity, vitals, recovery) now keys on the window
+  NAME, resolved once at ingest (`resolve_pane_id` returns `#{window_name}`);
+  state.db v20 migrates readable; the rename-between-hook-and-consume post
+  loss went with the index → name round-trip. Still open from the same
+  cluster: identical bodies confuse receipts; delivery lacks backpressure;
   `SPAWN_CAP` includes windows we do not own.
 - [ ] Backend parity, blocked on measurement rather than effort: claude's
   `/` palette is not transcribed (mechanical once captured — transcribe the

@@ -904,7 +904,9 @@ export const boardDelete = (session: string, id: number) =>
   call<{ ok: boolean }>('hub_board_delete', { session, id });
 export interface HubActivityEvent {
   ts: number;      // epoch ms — merges directly with chat message timestamps
-  window: number;
+  /** The window NAME — the agent's identity (board #120; it was the tmux
+   * window index, which renumber-windows reassigns). */
+  window: string;
   /** tool = a hook tool call, status = `tmm status`, notif = a lifecycle hook,
    * prompt = a prompt the agent accepted (userPromptSubmit), warn = a line we
    * typed that the agent never echoed back. */

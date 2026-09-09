@@ -150,7 +150,7 @@ pub struct ActivityEvent {
     pub id: i64,
     /// Epoch MILLISECONDS to merge directly with bus message timestamps.
     pub ts: u64,
-    pub window: usize,
+    pub window: String,
     /// tool | status | notif | prompt | warn
     pub kind: String,
     pub text: String,
@@ -179,21 +179,21 @@ fn events() -> &'static Mutex<HashMap<String, std::collections::VecDeque<Activit
     EVENTS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn push_event(session: &str, window: usize, kind: &str, text: String) {
+fn push_event(session: &str, window: &str, kind: &str, text: String) {
     push_full(session, window, kind, text, String::new(), String::new());
 }
 
-fn push_event_via(session: &str, window: usize, kind: &str, text: String, via: String) {
+fn push_event_via(session: &str, window: &str, kind: &str, text: String, via: String) {
     push_full(session, window, kind, text, String::new(), via);
 }
 
-fn push_full(session: &str, window: usize, kind: &str, text: String, tool: String, via: String) {
+fn push_full(session: &str, window: &str, kind: &str, text: String, tool: String, via: String) {
     push(
         session,
         ActivityEvent {
             id: 0,
             ts: now_ms(),
-            window,
+            window: window.to_string(),
             kind: kind.into(),
             text,
             tool,
@@ -229,7 +229,7 @@ fn persist(_session: &str, _ev: &ActivityEvent) {}
 #[cfg(not(test))]
 fn persist(session: &str, ev: &ActivityEvent) {
     let written = super::with_store(|s| {
-        s.insert_activity(session, ev.window, ev.ts, &ev.kind, &ev.text, &ev.tool, &ev.via, &ev.state)
+        s.insert_activity(session, &ev.window, ev.ts, &ev.kind, &ev.text, &ev.tool, &ev.via, &ev.state)
     });
     if let Err(e) = written {
         // Fail-soft, but not SILENT: a lost write is a hole in the trace, and the
@@ -320,7 +320,7 @@ pub fn recent_events(session: &str, since_ts: u64) -> Vec<ActivityEvent> {
 
 /// The prompt newer than this window's last turn end. The durable path lets a
 /// stop hook recover its reply edge after the server restarted mid-turn.
-pub fn current_turn_prompt(session: &str, window: usize) -> Option<String> {
+pub fn current_turn_prompt(session: &str, window: &str) -> Option<String> {
     if !cfg!(test) {
         return super::with_store(|s| s.current_turn_prompt(session, window))
             .ok()
@@ -348,14 +348,14 @@ pub fn events_stats(session: &str) -> (usize, u64, u64) {
     super::with_store(|s| s.activity_stats(session)).unwrap_or((0, 0, 0))
 }
 
-fn store() -> &'static Mutex<HashMap<(String, usize), Rec>> {
-    static STORE: OnceLock<Mutex<HashMap<(String, usize), Rec>>> = OnceLock::new();
+fn store() -> &'static Mutex<HashMap<(String, String), Rec>> {
+    static STORE: OnceLock<Mutex<HashMap<(String, String), Rec>>> = OnceLock::new();
     STORE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn with_rec(session: &str, window: usize, f: impl FnOnce(&mut Rec)) {
+fn with_rec(session: &str, window: &str, f: impl FnOnce(&mut Rec)) {
     let mut map = store().lock().unwrap();
-    f(map.entry((session.to_string(), window)).or_default());
+    f(map.entry((session.to_string(), window.to_string())).or_default());
 }
 
 // ── Outstanding deliveries survive OUR restart ────────────────────────────
@@ -389,7 +389,7 @@ fn durable() -> bool {
 /// Every write here is FAIL-SOFT: telemetry may never block or break the thing
 /// it observes, and without a database the queue is exactly what it was before —
 /// in-memory, good for this process's lifetime.
-fn remember_delivery(session: &str, window: usize, line: &str, ts: u64) {
+fn remember_delivery(session: &str, window: &str, line: &str, ts: u64) {
     if !durable() {
         return;
     }
@@ -397,14 +397,14 @@ fn remember_delivery(session: &str, window: usize, line: &str, ts: u64) {
 }
 
 /// A line is settled — acked by its echo, or reported by the sweep.
-fn forget_delivery(session: &str, window: usize, line: &str) {
+fn forget_delivery(session: &str, window: &str, line: &str) {
     if !durable() {
         return;
     }
     let _ = super::with_store(|s| s.delete_delivery(session, window, line));
 }
 
-fn forget_window_deliveries(session: &str, window: usize) {
+fn forget_window_deliveries(session: &str, window: &str) {
     if !durable() {
         return;
     }
@@ -414,8 +414,8 @@ fn forget_window_deliveries(session: &str, window: usize) {
 /// (session, window) keys whose durable queue this process has already folded
 /// into memory. Once folded, memory is the working copy again — the hydration is
 /// a recovery step, not a second source of truth.
-fn hydrated() -> &'static Mutex<std::collections::HashSet<(String, usize)>> {
-    static HYDRATED: OnceLock<Mutex<std::collections::HashSet<(String, usize)>>> = OnceLock::new();
+fn hydrated() -> &'static Mutex<std::collections::HashSet<(String, String)>> {
+    static HYDRATED: OnceLock<Mutex<std::collections::HashSet<(String, String)>>> = OnceLock::new();
     HYDRATED.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
 }
 
@@ -430,12 +430,12 @@ fn hydrated() -> &'static Mutex<std::collections::HashSet<(String, usize)>> {
 /// restart — seconds before the echo we are trying to catch arrives. Same reason
 /// the clock does not run while a turn is open (see `overdue_lines`): a delivery
 /// is only overdue once it has had a real chance to come back.
-fn hydrate(session: &str, window: Option<usize>) {
+fn hydrate(session: &str, window: Option<&str>) {
     if !durable() {
         return;
     }
     if let Some(w) = window {
-        if hydrated().lock().unwrap().contains(&(session.to_string(), w)) {
+        if hydrated().lock().unwrap().contains(&(session.to_string(), w.to_string())) {
             return;
         }
     }
@@ -449,25 +449,25 @@ fn hydrate(session: &str, window: Option<usize>) {
     });
 
     let rows = super::with_store(|s| s.pending_deliveries(session, window)).unwrap_or_default();
-    let mut by_window: HashMap<usize, Vec<String>> = HashMap::new();
+    let mut by_window: HashMap<String, Vec<String>> = HashMap::new();
     for (w, line, _typed_at) in rows {
         by_window.entry(w).or_default().push(line);
     }
     // A queried window with no rows still counts as recovered, so the echo path
     // asks the database once and then stays in memory.
     if let Some(w) = window {
-        by_window.entry(w).or_default();
+        by_window.entry(w.to_string()).or_default();
     }
     let ts = now();
     for (w, lines) in by_window {
-        let key = (session.to_string(), w);
+        let key = (session.to_string(), w.clone());
         if !hydrated().lock().unwrap().insert(key) {
             continue; // another caller already folded this window in
         }
         if lines.is_empty() {
             continue;
         }
-        with_rec(session, w, |r| {
+        with_rec(session, &w, |r| {
             for line in lines {
                 // Memory wins: a line typed by THIS process keeps its own clock.
                 if r.pending.iter().any(|(l, _)| l == &line) {
@@ -486,7 +486,7 @@ fn hydrate(session: &str, window: Option<usize>) {
 /// facts arrive here and they are stored apart: a stop ENDS the turn, a
 /// permission/input prompt means the agent is blocked on the human while the
 /// turn stays open.
-pub fn record_notification(session: &str, window: usize, kind: &str, ts: u64) {
+pub fn record_notification(session: &str, window: &str, kind: &str, ts: u64) {
     push_event(session, window, "notif", kind.to_string());
     let kind = kind.to_string();
     with_rec(session, window, |r| match kind.as_str() {
@@ -512,7 +512,7 @@ pub fn record_notification(session: &str, window: usize, kind: &str, ts: u64) {
 ///
 /// Same shape as a `completed` stop, with `ask` cleared because a cancelled
 /// turn is not still asking.
-pub fn record_interrupt(session: &str, window: usize) {
+pub fn record_interrupt(session: &str, window: &str) {
     let ts = now();
     with_rec(session, window, |r| {
         r.end = Some(("completed".to_string(), ts));
@@ -523,7 +523,7 @@ pub fn record_interrupt(session: &str, window: usize) {
 /// A hook tool event (isolated-home agents only, Phase B+): `("Edit",
 /// "foo.rs")`. The event keeps the two parts apart for rendering; the status
 /// record keeps the joined line, which is what "working — Edit foo.rs" shows.
-pub fn record_tool(session: &str, window: usize, tool: &str, detail: &str) {
+pub fn record_tool(session: &str, window: &str, tool: &str, detail: &str) {
     // A tool call is proof the model answered: whatever transient-error retry
     // budget this window was burning refills (recovery rule 3).
     super::recovery::note_tool_activity(session, window);
@@ -553,7 +553,7 @@ pub fn record_tool(session: &str, window: usize, tool: &str, detail: &str) {
 /// pending delivery until the agent's `userPromptSubmit` hook echoes it back —
 /// in memory and in state.db, because the agent's own queue outlives our process
 /// (see the durable-delivery block above).
-pub fn record_delivery(session: &str, window: usize, line: &str) {
+pub fn record_delivery(session: &str, window: &str, line: &str) {
     let (line, ts) = (line.to_string(), now());
     with_rec(session, window, |r| {
         // Re-typing the same line replaces its entry rather than queueing a
@@ -577,7 +577,7 @@ pub fn record_delivery(session: &str, window: usize, line: &str) {
 /// containment, not equality: the CLI may submit the line with its own
 /// decoration, and an agent that is mid-task receives our line appended to
 /// whatever it was already typing.
-pub fn record_prompt(session: &str, window: usize, prompt: &str) -> bool {
+pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
     let text = truncate_chars(prompt, MAX_PROMPT_CHARS);
     let mut acked = false;
     let ts = now();
@@ -691,7 +691,7 @@ pub fn sweep_deliveries(session: &str) {
     // they are exactly the lines whose fate nobody is tracking any more.
     hydrate(session, None);
     let now = now();
-    let stale: Vec<(usize, String)> = {
+    let stale: Vec<(String, String)> = {
         let mut map = store().lock().unwrap();
         map.iter_mut()
             .filter(|((s, _), _)| s == session)
@@ -700,15 +700,15 @@ pub fn sweep_deliveries(session: &str) {
                 // Each line is reported once, so it leaves the queue with its
                 // warning. The ones still in time stay outstanding.
                 r.pending.retain(|(line, _)| !due.contains(line));
-                due.into_iter().map(move |line| (*w, line)).collect::<Vec<_>>()
+                due.into_iter().map(|line| (w.clone(), line)).collect::<Vec<_>>()
             })
             .collect()
     };
     for (window, line) in stale {
         // Reported means settled: the durable copy goes too, so the next restart
         // does not warn about it a second time.
-        forget_delivery(session, window, &line);
-        push_event(session, window, "warn", format!("unconfirmed: {}", truncate_chars(&line, 160)));
+        forget_delivery(session, &window, &line);
+        push_event(session, &window, "warn", format!("unconfirmed: {}", truncate_chars(&line, 160)));
     }
 }
 
@@ -723,7 +723,7 @@ fn truncate_chars(input: &str, max: usize) -> String {
 /// An auto-recovery action (`projects::recovery`) made visible: rendered as a
 /// `warn` row because it is ABOUT a window that needed intervention, and warns
 /// stay visible at every feed detail level.
-pub fn record_recovery(session: &str, window: usize, text: &str) {
+pub fn record_recovery(session: &str, window: &str, text: &str) {
     push_event(session, window, "warn", text.to_string());
 }
 
@@ -733,9 +733,9 @@ pub fn record_recovery(session: &str, window: usize, text: &str) {
 /// the screen long after the agent moved on, so the screen cannot answer it
 /// (owner, 2026-08-26 — the visible error re-triggered sends into a working
 /// agent). Seconds, same clock as the turn facts themselves.
-pub fn turn_fact_since(session: &str, window: usize, t: u64) -> bool {
+pub fn turn_fact_since(session: &str, window: &str, t: u64) -> bool {
     let map = store().lock().unwrap();
-    map.get(&(session.to_string(), window)).is_some_and(|r| {
+    map.get(&(session.to_string(), window.to_string())).is_some_and(|r| {
         r.prompt.is_some_and(|p| p >= t)
             || r.end.as_ref().is_some_and(|(_, ts)| *ts >= t)
             || r.tool.as_ref().is_some_and(|(_, ts)| *ts >= t)
@@ -744,13 +744,13 @@ pub fn turn_fact_since(session: &str, window: usize, t: u64) -> bool {
 
 /// Drop records for windows that no longer exist (called opportunistically
 /// with the live window set whenever someone lists a session's agents).
-pub fn retain_windows(session: &str, live: &[usize]) {
-    let dead: Vec<usize> = {
+pub fn retain_windows(session: &str, live: &[String]) {
+    let dead: Vec<String> = {
         let mut map = store().lock().unwrap();
         let dead = map
             .iter()
             .filter(|((s, w), _)| s == session && !live.contains(w))
-            .map(|((_, w), _)| *w)
+            .map(|((_, w), _)| w.clone())
             .collect();
         map.retain(|(s, w), _| s != session || live.contains(w));
         dead
@@ -764,8 +764,8 @@ pub fn retain_windows(session: &str, live: &[usize]) {
     // which reports them once and settles them — this path costs nothing on the
     // roster poll that calls it several times a minute.
     for w in &dead {
-        forget_window_deliveries(session, *w);
-        hydrated().lock().unwrap().remove(&(session.to_string(), *w));
+        forget_window_deliveries(session, w);
+        hydrated().lock().unwrap().remove(&(session.to_string(), w.clone()));
     }
 }
 
@@ -782,11 +782,11 @@ pub fn forget_process_state(session: &str) {
 /// Derive the current status for (session, window). `activity_ts` is tmux's
 /// window_activity for the window — used ONLY when the window has produced no
 /// hook facts at all. Pure given the record + clock.
-pub fn derive(session: &str, window: usize, activity_ts: u64) -> AgentStatus {
+pub fn derive(session: &str, window: &str, activity_ts: u64) -> AgentStatus {
     let rec = store()
         .lock()
         .unwrap()
-        .get(&(session.to_string(), window))
+        .get(&(session.to_string(), window.to_string()))
         .cloned()
         .unwrap_or_default();
     derive_from(&rec, activity_ts, now())
@@ -798,11 +798,11 @@ pub fn derive(session: &str, window: usize, activity_ts: u64) -> AgentStatus {
 /// call, no pane sniff, so `hub_rooms` can afford it on every poll. Windows
 /// that never produced a hook fact are simply absent — the client reads
 /// absence as idle, which is what no-facts honestly means.
-pub fn all_states() -> Vec<(String, usize, String)> {
+pub fn all_states() -> Vec<(String, String, String)> {
     let t = now();
     let map = store().lock().unwrap();
     map.iter()
-        .map(|((s, w), rec)| (s.clone(), *w, derive_from(rec, 0, t).state))
+        .map(|((s, w), rec)| (s.clone(), w.clone(), derive_from(rec, 0, t).state))
         .collect()
 }
 
@@ -885,15 +885,15 @@ mod tests {
     /// which the client reads as idle.
     #[test]
     fn all_states_reports_every_hooked_window_with_its_derived_state() {
-        record_prompt("allst-a", 2, "do the thing");
-        record_notification("allst-b", 3, "completed", 12345);
+        record_prompt("allst-a", "w2", "do the thing");
+        record_notification("allst-b", "w3", "completed", 12345);
         let states = all_states();
-        let get = |s: &str, w: usize| {
-            states.iter().find(|(ss, ww, _)| ss == s && *ww == w).map(|(_, _, st)| st.clone())
+        let get = |s: &str, w: &str| {
+            states.iter().find(|(ss, ww, _)| ss == s && ww == w).map(|(_, _, st)| st.clone())
         };
-        assert_eq!(get("allst-a", 2).as_deref(), Some("running"), "an open turn derives running");
-        assert_eq!(get("allst-b", 3).as_deref(), Some("idle"), "a closed turn derives idle");
-        assert_eq!(get("allst-a", 9), None, "no hook facts, no row — absence means idle");
+        assert_eq!(get("allst-a", "w2").as_deref(), Some("running"), "an open turn derives running");
+        assert_eq!(get("allst-b", "w3").as_deref(), Some("idle"), "a closed turn derives idle");
+        assert_eq!(get("allst-a", "w9"), None, "no hook facts, no row — absence means idle");
     }
 
     /// A human interrupt closes the turn itself, because nothing else will: the
@@ -902,16 +902,16 @@ mod tests {
     /// `running` for ever.
     #[test]
     fn an_interrupt_closes_the_turn_it_cancelled() {
-        record_prompt("int-a", 1, "do the long thing");
-        assert_eq!(derive("int-a", 1, 0).state, "running");
+        record_prompt("int-a", "w1", "do the long thing");
+        assert_eq!(derive("int-a", "w1", 0).state, "running");
 
-        record_interrupt("int-a", 1);
-        let after = derive("int-a", 1, 0);
+        record_interrupt("int-a", "w1");
+        let after = derive("int-a", "w1", 0);
         assert_eq!(after.state, "idle", "the cancelled turn is over");
         assert!(after.since > 0, "since moves to the interrupt");
         // Pane activity must not resurrect it either: a hooked window ignores
         // the repaint an interrupted TUI does on its way back to the prompt.
-        assert_eq!(derive("int-a", 1, now()).state, "idle");
+        assert_eq!(derive("int-a", "w1", now()).state, "idle");
         // And a REAL new turn afterwards is a fact of its own, so it reads
         // running again — which is the point of resetting FIRST. Checked on the
         // pure state machine because the record's clock is in seconds: an
@@ -958,46 +958,46 @@ mod tests {
         let rows = |s: &str| {
             recent_events(s, 0).into_iter().filter(|e| e.kind == "tool").count()
         };
-        record_tool(&session, 4, "Read", "/w/src/lib.rs");
-        record_tool(&session, 4, "Read", "/w/src/lib.rs");   // the Post half
+        record_tool(&session, "w4", "Read", "/w/src/lib.rs");
+        record_tool(&session, "w4", "Read", "/w/src/lib.rs");   // the Post half
         assert_eq!(rows(&session), 1, "one call, one row");
 
         // A different argument is a different call.
-        record_tool(&session, 4, "Read", "/w/src/main.rs");
+        record_tool(&session, "w4", "Read", "/w/src/main.rs");
         assert_eq!(rows(&session), 2);
         // The same argument in ANOTHER window is that window's own call.
-        record_tool(&session, 9, "Read", "/w/src/main.rs");
+        record_tool(&session, "w9", "Read", "/w/src/main.rs");
         assert_eq!(rows(&session), 3);
         // And the status record still carries the newest line either way.
-        let st = derive(&session, 4, 0);
+        let st = derive(&session, "w4", 0);
         assert!(st.detail.contains("main.rs"), "got {:?}", st.detail);
     }
 
     #[test]
     fn two_lines_queued_at_a_busy_agent_are_both_still_outstanding() {
         let session = format!("queue-test-{}", std::process::id());
-        record_prompt(&session, 1, "start working");      // a turn is open
-        record_delivery(&session, 1, "[tmm chat 00:05] human: first thing");
-        record_delivery(&session, 1, "[tmm chat 00:06] human: second thing");
+        record_prompt(&session, "w1", "start working");      // a turn is open
+        record_delivery(&session, "w1", "[tmm chat 00:05] human: first thing");
+        record_delivery(&session, "w1", "[tmm chat 00:06] human: second thing");
 
         // Both are held, oldest first — the second no longer erases the first.
         let held = |s: &str| {
-            store().lock().unwrap().get(&(s.to_string(), 1)).map(|r| r.pending.clone()).unwrap_or_default()
+            store().lock().unwrap().get(&(s.to_string(), "w1".to_string())).map(|r| r.pending.clone()).unwrap_or_default()
         };
         assert_eq!(held(&session).len(), 2);
         assert!(held(&session)[0].0.contains("first thing"));
 
         // The agent works through the queue in order. Each echo acknowledges its
         // OWN line and leaves the other outstanding.
-        assert!(record_prompt(&session, 1, "[tmm chat 00:05] human: first thing"),
+        assert!(record_prompt(&session, "w1", "[tmm chat 00:05] human: first thing"),
             "the first queued line is acknowledged, however late it arrives");
         assert_eq!(held(&session).len(), 1);
         assert!(held(&session)[0].0.contains("second thing"));
-        assert!(record_prompt(&session, 1, "[tmm chat 00:06] human: second thing"));
+        assert!(record_prompt(&session, "w1", "[tmm chat 00:06] human: second thing"));
         assert!(held(&session).is_empty());
 
         // A prompt nobody typed for us is still local input.
-        assert!(!record_prompt(&session, 1, "something the user typed at the keyboard"));
+        assert!(!record_prompt(&session, "w1", "something the user typed at the keyboard"));
     }
 
     #[test]
@@ -1006,11 +1006,11 @@ mod tests {
         // containing several of ours. Each must be acknowledged, or the earlier
         // messages keep their hollow ring for ever.
         let session = format!("queue-batch-{}", std::process::id());
-        record_prompt(&session, 2, "open the turn");
-        record_delivery(&session, 2, "line one");
-        record_delivery(&session, 2, "line two");
-        assert!(record_prompt(&session, 2, "line one\nline two\n"));
-        let left = store().lock().unwrap().get(&(session, 2)).map(|r| r.pending.clone()).unwrap_or_default();
+        record_prompt(&session, "w2", "open the turn");
+        record_delivery(&session, "w2", "line one");
+        record_delivery(&session, "w2", "line two");
+        assert!(record_prompt(&session, "w2", "line one\nline two\n"));
+        let left = store().lock().unwrap().get(&(session, "w2".to_string())).map(|r| r.pending.clone()).unwrap_or_default();
         assert!(left.is_empty(), "both lines were in that prompt");
     }
 
@@ -1142,11 +1142,11 @@ mod tests {
     #[test]
     fn a_typed_line_is_acknowledged_by_the_prompt_hook_that_echoes_it() {
         let line = "[tmm chat] human: @dev ship it";
-        record_delivery("ack-test", 3, line);
+        record_delivery("ack-test", "w3", line);
         // The CLI submits our line (possibly with the agent's own leading text
         // when it was mid-typing) — containment, not equality.
         assert!(
-            record_prompt("ack-test", 3, &format!("{line}\n")),
+            record_prompt("ack-test", "w3", &format!("{line}\n")),
             "the echo must acknowledge the pending delivery"
         );
         let evs = recent_events("ack-test", 0);
@@ -1168,26 +1168,26 @@ mod tests {
     #[test]
     fn a_multi_line_delivery_is_acknowledged_despite_whitespace_drift() {
         let line = "[tmm chat] human: @dev line one\nline two\n  line three";
-        record_delivery("ws-test", 1, line);
+        record_delivery("ws-test", "w1", line);
         // The composer turned newlines into single spaces and doubled one.
         assert!(
-            record_prompt("ws-test", 1, "[tmm chat] human: @dev line one line two  line three"),
+            record_prompt("ws-test", "w1", "[tmm chat] human: @dev line one line two  line three"),
             "newline → space must still ack"
         );
         // CRLF and trailing whitespace on the echo side.
-        record_delivery("ws-test", 2, "[tmm chat] human: do\nthe thing");
-        assert!(record_prompt("ws-test", 2, "[tmm chat] human: do\r\nthe thing \n"));
+        record_delivery("ws-test", "w2", "[tmm chat] human: do\nthe thing");
+        assert!(record_prompt("ws-test", "w2", "[tmm chat] human: do\r\nthe thing \n"));
         // tmux dropped the newline byte: the echo comes back GLUED — the
         // 2026-08-24 shape, measured live in the translator project
         // ("AgenticAI\nAgentic…" echoed as "AgenticAIAgentic…").
-        record_delivery("ws-test", 4, "[tmm chat] human: @dev AgenticAI\nAgentic AI 基础设施");
+        record_delivery("ws-test", "w4", "[tmm chat] human: @dev AgenticAI\nAgentic AI 基础设施");
         assert!(
-            record_prompt("ws-test", 4, "[tmm chat] human: @dev AgenticAIAgentic AI 基础设施"),
+            record_prompt("ws-test", "w4", "[tmm chat] human: @dev AgenticAIAgentic AI 基础设施"),
             "newline → NOTHING must still ack"
         );
         // Different WORDS still refuse — tolerance must not become fuzz.
-        record_delivery("ws-test", 3, "[tmm chat] human: alpha beta");
-        assert!(!record_prompt("ws-test", 3, "[tmm chat] human: alpha gamma"));
+        record_delivery("ws-test", "w3", "[tmm chat] human: alpha beta");
+        assert!(!record_prompt("ws-test", "w3", "[tmm chat] human: alpha gamma"));
     }
 
     // ── Board #5: an outstanding delivery survives OUR restart ─────────────
@@ -1206,11 +1206,11 @@ mod tests {
         forget_process_state(session);
     }
 
-    fn held(session: &str, window: usize) -> Vec<String> {
+    fn held(session: &str, window: &str) -> Vec<String> {
         store()
             .lock()
             .unwrap()
-            .get(&(session.to_string(), window))
+            .get(&(session.to_string(), window.to_string()))
             .map(|r| r.pending.iter().map(|(l, _)| l.clone()).collect())
             .unwrap_or_default()
     }
@@ -1220,16 +1220,16 @@ mod tests {
         crate::projects::tests::use_test_store();
         let session = format!("restart-ack-{}", uuid::Uuid::new_v4());
         let line = "[tmm chat 2026-08-29 16:00] human: @dev 部署一下\n第二行";
-        record_delivery(&session, 1, line);
+        record_delivery(&session, "w1", line);
 
         simulate_restart(&session);
-        assert!(held(&session, 1).is_empty(), "the in-process record really is gone");
+        assert!(held(&session, "w1").is_empty(), "the in-process record really is gone");
 
         // The agent submits what it queued. Glued newlines (the tmux
         // extended-keys shape), so the whitespace-blind match is exercised on
         // the recovered line exactly as on a live one.
         assert!(
-            record_prompt(&session, 1, "[tmm chat 2026-08-29 16:00] human: @dev 部署一下第二行"),
+            record_prompt(&session, "w1", "[tmm chat 2026-08-29 16:00] human: @dev 部署一下第二行"),
             "the recovered delivery must still be acknowledged as ours"
         );
         let e = recent_events(&session, 0).into_iter().last().unwrap();
@@ -1238,7 +1238,7 @@ mod tests {
             ("prompt", "app"),
             "the receipt, not a separate line of keyboard input"
         );
-        assert!(held(&session, 1).is_empty(), "acked lines leave the queue");
+        assert!(held(&session, "w1").is_empty(), "acked lines leave the queue");
 
         // Settled for good: another restart finds nothing to recover, so the
         // sweep cannot warn about a message that WAS delivered.
@@ -1255,14 +1255,14 @@ mod tests {
     fn a_restart_recovers_the_whole_queue_and_restarts_its_ack_clock() {
         crate::projects::tests::use_test_store();
         let session = format!("restart-queue-{}", uuid::Uuid::new_v4());
-        record_prompt(&session, 2, "open the turn");
-        record_delivery(&session, 2, "line one");
-        record_delivery(&session, 2, "line two");
+        record_prompt(&session, "w2", "open the turn");
+        record_delivery(&session, "w2", "line one");
+        record_delivery(&session, "w2", "line two");
         // A line typed LONG before the restart — the durable row keeps its real
         // typing time, which is what would make the first sweep after a restart
         // report it as unconfirmed seconds before its echo arrives.
         let long_ago = now().saturating_sub(DELIVERY_ACK_SECS * 20);
-        let _ = crate::projects::with_store(|s| s.insert_delivery(&session, 2, "stale line", long_ago));
+        let _ = crate::projects::with_store(|s| s.insert_delivery(&session, "w2", "stale line", long_ago));
 
         simulate_restart(&session);
 
@@ -1276,23 +1276,23 @@ mod tests {
             0,
             "a recovered line gets a real chance to come back"
         );
-        assert_eq!(held(&session, 2).len(), 3, "the whole queue is back, oldest first");
+        assert_eq!(held(&session, "w2").len(), 3, "the whole queue is back, oldest first");
 
         // One submitted prompt carrying several of our lines still acks each of
         // them — the multi-message match is unchanged by the recovery.
-        assert!(record_prompt(&session, 2, "line one\nline two"));
-        assert_eq!(held(&session, 2), vec!["stale line".to_string()]);
-        assert!(record_prompt(&session, 2, "stale line"));
-        assert!(held(&session, 2).is_empty());
+        assert!(record_prompt(&session, "w2", "line one\nline two"));
+        assert_eq!(held(&session, "w2"), vec!["stale line".to_string()]);
+        assert!(record_prompt(&session, "w2", "stale line"));
+        assert!(held(&session, "w2").is_empty());
     }
 
     #[test]
     fn a_reported_line_is_not_resurrected_and_a_dead_window_is_forgotten() {
         crate::projects::tests::use_test_store();
         let session = format!("restart-sweep-{}", uuid::Uuid::new_v4());
-        record_delivery(&session, 3, "@dev hello");
+        record_delivery(&session, "w3", "@dev hello");
         // Past the ack window: the sweep reports it once and settles it.
-        with_rec(&session, 3, |r| {
+        with_rec(&session, "w3", |r| {
             let (line, ts) = r.pending[0].clone();
             r.pending = vec![(line, ts - DELIVERY_ACK_SECS - 1)];
         });
@@ -1311,7 +1311,7 @@ mod tests {
 
         // And a window that no longer exists can never echo, so its queue goes
         // with the record instead of waiting for a recycled index to inherit it.
-        record_delivery(&session, 4, "@gone hello");
+        record_delivery(&session, "w4", "@gone hello");
         retain_windows(&session, &[]);
         simulate_restart(&session);
         assert_eq!(
@@ -1358,7 +1358,7 @@ mod tests {
     fn a_feed_page_is_capped_and_walks_back_from_its_own_cursor() {
         let session = format!("page-{}", uuid::Uuid::new_v4());
         for n in 0..10 {
-            record_tool(&session, 1, "Edit", &format!("f{n}.rs"));
+            record_tool(&session, "w1", "Edit", &format!("f{n}.rs"));
         }
         let (newest, _) = events_page(&session, 0, None, 4);
         assert_eq!(newest.len(), 4, "the caller's limit is honoured");
@@ -1384,7 +1384,7 @@ mod tests {
     }
 
     #[test]
-    fn a_prompt_typed_at_the_keyboard_is_recorded_as_local_input() {        assert!(!record_prompt("local-test", 1, "fix the flaky test"), "nothing was pending");
+    fn a_prompt_typed_at_the_keyboard_is_recorded_as_local_input() {        assert!(!record_prompt("local-test", "w1", "fix the flaky test"), "nothing was pending");
         let e = recent_events("local-test", 1).into_iter().next().unwrap();
         assert_eq!((e.kind.as_str(), e.via.as_str()), ("prompt", "local"));
         assert_eq!(e.text, "fix the flaky test", "the input half of the transcript");
@@ -1393,8 +1393,8 @@ mod tests {
     #[test]
     fn an_unacknowledged_delivery_is_reported_once() {
         // Backdate the pending line past the ack window.
-        record_delivery("sweep-test", 2, "[tmm chat] human: @dev hello");
-        with_rec("sweep-test", 2, |r| {
+        record_delivery("sweep-test", "w2", "[tmm chat] human: @dev hello");
+        with_rec("sweep-test", "w2", |r| {
             let (line, ts) = r.pending[0].clone();
             r.pending = vec![(line, ts - DELIVERY_ACK_SECS - 1)];
         });
@@ -1417,20 +1417,75 @@ mod tests {
     #[test]
     fn prompt_text_is_capped() {
         let long = "x".repeat(MAX_PROMPT_CHARS + 50);
-        record_prompt("cap-test", 1, &long);
+        record_prompt("cap-test", "w1", &long);
         let e = recent_events("cap-test", 0).into_iter().next().unwrap();
         assert_eq!(e.text.chars().count(), MAX_PROMPT_CHARS + 1, "capped plus the ellipsis");
     }
 
     #[test]
     fn store_roundtrip_and_window_retention() {
-        record_prompt("tsess", 1, "one");
-        record_prompt("tsess", 2, "two");
-        retain_windows("tsess", &[2]);
-        let s1 = derive("tsess", 1, 0);
+        record_prompt("tsess", "w1", "one");
+        record_prompt("tsess", "w2", "two");
+        retain_windows("tsess", &["w2".to_string()]);
+        let s1 = derive("tsess", "w1", 0);
         assert_eq!(s1.state, "idle", "dropped window's record must be gone");
-        let s2 = derive("tsess", 2, 0);
+        let s2 = derive("tsess", "w2", 0);
         assert_eq!(s2.state, "running", "the surviving record still answers");
         retain_windows("tsess", &[]);
     }
+    /// Board #120, the reproduction that motivated the name key: with
+    /// `renumber-windows on`, killing a lower window shifts every higher
+    /// index and a NEWCOMER inherits the freed number. Keyed by index, dev's
+    /// open turn painted rev's card and rev's history painted the newcomer's
+    /// (measured 2026-09-09: @788 "dev" resolved 2 → 1 after the kill). Keyed
+    /// by NAME, the same pane resolves to the same identity before and after
+    /// the shift, and the newcomer starts with no facts.
+    #[test]
+    fn an_index_shift_cannot_move_turn_edges_between_agents() {
+        let session = format!("tmm-idx-{}", std::process::id());
+        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &format!("={session}")]).status();
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "-n", "shell0", "sleep 60"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        let run = |args: &[&str]| { let _ = std::process::Command::new("tmux").args(args).status(); };
+        run(&["new-window", "-d", "-t", &format!("={session}:"), "-n", "dev", "sleep 60"]);
+        run(&["set-option", "-t", &format!("={session}:"), "renumber-windows", "on"]);
+        let pane_id = String::from_utf8(
+            std::process::Command::new("tmux")
+                .args(["display-message", "-p", "-t", &format!("={session}:dev"), "#{pane_id}"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
+
+        // Ingest exactly as the hook consumer does: resolve the pane, record.
+        let (s1, w1, _) = crate::tmux::resolve_pane_id(&pane_id).expect("pane resolves");
+        assert_eq!(w1, "dev", "the resolved key is the identity, not a number");
+        record_prompt(&s1, &w1, "open a turn");
+        assert_eq!(derive(&s1, "dev", 0).state, "running");
+
+        // The shift: kill the lower window; a newcomer takes a freed index.
+        run(&["kill-window", "-t", &format!("={session}:shell0")]);
+        run(&["new-window", "-d", "-t", &format!("={session}:"), "-n", "newcomer", "sleep 60"]);
+
+        // The SAME pane still resolves to the SAME key…
+        let (_, w2, _) = crate::tmux::resolve_pane_id(&pane_id).expect("pane still resolves");
+        assert_eq!(w2, "dev", "an index shift does not change the identity");
+        assert_eq!(derive(&s1, "dev", 0).state, "running", "dev keeps its own open turn");
+        // …and the newcomer inherits NOTHING (under index keys it inherited
+        // whatever record sat at its number).
+        assert_eq!(derive(&s1, "newcomer", 0).state, "idle", "no facts, honestly idle");
+
+        run(&["kill-session", "-t", &format!("={session}")]);
+    }
+
 }
