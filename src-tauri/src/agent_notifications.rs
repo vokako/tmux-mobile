@@ -117,9 +117,17 @@ impl AgentNotificationHub {
         if let Some(targets) = self.state.lock().unwrap().reply_targets.remove(&key) {
             return targets;
         }
-        crate::projects::telemetry::current_turn_prompt(session, window)
-            .map(|prompt| reply_targets(&prompt))
-            .unwrap_or_default()
+        // Desktop-gated like every `crate::projects` reader: the telemetry
+        // store does not exist on mobile, where an empty route is the same
+        // fail-soft answer a missing turn gives on desktop.
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            crate::projects::telemetry::current_turn_prompt(session, window)
+                .map(|prompt| reply_targets(&prompt))
+                .unwrap_or_default()
+        }
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        Vec::new()
     }
 
     /// The agent conversation id last reported by a hook in this tmux window,

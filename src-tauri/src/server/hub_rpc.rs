@@ -1059,6 +1059,7 @@ fn context_recipient_label(to: &[String]) -> String {
         .join(", ")
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn context_stamp(ts: i64) -> String {
     chrono::DateTime::from_timestamp_millis(ts)
         .map(|dt| dt.with_timezone(&chrono::Local).format("%m-%d %H:%M").to_string())
@@ -1067,6 +1068,7 @@ fn context_stamp(ts: i64) -> String {
 
 /// Messages since the target's previous delivery, bounded at the delivery
 /// edge. The newest rows win when the prior delivery lies beyond the page.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn team_context(
     history: &[RoutedChat],
     target: &str,
@@ -1124,6 +1126,7 @@ fn team_context(
     Some(out)
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn delivered_chat_line(from: &str, body: &str, context: Option<&str>) -> String {
     let current = format!("[tmm chat {}] {from}: {body}", stamp_now());
     match context {
@@ -2092,6 +2095,10 @@ mod tests {
     fn projects_readers_are_desktop_gated() {
         const GATE: &str = "target_os = \"android\"";
         let src = include_str!("hub_rpc.rs");
+        // `chrono` is a desktop-gated dependency exactly like `crate::projects`
+        // (Cargo.toml target block) — an ungated user broke the Android build
+        // the same silent way on 2026-09-09 (context_stamp/delivered_chat_line,
+        // found by the board #100 smoke build).
         let lines: Vec<&str> = src.lines().collect();
 
         // Column-0 `fn` only: this is about the file's own top-level items.
@@ -2121,7 +2128,7 @@ mod tests {
                     break;
                 }
             }
-            if !body.contains("crate::projects") {
+            if !body.contains("crate::projects") && !body.contains("chrono::") {
                 continue;
             }
             checked += 1;
