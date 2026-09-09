@@ -33,10 +33,11 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { projectAgeLabel, sortRows } from '../projects/projects.ts';
-  import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, stateNeedsYou, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, mentionedAgents, chipExtras, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, perLineOf, modelLabel } from './hub.ts';
+  import { TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, stateNeedsYou, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, mentionedAgents, chipExtras, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, perLineOf, modelLabel } from './hub.ts';
   import { handlePathLinkClick, resolvePathRef } from '../core/path-links.ts';
   import { heldAnchor, readingDirection, refoldEligible } from './hub-reading.ts';
   import { ALL_TARGET, attachmentBody, attachToken, paletteBackendFor } from './hub-composer.ts';
+  import { walkFeedGap } from './hub-history.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, popOrigin, viewBox } from '../ui/placement.ts';
@@ -444,14 +445,13 @@
         // in before the cursor moves past them — the hole was permanent
         // otherwise (review C, 2026-09-03). Bounded: 50 pages is 5000 messages
         // in one absence, past which the first-load page is the honest answer.
-        let cursor = res.oldest_seq;
-        for (let i = 0; i < 50 && cursor; i++) {
-          const page = await hubLog(s, 0, 100, cursor);
-          if (selected !== s) return;
-          const { newer, next } = gapWalkStep(page, floorTs);
-          if (newer.length) feed = mergeMessages(feed, newer);
-          cursor = next;
-        }
+        const walked = await walkFeedGap({ session: s, floorTs, cursor: res.oldest_seq }, {
+          readPage: (session, cursor) => hubLog(session, 0, 100, cursor),
+          stillCurrent: (session) => selected === session,
+          mergePage: (newer) => { feed = mergeMessages(feed, newer); },
+        });
+        // The helper return adds an await boundary before adopting the poll batch.
+        if (!walked || selected !== s) return;
       }
       if (messages?.length) {
         feed = mergeMessages(feed, messages);

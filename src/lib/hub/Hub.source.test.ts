@@ -356,6 +356,26 @@ test('history paging: anchored prepend, guarded rooms, parked cursors (board #9)
     'the load-earlier entry is the same whisper, wired to the same walk');
 });
 
+test('the gap walk keeps captured inputs and validates its added return boundary (#118)', () => {
+  const poll = source.slice(source.indexOf('async function loadFeed()'), source.indexOf('async function loadActivity()'));
+  assert.match(source, /import \{ walkFeedGap \} from '\.\/hub-history\.ts';/u);
+  assert.match(poll, /const floorTs = lastTs;/u, 'the floor is captured before the initial poll');
+  assert.match(poll, /else if \(res\.has_more && \(res\.oldest_seq \?\? 0\) > 0\)/u,
+    'first-page paging remains separate from the incremental gap');
+  assert.match(poll, /await walkFeedGap\(\{ session: s, floorTs, cursor: res\.oldest_seq \},/u);
+  assert.match(poll, /readPage: \(session, cursor\) => hubLog\(session, 0, 100, cursor\)/u,
+    'the existing RPC page size and before_seq arguments remain in Hub');
+  assert.match(poll, /stillCurrent: \(session\) => selected === session/u);
+  assert.match(poll, /mergePage: \(newer\) => \{ feed = mergeMessages\(feed, newer\); \}/u,
+    'each page merges into the live feed through the existing id dedupe');
+  const awaited = poll.indexOf('const walked = await walkFeedGap');
+  const guard = poll.indexOf('if (!walked || selected !== s) return;');
+  const batch = poll.indexOf('if (messages?.length)');
+  assert.ok(awaited >= 0 && guard > awaited && batch > guard,
+    'a stale walk or room change during the new return await prevents batch adoption');
+  assert.doesNotMatch(poll, /gapWalkStep|for \(let i = 0; i < 50/u, 'no second gap loop survives in the coordinator');
+});
+
 test('the fold budget goes through foldLines, and the basis is the column', () => {
   // Board #4: the budget math lives in hub.ts (pure, tested) — Hub only
   // measures. Re-inlining `* 0.2` here would fork the mapping again, and
