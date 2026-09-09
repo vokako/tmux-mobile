@@ -103,7 +103,7 @@ Each links to the doc that holds the reason and the details.
 | `docs/conventions/` | how we WORK: development loop, frontend rules, testing | first day, and whenever a build misbehaves |
 | `docs/reference/` | FACTS to look up: configuration keys, the backend module map | when configuring or deploying |
 | `docs/exec-plans/` | HISTORY: dated plans and prototypes that led here | to understand a past decision |
-| `docs/todo.md` · `docs/unresolved.md` | the gap between tenets and code; known open problems | before filing a duplicate |
+| `docs/todo.md` | the gap between tenets and code; known open problems | before filing a duplicate |
 
 ### Requirements (the WHAT)
 - Pages: [Terminal](docs/requirements/pages/terminal.md) · [File Browser](docs/requirements/pages/file-browser.md) · [Sessions](docs/requirements/pages/sessions.md) · [Settings](docs/requirements/pages/settings.md) · [Hub (chat, agents, board)](docs/requirements/pages/hub.md)
@@ -125,7 +125,7 @@ Each links to the doc that holds the reason and the details.
 ### Conventions, reference, history
 - [Development (commands, dev loop, build gotchas)](docs/conventions/development.md) · [Frontend conventions](docs/conventions/frontend.md) · [Testing](docs/conventions/testing.md)
 - [Configuration reference](docs/reference/config.md) · [Backend module map](docs/reference/backend-map.md)
-- [Execution plans (history)](docs/exec-plans/) · [Unresolved issues](docs/unresolved.md)
+- [Execution plans (history)](docs/exec-plans/)
 
 ## One entry point
 

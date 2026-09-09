@@ -1,10 +1,10 @@
 # TODO: Gaps Against the Tenets
 
-> Draft · 2026-09-09. This document records gaps and remaining work, not
-> decisions. Decisions belong in `tenet.md`; rules belong in `guidance/`.
-> Detailed historical context remains in `docs/unresolved.md`; this list
-> gives short descriptions and priorities. Consolidating the two is a
-> remaining task below.
+> Draft · 2026-09-09. This document is the ONE entry point for open problems
+> and remaining work, not decisions. Decisions belong in `tenet.md`; rules
+> belong in `guidance/`. (`docs/unresolved.md` was folded in here on
+> 2026-09-09, board #104 — its resolved entries live on in the design docs'
+> dated rules and in git history.)
 > Priorities: **P0** implementation violates an established tenet;
 > **P1** correctness/security; **P2** quality debt; **P3** recorded limitations.
 
@@ -44,8 +44,10 @@
 - [ ] **Entry-point map:** CLAUDE.md's ownership boundaries and documentation
   map point to `tenet.md` and `guidance/`; `<config>/AGENTS.md` references
   the short Zen list, describing process only (tenet 11).
-- [ ] **Consolidate `docs/unresolved.md` and this document** in either direction,
-  leaving one entry point for remaining work.
+- [x] **Consolidate `docs/unresolved.md` and this document** (board #104,
+  2026-09-09): unresolved.md's surviving details are folded into the matching
+  items here and the file is gone; resolved and deleted-feature entries were
+  dropped (their record is the design docs' dated rules and git history).
 - [ ] **Review process:** define how agents review separate disciplines,
   with one reviewer per dimension, the corresponding guidance checklist,
   and conclusions recorded in board notes.
@@ -62,10 +64,17 @@
   or a pre-recipe `agents/<name>.json` (board #112, 2026-09-09).
 - [ ] The roughly 1300-line touch-gesture state machine is embedded in
   `Terminal.svelte`'s effect closure with no tests; `kbLocked` invariants
-  rely only on documentation.
+  (e.g. "endTouchScroll must never change kbLocked") rely only on
+  documentation. Plan: terminal-gestures.md already specifies the state
+  machine — test the pure geometry first, then extract behind an interface;
+  needs an on-device regression pass.
 - [x] #108: a bounded stateful filter covers fragmented/coalesced `onData`
   replies. The source of the original `?62;22;52c` report still requires
-  measurement; see `unresolved.md`.
+  measurement: installed xterm.js 6.0.0 emits DA1 as ONE complete callback
+  even for fragmented queries, so the old "naturally split replies"
+  attribution was an unverified hypothesis — if the text recurs, capture the
+  `onData` payloads and pane output first; never strip bare printable
+  `?62;22;52c` on assumption (see terminal-rendering.md § xterm DA filtering).
 - [x] #109: full snapshots restore history. The false-tail event, lost news
   flag and repeated redraw caused by synchronous `clear()` are fixed by
   in-frame `CSI 3J`.
@@ -73,16 +82,24 @@
   `renumber-windows` mismatches. Renaming between hook and consumption loses
   a post; identical bodies confuse receipts; delivery lacks backpressure;
   `SPAWN_CAP` includes windows we do not own.
-- [ ] Backend parity: claude's `/` palette is not transcribed;
-  claude/codex/grok have no auto-continue; codex has no StopFailure.
+- [ ] Backend parity, blocked on measurement rather than effort: claude's
+  `/` palette is not transcribed (mechanical once captured — transcribe the
+  popup with pinned captures like codex's); claude/codex/grok have no
+  auto-continue (their transient-error paints are uncaptured, and a guessed
+  pattern would type `continue` into a working agent — capture each verbatim
+  into a test first); codex has no StopFailure hook event (binary checked),
+  so a codex `failed` state has nothing to wire until the CLI grows one.
 - [ ] Smoke-test CSP on a real device with Markdown, PDF, Mermaid and Hub.
   Browser/PWA responses have no CSP header.
 - [ ] The Android signing key was in git history before 60992d4 and has not
   been rotated, by owner decision. Keep this recorded.
-- [ ] Isolate flaky `adopt_then_down_then_up_restores_the_workspace` tests
-  on a separate tmux socket.
-- [ ] Consolidate three shell quoters in `agent_notifications.rs`, `tasks.rs`
-  and `team/backends.rs`.
+- [ ] Isolate the flaky `adopt_then_down_then_up_restores_the_workspace` test
+  on its own tmux socket (`-S`): `pick_workspace` votes over ALL windows and
+  the test's two windows have no majority, so anything another test leaves in
+  the shared tmux can tip which directory wins (seen once, 2026-08-05).
+- [ ] Consolidate three shell quoters: `agent_notifications.rs` (the only one
+  compiled on Android, pinned by hook files on disk), `tasks.rs::sh_quote`,
+  and `projects/backends/shared.rs::shell_quote`.
 - [ ] `auto_adopt_with` invokes tmux while holding the store lock.
 - [ ] The `@all` recipient is stored as `'all'` but not restored by `pickLead`;
   `hubLog` drops `since_ts` when `before_seq` is present.
@@ -121,9 +138,12 @@
   `Settings`, `GitPanel` and `ui/Select`. Some source tests pin implementation text.
 - [ ] `list_panes` runs a full `ps -axo` every time; a `hub_post` triggers
   at least two calls. Treat `child_cmd` as a detection clue and measure first.
-- [ ] Structural clippy findings: too many parameters in `handle_connection`(9),
-  `handle_connection_ws`(11) and `prepare_codex`(9); introduce context structures.
-  `Outbound::InitCipher` has a large_enum_variant finding.
+- [ ] Structural clippy findings (deferred 2026-07-22; fixing them changes
+  signatures, which the mechanical-move discipline forbade in that pass):
+  `handle_connection`(9) / `handle_connection_ws`(11) want a `ConnContext`
+  struct. `Outbound::InitCipher` is ~700 bytes vs 24 for `Plain`
+  (large_enum_variant) — boxing is trivial but touches the hot send funnel,
+  so do it with a connection-path regression run, not blind.
 - [ ] Frontend backend lists: `AgentsPage.svelte` and `TeamTemplates.svelte`
   each define `BACKENDS`, with five implicit `?? 'kiro'` defaults.
   Source these from the server's `SPAWNABLE_BACKENDS` as part of section A.
@@ -193,9 +213,30 @@ current recipient's window · #77 sidebar close/remove menu plus confirmation ·
 
 ## F. Recorded Limitations (P3)
 
-Emoji width is two cells in tmux versus one in xterm · bookmarks/recents use
-cross-client last-writer-wins · iOS target · helper-textarea listeners after
-xterm font-size changes · `newWindow` depends on `listPanes` ordering ·
-the window switcher can show a non-active pane ·
-`slow_rpc_does_not_block_fast_rpc` proves concurrency in only one direction ·
-Team-related issues disappear with Team removal.
+- Emoji width: tmux measures 2 cells, xterm's UnicodeV6 table 1 — a joined
+  (`capture -J`) line with emoji can re-wrap differently and shear pane rows.
+  Fix = `@xterm/addon-unicode11` AND the same table in
+  `terminal/cursor-layout.ts` `cellWidth`; verify against tmux's wcwidth first.
+- Bookmarks/recents are cross-client last-writer-wins: the client guards its
+  own races (generation counter, see file-browser.md), but phone + desktop
+  writing from parallel snapshots still clobber each other. Deeper fix:
+  server-side add/remove RPCs (`bookmark_toggle`, `fs_add_recent`) or merge
+  semantics in `set_prefs`, after which the client guards go.
+- iOS target: not implemented (Xcode + xcodegen + Apple Developer account;
+  `rustup target add aarch64-apple-ios aarch64-apple-ios-sim && npx tauri ios
+  init && npx tauri ios dev`).
+- xterm helper-textarea listeners after a font-size change: if xterm rebuilds
+  its hidden textarea (unverified), the `kbTa` reference and blur/focus
+  listeners go stale and break the keyboard-lock guard — confirm with a test
+  before re-binding per font change (`Terminal.svelte` fontSize $effect).
+- `newWindow` relies on `listPanes` returning the new pane last; have the
+  `new_window` RPC return the new `{session, window, pane}` directly.
+- The window switcher dedupes by window id with the FIRST pane it meets, so
+  command/title/AI badge can come from a background pane — prefer
+  `pane_active`.
+- `slow_rpc_does_not_block_fast_rpc` proves concurrency in one direction only
+  (measured 2026-08-20: the 5.3 MB download frame sits ahead of the pings in
+  the socket buffer, so a serial server can look concurrent). It prints
+  `inconclusive` instead of crying wolf; closing the gap needs an RPC whose
+  server work is slow while its response stays small — every current one
+  couples the two.

@@ -107,7 +107,7 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
 ## Edge Cases
 - Content updates paused during touch interaction, caught up via `endTouchScroll()`
 - `endTouchScroll` does NOT manipulate `kbLocked` — prevents race conditions with delayed timers
-- Complete xterm.js Device Attribute response chunks (`\x1b[?62;22c`) are filtered before forwarding to tmux; split-chunk leakage remains tracked in `docs/unresolved.md`
+- Complete xterm.js Device Attribute response chunks (`\x1b[?62;22c`) are filtered before forwarding to tmux; split-chunk leakage remains tracked in `docs/todo.md` §B
 - Mobile keyboard: double-tap to open. Three-layer control — `inputmode="none"` (browser hint), `kbLocked` focus guard (immediate blur), `keyboard-shift kbHeight=0` listener (catches system keyboard dismiss). Only `unlockKeyboard()`, blur timer, keyboard-shift, and pane switch may change `kbLocked`.
 - Nav buttons have `tabindex="-1"` to prevent focus stealing from textarea
 - All shortcut buttons use non-passive `touchstart: preventDefault()` to block synthetic `mousedown` focus stealing

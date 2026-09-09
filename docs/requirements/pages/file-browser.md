@@ -87,7 +87,7 @@ against clobbering (`src/lib/files/Files.svelte`):
    must not overwrite a newer local mutation.
 3. The lazy first load is single-flighted (one shared promise).
 These are client-side guards only; two *different* clients can still race
-(server-side merge semantics would be the deeper fix — see unresolved.md).
+(server-side merge semantics would be the deeper fix — see todo.md §F).
 
 Both rules are implemented once in `src/lib/files/persisted-list.ts`
 (unit-tested); bookmarks and recents are two configurations of it.

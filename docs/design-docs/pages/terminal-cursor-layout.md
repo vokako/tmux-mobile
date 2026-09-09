@@ -66,7 +66,7 @@ re-wrap xterm performs, not the wrap tmux performed:
 
 The server's `is_wide_char` (tmux.rs) is tmux-oriented and counts emoji as
 2 — do NOT "unify" the two tables; they answer different questions. The
-residual emoji fidelity gap is recorded in `docs/unresolved.md`.
+residual emoji fidelity gap is recorded in `docs/todo.md` §F.
 
 ## Verification
 

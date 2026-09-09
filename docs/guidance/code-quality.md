@@ -105,4 +105,4 @@
 - The 70-fix review on 2026-09-03 found a 750-line `hub_rpc.rs` match,
   40 boilerplate branches, three shell quoters and a full `ps` for every
   `list_panes`. These were recorded without immediate changes
-  ("记录、暂不动"), with reasons in unresolved.md.
+  ("记录、暂不动"), with reasons in todo.md.

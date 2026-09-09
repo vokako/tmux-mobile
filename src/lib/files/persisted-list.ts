@@ -17,7 +17,7 @@
 //
 // Framework-free: the host mirrors `onChange(items)` into its own $state.
 // The deeper fix (server-side merge semantics) is tracked in
-// docs/unresolved.md ("Prefs/bookmarks: cross-client last-writer-wins").
+// docs/todo.md §F (bookmarks/recents are cross-client last-writer-wins).
 
 export interface PersistedListDeps<T> {
   /** Read the server copy. Errors propagate to load() callers. */

@@ -434,7 +434,7 @@ async fn slow_rpc_does_not_block_fast_rpc() {
     // one from here. Asserting on the order anyway is what made this test fail
     // about two runs in three on a loaded host with nothing in the concurrency path
     // touched, and cost a reader real time deciding whether their change broke it
-    // (docs/unresolved.md, 2026-08-19).
+    // (docs/todo.md §F, 2026-08-19).
     //
     // So this test PROVES concurrency when it sees it and reports inconclusive
     // otherwise. A one-directional prover that never cries wolf is worth more than
