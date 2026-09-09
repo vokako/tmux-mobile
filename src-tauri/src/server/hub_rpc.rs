@@ -9,7 +9,7 @@
 //! desktop-gated — messages live in its `hub_msgs` table since board #107),
 //! so mobile answers method-not-found and clients degrade gracefully.
 
-use super::rpc::{require_str, Request, Response, ERR_INTERNAL, ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND};
+use super::rpc::{require_str, Request, Response, RpcError, ERR_INTERNAL, ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND};
 
 /// Bus room for a project's hub chat.
 ///
@@ -28,8 +28,13 @@ pub(super) fn project_room(session: &str) -> String {
         .unwrap_or_else(|| format!("proj:{session}"))
 }
 
+/// The hub dispatcher proper (board #146): every arm is a `Result`, so a
+/// missing param or a store error is a `?` with its wire code already chosen
+/// (`RpcError`), and `handle_hub_request` below is the one place a
+/// `Response` is built. Arm order and every message are exactly what the
+/// inline `match … return Response::err` shape produced.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::agent_notifications::AgentNotificationHub>) -> Response {
+fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notifications::AgentNotificationHub>) -> Result<Response, RpcError> {
     use crate::projects::rooms;
     use crate::projects::telemetry;
 
@@ -47,7 +52,7 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
         for (s, w, st) in crate::projects::telemetry::all_states() {
             states.insert(format!("{s}:{w}"), serde_json::Value::String(st));
         }
-        return Response::ok(id, serde_json::json!({ "rooms": crate::projects::rooms::room_latest(), "states": states }));
+        return Ok(Response::ok(id, serde_json::json!({ "rooms": crate::projects::rooms::room_latest(), "states": states })));
     }
     // The board twin of `hub_rooms`: issue counts per column for EVERY
     // project's board, one grouped read (board #39) — the Board sidebar
@@ -57,13 +62,13 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
     // all-rooms reads; same authenticated reader as everything here.
     if req.method == "hub_board_counts" {
         return match crate::projects::board_counts() {
-            Ok(v) => Response::ok(id, v),
-            Err(e) => Response::err(id, ERR_INTERNAL, e),
+            Ok(v) => Ok(Response::ok(id, v)),
+            Err(e) => Err(RpcError::Internal(e)),
         };
     }
     let asked = match require_str(p, "session") {
         Ok(s) => s,
-        Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+        Err(e) => return Err(RpcError::InvalidParams(e)),
     };
     // Resolve the caller's session name to the project's CURRENT one, ONCE, here.
     // Renaming a project renames its tmux session, but a running agent carries
@@ -98,14 +103,14 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
         "hub_command" => {
             let agent = match require_str(p, "agent") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             let text = match require_str(p, "text") {
                 Ok(s) => s.trim(),
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             if !text.starts_with('/') {
-                return Response::err(id, ERR_INVALID_PARAMS, "a command must start with '/'".into());
+                return Err(RpcError::InvalidParams("a command must start with '/'".into()));
             }
             let ws = crate::projects::project_for_session(session).ok().flatten().map(|pr| pr.path);
             let panes = crate::tmux::list_panes(session).unwrap_or_default();
@@ -130,20 +135,16 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
                 }
             }
             if sent.is_empty() {
-                return Response::err(
-                    id,
-                    ERR_INVALID_PARAMS,
-                    format!("no managed agent named '{agent}' in session '{session}'"),
-                );
+                return Err(RpcError::InvalidParams(format!("no managed agent named '{agent}' in session '{session}'")));
             }
             let _ = rooms::post(&room, "human", &format!("[tmm] {} → {}", text, sent.join(", ")));
-            Response::ok(id, serde_json::json!({ "sent": sent, "command": text }))
+            Ok(Response::ok(id, serde_json::json!({ "sent": sent, "command": text })))
         }
 
         "hub_post" => {
             let raw_body = match require_str(p, "body") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             let from = p.get("from").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or("human");
             let is_status = p.get("status").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -173,9 +174,9 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
                         let seq = msg.get("seq").and_then(|v| v.as_i64());
                         deliver_mentions(session, from, &body, &room, seq);
                     }
-                    Response::ok(id, msg)
+                    Ok(Response::ok(id, msg))
                 }
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
@@ -246,7 +247,7 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
                     obj.insert("has_more".into(), serde_json::json!(more && !reached_cursor));
                 }
             }
-            Response::ok(id, history)
+            Ok(Response::ok(id, history))
         }
 
         // Keyword search over the room's FULL history — `hub_log` pages, this
@@ -264,7 +265,7 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
                 .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
                 .unwrap_or_default();
             if terms.iter().all(|t| t.trim().is_empty()) {
-                return Response::err(id, ERR_INVALID_PARAMS, "grep must be a non-empty array of search terms".into());
+                return Err(RpcError::InvalidParams("grep must be a non-empty array of search terms".into()));
             }
             let global = p.get("global").and_then(|v| v.as_bool()).unwrap_or(false);
             let limit = p.get("limit").and_then(|v| v.as_i64()).unwrap_or(50).clamp(1, 500);
@@ -289,7 +290,7 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
                     });
                 }
             }
-            Response::ok(id, result)
+            Ok(Response::ok(id, result))
         }
 
         // Deleting a message is TWO steps, because a transcript is a record and a
@@ -304,7 +305,7 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
                 .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
                 .unwrap_or_default();
             if ids.is_empty() {
-                return Response::err(id, ERR_INVALID_PARAMS, "ids must be a non-empty array".into());
+                return Err(RpcError::InvalidParams("ids must be a non-empty array".into()));
             }
             match req.method.as_str() {
                 "hub_msg_archive" => {
@@ -329,11 +330,11 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
                             done += 1;
                         }
                     }
-                    Response::ok(id, serde_json::json!({ "archived": done }))
+                    Ok(Response::ok(id, serde_json::json!({ "archived": done })))
                 }
                 "hub_msg_restore" => match crate::projects::unarchive_msgs(&room, &ids) {
-                    Ok(n) => Response::ok(id, serde_json::json!({ "restored": n })),
-                    Err(e) => Response::err(id, ERR_INTERNAL, e),
+                    Ok(n) => Ok(Response::ok(id, serde_json::json!({ "restored": n }))),
+                    Err(e) => Err(RpcError::Internal(e)),
                 },
                 _ => {
                     // Forget the message itself first: if that fails the archive row
@@ -341,9 +342,9 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
                     match rooms::delete_messages(&room, &ids) {
                         Ok(n) => {
                             let _ = crate::projects::unarchive_msgs(&room, &ids);
-                            Response::ok(id, serde_json::json!({ "deleted": n }))
+                            Ok(Response::ok(id, serde_json::json!({ "deleted": n })))
                         }
-                        Err(e) => Response::err(id, ERR_INTERNAL, e),
+                        Err(e) => Err(RpcError::Internal(e)),
                     }
                 }
             }
@@ -358,27 +359,27 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
                     serde_json::json!({ "id": id, "ts": ts, "from": sender, "body": body, "archived_at": at })
                 })
                 .collect();
-            Response::ok(id, serde_json::json!({ "messages": rows }))
+            Ok(Response::ok(id, serde_json::json!({ "messages": rows })))
         }
 
         // Derived agent states for a session: one row per live window, agent
         // detection + status derivation joined at read time.
-        "hub_agents" => Response::ok(id, agent_states(session)),
+        "hub_agents" => Ok(Response::ok(id, agent_states(session))),
 
         // ---- the project task board (owner, 2026-08-29): the human writes
         // issues on the board page, agents read/update through `tmm board`.
         // Session-scoped like the chat room; note/move/save record WHO acted.
         "hub_board_list" => match crate::projects::board_list(session) {
-            Ok(v) => Response::ok(id, v),
-            Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
+            Ok(v) => Ok(Response::ok(id, v)),
+            Err(e) => Err(RpcError::InvalidParams(e)),
         },
         "hub_board_get" => {
             let Some(issue_id) = p.get("id").and_then(|v| v.as_i64()) else {
-                return Response::err(id, ERR_INVALID_PARAMS, "id required".into());
+                return Err(RpcError::InvalidParams("id required".into()));
             };
             match crate::projects::board_get(session, issue_id) {
-                Ok(v) => Response::ok(id, v),
-                Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
+                Ok(v) => Ok(Response::ok(id, v)),
+                Err(e) => Err(RpcError::InvalidParams(e)),
             }
         }
         "hub_board_save" => {
@@ -462,14 +463,14 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
                             deliver_chat_line(session, assignee, &line);
                         }
                     }
-                    Response::ok(id, serde_json::json!({ "ok": true, "id": saved }))
+                    Ok(Response::ok(id, serde_json::json!({ "ok": true, "id": saved })))
                 }
-                Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => Err(RpcError::InvalidParams(e)),
             }
         }
         "hub_board_note" => {
             let Some(issue_id) = p.get("id").and_then(|v| v.as_i64()) else {
-                return Response::err(id, ERR_INVALID_PARAMS, "id required".into());
+                return Err(RpcError::InvalidParams("id required".into()));
             };
             let body = p.get("body").and_then(|v| v.as_str()).unwrap_or("");
             let author = p.get("who").and_then(|v| v.as_str()).unwrap_or("human");
@@ -489,19 +490,19 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
                             deliver_chat_line(session, &assignee, &line);
                         }
                     }
-                    Response::ok(id, serde_json::json!({ "ok": true }))
+                    Ok(Response::ok(id, serde_json::json!({ "ok": true })))
                 }
-                Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => Err(RpcError::InvalidParams(e)),
             }
         }
         "hub_board_delete" => {
             let Some(issue_id) = p.get("id").and_then(|v| v.as_i64()) else {
-                return Response::err(id, ERR_INVALID_PARAMS, "id required".into());
+                return Err(RpcError::InvalidParams("id required".into()));
             };
             match crate::projects::board_delete(session, issue_id) {
-                Ok(true) => Response::ok(id, serde_json::json!({ "ok": true })),
-                Ok(false) => Response::err(id, ERR_INVALID_PARAMS, format!("no issue #{issue_id} on this board")),
-                Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
+                Ok(true) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
+                Ok(false) => Err(RpcError::InvalidParams(format!("no issue #{issue_id} on this board"))),
+                Err(e) => Err(RpcError::InvalidParams(e)),
             }
         }
 
@@ -545,7 +546,7 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
             // back so a client never has to reconstruct it.
             let oldest = events.first().map(|e| serde_json::json!({ "ts": e.ts, "id": e.id }));
             let (total, first_ts, _last_ts) = telemetry::events_stats(session);
-            Response::ok(
+            Ok(Response::ok(
                 id,
                 serde_json::json!({
                     "events": events,
@@ -554,7 +555,7 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
                     "total": total,
                     "first_ts": first_ts,
                 }),
-            )
+            ))
         }
 
         // Stop / restart ONE agent. The window is the agent's life: killing it
@@ -570,15 +571,13 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
         "hub_agent_interrupt" => {
             let agent = match require_str(p, "agent") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             if crate::projects::managed_home(session, agent).is_none() {
-                return Response::err(id, ERR_INVALID_PARAMS,
-                    format!("'{agent}' is not an agent this app started"));
+                return Err(RpcError::InvalidParams(format!("'{agent}' is not an agent this app started")));
             }
             let Some(window) = window_of_agent(session, agent) else {
-                return Response::err(id, ERR_INVALID_PARAMS,
-                    format!("no window named '{agent}' in session '{session}'"));
+                return Err(RpcError::InvalidParams(format!("no window named '{agent}' in session '{session}'")));
             };
             // Reset the derived state BEFORE the key goes in, never after. A
             // cancelled turn produces no stop hook, so without this the newest
@@ -598,9 +597,9 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
                     // half of the composer's interrupt affordance (owner,
                     // 2026-08-24: "发送 interrupt 的状态在消息列表里也要展示").
                     let _ = rooms::post(&room, agent, &format!("[tmm] interrupted {agent}"));
-                    Response::ok(id, serde_json::json!({ "interrupted": agent }))
+                    Ok(Response::ok(id, serde_json::json!({ "interrupted": agent })))
                 }
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
@@ -609,25 +608,24 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
         "hub_agent_remove" => {
             let agent = match require_str(p, "agent") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             match crate::projects::agent_remove(session, agent) {
                 Ok(v) => {
                     let _ = rooms::post(&room, agent, &format!("[tmm] removed {agent}"));
-                    Response::ok(id, v)
+                    Ok(Response::ok(id, v))
                 }
-                Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => Err(RpcError::InvalidParams(e)),
             }
         }
 
         "hub_agent_stop" | "hub_agent_restart" => {
             let agent = match require_str(p, "agent") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             if crate::projects::managed_home(session, agent).is_none() {
-                return Response::err(id, ERR_INVALID_PARAMS,
-                    format!("'{agent}' is not an agent this app started"));
+                return Err(RpcError::InvalidParams(format!("'{agent}' is not an agent this app started")));
             }
             let restart = req.method == "hub_agent_restart";
             let live = window_of_agent(session, agent);
@@ -636,19 +634,18 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
             // after a stop — which is what the button does when it reads Start.
             match (live, restart) {
                 (None, false) => {
-                    return Response::err(id, ERR_INVALID_PARAMS,
-                        format!("no window named '{agent}' in session '{session}'"));
+                    return Err(RpcError::InvalidParams(format!("no window named '{agent}' in session '{session}'")));
                 }
                 (Some(window), _) => {
                     if let Err(e) = crate::tmux::kill_window(&format!("{session}:{window}")) {
-                        return Response::err(id, ERR_INTERNAL, e);
+                        return Err(RpcError::Internal(e));
                     }
                 }
                 (None, true) => {}
             }
             if !restart {
                 let _ = rooms::post(&room, agent, &format!("[tmm] stopped {agent}"));
-                return Response::ok(id, serde_json::json!({ "stopped": agent }));
+                return Ok(Response::ok(id, serde_json::json!({ "stopped": agent })));
             }
             // Recreate from the declaration. A window younger than the capture
             // loop's 120 s rule may not be in it yet, so fall back to a fresh
@@ -675,11 +672,11 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
                     session, agent, brief: "", by: "", resume: true, ..Default::default()
                 });
                 if let Err(e) = r {
-                    return Response::err(id, ERR_INTERNAL, format!("restart failed: {e}"));
+                    return Err(RpcError::Internal(format!("restart failed: {e}")));
                 }
             }
             let _ = rooms::post(&room, agent, &format!("[tmm] restarted {agent}"));
-            Response::ok(id, serde_json::json!({ "restarted": agent, "resumed": resumed }))
+            Ok(Response::ok(id, serde_json::json!({ "restarted": agent, "resumed": resumed })))
         }
 
         // Spawn a registry agent into this project (tmm spawn / the UI's
@@ -690,7 +687,7 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
         "hub_spawn_team" => {
             let team = match require_str(p, "team") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             let brief = p.get("brief").and_then(|v| v.as_str()).unwrap_or("");
             let by = p.get("by").and_then(|v| v.as_str()).unwrap_or("");
@@ -707,15 +704,15 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
                         };
                         let _ = rooms::post(&room, who, &line);
                     }
-                    Response::ok(id, result)
+                    Ok(Response::ok(id, result))
                 }
-                Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => Err(RpcError::InvalidParams(e)),
             }
         }
         "hub_spawn" => {
             let agent = match require_str(p, "agent") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             let brief = p.get("brief").and_then(|v| v.as_str()).unwrap_or("");
             let by = p.get("by").and_then(|v| v.as_str()).unwrap_or("");
@@ -735,15 +732,24 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
                         format!("[tmm] spawned {win} — {brief}")
                     };
                     let _ = rooms::post(&room, who, &line);
-                    Response::ok(id, result)
+                    Ok(Response::ok(id, result))
                 }
-                Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => Err(RpcError::InvalidParams(e)),
             }
         }
 
-        other => Response::err(id, ERR_METHOD_NOT_FOUND, format!("unknown hub method: {other}")),
+        other => Err(RpcError::MethodNotFound(format!("unknown hub method: {other}"))),
     }
 }
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub(super) fn handle_hub_request(req: &Request, notifications: Option<&crate::agent_notifications::AgentNotificationHub>) -> Response {
+    match dispatch_hub(req, notifications) {
+        Ok(r) => r,
+        Err(e) => Response::from_error(req.id, e),
+    }
+}
+
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::agent_notifications::AgentNotificationHub>) -> Response {

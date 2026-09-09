@@ -312,6 +312,8 @@ mod golden_errors {
         // ── hub_rpc.rs literals ──────────────────────────────────────────
         check("hub_command", hub("hub_command", serde_json::json!({"agent": "a", "text": "model"})),
             ERR_INVALID_PARAMS, "a command must start with '/'");
+        check("hub_command no such agent", hub("hub_command", serde_json::json!({"agent": "nobody-such", "text": "/model"})),
+            ERR_INVALID_PARAMS, format!("no managed agent named 'nobody-such' in session '{session}'").as_str());
         check("hub_search", hub("hub_search", serde_json::json!({"grep": []})),
             ERR_INVALID_PARAMS, "grep must be a non-empty array of search terms");
         for m in ["hub_msg_archive", "hub_msg_restore", "hub_msg_purge"] {
@@ -323,6 +325,12 @@ mod golden_errors {
         check("hub_board_delete absent", hub("hub_board_delete", serde_json::json!({"id": 999999})),
             ERR_INVALID_PARAMS, "no issue #999999 on this board");
         check("unknown hub method", hub("hub_nope", serde_json::json!({})), ERR_METHOD_NOT_FOUND, "unknown hub method: hub_nope");
+        // Two multi-line literals the first census missed (found by the c2
+        // conversion): the agent-control arms' identity checks.
+        for m in ["hub_agent_interrupt", "hub_agent_stop", "hub_agent_restart"] {
+            check(m, hub(m, serde_json::json!({"agent": "nobody-such"})),
+                ERR_INVALID_PARAMS, "'nobody-such' is not an agent this app started");
+        }
 
         // ── rpc.rs literals ──────────────────────────────────────────────
         check("git allowlist", rpc("git", serde_json::json!({"subcmd": "rm"})), ERR_INVALID_PARAMS, "git subcommand not allowed: rm");
