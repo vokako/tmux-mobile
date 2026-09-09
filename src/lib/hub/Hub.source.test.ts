@@ -170,6 +170,39 @@ test('the agent card speaks the three-stage machine: select, then options, dblcl
   assert.match(source, /if \(filterAgent\) \{ filterAgent = ''; return true; \}/u, 'back gesture exits the filter');
 });
 
+test('Back registers the original live guards and publishes one local dispatcher (#119)', () => {
+  const region = source.slice(source.indexOf('const backLayers ='), source.indexOf('/** A pointer event'));
+  const guards = {
+    lightbox: "if (shotView) { shotView = ''; return true; }",
+    contextMenu: 'if (ctxAt) { closeCtx(); return true; }',
+    agentMenu: "if (menuFor) { menuFor = ''; return true; }",
+    recipient: 'if (recipientOpen) { recipientOpen = false; return true; }',
+    palette: 'if (palette) { paletteOff = true; return true; }',
+    interrupt: 'if (intArm) { intArm = false; return true; }',
+    action: 'if (pendingAct && !acting) { pendingAct = null; return true; }',
+    trash: 'if (trashAsk) { trashAsk = null; return true; }',
+    picker: 'if (pickerOpen) { pickerOpen = false; return true; }',
+    create: 'if (createOpen) { createOpen = false; return true; }',
+    rename: 'if (renaming) { renaming = false; return true; }',
+    filter: "if (filterAgent) { filterAgent = ''; return true; }",
+    files: "if (termOpen && drawerView === 'files' && drawerFilesBack?.()) return true;",
+    drawer: 'if (termOpen) { closeDrawer(); return true; }',
+    sidebar: 'if (compact && !sideOpen) { sideOpen = true; return true; }',
+  };
+  for (const [layer, guard] of Object.entries(guards)) {
+    assert.ok(region.includes(`backLayers.register('${layer}', () => { ${guard} return false; })`),
+      `${layer} keeps its original guard/action inside a live callback`);
+  }
+  assert.equal([...region.matchAll(/backLayers\.register\(/g)].length, 15);
+  assert.match(region, /onGoBack\(backLayers\.back\);/u);
+  assert.match(region, /return \(\) => \{ for \(const dispose of disposers\) dispose\(\); \};/u);
+  assert.doesNotMatch(region, /onGoBack\(\(\) =>|addEventListener|popstate|pushState/u,
+    'the old dispatch chain and event routing do not coexist with the registry');
+  const board = /<Board session=\{selected\}[^>]*>/u.exec(source)?.[0] ?? '';
+  assert.ok(board);
+  assert.doesNotMatch(board, /onGoBack/u, 'Board delegation is a separate behavior change');
+});
+
 test('the drawer pills show AGENT windows; the rest fold behind +N (board #92)', () => {
   // The switcher is for watching agents; shells and other windows are noise
   // that pushed the agent pills out of the bar ("只 filter 出当前有效的 agent

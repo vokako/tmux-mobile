@@ -97,7 +97,30 @@ App-level left/right tab swipe is lowest priority. Suppressed when any child ges
 
 ### The phone's BACK gesture peels layers; it never reads as the browser navigating
 
-App seeds/re-pushes `{app:true}` history entries and routes `popstate` to the visible page's own `onGoBack` closure — the Files page defined the contract (git panel → editor-with-confirm → preview → directory up → floor) and the owner named it the reference ("chat agent配置等页面 对于返回手势适配不太好 像是网页刷新了。像文件管理页面就很好", 2026-08-24). Hub peels in tap-outside/Escape order: context menu → agent menu → recipient picker → `/` palette → armed interrupt → confirm dialogs → team picker → create dialog → rename → terminal drawer (via `closeDrawer`) → and on compact, a bare conversation lifts the project list (the list is the FLOOR, like Files' `/`: back with it open falls through, so it cannot cycle open/close). Terminal on compact follows the same floor rule (board #58): a bare terminal lifts the session drawer; with it open Back falls through/re-pushes instead of closing it, so no close/open cycle; a Chat-jumped Terminal returns to Chat before the floor lift. AgentsPage: pending delete dialog → whichever editor is open (compact: the editor takes the screen) → floor. Settings: the open category → the category list (its compact layout is the same drill-down — the list is the first screen, a chip row was a third navigation species; owner, 2026-08-25) → floor (leaves the page). A CONSUMED pop re-pushes in App so the next back always has an entry to spend; only an unconsumed one reaches the re-push floor. Pages register via the same `onGoBack={(fn) => xGoBack = fn}` prop pattern Files uses — a page never installs its own `popstate` listener.
+App seeds/re-pushes `{app:true}` history entries and routes `popstate` to the visible page's own `onGoBack` closure — the Files page defined the contract (git panel → editor-with-confirm → preview → directory up → floor) and the owner named it the reference ("chat agent配置等页面 对于返回手势适配不太好 像是网页刷新了。像文件管理页面就很好", 2026-08-24). Hub peels its fixed local priority sequence, listed below; this is separate from its Escape/pointerdown listeners. On compact, a bare conversation lifts the project list (the list is the FLOOR, like Files' `/`: back with it open falls through, so it cannot cycle open/close). Terminal on compact follows the same floor rule (board #58): a bare terminal lifts the session drawer; with it open Back falls through/re-pushes instead of closing it, so no close/open cycle; a Chat-jumped Terminal returns to Chat before the floor lift. AgentsPage: pending delete dialog → whichever editor is open (compact: the editor takes the screen) → floor. Settings: the open category → the category list (its compact layout is the same drill-down — the list is the first screen, a chip row was a third navigation species; owner, 2026-08-25) → floor (leaves the page). A CONSUMED pop re-pushes in App so the next back always has an entry to spend; only an unconsumed one reaches the re-push floor. Pages register via the same `onGoBack={(fn) => xGoBack = fn}` prop pattern Files uses — a page never installs its own `popstate` listener.
+
+**Hub dispatch ownership** (board #119, 2026-09-09): one per-Hub
+`hub-back.ts` registry replaces the closure-wide flag chain. Its fixed order
+is lightbox -> ContextMenu -> agent tap menu -> recipient -> palette ->
+armed interrupt -> non-busy action confirmation -> trash confirmation ->
+agent picker -> create project -> rename -> agent filter -> Files delegate ->
+drawer close -> compact project-list floor. This is not registration order
+or a chronological stack. Each callback reads its owner's live state;
+the registry keeps no duplicate open flags. Missing callbacks fall through.
+Each disposer belongs to one registration, so an old owner cannot remove
+its replacement even when both register the same function.
+
+Hub still publishes one callback through `onGoBack`; cleanup removes its
+registrations. The original guards remain: a truthy palette consumes even
+without items, busy action confirmation falls through, and Files is called
+only for an open Files partition and consumes only on a true return.
+Message actions/raw view are not Back layers; Board delegation is not added.
+The Escape/pointerdown listeners and their capture order stay in Hub,
+including the terminal/Files/Board focus territories. The registry neither
+installs listeners nor calls browser history. Desktop still uses in-pane
+Files Back/breadcrumbs; a narrow desktop is not a reason to trap browser Back.
+Unit traces cover every layer and overlap; a mounted Hub test exercises
+recipient/palette priority, the compact floor and registration cleanup.
 
 **The dance is the phone's** (review, 2026-09-03). Everything above — the seed, the re-push after a consumed pop, the `popstate` router — is gated on `layout.isTouchDevice`, and `navPush()` is a no-op that returns `false` on a desktop layout. A desktop browser has no back gesture to protect, and the unconditional seed + re-push had made the app a page you could not Back out of: the browser's Back button did nothing, forever. On the phone nothing changed. Callers that later spend an entry with `history.back()` (the gear's toggle via `prefsPushed`, Settings' compact drill via `onDrill`'s return value → `drillPushed`) only do so when their push was real, so a narrow desktop window never `history.back()`s out of the app. The gate is reactive: switching the layout mode in Settings installs or removes the router live (entries already pushed before a switch to desktop are simply popped by the browser with nothing listening). `App.source.test.ts` pins the gate. Files' own `navPush` (a page-local push, Files-owned) still pushes on desktop; those entries are consumed silently by Back until the app's real root is reached — harmless, but the one remaining desktop push.
 

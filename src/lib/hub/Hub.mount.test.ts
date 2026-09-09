@@ -160,3 +160,60 @@ test('a pending attachment blocks Enter until the real Hub can send the complete
   assert.equal(pushed.size, 0);
   context.diagnostic(`attachment scenario after shared compilation ${(performance.now() - started).toFixed(1)}ms`);
 });
+
+test('the local Hub Back callback peels recipient before palette and stops at the compact floor', { timeout: 60000 }, async (context) => {
+  const fixture = await compiledHub();
+  const started = performance.now();
+  const { rpc } = roomFixture();
+  let back: () => boolean = () => assert.fail('Hub has not registered Back');
+  let registrations = 0;
+  const app = await fixture.mount(context, {
+    props: {
+      visible: true, mobile: true,
+      onGoBack: (fn: () => boolean) => { back = fn; registrations++; },
+    },
+    modules: [{ ...rpc, modelsList: async () => ({ models: [] }) }],
+  });
+  try {
+    for (let i = 0; i < 10 && app.document.querySelector('.to-name')?.textContent !== 'alice'; i++) {
+      await app.flush();
+    }
+    assert.equal(app.document.querySelector('.to-name')?.textContent, 'alice');
+    const historyLength = app.window.history.length;
+    const published = back;
+    const input = app.document.querySelector<HTMLTextAreaElement>('.c-input')!;
+    input.value = '/';
+    input.dispatchEvent(new app.window.Event('input', { bubbles: true }));
+    await app.flush();
+    assert.ok(app.document.querySelector('.cmd-menu'));
+    app.document.querySelector<HTMLButtonElement>('.to-chip')!.click();
+    await app.flush();
+    assert.ok(app.document.querySelector('.to-menu'));
+
+    assert.equal(back(), true);
+    await app.flush();
+    assert.equal(app.document.querySelector('.to-menu'), null, 'recipient is peeled first');
+    assert.ok(app.document.querySelector('.cmd-menu'), 'palette survives the first Back');
+    assert.equal(back(), true);
+    await app.flush();
+    assert.equal(app.document.querySelector('.cmd-menu'), null);
+    assert.equal(back(), true);
+    await app.flush();
+    assert.ok(app.document.querySelector('.sidebar.open'));
+    assert.equal(back(), false);
+    assert.equal(back(), false);
+    assert.ok(app.document.querySelector('.sidebar.open'), 'the floor never closes itself');
+    assert.equal(back, published);
+    assert.equal(registrations, 1, 'state changes do not publish another callback');
+    assert.equal(app.window.history.length, historyLength, 'local dispatch never pushes browser history');
+
+    app.document.querySelector<HTMLElement>('.side-scrim')!.click();
+    app.document.querySelector<HTMLButtonElement>('.to-chip')!.click();
+    await app.flush();
+    assert.ok(app.document.querySelector('.to-menu'), 'leave a live layer for the unmount check');
+  } finally {
+    await app.close();
+  }
+  assert.equal(back(), false, 'the disposed Hub has no registered layers');
+  context.diagnostic(`Back scenario after shared compilation ${(performance.now() - started).toFixed(1)}ms`);
+});

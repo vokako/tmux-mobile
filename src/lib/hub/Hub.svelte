@@ -38,6 +38,7 @@
   import { heldAnchor, readingDirection, refoldEligible } from './hub-reading.ts';
   import { ALL_TARGET, attachmentBody, attachToken, paletteBackendFor } from './hub-composer.ts';
   import { walkFeedGap } from './hub-history.ts';
+  import { createHubBackRegistry } from './hub-back.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, popOrigin, viewBox } from '../ui/placement.ts';
@@ -1931,33 +1932,35 @@
   // ── The phone's BACK GESTURE, the Files page's contract (owner, 2026-08-24:
   // "chat…对于返回手势适配不太好 像是网页刷新了。像文件管理页面就很好"): App
   // routes a history pop here, and a `true` means it was CONSUMED by peeling
-  // the topmost layer — the same order a tap-outside or Escape would use.
+  // the topmost layer in the fixed Back priority (separate from key listeners).
   // Only when nothing is left to peel does it fall through to App's re-push,
   // so a back never looks like the browser leaving. On a phone the project
   // LIST is the level above the conversation (the Files analogy: cwd = '/'
   // is the floor); with the list open, back has reached the floor.
   // The lightbox is the topmost transient layer: back peels it first.
   let shotView = $state('');
+  const backLayers = createHubBackRegistry();
   $effect(() => {
     if (!onGoBack) return;
-    onGoBack(() => {
-      if (shotView) { shotView = ''; return true; }
-      if (ctxAt) { closeCtx(); return true; }
-      if (menuFor) { menuFor = ''; return true; }
-      if (recipientOpen) { recipientOpen = false; return true; }
-      if (palette) { paletteOff = true; return true; }
-      if (intArm) { intArm = false; return true; }
-      if (pendingAct && !acting) { pendingAct = null; return true; }
-      if (trashAsk) { trashAsk = null; return true; }
-      if (pickerOpen) { pickerOpen = false; return true; }
-      if (createOpen) { createOpen = false; return true; }
-      if (renaming) { renaming = false; return true; }
-      if (filterAgent) { filterAgent = ''; return true; }
-      if (termOpen && drawerView === 'files' && drawerFilesBack?.()) return true;
-      if (termOpen) { closeDrawer(); return true; }
-      if (compact && !sideOpen) { sideOpen = true; return true; }
-      return false;
-    });
+    const disposers = [
+      backLayers.register('lightbox', () => { if (shotView) { shotView = ''; return true; } return false; }),
+      backLayers.register('contextMenu', () => { if (ctxAt) { closeCtx(); return true; } return false; }),
+      backLayers.register('agentMenu', () => { if (menuFor) { menuFor = ''; return true; } return false; }),
+      backLayers.register('recipient', () => { if (recipientOpen) { recipientOpen = false; return true; } return false; }),
+      backLayers.register('palette', () => { if (palette) { paletteOff = true; return true; } return false; }),
+      backLayers.register('interrupt', () => { if (intArm) { intArm = false; return true; } return false; }),
+      backLayers.register('action', () => { if (pendingAct && !acting) { pendingAct = null; return true; } return false; }),
+      backLayers.register('trash', () => { if (trashAsk) { trashAsk = null; return true; } return false; }),
+      backLayers.register('picker', () => { if (pickerOpen) { pickerOpen = false; return true; } return false; }),
+      backLayers.register('create', () => { if (createOpen) { createOpen = false; return true; } return false; }),
+      backLayers.register('rename', () => { if (renaming) { renaming = false; return true; } return false; }),
+      backLayers.register('filter', () => { if (filterAgent) { filterAgent = ''; return true; } return false; }),
+      backLayers.register('files', () => { if (termOpen && drawerView === 'files' && drawerFilesBack?.()) return true; return false; }),
+      backLayers.register('drawer', () => { if (termOpen) { closeDrawer(); return true; } return false; }),
+      backLayers.register('sidebar', () => { if (compact && !sideOpen) { sideOpen = true; return true; } return false; }),
+    ];
+    onGoBack(backLayers.back);
+    return () => { for (const dispose of disposers) dispose(); };
   });
   /** A pointer event as a plain client point. */
   const pointOf = (e) => ({ x: e.clientX ?? 0, y: e.clientY ?? 0 });
