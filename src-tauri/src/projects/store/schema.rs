@@ -4,6 +4,8 @@
 //! connection, the same migration ladder, the same tests — only the file moved.
 
 use super::*;
+// The v18 step backfills the omp default from the registry's own seed text.
+use super::registry::{DEFAULT_OMP_MODEL, DEFAULT_OMP_SYSTEM};
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
