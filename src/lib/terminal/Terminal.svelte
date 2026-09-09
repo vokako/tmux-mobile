@@ -20,11 +20,11 @@
   import { compactLineGeometry } from './terminal-line-geometry.ts';
   import { selStart, selContains, selLength, selForDrag, selFromExclusive, wordBounds } from './selection-model.ts';
   import { pointToCell, handleGrabOffset, snapHandleColumn, selectionView, hitSelectionHandle } from './terminal-gesture-geometry.ts';
-  import { scrollSamples, scrollStep, releaseVelocity, coastStep, edgeDirection, edgeStep } from './terminal-gesture-motion.ts';
+  import { createTerminalGestures } from './terminal-gestures.ts';
   import { computeCursorLayout } from './cursor-layout.ts';
   import { restoreViewportAfterPaneSwitch } from './terminal-viewport.ts';
   import { cycleItem } from '../app/shortcuts.ts';
-  import { createDoubleTapDetector, createOneShotCtrl, encodeTerminalShortcut } from './terminal-keyboard.ts';
+  import { createOneShotCtrl, encodeTerminalShortcut } from './terminal-keyboard.ts';
   import { createTerminalResponseFilter } from './terminal-responses.ts';
   import { writeTerminalFrame } from './terminal-frame.ts';
   import { openExternalUrl } from '../core/external-links.ts';
@@ -34,8 +34,6 @@
   // Max wait for server to echo our resize. If never confirmed (external resize
   // or slow tmux), client falls back to trusting server-reported dimensions.
   const RESIZE_CONFIRM_TIMEOUT_MS = 5000;
-  const LONG_PRESS_MS = 500;
-  const TOUCH_END_DELAY_MS = 500;
 
   // xterm.js fallback cell size ratios (used when render dimensions unavailable)
   const CELL_W_RATIO = 0.6;
@@ -954,25 +952,14 @@
       },
     };
 
-    // Mobile touch: scrolling, scrollbar drag, long-press word selection
-    let touchId = null; // track the initial touch to ignore extra fingers
-    let touchY = 0, touchStartY = 0, accumulatedDy = 0, longPressTimer = null, didScroll = false;
-    let lastMoveTime = 0, momentumId = null, totalDist = 0;
-    let velocitySamples = []; // recent velocity samples for smoothing
-
-    let onScrollbar = false, scrollbarStartY = 0, scrollbarStartViewport = 0;
-    // Touch mode: 'idle' | 'down' | 'scrollbar' | 'scroll' | 'longpress-select' | 'handle-drag'
-    let touchMode = 'idle';
-    let dragHandle = null; // 'start' | 'end' when touchMode === 'handle-drag'
-    let handleGrabDx = 0;  // finger minus dragged endpoint cell-centre at grab time
-    let handleGrabDy = 0;
-    let edgeScrollId = null; // rAF loop for drag-at-edge auto-scroll
-    let edgeScrollDir = 0;   // -1 up / +1 down / 0 none
-    let lastDragX = 0, lastDragY = 0; // latest compensated drag point (px)
-    const stopMomentum = () => { if (momentumId) { cancelAnimationFrame(momentumId); momentumId = null; } };
-    // Double-tap → keyboard (terminal-keyboard.md). Fed ONLY from the clean-tap
-    // branch of onTouchEnd; every other gesture end resets it.
-    const doubleTap = createDoubleTapDetector();
+    const gestures = createTerminalGestures(gestureHost, {
+      now: () => Date.now(),
+      setDelay: (callback, ms) => window.setTimeout(callback, ms),
+      clearDelay: (id) => window.clearTimeout(id),
+      requestFrame: (callback) => window.requestAnimationFrame(callback),
+      cancelFrame: (id) => window.cancelAnimationFrame(id),
+      vibrate: (ms) => { navigator.vibrate?.(ms); },
+    });
 
     // Local input means "show me the live tail".
     //
@@ -987,11 +974,11 @@
     // tail and drop the selection on input; do the same, on every send path.
     function resumeLiveTail() {
       if (!term) return;
-      if (!selection && !touchScrolling && termAtBottom && momentumId == null) return;
+      if (!selection && !touchScrolling && termAtBottom && !gestures.isCoasting()) return;
       if (selection) clearSelection();
       // A live coast would scroll the viewport straight back off the tail
       // (measured: typing mid-coast re-armed the deferral one frame later).
-      stopMomentum();
+      gestures.stopMomentum();
       if (touchScrolling) {
         clearTimeout(endTouchScrollTimer);
         endTouchScrollTimer = null;
@@ -1044,7 +1031,7 @@
       isApplyingSelection = true;
       try { term?.clearSelection(); } finally { isApplyingSelection = false; }
       // Resume content updates (selection had pinned them).
-      if (touchMode === 'idle') {
+      if (gestures.isIdle()) {
         touchScrolling = false;
         if (lastContent && termAtBottom) writeToXterm(lastContent, lastCursor);
       }
@@ -1112,43 +1099,6 @@
       moveHead(row, col);
     }
 
-    // Auto-scroll while dragging a handle near the top/bottom edge — the
-    // native way to extend a selection beyond the visible screen. Speed
-    // ramps with proximity to the edge (1 px/frame deep in the zone is
-    // ~1 row per 3 frames; pressed against the edge it's ~4 rows/frame...
-    // we keep it gentle: 1 row per N frames scaling to 2 rows/frame).
-    function updateEdgeScroll(clientY) {
-      const rect = gestureHost.edgeBounds();
-      const dir = edgeDirection(clientY, rect.top, rect.bottom);
-      edgeScrollDir = dir;
-      if (dir !== 0 && !edgeScrollId) {
-        let acc = 0;
-        const tick = () => {
-          if (edgeScrollDir === 0 || touchMode !== 'handle-drag' || !gestureHost.available()) {
-            edgeScrollId = null;
-            return;
-          }
-          const rect2 = gestureHost.edgeBounds();
-          const step = edgeStep(acc, edgeScrollDir, lastDragY + handleGrabDy, rect2.top, rect2.bottom);
-          acc = step.accumulated;
-          const lines = step.lines;
-          if (lines !== 0) {
-            gestureHost.scrollLines(lines);
-            acc = step.remainder;
-            // Viewport moved under the stationary finger — re-map the
-            // endpoint so the selection keeps extending row by row.
-            gestureHost.dragHeadAt(lastDragX, lastDragY);
-          }
-          edgeScrollId = requestAnimationFrame(tick);
-        };
-        edgeScrollId = requestAnimationFrame(tick);
-      }
-    }
-    function stopEdgeScroll() {
-      edgeScrollDir = 0;
-      if (edgeScrollId) { cancelAnimationFrame(edgeScrollId); edgeScrollId = null; }
-    }
-
     // Hit-test handles. Each handle is a lollipop (dot + stem); the visible
     // dot is 12 px but the *touchable* zone is much larger so the user
     // doesn't have to aim. Capsule axis runs along the stem, with generous
@@ -1174,235 +1124,13 @@
       const rect = termEl.getBoundingClientRect();
       return hitSelectionHandle(clientX, clientY, rect, selection, selUI);
     }
-    // Hit-test the toolbar copy button (handled by the button's own pointer
-    // events; we just need to know to skip terminal-touch handling when the
-    // touch lands on the toolbar).
-    function isOnToolbar(target) {
-      return !!(target && target.closest && target.closest('.sel-toolbar'));
-    }
+
     // Hit-test whether a buffer-row/col is inside the current selection
     function isInsideSelection(bufRow, col) {
       return selContains(selection, bufRow, col);
     }
 
-    const onTouchStart = (e) => {
-      stopMomentum();
-      touchId = e.touches[0].identifier; // track this finger
-      const cx = e.touches[0].clientX;
-      const cy = e.touches[0].clientY;
-
-      // Toolbar / handle hit-tests come first — they're tiny UI surfaces and
-      // the rest of the terminal-touch logic must not run for them. Toolbar
-      // buttons handle their own clicks; we just bow out.
-      if (isOnToolbar(e.target)) {
-        touchMode = 'idle';
-        return;
-      }
-      if (gestureHost.hasSelection()) {
-        const which = gestureHost.hitHandle(cx, cy);
-        if (which) {
-          touchMode = 'handle-drag';
-          dragHandle = which;
-          // Re-anchor so the grabbed endpoint is `head` — all subsequent
-          // moves rewrite head only (see beginEndpointDrag).
-          // Record the finger's offset from the dragged endpoint's CELL
-          // CENTRE in both axes, so the first touchmove maps to exactly the
-          // cell the endpoint is already on — zero snap. The old code only
-          // compensated Y (the end-handle dot sits at the cell's right edge,
-          // so X was off by up to a full column) and then "lifted" the point
-          // one row above the finger, which guaranteed a one-row jump on the
-          // first frame of every drag.
-          const offset = gestureHost.grabHandle(which, cx, cy);
-          handleGrabDx = offset.dx;
-          handleGrabDy = offset.dy;
-          // Pin content updates while dragging. preventDefault on touchmove
-          // (which is non-passive) blocks the page from scrolling.
-          gestureHost.pinUpdates();
-          return;
-        }
-      }
-
-      // Scrollbar drag (right edge)
-      onScrollbar = gestureHost.isScrollbarPoint(cx);
-      if (onScrollbar) {
-        touchMode = 'scrollbar';
-        gestureHost.pinUpdates();
-        scrollbarStartY = cy;
-        scrollbarStartViewport = gestureHost.scrollPosition();
-        return;
-      }
-
-      touchY = cy;
-      touchStartY = touchY;
-      accumulatedDy = 0;
-      velocitySamples = [];
-      totalDist = 0;
-      lastMoveTime = Date.now();
-      didScroll = false;
-      touchMode = 'down';
-      // Selection lives on. We DO allow scrolling within a selection — the
-      // selection follows buffer rows, so scrolling just moves it. We do
-      // NOT, however, kick off a new long-press while a selection exists;
-      // long-press inside the selection is no-op (use handle to refine),
-      // long-press outside cancels and starts a new selection.
-      const startCX = cx, startCY = cy;
-      longPressTimer = setTimeout(() => {
-        if (touchMode !== 'down' || didScroll || !gestureHost.available()) return;
-        // If a selection exists and the long-press lands inside it, ignore
-        // (avoid surprising users who are aiming at handles).
-        if (!gestureHost.tryWordSelection(startCX, startCY)) return;
-        touchMode = 'longpress-select';
-        navigator.vibrate?.(15);
-      }, LONG_PRESS_MS);
-    };
-    // Find the tracked touch by identifier (ignore extra fingers)
-    const findTouch = (list) => { for (let i = 0; i < list.length; i++) if (list[i].identifier === touchId) return list[i]; return null; };
-    const onTouchMove = (e) => {
-      if (!gestureHost.available()) return;
-      const t0 = findTouch(e.touches);
-      if (!t0) return; // not our finger
-      // Scrollbar drag: map touch delta proportionally to scroll position
-      if (touchMode === 'scrollbar') {
-        gestureHost.dragScrollbar(scrollbarStartY, scrollbarStartViewport, t0.clientY);
-        if (e.cancelable) e.preventDefault();
-        return;
-      }
-      // Handle drag: the grabbed endpoint is `head` (re-anchored at grab
-      // time); just track the finger. Grab-offset compensation in BOTH axes
-      // means the mapped cell starts exactly where the endpoint already is.
-      if (touchMode === 'handle-drag' && gestureHost.hasSelection()) {
-        lastDragX = t0.clientX - handleGrabDx;
-        lastDragY = t0.clientY - handleGrabDy;
-        gestureHost.dragHeadAt(lastDragX, lastDragY);
-        updateEdgeScroll(t0.clientY);
-        if (e.cancelable) e.preventDefault();
-        return;
-      }
-      // Long-press selection: extend from anchor word to current cell
-      if (touchMode === 'longpress-select' && gestureHost.hasSelection()) {
-        gestureHost.extendHeadAt(t0.clientX, t0.clientY);
-        if (e.cancelable) e.preventDefault();
-        return;
-      }
-      // Normal content scroll
-      const now = Date.now();
-      const y = t0.clientY;
-      const dy = touchY - y;
-      const previousMoveTime = lastMoveTime;
-      touchY = y;
-      lastMoveTime = now;
-      accumulatedDy += dy;
-      totalDist += Math.abs(dy);
-      const lh = gestureHost.lineHeight();
-      velocitySamples = scrollSamples(velocitySamples, dy, now, previousMoveTime);
-      const step = scrollStep(accumulatedDy, lh);
-      const lines = step.lines;
-      if (lines !== 0) {
-        didScroll = true;
-        if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
-        if (touchMode === 'down') touchMode = 'scroll';
-        gestureHost.pinUpdates();
-        gestureHost.scrollLines(lines);
-        accumulatedDy = step.remainder;
-        if (e.cancelable) e.preventDefault();
-      }
-    };
-    const onTouchEnd = (e) => {
-      const endedMode = touchMode;
-      if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
-      // Only a clean tap can be half of a double-tap; a scroll, drag or
-      // long-press between two taps breaks the pair.
-      if (endedMode !== 'down') doubleTap.reset();
-      if (endedMode === 'scrollbar') {
-        touchMode = 'idle';
-        onScrollbar = false;
-        gestureHost.requestRenderRelease(TOUCH_END_DELAY_MS);
-        return;
-      }
-      if (endedMode === 'handle-drag') {
-        touchMode = 'idle';
-        dragHandle = null;
-        stopEdgeScroll();
-        // Selection persists; pinning persists
-        return;
-      }
-      if (endedMode === 'longpress-select') {
-        touchMode = 'idle';
-        // Selection persists with current head; pinning persists
-        return;
-      }
-      // 'down' (clean tap) or 'scroll' (released after scroll)
-      if (endedMode === 'down') {
-        touchMode = 'idle';
-        const t0 = e.changedTouches?.[0];
-        // Clean tap. If a selection exists and the tap was outside it (and
-        // not on a handle/toolbar — those bailed at touchstart), cancel the
-        // selection. That tap is spent on the cancel: it never starts a
-        // double-tap pair, so dismissing a selection cannot pop the keyboard.
-        if (gestureHost.hasSelection()) {
-          doubleTap.reset();
-          if (t0) {
-            gestureHost.clearSelectionOutside(t0.clientX, t0.clientY);
-          }
-          return;
-        }
-        // A single tap does nothing. The second clean tap of a double-tap
-        // opens the keyboard — the ONE terminal-area gesture that may.
-        if (t0 && doubleTap.tap({ x: t0.clientX, y: t0.clientY, t: Date.now() })) {
-          // Cancel the browser's synthetic mouse events for this touch
-          // (mousedown/mouseup/click/dblclick): xterm turns a dblclick into a
-          // word selection, which onSelChange would adopt as a stray
-          // selection right under the keyboard. touchend is registered
-          // non-passive for exactly this call.
-          if (e.cancelable) e.preventDefault();
-          gestureHost.openFromDoubleTap();
-        }
-        return;
-      }
-      // 'scroll' or anything that left touchScrolling=true
-      touchMode = 'idle';
-      if (gestureHost.isPinned() && velocitySamples.length > 0) {
-        const lh = gestureHost.lineHeight();
-        let v = releaseVelocity(velocitySamples, lh);
-        if (Math.abs(v) > 0.1) {
-          let acc = 0;
-          const coast = () => {
-            const step = coastStep(v, acc);
-            v = step.velocity;
-            acc = step.accumulated;
-            const lines = step.lines;
-            if (lines !== 0) {
-              gestureHost.scrollLines(lines);
-              acc = step.remainder;
-            }
-            if (step.running) {
-              momentumId = requestAnimationFrame(coast);
-            } else {
-              momentumId = null;
-              gestureHost.requestRenderRelease(200);
-            }
-          };
-          momentumId = requestAnimationFrame(coast);
-        } else {
-          gestureHost.requestRenderRelease(TOUCH_END_DELAY_MS);
-        }
-      } else if (gestureHost.isPinned() && !gestureHost.hasSelection()) {
-        gestureHost.requestRenderRelease(TOUCH_END_DELAY_MS);
-      }
-    };
-    const onTouchCancel = () => {
-      if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
-      doubleTap.reset();
-      onScrollbar = false;
-      touchMode = 'idle';
-      dragHandle = null;
-      stopMomentum();
-      stopEdgeScroll();
-      // Don't blow away the selection on a stray cancel — but if we were
-      // mid-handle-drag the user expects the partial drag to commit, which
-      // it already has via moveHead() on the last touchmove.
-      if (!gestureHost.hasSelection()) gestureHost.requestRenderRelease(100);
-    };
+    const { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel } = gestures;
     termEl.addEventListener('touchstart', onTouchStart, { passive: true });
     termEl.addEventListener('touchmove', onTouchMove, { passive: false });
     // touchend is non-passive: the double-tap branch calls preventDefault()
@@ -1423,7 +1151,7 @@
         if (selection) {
           selection = null;
           selUI = null;
-          if (touchMode === 'idle') {
+          if (gestures.isIdle()) {
             touchScrolling = false;
             if (lastContent && termAtBottom) writeToXterm(lastContent, lastCursor);
           }
@@ -1452,11 +1180,7 @@
       const generation = ++resumeGeneration;
       const resumeAtTail = followedTailBeforeHide;
       touchScrolling = false;
-      onScrollbar = false;
-      touchMode = 'idle';
-      dragHandle = null;
-      stopMomentum();
-      stopEdgeScroll();
+      gestures.resetAfterVisibility();
       // Drop the selection — re-attaching to a clipboard from before
       // backgrounding is rarely useful and could surprise the user.
       if (selection) clearSelection();
@@ -1780,12 +1504,11 @@
       termEl?.style.removeProperty('--xterm-char-height');
       termEl?.style.removeProperty('--xterm-line-offset');
       clearTimeout(endTouchScrollTimer);
-      if (longPressTimer) clearTimeout(longPressTimer);
+      gestures.cancelHold();
       clearTimeout(kbBlurTimer);
       if (kbTa && onTaBlur) kbTa.removeEventListener('blur', onTaBlur);
       if (kbTa && onTaFocus) kbTa.removeEventListener('focus', onTaFocus);
-      stopMomentum();
-      stopEdgeScroll();
+      gestures.dispose();
       if (_pendingRaf) { cancelAnimationFrame(_pendingRaf); _pendingRaf = 0; }
       _pendingContent = null;
       _pendingCursor = null;

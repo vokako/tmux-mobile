@@ -266,12 +266,12 @@ timer, xterm or Svelte dependency. One signed `Math.trunc` splitter serves
 pixel scrolling (with the measured line height) and line-unit coasts.
 
 The sample helper returns a bounded copy instead of mutating its input.
-Terminal remains the sole owner of that private list and assigns the result
+At this step Terminal remained the sole owner of that private list, assigning the result
 at the old collection point; existing sample objects are retained. Pruning
 still happens on collection, not through a new release-time age check.
 Same-time/backward clocks retain the one-millisecond denominator floor.
 
-All scheduling and mode transitions stay in the closure: the nonempty
+At this step all scheduling and mode transitions stayed in the closure: the nonempty
 sample guard and strict `>0.1` coast-start condition, rAF ownership/cancel,
 200/500ms release paths, and edge-drag stop conditions are unchanged.
 Accumulated state is published before `scrollLines`, and its remainder
@@ -291,8 +291,8 @@ Restoring truncation returns green.
 The 92-state #141 matrix still matches, including selection API arguments;
 88 PNGs are byte-identical and four Copy captures differ only in the existing
 toast timing. This is not a physical Android/IME verification. The controller
-boundary must be re-reviewed after these pure moves land, before moving its
-state, timers or listeners.
+boundary was re-reviewed after these pure moves landed; #148 below records
+the approved state/timer move. Listener ownership does not move.
 
 ## Controller Boundary Preparation (#148, 2026-09-09)
 
@@ -306,6 +306,83 @@ timers, listeners, selection or rendering ownership.
 Expanding the adapters restores the original Root AST, including read/action
 order. The 92-state Chromium baseline matches; the four nonidentical Copy
 PNGs differ only in the existing toast timing.
+
+## Controller Ownership (#148, 2026-09-09)
+
+The second commit moves the procedural controller, not the xterm lifecycle,
+into `createTerminalGestures` in `terminal-gestures.ts`. One inert factory
+replaces the old state group inside the target-only lifecycle: construction
+does not query Root, perform a command or schedule work. It owns the same
+21 transient bindings (including existing redundant fields), four touch
+handlers, edge loop, hold timer, momentum/edge rAFs and double-tap detector.
+Selection/model/geometry/motion definitions remain in their existing modules.
+
+The boundary is deliberately bounded, not a mutable component-context bag:
+
+- 18 live Root operations: `available`, `hasSelection`, `isPinned`,
+  `pinUpdates`, `requestRenderRelease`, `hitHandle`, `grabHandle`,
+  `dragHeadAt`, `extendHeadAt`, `tryWordSelection`, `clearSelectionOutside`,
+  `isScrollbarPoint`, `scrollPosition`, `dragScrollbar`, `lineHeight`,
+  `edgeBounds`, `scrollLines`, `openFromDoubleTap`.
+- Six environment operations: `now`, `setDelay`, `clearDelay`,
+  `requestFrame`, `cancelFrame`, `vibrate`. No browser global is read inside
+  the controller; `target.closest` uses only the supplied event target.
+- Ten returned operations: `onTouchStart`, `onTouchMove`, `onTouchEnd`,
+  `onTouchCancel`, `isIdle`, `isCoasting`, `stopMomentum`,
+  `resetAfterVisibility`, `cancelHold`, `dispose`.
+
+Root keeps selection/UI, native selection/scroll adoption, geometry reads,
+input/tail/news, rendering, keyboard, clipboard, visibility/RPC recovery and
+listener installation/removal. The same four handler references are installed
+at the old positions: start/cancel passive, move/end non-passive. Double-tap
+still invokes the labelled Root unlock synchronously after preventing default.
+
+**The render-release timer stays in Root.** `endTouchScrollTimer`,
+`scheduleEndTouchScroll` and `endTouchScroll` also serve input and repaint,
+so the controller requests 100/200/500ms release without owning its timer
+or another copy of the render pin. `resumeLiveTail` queries/stops the coast
+before its existing release/tail/replay sequence. The selection-clear paths
+query live idle state. Visibility reset is not touchcancel: it only resets
+the original mode/drag fields and stops coasts, without newly cancelling
+hold, resetting the double-tap pair or requesting release.
+
+Teardown retains two slots: `cancelHold` at the old pre-keyboard-cleanup
+position, then `dispose` at the old coast/edge-cancellation position.
+Disposal cancels owned work only, never selection, pin, keyboard or replay.
+Current extra-finger/end-touch semantics and #143 toolbar clipping are
+preserved; correcting them is not part of this mechanical move.
+
+`terminal-gestures.test.ts` executes transitions, live queries, call ordering,
+hold/coast/edge scheduling, disposal and independent instances with injected
+time and narrow Root spies. Small jsdom 30 event fixtures execute `closest`,
+cancelability, synchronous prevention/opening and listener teardown. These
+are not fake-xterm rendering tests. Source contracts deliberately follow the
+new owners: Root wiring stays in `Terminal.source.test.ts`; gesture execution
+replaces its old inline-body assertions. `mount.ts` still rejects xterm,
+and no dependency or runner was added.
+
+The nine moved functions and 21 bindings match their originals after
+type/port normalization; reinserting the regions restores the entire Root
+AST and markup/CSS are byte-identical. Copying selection/pin at construction,
+giving the scrollbar priority over a handle, dropping hold/coast cleanup or
+retaining a cancelled/spent tap each fails its negative-controlled test.
+
+Measured on Chromium 152.0.7977.64, xterm 6.0.0, Node 22.23.2 and
+Svelte 5.53.5: all 92 state/geometry signatures, selection arguments and
+92 PNGs match the first commit byte-for-byte across the eight desktop/compact
+DOM/WebGL combinations. Both builds coast +3/-3 lines over four live frames,
+then real xterm input stops the coast at tail. Omitting only Root's input
+`stopMomentum` call in a separate test build leaves viewport 49 instead
+of tail 53; the normal build restores the passing trace. The full 745-test
+suite and svelte-check pass. Terminal.svelte is 2269 lines; the controller
+is 362 lines. Reproducer and logs are referenced on #148.
+
+**Android acceptance is still pending.** Code may reach review, but #148
+does not become done until the owner records the seven checks on #138 against
+the candidate APK/build hash and device/WebView/IME configuration. Desktop
+Chromium and jsdom cannot establish physical touch batching, fling feel,
+haptics, real activation/compatibility events, InputConnection/IME ordering,
+native insets or OS suspension. The lead schedules that pass.
 
 ## Characterization Before Extraction
 

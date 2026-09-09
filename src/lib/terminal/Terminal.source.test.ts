@@ -120,7 +120,10 @@ test('resumeLiveTail releases every render-suppressing state', () => {
   const body = /function resumeLiveTail\(\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1];
   assert.ok(body, 'resumeLiveTail must exist');
   assert.match(body, /if \(selection\) clearSelection\(\);/u);
-  assert.match(body, /stopMomentum\(\);/u); // a coast re-parks the viewport otherwise
+  assert.match(body, /!gestures\.isCoasting\(\)/u);
+  assert.match(body, /gestures\.stopMomentum\(\);/u); // a coast re-parks the viewport otherwise
+  assert.ok(body.indexOf('clearSelection();') < body.indexOf('gestures.stopMomentum();'));
+  assert.match(body, /clearTimeout\(endTouchScrollTimer\);\s*endTouchScrollTimer = null;/u);
   assert.match(body, /touchScrolling = false;/u);
   assert.match(body, /termAtBottom = true;/u);
   assert.match(body, /writeToXterm\(lastContent, lastCursor\)/u);
@@ -240,25 +243,11 @@ test('kbLocked has exactly two writers: unlockKeyboard() and lockKeyboard()', ()
 });
 
 test('double-tap is the ONE terminal-area gesture that opens the keyboard (review 2026-09-03)', () => {
-  // terminal-touch.md / terminal-keyboard.md promised "double-tap → keyboard,
-  // single tap does nothing" while the only caller of unlockKeyboard() was the
-  // toggle button. The detector is pure (terminal-keyboard.ts) and is fed from
-  // exactly one place: the clean-tap branch of onTouchEnd.
-  assert.match(source, /import \{[^}]*\bcreateDoubleTapDetector\b[^}]*\} from '\.\/terminal-keyboard\.ts';/u);
-  const end =/const onTouchEnd = \(e\) => \{([\s\S]*?)\n    \};/u.exec(source)?.[1] ?? '';
-  assert.ok(end, 'onTouchEnd must exist');
-  const down = /if \(endedMode === 'down'\) \{([\s\S]*?)\n        return;\n      \}/u.exec(end)?.[1] ?? '';
-  assert.ok(down, 'the clean-tap branch must exist');
-  assert.match(down, /doubleTap\.tap\(\{ x: t0\.clientX, y: t0\.clientY, t: Date\.now\(\) \}\)/u, 'fed from the clean tap');
-  assert.match(down, /if \(gestureHost\.hasSelection\(\)\) \{\s*doubleTap\.reset\(\);/u, 'a tap that cancels a selection never starts a pair');
-  // The second tap suppresses the browser's synthetic dblclick, or xterm would
-  // word-select under the keyboard and onSelChange would adopt it.
-  assert.match(down, /if \(e\.cancelable\) e\.preventDefault\(\);\s*gestureHost\.openFromDoubleTap\(\);/u);
+  // #148 moves pairing/preventDefault into the executed controller tests.
+  // Root still owns the synchronous keyboard command and listener options.
+  assert.match(source, /openFromDoubleTap\(\) \{\s*window\.__dbg\?\.\([^;]+;\s*unlockKeyboard\(\); \/\/ double-tap/u);
+  assert.doesNotMatch(source, /createDoubleTapDetector|doubleTap\.tap/u);
   assert.match(source, /addEventListener\('touchend', onTouchEnd, \{ passive: false \}\)/u, 'preventDefault needs a non-passive touchend');
-  // Every non-tap gesture end breaks the pair.
-  assert.match(end, /if \(endedMode !== 'down'\) doubleTap\.reset\(\);/u);
-  const cancel = /const onTouchCancel = \(\) => \{([\s\S]*?)\n    \};/u.exec(source)?.[1] ?? '';
-  assert.match(cancel, /doubleTap\.reset\(\);/u);
   // unlockKeyboard() has exactly two callers, each labelled.
   const calls = [...source.matchAll(/unlockKeyboard\(\);(?: \/\/ ([^\n]*))?/gu)].map(m => m[1] ?? '');
   assert.deepEqual(calls.sort(), ['double-tap', 'toggle: open half']);
@@ -299,13 +288,9 @@ test('mobile inputmode stays text while the keyboard lock gates focus (#139)', (
   assert.match(focus, /if \(kbLocked\) \{[\s\S]*?kbTa\.blur\(\);\s*return;/u);
 });
 
-test('touch priority, passive options and cleanup keep the current owner (#139)', () => {
-  const start = source.slice(source.indexOf('const onTouchStart ='), source.indexOf('const findTouch ='));
-  const priorities = ['isOnToolbar(e.target)', 'hitHandle(cx, cy)', 'onScrollbar =', "touchMode = 'down'"]
-    .map((text) => start.indexOf(text));
-  assert.ok(priorities.every((index) => index >= 0));
-  assert.deepEqual(priorities, [...priorities].sort((a, b) => a - b),
-    'toolbar and handles win over the scrollbar and body gesture');
+test('touch listeners keep stable controller refs, passive options and Root ownership (#139, #148)', () => {
+  // Priority is executed in terminal-gestures.test.ts, not duplicated here.
+  assert.match(source, /const \{ onTouchStart, onTouchMove, onTouchEnd, onTouchCancel \} = gestures;/u);
   for (const [event, handler, passive] of [
     ['touchstart', 'onTouchStart', true], ['touchmove', 'onTouchMove', false],
     ['touchend', 'onTouchEnd', false], ['touchcancel', 'onTouchCancel', true],
@@ -329,9 +314,9 @@ test('selection uses inclusive buffer endpoints and cannot release its rendering
     'the model owns the unchanged end.x=0 clamp; absent native selection stays a boundary no-op');
   const end = /function endTouchScroll\(\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1] ?? '';
   assert.match(end, /if \(selection\) return;\s*touchScrolling = false;/u);
-  const cancel = source.slice(source.indexOf('const onTouchCancel ='), source.indexOf("termEl.addEventListener('touchstart'"));
-  assert.doesNotMatch(cancel, /clearSelection\(\)/u, 'touchcancel commits the latest endpoint, not a selection clear');
-  assert.match(cancel, /stopMomentum\(\);\s*stopEdgeScroll\(\);/u);
+  assert.match(adopt, /if \(gestures\.isIdle\(\)\) \{\s*touchScrolling = false;/u);
+  const clear = /\n    clearSelection = \(\) => \{([\s\S]*?)\n    \};/u.exec(source)?.[1] ?? '';
+  assert.match(clear, /if \(gestures\.isIdle\(\)\) \{\s*touchScrolling = false;/u);
 });
 
 test('endpoint grab fixes the far endpoint and compensates both coordinates (#139)', () => {
@@ -339,8 +324,7 @@ test('endpoint grab fixes the far endpoint and compensates both coordinates (#13
   assert.match(grab, /if \(!selection\) return;\s*selection = selForDrag\(selection, which\);/u);
   assert.match(source, /selection = \{ anchor: selection\.anchor, head: \{ row: bufRow, col \} \};/u);
   assert.match(source, /return handleGrabOffset\(cx, cy, ep, term\.buffer\.active\.viewportY, r, cell\);/u);
-  assert.match(source, /const offset = gestureHost\.grabHandle\(which, cx, cy\);\s*handleGrabDx = offset\.dx;\s*handleGrabDy = offset\.dy;/u);
-  assert.match(source, /lastDragX = t0\.clientX - handleGrabDx;\s*lastDragY = t0\.clientY - handleGrabDy;/u);
+  // #148 controller tests execute grab-before-pin and two-axis compensation.
   // #141 gives numeric capsule/overlap boundaries unit vectors in geometry.
   assert.match(source, /return hitSelectionHandle\(clientX, clientY, rect, selection, selUI\);/u);
   assert.match(source, /\.sel-handle \{[^}]*width: 0; height: 0;/u,
@@ -369,20 +353,25 @@ test('geometry adapters read the live rectangle and the single cellSize source (
   assert.match(hit, /if \(!selection \|\| !selUI \|\| !termEl\) return null;\s*const rect = termEl\.getBoundingClientRect\(\);\s*return hitSelectionHandle/u);
 });
 
-test('motion decisions are pure while state writes and scheduling stay in Terminal (#142)', () => {
-  // #142 moves the numeric #139 contracts into motion unit vectors.
-  assert.match(source, /import \{ scrollSamples, scrollStep, releaseVelocity, coastStep, edgeDirection, edgeStep \} from '\.\/terminal-gesture-motion\.ts';/u);
-  assert.match(source, /const previousMoveTime = lastMoveTime;\s*touchY = y;\s*lastMoveTime = now;/u);
-  assert.match(source, /velocitySamples = scrollSamples\(velocitySamples, dy, now, previousMoveTime\);\s*const step = scrollStep\(accumulatedDy, lh\);/u);
-  assert.match(source, /gestureHost\.scrollLines\(lines\);\s*accumulatedDy = step\.remainder;/u,
-    'the scroll remainder is still published after the xterm call');
-  assert.match(source, /if \(gestureHost\.isPinned\(\) && velocitySamples\.length > 0\) \{\s*const lh = gestureHost\.lineHeight\(\);\s*let v = releaseVelocity\(velocitySamples, lh\);\s*if \(Math\.abs\(v\) > 0\.1\)/u);
-  assert.match(source, /const step = coastStep\(v, acc\);\s*v = step\.velocity;\s*acc = step\.accumulated;/u);
-  assert.match(source, /if \(step\.running\) \{\s*momentumId = requestAnimationFrame\(coast\);\s*\} else \{\s*momentumId = null;\s*gestureHost\.requestRenderRelease\(200\);/u);
-  assert.match(source, /const dir = edgeDirection\(clientY, rect\.top, rect\.bottom\);\s*edgeScrollDir = dir;/u);
-  assert.match(source, /const step = edgeStep\(acc, edgeScrollDir, lastDragY \+ handleGrabDy, rect2\.top, rect2\.bottom\);/u);
-  assert.match(source, /acc = step\.remainder;[\s\S]*?gestureHost\.dragHeadAt\(lastDragX, lastDragY\);[\s\S]*?edgeScrollId = requestAnimationFrame\(tick\);/u);
-  assert.doesNotMatch(source, /const MOMENTUM_|const EDGE_SCROLL_ZONE_PX/u, 'one owner for motion coefficients');
+test('one lifecycle factory receives six deferred environment operations (#148)', () => {
+  assert.match(source, /import \{ createTerminalGestures \} from '\.\/terminal-gestures\.ts';/u);
+  assert.equal([...source.matchAll(/createTerminalGestures\(/gu)].length, 1);
+  const factory = source.indexOf('const gestures = createTerminalGestures(');
+  assert.ok(factory > source.indexOf('term = new Terminal('));
+  assert.ok(factory < source.indexOf("termEl.addEventListener('touchstart'"));
+  assert.match(source, /createTerminalGestures\(gestureHost, \{\s*now: \(\) => Date\.now\(\),\s*setDelay: \(callback, ms\) => window\.setTimeout\(callback, ms\),\s*clearDelay: \(id\) => window\.clearTimeout\(id\),\s*requestFrame: \(callback\) => window\.requestAnimationFrame\(callback\),\s*cancelFrame: \(id\) => window\.cancelAnimationFrame\(id\),\s*vibrate: \(ms\) => \{ navigator\.vibrate\?\.\(ms\); \},\s*\}\);/u);
+  assert.doesNotMatch(source, /let touchId|let touchMode|let velocitySamples|let edgeScrollId|const stopMomentum/u,
+    'the controller state and scheduling have no second owner');
+});
+
+test('visibility reset and the two cleanup slots preserve Root render/keyboard ordering (#148)', () => {
+  const visible = source.slice(source.indexOf('const onVisible ='), source.indexOf("document.addEventListener('visibilitychange'"));
+  assert.match(visible, /touchScrolling = false;\s*gestures\.resetAfterVisibility\(\);/u);
+  assert.ok(visible.indexOf('gestures.resetAfterVisibility();') < visible.indexOf('if (selection) clearSelection();'));
+  assert.doesNotMatch(visible, /gestures\.onTouchCancel|gestures\.cancelHold/u);
+  assert.match(source, /clearTimeout\(endTouchScrollTimer\);\s*gestures\.cancelHold\(\);\s*clearTimeout\(kbBlurTimer\);\s*if \(kbTa && onTaBlur\) kbTa\.removeEventListener\('blur', onTaBlur\);\s*if \(kbTa && onTaFocus\) kbTa\.removeEventListener\('focus', onTaFocus\);\s*gestures\.dispose\(\);/u);
+  assert.match(source, /function scheduleEndTouchScroll\(ms\) \{\s*clearTimeout\(endTouchScrollTimer\);\s*endTouchScrollTimer = setTimeout\(endTouchScroll, ms\);/u,
+    'the shared render-release timer never moves into the gesture controller');
 });
 
 test('the gesture Root port has exactly eighteen inert operations and live queries (#148)', () => {

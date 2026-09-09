@@ -65,15 +65,15 @@
   `KIRO_HOME` subtree after `agent_remove`. It now requires `launch.json`
   or a pre-recipe `agents/<name>.json` (board #112, 2026-09-09).
 - [ ] Extract Terminal's embedded gesture decisions and controller
-  (#138 plan, #139 characterization, 2026-09-09). Measured at `62ac7e05`:
-  the target lifecycle closure is 1331 lines, of which 740 cover gestures,
-  selection and visibility recovery. Selection ordering, keyboard decisions,
-  cursor layout and source contracts (including the `kbLocked` writers)
-  already have tests. #139 adds source contracts and a real-browser baseline;
-  isolated unit coverage of inline geometry and gesture transitions is still
-  missing. Extract selection-model decisions, pure geometry and motion
-  first, then re-review the controller interface. The final controller move
-  requires an owner Android pass; Chromium is not IME or finger-behavior proof.
+  (#138 plan, 2026-09-09). #139 characterized the real terminal; #140-#142
+  extracted selection decisions, geometry and motion with unit coverage.
+  #148 moves the controller behind the approved 18 Root + 6 environment
+  operations, with clock-driven transition tests and jsdom event fixtures;
+  Terminal.svelte is now 2269 lines (2664 at the plan baseline).
+  Selection/render/keyboard/visibility ownership and listener installation
+  remain in Root. Still open: the owner Android pass against the candidate
+  APK. Chromium is not IME or finger-behavior proof; do not check this item
+  merely because the off-device tests pass.
 - [x] #108: a bounded stateful filter covers fragmented/coalesced `onData`
   replies. The source of the original `?62;22;52c` report still requires
   measurement: installed xterm.js 6.0.0 emits DA1 as ONE complete callback
