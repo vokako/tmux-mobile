@@ -129,7 +129,8 @@ flaky wall-clock assertions in the test.
 | `team/TeamTemplates.source.test.ts` | the phone's template picker is `ui/Select`, never a hand-rolled panel |
 | `ui/tokens.source.test.ts` | one type scale: no raw px font-size outside the listed exceptions |
 | `ui/confirm.source.test.ts` | every destructive verb goes through the shared confirmation |
-| `hub/Hub.source.test.ts` | a tool-lane row is one line (`nowrap`, never `pre`), the argument is never truncated (the lane pans instead), and the row cap stays expressed in rows |
+| `hub/Hub.source.test.ts` | room/paging/send coordination, the narrow component boundaries and capture-listener order |
+| `hub/Feed.source.test.ts` | a tool-lane row is one line (`nowrap`, never `pre`), the argument is never truncated (the lane pans instead), the row cap stays expressed in rows, and reading geometry stays in the one Feed |
 | `ui/sidebar.source.test.ts` | one sidebar box: a section header takes its padding and type from `.side-h`, and `.side-h`/`.side-row` keep the same 10px inset |
 | `ui/statusdot.source.test.ts` | the running cue: `--status-sleep` stays achromatic, `.live-dot` is defined once in app.css (halo + `dot-breathe` scale, never an opacity fade) and stills under reduced motion, and no component re-implements it |
 | `app/preferences.source.test.ts` | Settings embeds the real AgentsPage (never a copy), the category exists only where Agents is not a page, back peels the embedded page first, one head at a time |

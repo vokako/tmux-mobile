@@ -9,7 +9,7 @@ const rule = (selector: string) =>
 test('Composer retains its stacking context and orders its menus inside it (#133)', () => {
   const composer = /\n  \.composer \{([^}]*)\}/u.exec(source)?.[1] ?? '';
   assert.match(composer, /position:\s*relative/u);
-  assert.match(composer, /z-index: 15/u, 'Hub.source pins the feed below this context');
+  assert.match(composer, /z-index: 15/u, 'Feed.source pins the feed below this context');
   const z = (css: string) => Number(/z-index:\s*(\d+)/u.exec(css)?.[1] ?? NaN);
   assert.ok(z(rule('.cmd-menu')) > z(rule('.to-menu')));
   assert.match(source, /:global\(\.hub-root\.compact\) \.composer/u,

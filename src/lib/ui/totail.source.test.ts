@@ -17,7 +17,7 @@ const SRC = new URL('../../', import.meta.url); // src/
 
 /** Every wearer: [file, the scoped placement class it may still have]. */
 const WEARERS: Array<[string, string]> = [
-  ['lib/hub/Hub.svelte', 'to-bottom'],
+  ['lib/hub/Feed.svelte', 'to-bottom'],
   ['lib/terminal/Terminal.svelte', 'scroll-btn'],
 ];
 
