@@ -132,10 +132,12 @@
   fixed-priority registry, not a chronological stack. Room/transport/cache,
   shared state/preferences, routing, action authority and the small
   spawn-coupled picker remain in Hub.
-- [ ] `store.rs` 2989 / `projects/mod.rs` 2223 / `spawn.rs` 2364 /
-  `bin/tmm.rs` 1312 / `vitals.rs` 1308:
-  split store by projects/registry/board/activity, move mod.rs skills into
-  `skills.rs`, and move spawn `render_*` functions into backend files.
+- [ ] Oversized files. Done: `store.rs` 3469 → `store/` with a 193-line hub
+  and one `impl Store` file per table family (board #147, 2026-09-09; a
+  source test keeps the hub to open/open_memory/init/heal); spawn `render_*`
+  and the vitals dialects moved into the backend files (board #128/#127).
+  Open: `projects/mod.rs` 2223 (move the skills half into `skills.rs`),
+  `bin/tmm.rs` 1312.
 - [ ] The `hub_rpc.rs` match mixes dispatch, delivery and board notification
   policy. (The boilerplate half closed with board #146, 2026-09-09: both
   dispatchers are `?`-returning inner fns over `RpcError`, ~90 `match →
