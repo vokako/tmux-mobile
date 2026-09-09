@@ -317,12 +317,15 @@ test('touch priority, passive options and cleanup keep the current owner (#139)'
 test('selection uses inclusive buffer endpoints and cannot release its rendering pin (#139)', () => {
   const apply = /function applySelectionToXterm\(\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1] ?? '';
   assert.match(apply, /isApplyingSelection = true;/u);
-  assert.match(apply, /\(b\.row - a\.row\) \* term\.cols \+ \(b\.col - a\.col \+ 1\)/u);
+  // #140 moves arithmetic into the canonical model; retain the boundary guard
+  // and side effects here, with numeric vectors owned by selection-model.test.
+  assert.match(apply, /if \(!selection\) \{ term\.clearSelection\(\); return; \}/u);
+  assert.match(apply, /const len = selLength\(selection, term\.cols\);\s*term\.select\(a\.col, a\.row, len\);/u);
   assert.match(apply, /finally \{\s*isApplyingSelection = false;/u);
   const adopt = source.slice(source.indexOf('const onSelChange ='), source.indexOf('let followedTailBeforeHide'));
   assert.match(adopt, /if \(isApplyingSelection\) return;/u);
-  assert.match(adopt, /Math\.max\(0, pos\.end\.x - 1\)/u,
-    'pin the existing end.x=0 clamp; correcting it is not a mechanical move');
+  assert.match(adopt, /if \(!pos\) return;\s*selection = selFromExclusive\(pos\);/u,
+    'the model owns the unchanged end.x=0 clamp; absent native selection stays a boundary no-op');
   const end = /function endTouchScroll\(\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1] ?? '';
   assert.match(end, /if \(selection\) return;\s*touchScrolling = false;/u);
   const cancel = source.slice(source.indexOf('const onTouchCancel ='), source.indexOf("termEl.addEventListener('touchstart'"));
@@ -332,7 +335,7 @@ test('selection uses inclusive buffer endpoints and cannot release its rendering
 
 test('endpoint grab fixes the far endpoint and compensates both coordinates (#139)', () => {
   const grab = /function beginEndpointDrag\(which\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1] ?? '';
-  assert.match(grab, /\? \{ anchor: \{ \.\.\.b \}, head: \{ \.\.\.a \} \}\s*: \{ anchor: \{ \.\.\.a \}, head: \{ \.\.\.b \} \}/u);
+  assert.match(grab, /if \(!selection\) return;\s*selection = selForDrag\(selection, which\);/u);
   assert.match(source, /selection = \{ anchor: selection\.anchor, head: \{ row: bufRow, col \} \};/u);
   assert.match(source, /handleGrabDx = cx - epCenterX;\s*handleGrabDy = cy - epCenterY;/u);
   assert.match(source, /lastDragX = t0\.clientX - handleGrabDx;\s*lastDragY = t0\.clientY - handleGrabDy;/u);
@@ -342,6 +345,12 @@ test('endpoint grab fixes the far endpoint and compensates both coordinates (#13
   assert.match(source, /\.sel-handle \{[^}]*width: 0; height: 0;/u,
     'the CSS anchor is not the old 44px hit wrapper');
   assert.match(source, /\.sel-handle::after \{[^}]*width: 12px;\s*height: 12px;/u);
+});
+
+test('range and word decisions use the existing canonical selection model (#140)', () => {
+  assert.match(source, /import \{[^}]*selContains[^}]*wordBounds \} from '\.\/selection-model\.ts';/u);
+  assert.match(source, /function isInsideSelection\(bufRow, col\) \{\s*return selContains\(selection, bufRow, col\);\s*\}/u);
+  assert.match(source, /const line = term\.buffer\.active\.getLine\(bufRow\);\s*return wordBounds\(line\?\.translateToString\(false\), col\);/u);
 });
 
 test('gesture motion keeps signed remainder and the measured fixed-frame rules (#139)', () => {

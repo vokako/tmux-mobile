@@ -102,6 +102,36 @@ The xterm.js API is converted at the boundary:
 - `applySelectionToXterm()` calls `term.select(start.col, start.row, length)` where `length` spans the inclusive range.
 - `onSelectionChange` reads `term.getSelectionPosition()` whose `pos.end.x` is exclusive, and converts to inclusive (`max(0, pos.end.x - 1)`).
 
+### Selection Decision Ownership (#140, 2026-09-09)
+
+`selection-model.ts` now owns the previously inline range containment,
+inclusive length, endpoint re-anchoring, exclusive-end conversion and
+word-boundary scan. `Selection` remains the one anchor/head definition;
+`selStart` and `selEnd` are unchanged. The component still owns selection
+state, guards before applying/re-anchoring or adopting a native selection,
+xterm calls, the reentrancy guard, UI measurement and render pin, in the same
+order. Range containment and absent-string fallback belong to the pure model.
+
+This is a mechanical move, not a correction to boundary semantics:
+length retains its one-cell floor, `end.x=0` retains the next-row col-0
+clamp, and word scanning still indexes the already-translated UTF-16 string
+and splits only at whitespace. Buffer-line reads stay in Terminal; the
+model has no DOM, xterm, clock or Svelte dependency. Do not introduce a
+second selection shape or a Unicode-width engine here.
+
+Unit vectors cover absent ranges/strings, inclusive row/column edges,
+resized-grid length flooring, equal/reversed endpoints and repeated
+crossings, conversion and string boundaries. The source contracts follow
+ownership: numeric rules live in the model tests, while Terminal tests pin
+the real helper calls and unchanged side-effect guards.
+
+The five lifted formulas/bodies match their originals after parameter/return
+normalization. The #139 comparison preserves all 92 final-state/geometry
+signatures and xterm selection arguments; 88 PNGs match byte-for-byte, with
+the other four differing only in the unchanged 1.5s Copied toast's capture
+timing. Reversing the grabbed endpoint fails the crossover unit vector and
+real-component browser check. Android validation remains deferred.
+
 ## Handle UI
 - Visual: 12px filled circle in `var(--accent)`, with a 2px-wide stem one cell high. The positioned wrapper has zero width/height; pseudo-elements draw the stem and dot.
 - Position: the leading anchor is the start cell's top-left corner, its stem runs down through the cell, and its dot sits below. The trailing anchor is the end cell's bottom-right corner, its stem runs up, and its dot also sits below. Edge dots shift 6px inward without moving the stem.

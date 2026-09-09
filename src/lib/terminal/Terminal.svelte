@@ -18,7 +18,7 @@
   import { terminalPrefs } from '../app/terminal-prefs.svelte.ts';
   import { adaptAnsiColors } from './ansi-colors.ts';
   import { compactLineGeometry } from './terminal-line-geometry.ts';
-  import { selStart, selEnd } from './selection-model.ts';
+  import { selStart, selEnd, selContains, selLength, selForDrag, selFromExclusive, wordBounds } from './selection-model.ts';
   import { computeCursorLayout } from './cursor-layout.ts';
   import { restoreViewportAfterPaneSwitch } from './terminal-viewport.ts';
   import { cycleItem } from '../app/shortcuts.ts';
@@ -896,13 +896,7 @@
     // Helper: find word boundaries at buffer row + col
     function wordBoundsAt(bufRow, col) {
       const line = term.buffer.active.getLine(bufRow);
-      if (!line) return { start: col, end: col + 1 };
-      const text = line.translateToString(false);
-      if (col >= text.length || /\s/.test(text[col])) return { start: col, end: col + 1 };
-      let start = col, end = col;
-      while (start > 0 && !/\s/.test(text[start - 1])) start--;
-      while (end < text.length - 1 && !/\s/.test(text[end + 1])) end++;
-      return { start, end: end + 1 };
+      return wordBounds(line?.translateToString(false), col);
     }
 
     // Mobile touch: scrolling, scrollbar drag, long-press word selection
@@ -1048,9 +1042,9 @@
       isApplyingSelection = true;
       try {
         if (!selection) { term.clearSelection(); return; }
-        const a = selStart(selection), b = selEnd(selection);
-        const len = (b.row - a.row) * term.cols + (b.col - a.col + 1);
-        term.select(a.col, a.row, Math.max(1, len));
+        const a = selStart(selection);
+        const len = selLength(selection, term.cols);
+        term.select(a.col, a.row, len);
       } finally {
         isApplyingSelection = false;
       }
@@ -1106,10 +1100,7 @@
     // visibly jumped.
     function beginEndpointDrag(which) {
       if (!selection) return;
-      const a = selStart(selection), b = selEnd(selection);
-      selection = which === 'start'
-        ? { anchor: { ...b }, head: { ...a } }
-        : { anchor: { ...a }, head: { ...b } };
+      selection = selForDrag(selection, which);
     }
 
     // Cell from clientX/clientY in buffer-row coords (row is absolute, not viewport-relative)
@@ -1251,13 +1242,7 @@
     }
     // Hit-test whether a buffer-row/col is inside the current selection
     function isInsideSelection(bufRow, col) {
-      if (!selection) return false;
-      const a = selStart(selection), b = selEnd(selection);
-      if (bufRow < a.row || bufRow > b.row) return false;
-      if (a.row === b.row) return col >= a.col && col <= b.col;
-      if (bufRow === a.row) return col >= a.col;
-      if (bufRow === b.row) return col <= b.col;
-      return true;
+      return selContains(selection, bufRow, col);
     }
 
     const onTouchStart = (e) => {
@@ -1543,14 +1528,7 @@
       }
       const pos = term.getSelectionPosition();
       if (!pos) return;
-      // xterm's pos.end.x is exclusive (one past the last selected cell).
-      // Convert to our inclusive model. If end.x === 0 the selection ends at
-      // the start of a row, which means "include up to the previous row's
-      // last cell"; clamp to col 0 anyway — visual difference is < 1 cell.
-      const sRow = pos.start.y, sCol = pos.start.x;
-      const eRow = pos.end.y;
-      const eCol = Math.max(0, pos.end.x - 1);
-      selection = { anchor: { row: sRow, col: sCol }, head: { row: eRow, col: eCol } };
+      selection = selFromExclusive(pos);
       recomputeSelUI();
       touchScrolling = true; // pin while selection is live
     });
