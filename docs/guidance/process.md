@@ -112,3 +112,4 @@
 - Repeated owner guidance: "先讨论方案，不要直接修改代码";
   "保持中文语言风格干练，不啰嗦"; "流程应该用英文，保持一致性".
 - 2026-09-08: "大家要分工明确，lead 不要过分代劳，不同人要对抗评审，对立统一".
+- A dependency change (package.json / Cargo.toml) is installed in the launch checkout at merge time, and the reviewer runs the suite THERE, not only in the branch worktree — a worktree with private node_modules can be green while the integration checkout is red (2026-09-09: jsdom from board #115 lived only in one worktree; main’s npm test failed for an hour before anyone ran it in place). Match the checkout’s package-manager layout (this host: pnpm) when installing.
