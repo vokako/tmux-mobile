@@ -1910,13 +1910,11 @@
     user-select: text; -webkit-user-select: text; cursor: text;
   }
   .path::-webkit-scrollbar { display: none; }
-  .spacer { flex: 1; }
   .term-toggle.on { color: var(--accent); background: var(--accent-bg); }
   .tava { display: inline-grid; place-items: center; background: var(--accent-bg); color: var(--accent); }
   .ap-go { margin-left: auto; font-size: var(--fs-micro); color: var(--accent); }
 
 
-  .empty { color: var(--text3); font-size: var(--fs-ui); text-align: center; margin: auto; padding: 0 24px; line-height: 1.6; }
 
   /* Empty room: start from a preset — one agent, or a team. */
   .start { margin: auto; display: flex; flex-direction: column; gap: 8px; width: min(420px, 100%); }

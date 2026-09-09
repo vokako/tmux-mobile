@@ -190,6 +190,13 @@ The two pulls — "记录完整" and "不要过多地占用前端和网络通信
 
 ### The terminal drawer has ONE switcher, and it shows agents (moved from tmm-cli.md, board #102)
 
+Before the Drawer view extraction (#136, 2026-09-09), its shared `.spacer`
+and `.empty` rules move once into `hub-atoms.css`. The selectors retain the
+former two-class specificity and name only the existing direct parents:
+page/drawer heads for the filler, feed/terminal body for the empty state.
+Embedded pages do not inherit a generic override and no component copies
+the declarations.
+
 The drawer's single bar is the window pills (state dot, name, `direct` tag) + roster count + open-full/close; the tmux-style statusline underneath was merged away (owner: "上面和下面有两个 bar…可以把它们合并一下" — it listed the same windows and called the same `pickWindow`; the pills carry state and actions, so they survived). The bar shows AGENT windows only (board #92: "只 filter 出当前有效的 agent window，其他 window 可以帮我折叠起来"): shells fold behind a `+N` pill of the same family, one tap unfolds (the pill becomes `−`), a room switch folds back — with ONE exception, the window the terminal is currently SHOWING keeps its pill even inside the folded set, because the bar may never hide the current pane. While the partition is open, selecting an agent in the chat (card click, composer picker, "talk to") retargets the drawer to that agent's window through the same `pickWindow` (board #91) — choosing who you talk to is choosing whose pane you watch, the reading `openDrawer` already makes when it seats the recipient's window first (board #76); it only follows a name that matches a roster window (@all and the room do not) and never opens a closed drawer. The divider is a real splitter: the drawer column is `var(--hub-drawer-w)` (320–900, default 520, persisted `tmux_hub_drawer_w`), reusing the parametric `SideHandle` (ONE resize affordance, ui-unification) — it was a fixed grid that looked draggable and was not.
 
 ### The chat header opens, closes and NAMES the project (moved from tmm-cli.md, board #102)

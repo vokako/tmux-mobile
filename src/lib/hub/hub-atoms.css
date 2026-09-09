@@ -2,3 +2,5 @@
    participate, so embedded file/terminal/board content gains no generic style. */
 .hub-root :where(.ac-top, .to-menu button, .m-state, .win-pill) > .st { width: 6px; height: 6px; border-radius: 50%; flex: none; transition: background var(--t-fast); }
 .hub-root :where(.to-menu button, .m-state) > .note-dot { border: 1px dashed var(--text3); background: none; }
+.hub-root :where(.page-head, .drawer-head) > .spacer { flex: 1; }
+.hub-root :where(.feed, .term-body) > .empty { color: var(--text3); font-size: var(--fs-ui); text-align: center; margin: auto; padding: 0 24px; line-height: 1.6; }

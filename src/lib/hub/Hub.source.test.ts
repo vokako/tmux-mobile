@@ -39,6 +39,11 @@ test('Hub dot sizing has one shared declaration without restyling embedded pages
   assert.match(css, /\.hub-root :where\(\.to-menu button, \.m-state\) > \.note-dot \{ border: 1px dashed var\(--text3\); background: none; \}/u,
     'the receipt and recipient menu share one dashed note mark (#133)');
   assert.doesNotMatch(source, /^\s*\.note-dot \{/mu);
+  assert.match(css, /\.hub-root :where\(\.page-head, \.drawer-head\) > \.spacer \{ flex: 1; \}/u,
+    'the Hub and drawer headers share the original filler without a copy (#136)');
+  assert.match(css, /\.hub-root :where\(\.feed, \.term-body\) > \.empty \{ color: var\(--text3\); font-size: var\(--fs-ui\); text-align: center; margin: auto; padding: 0 24px; line-height: 1\.6; \}/u);
+  assert.doesNotMatch(source, /^\s*\.(?:spacer|empty) \{/mu,
+    'only the existing direct parents receive these shared rules');
 });
 
 test('an uncached room unfolds: skeletons while it loads, then the feed from its tail and the roster from the left (motion.md wave 8)', () => {
