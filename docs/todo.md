@@ -36,7 +36,7 @@
   model/mcp/resources、不碰 prompt（`refresh_agent` 已部分解决，确认剩余）。
 - [ ] `is_managed_in` 在 `agent_remove` 后可被 kiro 重建 `KIRO_HOME` 子树重新武装 → 门控 `launch.json`。
 - [ ] `Terminal.svelte` 触摸手势状态机 ~1300 行嵌在 effect 闭包，零测试；`kbLocked` 不变量只靠文档。
-- [ ] DA 响应 `?62;22;52c` 跨两次 `onData` 分片绕过正则，泄漏为可见文本。
+- [x] #108：`onData` 分片/合并响应已由有界状态过滤器覆盖；原始 `?62;22;52c` 现象的来源仍待实测，见 `unresolved.md`。
 - [ ] 终端全量重写时 `term.clear()` 丢 xterm 侧 scrollback。
 - [ ] 遥测按窗口 INDEX 而身份是 NAME（`renumber-windows` 下错位）；hook→consume 间重命名丢 post；
   相同 body 混淆回执；投递无背压；`SPAWN_CAP` 计入非我方窗口。

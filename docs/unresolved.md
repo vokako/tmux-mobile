@@ -188,10 +188,10 @@
 - **Area**: Window switcher
 - **Details**: The `windows` derived in `Terminal.svelte` dedupes by window id using the first pane it encounters, not the active one. `current_command` / `pane_title` / AI icon badge may therefore come from a background pane. Prefer `pane_active` when choosing the representative pane.
 
-## DA-response leakage: `?62;22;52c` appears as text in the prompt
+## DA-response provenance: reported `?62;22;52c` text
 - **Priority**: Medium
 - **Area**: Terminal / xterm input filter
-- **Details**: Occasionally the literal string `?62;22;52c` shows up in the terminal as if the user typed it. This is xterm.js's reply to a DA1 (Primary Device Attributes) query — full sequence `\x1b[?62;22;52c`. The query reaches xterm because `tmux capture-pane -e` re-emits ANSI sequences captured from programs that printed `\x1b[c`. xterm replies via `term.onData(...)`, our existing filter at `Terminal.svelte:605` drops `^\x1b\[[\?>=]?[\d;]*c$` — but the reply can be split across two `onData` invocations (e.g. `\x1b[?62;22` then `;52c`), defeating the regex. Fix candidates: (a) accumulate `onData` chunks across a short window and re-test the joined string before forwarding; (b) strip DA-related sequences server-side before pushing the snapshot, since they're never useful as visible content; (c) configure xterm to not auto-reply DA queries at all. Need a real-world repro to pick the cleanest path. Affects: `src/lib/terminal/Terminal.svelte:onData`.
+- **Details**: The per-payload filtering hole is fixed by a per-instance carry filter (#108, 2026-09-09); injected fragments and coalesced replies are covered through the real xterm `input` -> `onData` path. However, installed xterm.js 6.0.0 emits DA1 `\x1b[?1;2c` as one complete callback, even with fragmented queries. The earlier attribution of `?62;22;52c` to naturally split xterm replies was an unverified hypothesis, not a measured cause. If the reported text recurs, capture both the `onData` payloads and pane output to identify its source; do not strip bare printable `?62;22;52c` or change server rendering on this assumption. See [terminal-rendering.md](design-docs/pages/terminal-rendering.md#xterm-da-filtering).
 
 ## Frontend structural debt: fat components, flat src/lib, closure-locked gestures
 - **Priority**: Medium (High for the gesture part)

@@ -24,7 +24,36 @@ with `extended-keys on`, tmux DROPS raw C0 bytes (`send-keys -l $'\x03'`) sent t
 
 ### xterm DA filtering
 
-Filter device attribute responses before forwarding to tmux.
+Filter device-attribute and device-status replies before forwarding to tmux.
+`terminal-responses.ts` owns the filter, instantiated once per xterm lifecycle,
+not once per `onData` callback and not shared between split panes.
+
+Board #108 (2026-09-09): the old three anchored regexes assumed an entire
+reply occupied exactly one callback. Injecting `ESC[?62;22` then `;52c`
+forwarded both fragments, and a reply adjacent to other input bypassed the
+same check. The filter now carries an unfinished ESC/CSI candidate between
+callbacks, then applies the existing DA/DSR recognition to each completed
+sequence. Ordinary text, malformed sequences and complete non-response
+keys pass through unchanged. A 512-character cap releases overlong candidates
+losslessly, preventing unbounded carry on malformed input.
+
+There is no timing guess: an incomplete control prefix waits for its next
+byte, and teardown drops it. The real bare Escape key and hardware Ctrl/Alt
+shortcuts keep their existing capture-phase direct-send path, outside this
+filter; complete arrow/function-key sequences on `onData` pass immediately.
+Paste is explicitly literal, including pasted reply-shaped bytes, and does
+not consume a pending response.
+
+Measurement, `@xterm/xterm` **6.0.0**, Node **22.23.2**: the real parser emits
+DA1 `ESC[?1;2c`, DA2 `ESC[>0;276;0c`, DSR `ESC[0n` and cursor position
+`ESC[1;1R` as four complete `onData` events, even when the queries are split
+across `write` calls. Its DA1 is not the reported `ESC[?62;22;52c`. Natural
+response fragmentation was **not** reproduced; the regression is tested by
+injecting fragments through the package's public `input` -> `onData` path.
+Do not describe this measurement as proof of the original report's source.
+Unit tests cover every split boundary, byte-wise and coalesced input, literal
+paste, non-response keys, overflow and lifecycle reset; the source contract
+pins the filter before forwarding and outside the callback.
 
 ### Motion: the terminal's box never animates, only the chrome around it
 

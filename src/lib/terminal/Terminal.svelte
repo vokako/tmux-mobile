@@ -23,6 +23,7 @@
   import { restoreViewportAfterPaneSwitch } from './terminal-viewport.ts';
   import { cycleItem } from '../app/shortcuts.ts';
   import { createDoubleTapDetector, createOneShotCtrl, encodeTerminalShortcut } from './terminal-keyboard.ts';
+  import { createTerminalResponseFilter } from './terminal-responses.ts';
   import { openExternalUrl } from '../core/external-links.ts';
 
   // Timing constants
@@ -756,13 +757,10 @@
         termEl.addEventListener('input', onTextInsert, { capture: true });
       }
     }
+    const responseFilter = createTerminalResponseFilter();
     term.onData(data => {
-      // Filter xterm.js terminal response sequences that leak through onData.
-      // These are generated when pane content contains query sequences (e.g. \x1b[6n).
-      // Without filtering, they create a feedback loop: response→tmux→capture→xterm→response.
-      if (/^\x1b\[[\?>=]?[\d;]*c$/.test(data)) return; // DA1/DA2/DA3
-      if (/^\x1b\[\d+;\d+R$/.test(data)) return;        // DSR cursor position
-      if (/^\x1b\[\d+n$/.test(data)) return;             // DSR device status
+      data = responseFilter.push(data, isPasting);
+      if (!data) return;
       window.__dbg?.(`input: onData len=${data.length} paste=${isPasting} data=${JSON.stringify(data).slice(0,40)}`);
       // Force-clear xterm's hidden textarea after keyboard input to prevent
       // accumulation from auto-paired quotes/brackets. Applies to desktop
@@ -1884,6 +1882,7 @@
     }).catch(() => {});
 
     return () => {
+      responseFilter.reset();
       resizeObs.disconnect();
       clearTimeout(resizeSendTimer);
       window.removeEventListener('app-zoom-change', onAppZoom);

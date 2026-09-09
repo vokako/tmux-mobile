@@ -5,6 +5,21 @@ import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('./Terminal.svelte', import.meta.url), 'utf8');
 
+test('DA/DSR filtering carries across onData callbacks and belongs to one xterm instance (#108)', () => {
+  const setup = source.indexOf('const responseFilter = createTerminalResponseFilter();');
+  assert.ok(setup > source.indexOf('term = new Terminal('), 'the filter is instance-local, not shared across split panes');
+  assert.ok(setup < source.indexOf('term.onData('), 'one carry survives all callbacks for this terminal');
+  assert.match(source, /term\.onData\(data => \{\s*data = responseFilter\.push\(data, isPasting\);\s*if \(!data\) return;/u,
+    'every non-paste chunk reaches the stateful filter before forwarding');
+  assert.match(source, /return \(\) => \{\s*responseFilter\.reset\(\);/u, 'pending bytes never survive pane teardown');
+  // The actual Escape key is claimed in hardware capture and bypasses onData,
+  // so waiting on a fragmented ESC prefix must not delay a user's Escape.
+  assert.match(source, /!event\.isComposing && event\.key === 'Escape'/u);
+  const hardware = /const onHardwareKeydown = \(event\) => \{([\s\S]*?)\n    \};/u.exec(source)?.[1] ?? '';
+  assert.match(hardware, /const data = bareEsc \? '\\x1b' : encodeTerminalShortcut\(event\);/u);
+  assert.match(hardware, /enqueueKeys\(data, true\);/u);
+});
+
 test('bare Escape is CLAIMED in capture and encoded by hand; no focus guards (board #20, closed)', () => {
   // The hardware-capture handler claims the bare key exactly like the
   // Ctrl/Alt combos, so the \x1b send never depends on whose keydown runs
