@@ -57,6 +57,8 @@
   store → projects/registry/board/activity；mod.rs skills 块 → `skills.rs`；spawn `render_*` → 后端文件。
 - [ ] `hub_rpc.rs` 750 行 match 混 dispatch/delivery/board 通知策略；~40 处 `require_str→match→err`
   样板 → `?`-returning 内层函数。
+- [ ] `Store::hub_search`（board #107）在 Rust 里全表扫描、进程内过滤——当前规模没问题，
+  房间变大前把匹配下推到 SQL（`lower(body) LIKE`）或 FTS（reviewer 2026-09-09）。
 - [ ] `Files.svelte` 预览渲染器（PDF/CSV/HTML/MD）拆出；markdown CSS 重复 → `ui/MarkdownBody`。
 - [ ] `ws.ts` 模块级单例（10 个顶层 `let`），split-screen 双连接时是墙。
 - [ ] 测试缺口：`bin/tmm.rs` 3 个测试全是 flag 解析；`connection.rs`/`fs.rs`/`server/mod.rs` 无测试；
