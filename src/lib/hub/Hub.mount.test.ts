@@ -383,3 +383,258 @@ test('Roster double-click filters without a menu and a stopped surface never res
   }
   context.diagnostic(`Roster scenario after shared compilation ${(performance.now() - started).toFixed(1)}ms`);
 });
+
+// Composer extraction characterization: use the same compiled Hub and RPC door.
+// Clipboard events are synthetic; native insertion and geometry belong to Chromium.
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+async function composerFixture(context: TestContext, extra: Record<string, (...args: any[]) => unknown> = {}, mobile = false) {
+  const fixture = await compiledHub();
+  const { rpc } = roomFixture();
+  const app = await fixture.mount(context, {
+    props: { visible: true, mobile },
+    setup(window) { window.Element.prototype.getAnimations = () => []; },
+    modules: [{
+      ...rpc,
+      projectList: async () => ({ projects: ['fixture', 'other'].map((session) => ({
+        project: { id: session, name: session, session, path: `/${session}` },
+        live: true, slots: [],
+      })) }),
+      modelsList: async () => ({ models: ['test-model'] }),
+      fsMkdir: async () => ({}),
+      ...extra,
+    }],
+  });
+  const wait = async (predicate: () => boolean) => {
+    for (let i = 0; i < 20 && !predicate(); i++) await app.flush();
+    assert.ok(predicate(), 'composer state settled');
+  };
+  await wait(() => app.document.querySelector('.to-name')?.textContent === 'alice');
+  const input = app.document.querySelector<HTMLTextAreaElement>('.c-input')!;
+  const send = app.document.querySelector<HTMLButtonElement>('.send-btn')!;
+  const text = async (value: string) => {
+    input.value = value;
+    input.dispatchEvent(new app.window.Event('input', { bubbles: true }));
+    await app.flush();
+  };
+  const key = async (key: string, options: KeyboardEventInit = {}) => {
+    const event = new app.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options });
+    input.dispatchEvent(event);
+    await app.flush();
+    return event.defaultPrevented;
+  };
+  const room = async (name: string) => {
+    app.document.querySelector<HTMLElement>(`[aria-label="${name}"] .proj-pick`)!.click();
+    await wait(() => app.document.querySelector('.h1-text')?.textContent === name);
+  };
+  const to = async (name: string) => {
+    app.document.querySelector<HTMLElement>('.to-chip')!.click();
+    await app.flush();
+    const button = [...app.document.querySelectorAll<HTMLButtonElement>('.to-menu button')]
+      .find((element) => element.textContent?.trim() === name);
+    assert.ok(button, name);
+    button.click();
+    await app.flush();
+  };
+  const paste = async (files: File[], words = '') => {
+    const event = new app.window.Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: {
+      files, items: [], getData: (type: string) => type === 'text/plain' ? words : '',
+    } });
+    input.dispatchEvent(event);
+    await app.flush();
+    return event.defaultPrevented;
+  };
+  return { ...app, input, send, text, key, room, to, wait, paste };
+}
+
+test('Composer keeps readline caret, palette, room drafts and all three destinations', { timeout: 60000 }, async (context) => {
+  const posts: Array<[string, string]> = [];
+  const app = await composerFixture(context, {
+    hubPost: async (session: string, body: string) => { posts.push([session, body]); return {}; },
+  });
+  try {
+    app.input.focus();
+    await app.text('one two');
+    app.input.setSelectionRange(4, 4);
+    assert.equal(await app.key('k', { ctrlKey: true }), true);
+    assert.equal(String(app.input.value), 'one ');
+    assert.equal(app.input.selectionStart, 4, 'caret lands after Svelte writes the value');
+    await app.room('other');
+    await app.key('y', { ctrlKey: true });
+    assert.equal(String(app.input.value), 'two', 'kill buffer survives project switches');
+    await app.room('fixture');
+    assert.equal(String(app.input.value), 'one ', 'draft restored from the leaving room');
+    await app.text('/');
+    await app.key('Tab');
+    assert.notEqual(app.input.value, '/');
+    assert.equal(app.document.activeElement, app.input);
+    assert.equal(app.input.selectionStart, app.input.value.length);
+    await app.text('hello');
+    assert.equal(await app.key('Enter', { shiftKey: true }), false);
+    assert.equal(await app.key('Enter', { isComposing: true }), false);
+    assert.deepEqual(posts, []);
+    await app.key('Enter');
+    await app.wait(() => posts.length === 1);
+    await app.to('everyone');
+    await app.text('broadcast');
+    app.send.click();
+    await app.wait(() => posts.length === 2);
+    await app.to('note');
+    await app.text('record');
+    app.send.click();
+    await app.wait(() => posts.length === 3);
+    assert.deepEqual(posts, [['fixture', '@alice hello'], ['fixture', '@all broadcast'], ['fixture', 'record']]);
+    await app.room('other');
+    await app.room('fixture');
+    assert.equal(app.document.querySelector('.to-name')?.textContent, 'note', 'an explicit room recipient persists');
+  } finally { await app.close(); }
+});
+
+test('Composer interrupt mixes button and Ctrl+C, expires, disarms and respects destination', { timeout: 60000 }, async (context) => {
+  const interrupts: Array<[string, string]> = [];
+  const app = await composerFixture(context, {
+    hubAgentInterrupt: async (session: string, name: string) => { interrupts.push([session, name]); return {}; },
+  }, true);
+  const armed = () => !!app.document.querySelector('.int-pill');
+  try {
+    assert.equal(await app.key('Enter'), false, 'compact Enter remains a newline');
+    app.send.click();
+    await app.flush();
+    assert.equal(armed(), true);
+    await app.advance(2999);
+    assert.equal(armed(), true);
+    await app.advance(1);
+    assert.equal(armed(), false);
+    await app.key('c', { ctrlKey: true });
+    await app.key('Escape');
+    assert.equal(armed(), false);
+    app.send.click();
+    await app.text('copy me');
+    assert.equal(armed(), false);
+    assert.equal(await app.key('c', { ctrlKey: true }), false, 'nonempty Ctrl+C is native copy');
+    await app.text('');
+    app.send.click();
+    await app.flush();
+    await app.to('bob');
+    assert.equal(armed(), false, 'changing recipient disarms synchronously');
+    app.send.click();
+    await app.flush();
+    await app.room('other');
+    assert.equal(armed(), false);
+    app.send.click();
+    await app.flush();
+    await app.key('c', { ctrlKey: true });
+    await app.wait(() => interrupts.length === 1);
+    assert.deepEqual(interrupts, [['other', 'alice']]);
+    await app.to('everyone');
+    await app.key('c', { ctrlKey: true });
+    app.send.click();
+    await app.wait(() => interrupts.length === 3);
+    assert.deepEqual(interrupts.slice(1), [['other', 'alice'], ['other', 'bob']]);
+    await app.to('note');
+    assert.equal(app.send.disabled, true);
+    await app.key('c', { ctrlKey: true });
+    assert.equal(armed(), false);
+    assert.equal(interrupts.length, 3);
+  } finally { await app.close(); }
+});
+
+test('Composer paste keeps Office words, stages files once and isolates overlapping generations', { timeout: 60000 }, async (context) => {
+  const uploads: Array<{ path: string; job: ReturnType<typeof deferred<object>> }> = [];
+  const posts: string[] = [];
+  const app = await composerFixture(context, {
+    fsUpload: async (path: string) => {
+      if (path.endsWith('/.gitignore')) return {};
+      const job = deferred<object>();
+      uploads.push({ path, job });
+      return job.promise;
+    },
+    hubPost: async (_session: string, body: string) => { posts.push(body); return {}; },
+  });
+  try {
+    const file = (name: string) => new app.window.File(['bytes'], name, { type: 'text/plain' });
+    const image = new app.window.File(['rendering'], 'selection.png', { type: 'image/png' });
+    assert.equal(await app.paste([image], 'Quarterly results'), false, 'Office words retain native insertion');
+    assert.equal(uploads.length, 0, 'a picture of the text is never staged');
+    await app.text('left right');
+    app.input.setSelectionRange(5, 5);
+    assert.equal(await app.paste([file('first.txt')], '/first.txt'), true);
+    await app.wait(() => uploads.length === 1);
+    await app.paste([file('second.txt')]);
+    await app.wait(() => uploads.length === 2);
+    uploads[0]!.job.resolve({});
+    await app.wait(() => app.input.value.includes('[file:1]'));
+    assert.equal(app.input.value, 'left [file:1]right', 'token uses the click-time caret');
+    assert.equal(app.send.disabled, true, 'the second same-room job keeps the gate closed');
+    await app.room('other');
+    await app.text('new room');
+    assert.equal(app.send.disabled, false, 'an old job does not lock the new generation');
+    await app.paste([file('third.txt')]);
+    await app.wait(() => uploads.length === 3);
+    uploads[1]!.job.resolve({});
+    await app.flush();
+    assert.equal(app.send.disabled, true, 'old finally cannot unlock the new job');
+    assert.equal(app.input.value, 'new room');
+    uploads[2]!.job.reject(new Error('upload denied'));
+    await app.wait(() => app.document.querySelector('.pend-chip.err') !== null);
+    assert.match(app.document.querySelector('.pend-why')!.textContent!, /upload denied/);
+    assert.equal(app.send.disabled, true);
+    await app.key('Enter');
+    assert.deepEqual(posts, [], 'failed chips block the key path as well as the button');
+    app.document.querySelector<HTMLElement>('.pend-x')!.click();
+    await app.flush();
+    assert.equal(app.send.disabled, false);
+    await app.paste([file('fourth.txt')]);
+    await app.wait(() => uploads.length === 4);
+    uploads[3]!.job.resolve({});
+    await app.wait(() => app.input.value.includes('[file:1]'));
+    assert.equal(app.document.activeElement, app.input, 'completed staging restores focus');
+    assert.equal(app.document.querySelectorAll('.pend-chip').length, 1);
+  } finally {
+    for (const { job } of uploads) job.resolve({});
+    await app.close();
+  }
+});
+
+test('Composer post and command failures never restore into the next room', { timeout: 60000 }, async (context) => {
+  const requests: Array<{ method: string; session: string; body: string; job: ReturnType<typeof deferred<object>> }> = [];
+  const call = (method: string, session: string, body: string) => {
+    const job = deferred<object>();
+    requests.push({ method, session, body, job });
+    return job.promise;
+  };
+  const app = await composerFixture(context, {
+    hubPost: (session: string, body: string) => call('post', session, body),
+    hubCommand: (session: string, target: string, body: string) => call(`command:${target}`, session, body),
+  });
+  try {
+    for (const [index, draft, method] of [[0, 'hello', 'post'], [1, '/clear', 'command:alice']] as const) {
+      await app.room('fixture');
+      await app.text(draft);
+      app.send.click();
+      await app.wait(() => requests.length === index + 1);
+      assert.equal(app.input.value, '');
+      assert.equal(requests[index]!.session, 'fixture');
+      assert.equal(requests[index]!.method, method);
+      await app.room('other');
+      await app.text(`next ${index}`);
+      requests[index]!.job.reject(new Error('send rejected'));
+      await app.flush();
+      assert.equal(app.input.value, `next ${index}`);
+    }
+    await app.text('same room');
+    app.send.click();
+    await app.wait(() => requests.length === 3);
+    requests[2]!.job.reject(new Error('retry'));
+    await app.wait(() => app.input.value === 'same room');
+  } finally {
+    for (const { job } of requests) job.resolve({});
+    await app.close();
+  }
+});

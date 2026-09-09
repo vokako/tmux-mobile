@@ -43,6 +43,19 @@ observes no post; after upload it observes the complete addressed body.
 Removing the actual `attaching` guard is the negative control. This proves
 the event-to-send path, not native clipboard behavior or layout.
 
+### Extraction characterization (board #133, 2026-09-09)
+
+Before moving the view, the mounted Hub characterizes readline caret after
+settling, kill-buffer and draft lifetime across rooms, palette focus, all
+three delivery destinations, compact/Shift/IME Enter, the mixed button/key
+interrupt pair and its 3-second expiry/disarm rules. Deferred RPC replies
+cover overlapping upload generations, failed chips and post/command rollback
+across a room switch. The existing upload/Enter and Back tests stay unchanged.
+These execute the real handlers but do not simulate clipboard insertion or
+layout. Chromium 152.0.7977.64 separately captures the real view at 1440x900
+and 390x844, light/dark and reduced-motion spots: short and overflowing text,
+command mirror font, measured recipient indent, both menus and file chips.
+
 ### Words beside a picture of the words: the text is the paste (2026-09-08)
 
 The paste door's rule was "files win over co-riding text" (board #25) — right for a Finder/Explorer file copy, whose text is the file's own path, and for a screenshot, which has no text. It was wrong for the paste the owner met daily: PowerPoint (and Word, Excel, Keynote, Numbers, every browser) puts a **PNG rendering of the selection** on the clipboard beside `text/plain`/`text/html`, and the composer staged the picture and threw the words away ("从 ppt 上粘贴过来的文字，总是被粘贴为了一个图片"). `textIsThePaste(text, files)` (hub.ts, pure, tested) now decides before `preventDefault`: the text wins when it is non-empty AND every file is an image AND the text is not one token that is a URL, a path, or the name of one of the files. Every legitimate file paste fails that test — a screenshot carries no text, a file copy carries its own name/path, a web "Copy image" carries at most the image URL, and any non-image file (a pdf beside a caption) is a file paste whatever the text says. When the text wins the handler simply returns and the textarea's default insertion runs; the rendering is dropped, not staged — nobody wants a picture of a bullet list next to the bullet list. The HTML flavour is ignored on purpose: the composer is plain text and markdown, and Office HTML is a wall of styling.
