@@ -7,9 +7,8 @@
 </script>
 
 <script>
-  // Markdown goes through the ONE safe renderer (rule 13: `&`/`<` escaped, so a
-  // README's raw <img onerror> is inert text). It also owns marked + KaTeX.
-  import { renderMarkdown } from '../core/markdown.ts';
+  import FilePreview from './FilePreview.svelte';
+  import { createPreviewRenderers, defaultWrapForMime, highlightCode, isPreviewable, mimeCategory } from './file-preview.ts';
   import { isAndroid, isTauri, tauriReady } from '../core/platform.ts';
   import Icon from '../ui/Icon.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
@@ -24,8 +23,7 @@
   import { untrack } from 'svelte';
   import { directoryLoadState, leaveDecision, cwdFollowStep } from './file-view-state.ts';
   import { createFileNavigation, directoryBackFloor } from './file-nav.ts';
-  import { installExternalLinkHandler } from '../core/external-links.ts';
-  import { handlePathLinkClick, installPathLinkHandler, resolvePathRef } from '../core/path-links.ts';
+  import { handlePathLinkClick, resolvePathRef } from '../core/path-links.ts';
   import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadHttp, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from '../core/ws.ts';
 
   // Tauri plugin imports (tree-shaken in browser builds). The platform flags
@@ -49,75 +47,15 @@
   // preview it was loaded for re-renders highlighted once it arrives —
   // until then the same lines show escaped and unhighlighted.
   let hljs = $state(null);
-  let hljsLoading = null;
-  function loadHljs() {
-    if (hljsLoading) return hljsLoading;
-    hljsLoading = Promise.all([
-      import('highlight.js/lib/core'),
-      import('highlight.js/lib/languages/javascript'),
-      import('highlight.js/lib/languages/typescript'),
-      import('highlight.js/lib/languages/python'),
-      import('highlight.js/lib/languages/rust'),
-      import('highlight.js/lib/languages/css'),
-      import('highlight.js/lib/languages/json'),
-      import('highlight.js/lib/languages/bash'),
-      import('highlight.js/lib/languages/xml'),
-      import('highlight.js/lib/languages/yaml'),
-      import('highlight.js/lib/languages/sql'),
-      import('highlight.js/lib/languages/go'),
-      import('highlight.js/lib/languages/java'),
-      import('highlight.js/lib/languages/ruby'),
-      import('highlight.js/lib/languages/markdown'),
-      import('highlight.js/styles/github-dark.min.css'),
-    ]).then(([core, javascript, typescript, python, rust, css, json, bash, xml, yaml, sql, go, java, ruby, markdown]) => {
-      const h = core.default;
-      h.registerLanguage('javascript', javascript.default);
-      h.registerLanguage('js', javascript.default);
-      h.registerLanguage('typescript', typescript.default);
-      h.registerLanguage('ts', typescript.default);
-      h.registerLanguage('python', python.default);
-      h.registerLanguage('rust', rust.default);
-      h.registerLanguage('css', css.default);
-      h.registerLanguage('json', json.default);
-      h.registerLanguage('bash', bash.default);
-      h.registerLanguage('sh', bash.default);
-      h.registerLanguage('html', xml.default);
-      h.registerLanguage('xml', xml.default);
-      h.registerLanguage('svg', xml.default);
-      h.registerLanguage('yaml', yaml.default);
-      h.registerLanguage('sql', sql.default);
-      h.registerLanguage('go', go.default);
-      h.registerLanguage('java', java.default);
-      h.registerLanguage('ruby', ruby.default);
-      h.registerLanguage('markdown', markdown.default);
-      hljs = h;
-      return h;
-    }).catch(() => { hljsLoading = null; return null; }); // offline: retry next time
-    return hljsLoading;
-  }
-
-  let mermaidLoading = null;
-  function loadMermaid() {
-    if (mermaidLoading) return mermaidLoading;
-    mermaidLoading = import('mermaid').then(m => {
-      m.default.initialize({ startOnLoad: false, theme: 'dark' });
-      return m.default;
-    }).catch(() => { mermaidLoading = null; return null; });
-    return mermaidLoading;
-  }
-
-  let pdfjsLoading = null;
-  function loadPdfjs() {
-    if (pdfjsLoading) return pdfjsLoading;
-    pdfjsLoading = Promise.all([
-      import('pdfjs-dist'),
-      import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
-    ]).then(([lib, worker]) => {
-      lib.GlobalWorkerOptions.workerSrc = worker.default;
-      return lib;
-    }).catch(() => { pdfjsLoading = null; return null; });
-    return pdfjsLoading;
-  }
+  const renderers = createPreviewRenderers({
+    get currentFile() { return currentFile; },
+    get pdfContainer() { return pdfContainer; },
+    get htmlPreviewEl() { return htmlPreviewEl; },
+    download: fsDownload,
+    onHighlight: (value) => { hljs = value; },
+    openPath: openPreviewRef,
+  });
+  const { loadHljs, renderPdf, renderMermaidBlocks, resolveImages, attachHtmlPreviewLinks } = renderers;
 
   let { session = '', onGoBack = null, visible = false, fontSize = 14, singlePane = false, navRequest = null, jumped = false, currentDir = $bindable('') } = $props();
 
@@ -292,9 +230,6 @@
   // can't track wrapped rows. Code/config (yaml, json, rs, …) defaults to
   // no-wrap so the gutter stays exactly aligned (long lines scroll sideways).
   let wrapLines = $state(false);
-  function defaultWrapForMime(mime) {
-    return mime === 'text/markdown' || mime === 'text/plain';
-  }
   /** The destructive action awaiting confirmation:
    *   { kind: 'file', path }     — delete on the server, no trash, no undo
    *   { kind: 'local', name }    — delete a downloaded copy (had NO confirm)
@@ -522,26 +457,6 @@
     else popDir();
   }
 
-  async function renderPdf(data) {
-    if (!pdfContainer) return;
-    const pdfjsLib = await loadPdfjs();
-    if (!pdfjsLib || !pdfContainer) return;
-    pdfContainer.innerHTML = '';
-    const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
-    const pdf = await pdfjsLib.getDocument({ data: bytes, verbosity: 0 }).promise;
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const scale = (pdfContainer.clientWidth || 360) / page.getViewport({ scale: 1 }).width;
-      const viewport = page.getViewport({ scale });
-      const canvas = document.createElement('canvas');
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      canvas.style.width = '100%';
-      canvas.style.marginBottom = '4px';
-      pdfContainer.appendChild(canvas);
-      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-    }
-  }
 
   // Breadcrumb parts
   let breadcrumbs = $derived.by(() => {
@@ -743,15 +658,6 @@
 
   const PREVIEW_SIZE_LIMIT = 5 * 1024 * 1024;
 
-  function isPreviewable(stat, name) {
-    if (!stat) return false;
-    const m = stat.mime_hint || '';
-    if (m === 'application/pdf') return true;
-    if (m.startsWith('image/')) return true;
-    if (stat.is_text && stat.size <= 512 * 1024) return true;
-    if (name && /\.pptx$/i.test(name)) return true;
-    return false;
-  }
 
   async function loadPreviewContent(file, my = fileNav.nextFile()) {
     previewLoading = true;
@@ -1466,122 +1372,13 @@
     return 'file';
   }
 
-  function mimeCategory(mime) {
-    if (!mime) return 'other';
-    if (mime.startsWith('image/')) return 'image';
-    if (mime === 'text/markdown') return 'markdown';
-    if (mime === 'text/csv') return 'csv';
-    if (mime === 'text/html') return 'html';
-    if (mime === 'application/pdf') return 'pdf';
-    if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/toml' || mime === 'application/yaml') return 'code';
-    return 'other';
-  }
-
-  function hljsLang(mime) {
-    const map = {
-      'text/javascript': 'js', 'text/typescript': 'ts', 'text/python': 'python',
-      'text/rust': 'rust', 'text/css': 'css', 'text/shell': 'bash', 'text/sql': 'sql',
-      'text/go': 'go', 'text/java': 'java', 'text/ruby': 'ruby', 'text/c': 'c',
-      'text/cpp': 'cpp', 'text/svelte': 'html', 'text/vue': 'html',
-      'application/json': 'json', 'application/toml': 'yaml', 'application/yaml': 'yaml',
-    };
-    return map[mime] || null;
-  }
-
-  // `hljs` is null until loadHljs() resolves; every highlighter degrades to
-  // the escaped source in the meantime and the $state flip re-renders it.
-  function highlightCode(text, mime) {
-    if (text == null) return '';
-    if (!hljs) return text.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-    const lang = hljsLang(mime);
-    if (lang && hljs.getLanguage(lang)) {
-      return hljs.highlight(text, { language: lang }).value;
-    }
-    try { return hljs.highlightAuto(text).value; } catch { return text.replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
-  }
-
-  // Highlight a SINGLE line for the per-line code views (preview + the gutter
-  // alignment fix). Per-line so each logical line is its own DOM row — the line
-  // number then sits at the top of that row and stays aligned even when the
-  // line soft-wraps. We skip highlightAuto here (too slow per-line and it would
-  // guess a different language each line); without a known language we just
-  // escape. Cross-line constructs (block comments, multiline strings) lose
-  // their context, an acceptable trade for reliable alignment + wrapping.
-  function highlightLine(line, mime) {
-    if (!line) return '';
-    const lang = hljs ? hljsLang(mime) : null;
-    if (lang && hljs.getLanguage(lang)) {
-      try { return hljs.highlight(line, { language: lang }).value; } catch {}
-    }
-    return line.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-  }
-
-  // The lined code preview renders one DOM row per line with a per-line hljs
-  // call; a 512 KB log is 20k rows and a multi-second main-thread freeze on a
-  // phone. Show the head and let the reader ask for the rest.
-  const CODE_PREVIEW_MAX_LINES = 3000;
+  // This state survives preview/editor round-trips, as before the extraction.
   let showAllLines = $state(false);
-  let previewLines = $derived((currentFile?.content ?? '').split('\n'));
-  let shownLines = $derived(showAllLines || previewLines.length <= CODE_PREVIEW_MAX_LINES
-    ? previewLines
-    : previewLines.slice(0, CODE_PREVIEW_MAX_LINES));
-
-  let mermaidId = 0;
-  async function renderMermaidBlocks(container) {
-    if (!container) return;
-    const blocks = container.querySelectorAll('code.language-mermaid');
-    if (!blocks.length) return; // most markdown has no diagram: never load mermaid for it
-    const mermaid = await loadMermaid();
-    if (!mermaid) return;
-    for (const block of blocks) {
-      const pre = block.parentElement;
-      const id = `mermaid-${++mermaidId}`;
-      const div = document.createElement('div');
-      div.className = 'mermaid-block';
-      try {
-        const { svg } = await mermaid.render(id, block.textContent);
-        div.innerHTML = svg;
-      } catch { div.textContent = block.textContent; }
-      pre.replaceWith(div);
-    }
-  }
 
   let previewEl = $state(null);
   let htmlPreviewEl = $state(null);
-  let removeHtmlPreviewLinks = () => {};
 
-  function attachHtmlPreviewLinks() {
-    removeHtmlPreviewLinks();
-    const doc = htmlPreviewEl?.contentDocument;
-    const removePaths = installPathLinkHandler(doc, openPreviewRef);
-    const removeExternal = installExternalLinkHandler(doc);
-    removeHtmlPreviewLinks = () => { removePaths(); removeExternal(); };
-  }
-
-  $effect(() => () => removeHtmlPreviewLinks());
-
-  function mimeFromName(name) {
-    const ext = name.split('.').pop()?.toLowerCase();
-    const map = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif' };
-    return map[ext] || 'image/png';
-  }
-
-  async function resolveImages(container) {
-    if (!container) return;
-    const dir = currentFile?.path?.replace(/\/[^/]+$/, '') || '';
-    const imgs = container.querySelectorAll('img[src]');
-    for (const img of imgs) {
-      const src = img.getAttribute('src');
-      if (!src || src.startsWith('data:') || src.startsWith('http')) continue;
-      // Resolve relative path
-      const fullPath = src.startsWith('/') ? src : dir + '/' + src;
-      try {
-        const r = await fsDownload(fullPath);
-        const mime = mimeFromName(r.name || src);
-        img.src = `data:${mime};base64,${r.data}`;
-      } catch { img.alt = `[${src}]`; }
-    }
-  }
+  $effect(() => () => renderers.dispose());
 
   $effect(() => {
     if (view === 'preview' && mimeCategory(currentFile?.stat?.mime_hint) === 'markdown' && previewEl) {
@@ -1592,21 +1389,6 @@
     }
   });
 
-  function renderCsv(text) {
-    if (text == null) return '';
-    const lines = text.trim().split('\n');
-    if (!lines.length) return '';
-    const rows = lines.map(l => l.split(',').map(c => c.trim().replace(/^"|"$/g, '')));
-    let html = '<table><thead><tr>';
-    rows[0].forEach(h => html += `<th>${h.replace(/</g,'&lt;')}</th>`);
-    html += '</tr></thead><tbody>';
-    rows.slice(1).forEach(r => {
-      html += '<tr>';
-      r.forEach(c => html += `<td>${c.replace(/</g,'&lt;')}</td>`);
-      html += '</tr>';
-    });
-    return html + '</tbody></table>';
-  }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -1782,41 +1564,9 @@
         <button class="act-btn" onclick={() => { view = 'info'; navPush(); }}><Icon name="info" size={14} /></button>
       </div>
     </div>
-    <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-    <div class="preview-body" bind:this={previewBodyEl} onclick={previewLinkClick} onauxclick={previewLinkClick} style="--file-font-size:{fontSize}px">
-      {#if mimeCategory(currentFile.stat?.mime_hint) === 'markdown'}
-        <div class="md-render" bind:this={previewEl}>{@html renderMarkdown(currentFile.content)}</div>
-      {:else if mimeCategory(currentFile.stat?.mime_hint) === 'csv'}
-        <div class="csv-render">{@html renderCsv(currentFile.content)}</div>
-      {:else if mimeCategory(currentFile.stat?.mime_hint) === 'html'}
-        <iframe
-          class="html-preview"
-          bind:this={htmlPreviewEl}
-          srcdoc={currentFile.content}
-          sandbox="allow-same-origin"
-          title="HTML Preview"
-          onload={attachHtmlPreviewLinks}
-        ></iframe>
-      {:else if mimeCategory(currentFile.stat?.mime_hint) === 'pdf'}
-        <div class="pdf-container" bind:this={pdfContainer} style="margin: -12px; padding: 0;"></div>
-      {:else if mimeCategory(currentFile.stat?.mime_hint) === 'image'}
-        <div class="image-preview"><img src={currentFile.dataUrl} alt={currentFile.name} /></div>
-      {:else if currentFile.convertedHtml}
-        <div class="md-render">{@html currentFile.convertedHtml}</div>
-      {:else}
-        <!-- 'code' and every other text: one lined view, capped (see shownLines) -->
-        <div class="code-lined" class:wrap={wrapLines}>
-          {#each shownLines as line, i}
-            <div class="cl-row"><span class="cl-num">{i + 1}</span><code class="cl-code">{@html highlightLine(line, currentFile.stat?.mime_hint) || '\u200b'}</code></div>
-          {/each}
-          {#if shownLines.length < previewLines.length}
-            <button class="cl-more" onclick={() => { showAllLines = true; }}>
-              {t('previewShowAllLines').replace('{n}', String(previewLines.length))}
-            </button>
-          {/if}
-        </div>
-      {/if}
-    </div>
+    <FilePreview {currentFile} {fontSize} {wrapLines} {hljs}
+      bind:showAllLines bind:previewBodyEl bind:previewEl bind:htmlPreviewEl bind:pdfContainer
+      {previewLinkClick} {attachHtmlPreviewLinks} />
 {/snippet}
 
 {#snippet editPanel()}
@@ -1837,7 +1587,7 @@
         {/each}
       </div>
       <div class="editor-layer" bind:this={layerEl}>
-        <pre class="editor-highlight" bind:this={hlEl} aria-hidden="true"><code>{@html highlightCode(editContent, currentFile?.stat?.mime_hint)}</code>{'\n'}</pre>
+        <pre class="editor-highlight" bind:this={hlEl} aria-hidden="true"><code>{@html highlightCode(editContent, currentFile?.stat?.mime_hint, hljs)}</code>{'\n'}</pre>
         <!-- Off-screen mirror: one block per logical line, same width/font/wrap
              as the highlight layer, so each block's measured height tells the
              gutter how tall to make that line number — keeping numbers aligned
@@ -2207,83 +1957,6 @@
     text-overflow: ellipsis; white-space: nowrap;
   }
   .preview-actions { display: flex; gap: 4px; }
-
-  /* Preview body */
-  .preview-body { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 12px; display: flex; flex-direction: column; min-height: 0; }
-  /* Per-line code view: each logical line is its own flex row (number + code),
-     so the line number sits at the top of its row and stays aligned even when
-     the code soft-wraps. No-wrap mode scrolls horizontally with the number
-     column pinned (sticky) on the left. */
-  .code-lined {
-    flex: 1; overflow: auto; -webkit-overflow-scrolling: touch;
-    font-family: var(--font-mono); font-size: var(--file-font-size, 13px); line-height: 1.5;
-    padding: 12px 0;
-  }
-  .cl-row { display: flex; align-items: flex-start; }
-  .cl-num {
-    position: sticky; left: 0; z-index: 1; flex-shrink: 0; min-width: 2.5em; padding: 0 8px;
-    text-align: right; color: var(--text3); user-select: none; white-space: pre;
-    background: var(--bg); border-right: 1px solid var(--border);
-  }
-  .cl-code {
-    margin: 0 0 0 10px; flex: 1; min-width: 0; color: var(--text);
-    white-space: pre; font-family: inherit;
-  }
-  .cl-code :global(code) { font-family: inherit; background: none; padding: 0; }
-  .code-lined.wrap .cl-code { white-space: pre-wrap; word-break: break-word; }
-  /* The "show all N lines" tail of a capped preview: a text button in the
-     gutter's row grid, sticky like the numbers so it is reachable at any
-     horizontal scroll. */
-  .cl-more {
-    display: block; position: sticky; left: 0; margin: 8px 0 0 10px; padding: 6px 10px;
-    min-height: 44px; border: 1px solid var(--border); border-radius: var(--ui-radius-control);
-    background: var(--surface); color: var(--accent); font: inherit; cursor: pointer;
-    transition: background var(--t-fast);
-  }
-  .cl-more:hover { background: var(--surface2); }
-  .html-preview {
-    flex: 1; width: 100%; border: none; background: #fff; border-radius: 4px;
-  }
-  .pdf-container {
-    flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 4px;
-    background: var(--surface);
-  }
-  .image-preview {
-    flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 12px;
-  }
-  .image-preview img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; }
-  .md-render { font-size: var(--file-font-size, 14px); line-height: 1.6; color: var(--text); overflow-wrap: break-word; }
-  .md-render :global(h1) { font-size: 1.55em; margin: 16px 0 8px; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 6px; }
-  .md-render :global(h2) { font-size: 1.28em; margin: 14px 0 6px; color: var(--accent); }
-  .md-render :global(h3) { font-size: 1.15em; margin: 10px 0 4px; color: var(--accent); }
-  .md-render :global(h4), .md-render :global(h5), .md-render :global(h6) { font-size: 1em; margin: 8px 0 4px; color: var(--accent); }
-  .md-render :global(p) { margin: 8px 0; }
-  .md-render :global(code) { background: var(--surface2); padding: 2px 5px; border-radius: 3px; font-size: 0.86em; font-family: var(--font-mono); }
-  .md-render :global(pre) { background: var(--code-bg); border-radius: 12px; padding: 12px; overflow-x: auto; margin: 8px 0; }
-  .md-render :global(pre code) { background: none; padding: 0; font-size: var(--fs-ui); line-height: 1.5; }
-  .md-render :global(strong) { color: var(--text); }
-  .md-render :global(em) { color: var(--text2); }
-  .md-render :global(a) { color: var(--accent); text-decoration: none; }
-  .md-render :global(a:hover) { text-decoration: underline; }
-  .md-render :global(ul), .md-render :global(ol) { padding-left: 20px; margin: 6px 0; }
-  .md-render :global(li) { margin: 3px 0; }
-  .md-render :global(blockquote) { border-left: 3px solid var(--accent); margin: 8px 0; padding: 4px 12px; color: var(--text2); }
-  .md-render :global(hr) { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
-  .md-render :global(img) { max-width: 100%; border-radius: 6px; }
-  .md-render :global(table) { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: var(--fs-body); }
-  .md-render :global(th), .md-render :global(td) { padding: 8px 12px; border: 1px solid var(--input-border); text-align: left; }
-  .md-render :global(th) { background: var(--surface2); color: var(--accent); font-weight: 600; }
-  .md-render :global(input[type="checkbox"]) { margin-right: 6px; }
-  .md-render :global(.katex-display) { overflow-x: auto; margin: 8px 0; }
-  .md-render :global(.mermaid-block) { background: var(--surface); border-radius: 12px; padding: 12px; margin: 8px 0; overflow-x: auto; }
-  .md-render :global(.mermaid-block svg) { max-width: 100%; }
-  .csv-render { overflow: auto; }
-  .csv-render :global(table) { border-collapse: collapse; font-size: var(--fs-ui); width: 100%; }
-  .csv-render :global(th), .csv-render :global(td) {
-    padding: 6px 10px; border: 1px solid var(--input-border); text-align: left;
-  }
-  .csv-render :global(th) { background: var(--surface2); color: var(--accent); font-weight: 600; }
-  .csv-render :global(td) { color: var(--text); }
 
   /* Editor */
   .editor-wrap {

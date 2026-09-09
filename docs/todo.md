@@ -59,7 +59,8 @@
   样板 → `?`-returning 内层函数。
 - [ ] `Store::hub_search`（board #107）在 Rust 里全表扫描、进程内过滤——当前规模没问题，
   房间变大前把匹配下推到 SQL（`lower(body) LIKE`）或 FTS（reviewer 2026-09-09）。
-- [ ] `Files.svelte` 预览渲染器（PDF/CSV/HTML/MD）拆出；markdown CSS 重复 → `ui/MarkdownBody`。
+- [x] #110：Files 的导航历史/返回决策进入 `file-nav.ts`；预览 body/CSS 与 renderer 进入 `FilePreview.svelte` / `file-preview.ts`，保持原行为。
+- [ ] markdown CSS 重复 → `ui/MarkdownBody`（#110 仅搬移原样式，不跨页面统一）。
 - [ ] `ws.ts` 模块级单例（10 个顶层 `let`），split-screen 双连接时是墙。
 - [ ] 测试缺口：`bin/tmm.rs` 3 个测试全是 flag 解析；`connection.rs`/`fs.rs`/`server/mod.rs` 无测试；
   `AgentsPage`/`Projects`/`Settings`/`GitPanel`/`ui/Select` 无测试；部分 source test 钉实现文本。

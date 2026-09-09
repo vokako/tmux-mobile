@@ -134,14 +134,15 @@ test('below its own path, a tab visit climbs to the parent — never the termina
     'the climb sits under the user-path pop, replenishes app history, and loads without pushing dir history');
 });
 
-test('markdown preview goes through the ONE safe renderer — never a bare marked.parse (review 2026-09-03)', () => {
+test('Files delegates preview markup to FilePreview without a second markdown pipeline (#110)', () => {
   // A README in any cloned repo is untrusted input rendered with {@html} in
   // the app origin, next to the token in localStorage. core/markdown.ts
   // escapes `&`/`<` first (rule 13); Files had its own renderer that did not,
   // so `<img src=x onerror=…>` in a README ran as script.
-  assert.match(source, /import \{ renderMarkdown \} from '\.\.\/core\/markdown\.ts';/u);
+  assert.match(source, /import FilePreview from '\.\/FilePreview\.svelte';/u);
   assert.doesNotMatch(source, /marked\.parse\(|from 'marked'|from 'katex'/u, 'no second markdown/KaTeX pipeline');
-  assert.match(source, /\{@html renderMarkdown\(currentFile\.content\)\}/u, 'the preview renders the shared output');
+  assert.match(source, /<FilePreview \{currentFile\} \{fontSize\} \{wrapLines\} \{hljs\}/u, 'the existing preview state is forwarded');
+  assert.doesNotMatch(source, /\{#if mimeCategory\(currentFile\.stat/u, 'the render branch chain moved whole');
 });
 
 test('heavy preview libraries load on first use, never at startup', () => {
@@ -151,29 +152,23 @@ test('heavy preview libraries load on first use, never at startup', () => {
   // that most sessions never open.
   assert.doesNotMatch(source, /^\s*import [^\n]* from '(?:pdfjs-dist|mermaid|highlight\.js)/mu, 'no static import of a preview library');
   assert.doesNotMatch(source, /^\s*import 'highlight\.js\/styles/mu, 'the highlighter CSS rides with the highlighter');
-  for (const loader of ['loadHljs', 'loadMermaid', 'loadPdfjs']) {
-    assert.match(source, new RegExp(`function ${loader}\\(\\) \\{\\s*if \\(\\w+Loading\\) return \\w+Loading;`, 'u'),
-      `${loader} memoizes its promise (idempotent)`);
-  }
-  assert.match(source, /import\('mermaid'\)/u);
-  assert.match(source, /import\('pdfjs-dist'\)/u);
-  assert.match(source, /import\('highlight\.js\/lib\/core'\)/u);
-  // A markdown file without a diagram must not pay for mermaid.
-  assert.match(source, /if \(!blocks\.length\) return;[^\n]*\n\s*const mermaid = await loadMermaid\(\);/u);
-  // Until the highlighter arrives, the same lines render escaped, not blank.
+  // The moved loaders are tested in file-preview.test.ts. The host keeps the
+  // same lifetime and live reads so preview unmounts do not reset their cache.
+  assert.match(source, /const renderers = createPreviewRenderers\(\{/u);
+  assert.match(source, /get currentFile\(\) \{ return currentFile; \}/u);
+  assert.match(source, /get pdfContainer\(\) \{ return pdfContainer; \}/u);
+  assert.match(source, /onHighlight: \(value\) => \{ hljs = value; \}/u);
+  assert.match(source, /\$effect\(\(\) => \(\) => renderers\.dispose\(\)\);/u);
   assert.match(source, /let hljs = \$state\(null\);/u);
-  assert.match(source, /const lang = hljs \? hljsLang\(mime\) : null;/u);
 });
 
-test('the lined code preview is capped, with the split out of the template', () => {
+test('the lined preview retains host-owned cap state across editor round-trips (#110)', () => {
   // One DOM row + one hljs call per line: a 512 KB log is 20k rows and a
   // multi-second freeze on a phone. The head renders; the reader asks for the
   // rest. The split lives in a $derived so a wrap toggle does not re-split.
-  assert.match(source, /const CODE_PREVIEW_MAX_LINES = \d+;/u);
-  assert.match(source, /let previewLines = \$derived\(\(currentFile\?\.content \?\? ''\)\.split\('\\n'\)\);/u);
-  assert.match(source, /\{#each shownLines as line, i\}/u, 'the template iterates the capped list');
-  assert.doesNotMatch(source, /\{#each \(currentFile\.content \?\? ''\)\.split/u, 'no inline split in the template');
-  assert.match(source, /\{#if shownLines\.length < previewLines\.length\}[\s\S]{0,200}?showAllLines = true;/u, 'the affordance lifts the cap');
+  assert.match(source, /let showAllLines = \$state\(false\);/u);
+  assert.match(source, /bind:showAllLines bind:previewBodyEl bind:previewEl bind:htmlPreviewEl bind:pdfContainer/u,
+    'cap and DOM references remain owned by the existing Files lifetime');
   assert.match(source, /showAllLines = false; \/\/ the cap is per file/u, 'a new file starts capped again');
 });
 
@@ -195,9 +190,9 @@ test('navRequest can ask for a FILE: land in its directory with the preview open
   // PREVIEWED FILE's directory, and the target opens through openEntry like
   // any row tap. Real URLs keep the browser's behaviour.
   assert.match(source, /handlePathLinkClick\(e, openPreviewRef\)/u, 'preview and chat share one path handler');
-  assert.match(source, /onclick=\{previewLinkClick\} onauxclick=\{previewLinkClick\}/u, 'all preview formats route primary and middle clicks');
+  assert.match(source, /\{previewLinkClick\} \{attachHtmlPreviewLinks\} \/>/u, 'the body receives the same click/load handlers');
   assert.match(source, /resolvePathRef\(docDir, ref\)/u, 'relative refs resolve against the document');
-  assert.match(source, /installPathLinkHandler\(doc, openPreviewRef\)/u, 'iframe documents install the same path policy');
+  assert.match(source, /openPath: openPreviewRef,/u, 'iframe documents retain the same context-aware path callback');
   assert.match(source, /fileNav\.backFromPreview\(\{ cwd, currentFile, fromGit \}\)/u, 'the tested history owner chooses Back before the directory floor');
   assert.match(source, /step\.kind === 'restore'\) \{ restoreFileLocation\(step\.location\); return; \}/u, 'the component applies the captured location, including DOM scroll');
   assert.match(source, /if \(view === 'preview'\) \{ backToList\(\); return true; \}/u, 'the browser back handler uses the same preview history');

@@ -146,10 +146,10 @@ NUL is rejected because operating-system argv cannot represent it.
 `GitPanel.svelte` has ONE outcome surface for git verbs: `flash(msg)` sets `pushResult` for 3 s under the header (`✗ ` prefix = failure, red). Push and commit always used it; stage, unstage and add-all wrapped their call in `catch {}` and said nothing, so a failing `git add` (index.lock left by a crash, permissions, a path outside the work tree) looked like "the plus button did nothing" (review, 2026-09-03). Now every verb's catch goes through `failed(e)` → the same banner — no second error mechanism. One timer, restarted per message, so a slow earlier 3 s timeout cannot blank a newer message. `git()` also throws on ANY non-zero exit, naming the exit code when stderr is empty, so the banner never has nothing to show. `gitError` remains the LOAD error (status/log listing failed) and is a separate, persistent line.
 
 ### Markdown preview uses the one safe renderer
-The Files markdown preview calls `renderMarkdown` from `src/lib/core/markdown.ts` — the same escape-first pipeline the chat uses (rule 13: `&` and `<` are escaped BEFORE marked parses, `>` is not, so blockquotes work and raw HTML is inert text). Files used to carry a second renderer that called `marked.parse` on the raw file, and marked v17 does not sanitize: a `README.md` in any cloned repo (or one an agent wrote) containing `<img src=x onerror=…>` ran in the app origin, where `localStorage` holds the token and `__TAURI_INTERNALS__` can invoke commands (review, 2026-09-03). The trade-off is deliberate: a README's inline HTML (badge tables, centered logos) renders as text; markdown-syntax images and links still work. Mermaid fences still render — the shared output keeps `code.language-mermaid`, and `renderMermaidBlocks` swaps them for SVG after paint. `Files.source.test.ts` pins that Files imports the shared renderer and never `marked.parse`.
+The `FilePreview` body calls `renderMarkdown` from `src/lib/core/markdown.ts` — the same escape-first pipeline the chat uses (rule 13: `&` and `<` are escaped BEFORE marked parses, `>` is not, so blockquotes work and raw HTML is inert text). Files used to carry a second renderer that called `marked.parse` on the raw file, and marked v17 does not sanitize: a `README.md` in any cloned repo (or one an agent wrote) containing `<img src=x onerror=…>` ran in the app origin, where `localStorage` holds the token and `__TAURI_INTERNALS__` can invoke commands (review, 2026-09-03). The trade-off is deliberate: a README's inline HTML (badge tables, centered logos) renders as text; markdown-syntax images and links still work. Mermaid fences still render — the shared output keeps `code.language-mermaid`, and `renderMermaidBlocks` swaps them for SVG after paint. `FilePreview.source.test.ts` pins the shared renderer; Files only delegates the body and never calls `marked.parse`.
 
 ### Heavy preview libraries load on first use
-pdf.js, mermaid and highlight.js (+15 grammars) are `import()`ed by memoized loaders (`loadPdfjs`, `loadMermaid`, `loadHljs`) the first time a PDF, a mermaid fence or a code/text file is opened. Files is statically imported by App and the Hub drawer, so the static imports it had put 1.5 MB into the entry chunk of the primary (Android) target: 2.30 MB (652 KB gzip) before, 1.14 MB (344 KB gzip) after (review, 2026-09-03). The highlighter is a `$state`: the lined preview and the editor overlay render escaped-and-plain until it lands, then re-render highlighted; a markdown file with no diagram never loads mermaid. KaTeX stays static because `core/markdown.ts` (chat) needs it on the first message.
+pdf.js, mermaid and highlight.js (+15 grammars) are `import()`ed by memoized loaders (`loadPdfjs`, `loadMermaid`, `loadHljs`) in `file-preview.ts` the first time a PDF, a mermaid fence or a code/text file is opened. Files is statically imported by App and the Hub drawer, so the static imports it had put 1.5 MB into the entry chunk of the primary (Android) target: 2.30 MB (652 KB gzip) before, 1.14 MB (344 KB gzip) after (review, 2026-09-03). The highlighter is a `$state`: the lined preview and the editor overlay render escaped-and-plain until it lands, then re-render highlighted; a markdown file with no diagram never loads mermaid. KaTeX stays static because `core/markdown.ts` (chat) needs it on the first message.
 
 ### Navigation ownership (#110, 2026-09-09)
 
@@ -167,6 +167,24 @@ tab visits climb below the directory stack. Clearing either history does not
 implicitly invalidate a file request; the existing call sites still advance
 the generation explicitly. Unit tests characterize each decision and preserve
 the captured listing/file/scroll references.
+
+### Preview ownership (#110, 2026-09-09)
+
+`FilePreview.svelte` contains the original preview-body branches and their
+CSS, with no new wrapper or header. `file-preview.ts` holds MIME/highlighting/
+CSV helpers and the lazy PDF, Mermaid, image and iframe-link renderers.
+Files creates one renderer factory per component lifetime and keeps the
+existing 50 ms scheduling, highlighter mirror, DOM bindings and code-cap
+state. Live context getters deliberately retain the pre-extraction reads;
+this move does not change parser behavior or asynchronous cancellation/error
+policy. Closing a preview or visiting the editor does not recreate loader
+caches or reset an expanded code preview.
+
+Pure helper tests characterize existing behavior (including the simple CSV
+splitter), renderer boundary tests cover image/link handling, and the real
+Svelte render test covers every branch plus the 3000-line cap. Files and
+FilePreview each pin their own wiring; browser comparison covers the actual
+rendered output and Back chain on both layouts.
 
 ### Markdown Image MIME
 Infer MIME from image file extension, not from parent markdown file's mime_hint.
