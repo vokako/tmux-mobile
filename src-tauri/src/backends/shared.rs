@@ -120,7 +120,7 @@ fn codex_key_segment(value: &str) -> String {
 
 pub(crate) fn codex_config_override(key: &str, value: Value) -> String {
     let assignment = format!("{}={}", key, serde_json::to_string(&value).unwrap());
-    format!("-c {}", shell_quote(&assignment))
+    format!("-c {}", crate::shell::quote(&assignment))
 }
 
 /// Codex CLI overrides for one extra MCP server. The system config.toml stays
@@ -310,10 +310,6 @@ pub(crate) fn claude_status_line_config() -> Value {
     })
 }
 
-// The one quoter lives in `crate::shell` (board #125); this re-export keeps
-// the launcher family's import path stable.
-pub(crate) use crate::shell::quote as shell_quote;
-
 /// Build the PATH used by managed agent launch scripts. The server is often
 /// supervised with a deliberately small service PATH, while user-installed
 /// CLIs (`claude`, `uvx`, cargo tools) live under the standard per-user bin
@@ -469,7 +465,7 @@ mod tests {
         let written = std::fs::read_to_string(&script).unwrap();
         assert!(written.contains(&huge_cmd));
         assert!(script.file_name().unwrap().to_string_lossy() == "launch-planner.sh");
-        let typed = format!(". {}", shell_quote(&script.to_string_lossy()));
+        let typed = format!(". {}", crate::shell::quote(&script.to_string_lossy()));
         assert!(typed.len() < 200, "typed line must stay far below the ~2KB swallow threshold, got {}", typed.len());
         // Relaunch overwrites, not appends.
         let script2 = write_launch_script(&dir, "planner", "echo v2").unwrap();
@@ -603,24 +599,4 @@ mod tests {
         assert!(overrides.contains("--stdio"));
     }
 
-    #[test]
-    fn shell_quote_plain_passthrough() {
-        assert_eq!(shell_quote("kiro-cli"), "kiro-cli");
-        assert_eq!(shell_quote("a/b_c.d"), "a/b_c.d");
-    }
-
-    #[test]
-    fn shell_quote_wraps_spaces_unicode_and_globs() {
-        assert_eq!(shell_quote("hello world"), "'hello world'");
-        assert_eq!(shell_quote("你是「经理」"), "'你是「经理」'");
-        assert_eq!(
-            shell_quote("global.anthropic.claude-fable-5-1[1m]"),
-            "'global.anthropic.claude-fable-5-1[1m]'"
-        );
-    }
-
-    #[test]
-    fn shell_quote_escapes_single_quote() {
-        assert_eq!(shell_quote("it's"), r"'it'\''s'");
-    }
 }

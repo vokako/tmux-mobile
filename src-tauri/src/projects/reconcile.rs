@@ -9,7 +9,6 @@ use super::agents;
 use super::store::{Project, Slot, SlotKind};
 // ONE shell quoter for every line typed into a pane — the same one `spawn`
 // uses. This module carried its own copy with a narrower safe set.
-use crate::backends::shared::shell_quote;
 use crate::tmux;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -113,7 +112,7 @@ fn start_in_existing(project: &Project, slot: &Slot, target: &str) -> SlotResult
         error: None,
     };
     if !slot.cwd.is_empty() {
-        if let Err(e) = tmux::send_command(target, &format!("cd {}", shell_quote(&cwd))) {
+        if let Err(e) = tmux::send_command(target, &format!("cd {}", crate::shell::quote(&cwd))) {
             result.error = Some(e);
             return result;
         }
@@ -170,8 +169,8 @@ fn run_slot_command(project: &Project, slot: &Slot, target: &str) -> Result<(), 
             let prefixed = if slot.kind == SlotKind::Agent {
                 format!(
                     "TMM_PROJECT={} TMM_AGENT={} {}",
-                    shell_quote(&project.session),
-                    shell_quote(&slot.window_name),
+                    crate::shell::quote(&project.session),
+                    crate::shell::quote(&slot.window_name),
                     cmd
                 )
             } else {
@@ -204,7 +203,7 @@ fn stage_relaunch_script(project_path: &str, window_name: &str, full: &str) -> O
         return None;
     }
     let script = crate::backends::shared::write_launch_script(&home, window_name, full).ok()?;
-    Some(format!(". {}", shell_quote(&script.to_string_lossy())))
+    Some(format!(". {}", crate::shell::quote(&script.to_string_lossy())))
 }
 
 /// Take a project down: kill the session, keep the declaration.
@@ -271,9 +270,9 @@ mod tests {
 
     #[test]
     fn quoting_survives_spaces_and_quotes() {
-        assert_eq!(shell_quote("/w/app"), "/w/app");
-        assert_eq!(shell_quote("/w/my app"), "'/w/my app'");
-        assert_eq!(shell_quote("it's"), r"'it'\''s'");
+        assert_eq!(crate::shell::quote("/w/app"), "/w/app");
+        assert_eq!(crate::shell::quote("/w/my app"), "'/w/my app'");
+        assert_eq!(crate::shell::quote("it's"), r"'it'\''s'");
     }
 
     #[test]

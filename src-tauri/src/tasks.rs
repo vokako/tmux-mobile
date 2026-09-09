@@ -384,16 +384,13 @@ fn validate_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Quote one argv element for `/bin/sh`, which is what tmux runs the command
-/// with. Building the string ourselves is the point: an agent passes argv, so
-/// nothing it contains can turn into shell syntax.
-// The one quoter (board #125). The old local safe set passed `,@+` bare;
-// the shared form quotes them — the equivalent shell word, one definition.
-use crate::shell::quote as sh_quote;
-
+/// Join argv for `/bin/sh`, which is what tmux runs the command with, through
+/// the one quoter (`crate::shell::quote`, board #125). Building the string
+/// ourselves is the point: an agent passes argv, so nothing it contains can
+/// turn into shell syntax.
 fn join_cmd(argv: &[String]) -> String {
     argv.iter()
-        .map(|a| sh_quote(a))
+        .map(|a| crate::shell::quote(a))
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -467,20 +464,6 @@ pub fn fmt_age(secs: Option<u64>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn quotes_only_what_needs_it() {
-        assert_eq!(sh_quote("npm"), "npm");
-        assert_eq!(sh_quote("tauri:dev:release"), "tauri:dev:release");
-        assert_eq!(sh_quote("--release"), "--release");
-        assert_eq!(sh_quote(""), "''");
-        assert_eq!(sh_quote("a b"), "'a b'");
-        assert_eq!(sh_quote("it's"), r"'it'\''s'");
-        // The reason this function exists: shell metacharacters in an agent's
-        // argv must not become shell syntax.
-        assert_eq!(sh_quote("; rm -rf /"), "'; rm -rf /'");
-        assert_eq!(sh_quote("$(whoami)"), "'$(whoami)'");
-    }
 
     #[test]
     fn joins_argv_into_one_sh_command() {

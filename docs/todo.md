@@ -113,7 +113,8 @@
   (the hook-file byte-pinned form; a managed home's hooks diffed
   byte-identical before/after) and `quote` (on-demand, the narrow safe set;
   the old tasks `,@+` bare-passthrough bought nothing its tests exercised).
-  The three local definitions are aliases/re-exports of it.
+  Every call site names it directly (board #144, 2026-09-09: the three alias
+  names and their duplicate tests are gone; the union table is the one test).
 - [ ] `auto_adopt_with` invokes tmux while holding the store lock.
 - [ ] The `@all` recipient is stored as `'all'` but not restored by `pickLead`;
   `hubLog` drops `since_ts` when `before_seq` is present.

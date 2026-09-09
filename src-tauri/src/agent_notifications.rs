@@ -327,7 +327,7 @@ impl AgentNotificationHub {
         self.write_helper()?;
         let helper = format!(
             "/bin/sh {}",
-            shell_quote(&self.helper_path().to_string_lossy())
+            crate::shell::quote_always(&self.helper_path().to_string_lossy())
         );
         install_claude(&claude_path(), &helper)?;
         install_codex(&codex_path(), &helper)?;
@@ -353,7 +353,7 @@ impl AgentNotificationHub {
     pub fn helper_command(&self, backend: &str) -> String {
         format!(
             "/bin/sh {} {} # {}",
-            shell_quote(&self.helper_path().to_string_lossy()),
+            crate::shell::quote_always(&self.helper_path().to_string_lossy()),
             backend,
             OWNER_MARKER
         )
@@ -369,7 +369,7 @@ impl AgentNotificationHub {
 
     fn write_helper(&self) -> Result<(), String> {
         std::fs::create_dir_all(self.root.join("inbox")).map_err(|e| e.to_string())?;
-        let inbox = shell_quote(&self.root.join("inbox").to_string_lossy());
+        let inbox = crate::shell::quote_always(&self.root.join("inbox").to_string_lossy());
         let script = format!(
             r#"#!/bin/sh
 umask 077
@@ -625,11 +625,6 @@ fn kiro_path() -> PathBuf {
 fn kiro_default_path() -> PathBuf {
     home_dir().join(".kiro/agents/kiro_default.json")
 }
-
-// The one quoter lives in `crate::shell` (board #125); the hook files on
-// disk carry the always-quoted form, byte-identical to what this alias
-// produced before the move.
-use crate::shell::quote_always as shell_quote;
 
 fn read_json_object(path: &Path) -> Result<Value, String> {
     if !path.exists() {

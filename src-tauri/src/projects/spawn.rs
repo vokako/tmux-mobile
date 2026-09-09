@@ -152,7 +152,7 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
 
     let prefix = env
         .iter()
-        .map(|(k, v)| format!("{}={}", k, shared::shell_quote(v)))
+        .map(|(k, v)| format!("{}={}", k, crate::shell::quote(v)))
         .collect::<Vec<_>>()
         .join(" ");
     // The launch line ends with the first prompt ONLY when a brief gave us
@@ -165,7 +165,7 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
     // NEVER send the full line via send-keys — see team/launch.rs: tty shims
     // swallow bursts ≳2KB. Source a script instead.
     let script = shared::write_launch_script(&home, &window_name, &full)?;
-    tmux::send_command(&pane, &format!(". {}", shared::shell_quote(&script.to_string_lossy())))?;
+    tmux::send_command(&pane, &format!(". {}", crate::shell::quote(&script.to_string_lossy())))?;
     if let Some(confirmation) = m.confirmation {
         shared::confirm_startup_prompt(pane.clone(), confirmation);
     }
@@ -489,7 +489,7 @@ pub fn relaunch_line(project_path: &str, window_name: &str, session_id: Option<&
     let env = recipe.get("env").and_then(|e| e.as_array()).map(|arr| {
         arr.iter()
             .filter_map(|kv| Some((kv.get(0)?.as_str()?, kv.get(1)?.as_str()?)))
-            .map(|(k, v)| format!("{}={}", k, shared::shell_quote(v)))
+            .map(|(k, v)| format!("{}={}", k, crate::shell::quote(v)))
             .collect::<Vec<_>>()
             .join(" ")
     }).unwrap_or_default();
@@ -535,7 +535,7 @@ fn launch_command(identity_cmd: &str, backend: &str, brief: &str, by: &str, resu
         identity_cmd.to_string()
     };
     match first_prompt(brief, by) {
-        Some(p) => format!("{} {}", identity_cmd, shared::shell_quote(&p)),
+        Some(p) => format!("{} {}", identity_cmd, crate::shell::quote(&p)),
         None => identity_cmd,
     }
 }
@@ -832,7 +832,7 @@ pub(crate) fn effort_flag(def: &RegAgent) -> String {
     if effort.is_empty() {
         String::new()
     } else {
-        format!(" --effort {}", shared::shell_quote(effort))
+        format!(" --effort {}", crate::shell::quote(effort))
     }
 }
 
