@@ -39,8 +39,9 @@
   import { ALL_TARGET, attachmentBody, attachToken, paletteBackendFor } from './hub-composer.ts';
   import { walkFeedGap } from './hub-history.ts';
   import { createHubBackRegistry } from './hub-back.ts';
+  import { rowAgents, rowAgentCounts } from './sidebar.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
-  import { backendIcon, paneAgent } from '../core/agents.ts';
+  import { backendIcon } from '../core/agents.ts';
   import { anchorOf, menuPlacement, popOrigin, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { longpress } from '../ui/longpress.ts';
@@ -219,37 +220,6 @@
    * `command`, the way rowAgents' closed-project chips already read it. */
   const slotBackend = (name) => (selectedRow?.slots ?? []).find((s) => s.window_name === name)?.command;
   const working = $derived(managedAgents.filter((a) => a.state === 'working').length);
-
-  // ── Sidebar row summary ──────────────────────────────────────────────────
-  // Each row answers two questions at a glance — "when did this project last
-  // update" (conversation first, tmux activity as the no-chat fallback, via
-  // the same helper Terminal uses) and "who is in it, doing what".
-  // A LIVE project reads its real windows — the same agent detection the
-  // window switcher uses — each coloured by the hook-derived state from
-  // hub_rooms (absence = idle: a window with no hook facts is at rest). A
-  // CLOSED project shows its DECLARED agent slots dimmed, no state dot: the
-  // roster `up` will bring back, not anything running now.
-  function rowAgents(row) {
-    if (row.live) {
-      const out = [];
-      const seen = new Set();
-      for (const p of panes) {
-        if (p.session !== row.project.session || !p.active || seen.has(p.window)) continue;
-        seen.add(p.window);
-        const agent = paneAgent(p);
-        if (!agent) continue;
-        out.push({
-          icon: agent.icon, name: p.window_name,
-          state: agentStates[`${row.project.session}:${p.window_name}`] ?? 'idle',
-        });
-      }
-      return out.slice(0, 4);
-    }
-    return (row.slots ?? [])
-      .filter((s) => s.kind === 'agent')
-      .slice(0, 4)
-      .map((s) => ({ icon: backendIcon(s.command), name: s.window_name, state: '' }));
-  }
 
   async function reload() {
     try {
@@ -2220,20 +2190,8 @@
     if (selectedRow?.project.path) lines.push({ label: t('hubHoverPath'), value: selectedRow.project.path });
     return { title: name, lines };
   }
-  /** Live vs stopped agents of a row — the full count, where the row's chips
-   * stop at four. Declared slots are the roster; a live window is one of them
-   * (or an ad hoc addition) that is actually running. */
-  function rowAgentCounts(row) {
-    const declared = (row.slots ?? []).filter((x) => String(x.kind ?? '').toLowerCase() === 'agent').map((x) => x.window_name);
-    if (!row.live) return { live: 0, stopped: declared.length };
-    const running = new Set();
-    for (const p of panes) {
-      if (p.session === row.project.session && p.active && paneAgent(p)) running.add(p.window_name);
-    }
-    return { live: running.size, stopped: declared.filter((n) => !running.has(n)).length };
-  }
   function rowInfo(row) {
-    const n = rowAgentCounts(row);
+    const n = rowAgentCounts(row, panes);
     const lines = [{ label: t('hubHoverPath'), value: row.project.path }];
     if (n.live || n.stopped) {
       lines.push({ label: t('hubHoverAgents'), value: t('hubHoverAgentsCount').replace('{live}', String(n.live)).replace('{stopped}', String(n.stopped)), tone: n.live ? 'accent' : undefined });
@@ -2373,9 +2331,9 @@
                   <span class="p-name">{row.project.name}</span>
                   <span class="side-age">{projectAgeLabel(row, talkMap, tick)}</span>
                 </span>
-                {#if rowAgents(row).length}
+                {#if rowAgents(row, panes, agentStates).length}
                   <span class="side-wins" class:dim={!row.live}>
-                    {#each rowAgents(row) as a (a.name)}
+                    {#each rowAgents(row, panes, agentStates) as a (a.name)}
                       <span class="side-win">
                         {#if a.icon}<img src={a.icon} alt="" width="11" height="11" />{/if}
                         <span class="side-win-name">{a.name}</span>

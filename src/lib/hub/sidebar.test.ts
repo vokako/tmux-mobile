@@ -1,0 +1,77 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { rowAgentCounts, rowAgents } from './sidebar.ts';
+import type { SidebarPane } from './sidebar.ts';
+import type { ProjectRow, Slot } from '../projects/projects.ts';
+
+const slot = (name: string, ord: number, command = 'kiro'): Slot => ({
+  ord, window_name: name, cwd: '/alpha', kind: 'agent', command,
+  auto_run: true, first_seen_at: 1,
+});
+const row: ProjectRow = {
+  project: {
+    id: 'alpha', name: 'Alpha', session: 'alpha', path: '/alpha',
+    adopted: false, autostart: false, archived: false, created_at: 1,
+  },
+  live: true,
+  slots: ['alice', 'bob', 'carol', 'dave', 'erin', 'frank'].map((name, i) => slot(name, i)),
+};
+const pane = (name: string, window: number, overrides: Partial<SidebarPane> = {}): SidebarPane => ({
+  session: 'alpha', window, window_name: name, active: true,
+  current_command: 'kiro', pane_title: '', ...overrides,
+});
+const live = row.slots.slice(0, 5).map((s) => pane(s.window_name, s.ord));
+
+test('live chips keep active windows in input order, exclude shells and stop at four', () => {
+  const panes = [
+    pane('other', 10, { session: 'elsewhere' }),
+    pane('inactive', 11, { active: false }),
+    pane('shell', 12, { current_command: 'bash' }),
+    live[0]!, pane('duplicate', 0), ...live.slice(1),
+  ];
+  const chips = rowAgents(row, panes, { 'alpha:alice': 'working', 'alpha:bob': 'waiting' });
+  assert.deepEqual(chips.map((a) => [a.name, a.state]), [
+    ['alice', 'working'], ['bob', 'waiting'], ['carol', 'idle'], ['dave', 'idle'],
+  ]);
+  assert.ok(chips.every((a) => a.icon === '/assets/kiro.svg'));
+});
+
+test('renumbering windows does not change name-keyed chip states (#120)', () => {
+  const states = { 'alpha:alice': 'working', 'alpha:0': 'failed' };
+  const before = rowAgents(row, live, states);
+  const after = rowAgents(row, live.map((p) => ({ ...p, window: p.window + 100 })), states);
+  assert.deepEqual(after, before);
+  assert.equal(after[0]!.state, 'working');
+});
+
+test('closed chips use declared backends, no live state, and the same four-chip cap', () => {
+  const closed = {
+    ...row, live: false,
+    slots: [
+      { ...slot('shell', 0), kind: 'shell' as const },
+      slot('alice', 1, 'codex'), slot('unknown', 2, 'unknown'),
+      slot('carol', 3), slot('dave', 4), slot('erin', 5),
+    ],
+  };
+  assert.deepEqual(rowAgents(closed, live, { 'alpha:alice': 'working' }), [
+    { name: 'alice', icon: '/assets/codex.svg', state: '' },
+    { name: 'unknown', icon: null, state: '' },
+    { name: 'carol', icon: '/assets/kiro.svg', state: '' },
+    { name: 'dave', icon: '/assets/kiro.svg', state: '' },
+  ]);
+});
+
+test('hover counts all live names and missing slots, independently of the chip cap', () => {
+  const panes = [
+    ...live, live[0]!, pane('shell', 90, { current_command: 'bash' }),
+    pane('frank', 5, { active: false }), pane('elsewhere', 0, { session: 'other' }),
+  ];
+  assert.equal(rowAgents(row, panes, {}).length, 4);
+  assert.deepEqual(rowAgentCounts(row, panes), { live: 5, stopped: 1 });
+  assert.deepEqual(rowAgentCounts(row, [...panes, pane('ad-hoc', 91)]), { live: 6, stopped: 1 });
+});
+
+test('a closed project counts declarations even when stale panes remain', () => {
+  assert.deepEqual(rowAgentCounts({ ...row, live: false }, live), { live: 0, stopped: 6 });
+  assert.deepEqual(rowAgentCounts({ ...row, slots: [] }, []), { live: 0, stopped: 0 });
+});

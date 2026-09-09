@@ -77,7 +77,7 @@ test('hover reports facts with no gesture tutorial (board #87)', () => {
   assert.ok(!/<div class="acard" class:sel[^>]*\stitle=/u.test(live), 'no native title on the live card');
   const off = source.slice(source.indexOf('class="acard off"'), source.indexOf('{/each}', source.indexOf('class="acard off"')));
   assert.match(off, /use:hoverInfo=\{\(\) => offCardInfo\(name\)\}/u, 'the stopped card too');
-  const cardFns = source.slice(source.indexOf('function cardInfo'), source.indexOf('function rowAgentCounts'));
+  const cardFns = source.slice(source.indexOf('function cardInfo'), source.indexOf('function pillInfo'));
   assert.doesNotMatch(cardFns, /\bnote\s*:/u, 'agent cards carry facts, never a click/right-click footer');
   assert.match(source, /class="side-row proj-row"[\s\S]{0,600}?use:hoverInfo=\{\(\) => rowInfo\(row\)\}/u, 'the sidebar row');
   assert.match(source, /class="win-pill state-ctl"[\s\S]{0,200}?use:hoverInfo=\{\(\) => pillInfo\(a\)\}/u, 'the drawer window pill');
