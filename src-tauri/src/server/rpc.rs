@@ -116,12 +116,17 @@ pub(super) fn valid_process_arg(arg: &str) -> bool {
     !arg.contains('\0')
 }
 
-pub(super) fn handle_request(req: &Request, token: &str) -> Response {
+/// The dispatcher proper (board #146): every arm is a `Result`, so a missing
+/// param or a tmux/fs error is a `?` with its wire code already chosen
+/// (`RpcError`), and `handle_request` below is the one place a `Response`
+/// is built. Arm order and every message are exactly what the inline
+/// `match … return Response::err` shape produced.
+fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
     let id = req.id;
     let p = &req.params;
 
     match req.method.as_str() {
-        "ping" => Response::ok(id, serde_json::json!("pong")),
+        "ping" => Ok(Response::ok(id, serde_json::json!("pong"))),
 
         // The backends this server can spawn, with the client's resource
         // names for each (board #130). No params, no session, no gate: the
@@ -130,7 +135,7 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
         // this and falls back to them only when an OLDER server says
         // method-not-found.
         "backends_list" => {
-            Response::ok(id, serde_json::json!({ "backends": crate::backends::Backend::list_json() }))
+            Ok(Response::ok(id, serde_json::json!({ "backends": crate::backends::Backend::list_json() })))
         }
 
         // ---- server system vitals (board #56) ------------------------------
@@ -141,22 +146,22 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
         // with unknowable fields as null/0 for the client's verdict rule.
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         "system_status" => {
-            Response::ok(id, serde_json::to_value(crate::system_status::read()).unwrap())
+            Ok(Response::ok(id, serde_json::to_value(crate::system_status::read()).unwrap()))
         }
 
         "list_sessions" => match tmux::list_sessions() {
-            Ok(sessions) => Response::ok(id, serde_json::to_value(&sessions).unwrap()),
-            Err(e) => Response::err(id, ERR_INTERNAL, e),
+            Ok(sessions) => Ok(Response::ok(id, serde_json::to_value(&sessions).unwrap())),
+            Err(e) => Err(RpcError::Internal(e)),
         },
 
         "list_panes" => {
             let session = match require_str(p, "session") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             match tmux::list_panes(session) {
-                Ok(panes) => Response::ok(id, serde_json::to_value(&panes).unwrap()),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(panes) => Ok(Response::ok(id, serde_json::to_value(&panes).unwrap())),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
@@ -168,130 +173,130 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
         "list_sessions_with_panes" => {
             let sessions = match tmux::list_sessions() {
                 Ok(v) => v,
-                Err(e) => return Response::err(id, ERR_INTERNAL, e),
+                Err(e) => return Err(RpcError::Internal(e)),
             };
             let panes = match tmux::list_all_panes() {
                 Ok(v) => v,
-                Err(e) => return Response::err(id, ERR_INTERNAL, e),
+                Err(e) => return Err(RpcError::Internal(e)),
             };
-            Response::ok(id, serde_json::json!({
+            Ok(Response::ok(id, serde_json::json!({
                 "sessions": sessions,
                 "panes": panes,
-            }))
+            })))
         }
 
         "capture_pane" => {
             let target = match require_str(p, "target") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             let lines = p.get("lines").and_then(|v| v.as_u64()).map(|n| n as usize);
             match tmux::capture_pane(target, lines) {
-                Ok(output) => Response::ok(id, serde_json::json!({ "output": output })),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(output) => Ok(Response::ok(id, serde_json::json!({ "output": output }))),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         "send_keys" => {
             let target = match require_str(p, "target") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             let keys = match require_str(p, "keys") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             let literal = p.get("literal").and_then(|v| v.as_bool()).unwrap_or(false);
             match tmux::send_keys(target, keys, literal) {
-                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         "paste_text" => {
             let target = match require_str(p, "target") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             let text = match require_str(p, "text") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             match tmux::paste_text(target, text) {
-                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         "send_command" => {
             let target = match require_str(p, "target") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             let command = match require_str(p, "command") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             match tmux::send_command(target, command) {
-                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         // resize_pane is handled in the connection message loop (needs per-connection state)
-        "resize_pane" => Response::err(id, ERR_INTERNAL, "resize_pane handled elsewhere".into()),
+        "resize_pane" => Err(RpcError::Internal("resize_pane handled elsewhere".into())),
 
         "new_session" => {
             let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("untitled");
             let path = p.get("path").and_then(|v| v.as_str());
             let command = p.get("command").and_then(|v| v.as_str());
             match tmux::new_session(name, path, command) {
-                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         "kill_session" => {
             let name = match require_str(p, "name") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             match tmux::kill_session(name) {
-                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         "new_window" => {
             let session = match require_str(p, "session") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             match tmux::new_window(session) {
-                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         "kill_window" => {
             let target = match require_str(p, "target") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             match tmux::kill_window(target) {
-                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         "pane_command" => {
             let target = match require_str(p, "target") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             match tmux::pane_command(target) {
-                Ok(cmd) => Response::ok(id, serde_json::json!({ "command": cmd })),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(cmd) => Ok(Response::ok(id, serde_json::json!({ "command": cmd }))),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
@@ -301,12 +306,12 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
             tmux::set_socket(socket);
-            Response::ok(id, serde_json::json!({ "ok": true }))
+            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
         }
 
         "get_bookmarks" => {
             let bookmarks = crate::config::get_bookmarks();
-            Response::ok(id, serde_json::json!({ "bookmarks": bookmarks }))
+            Ok(Response::ok(id, serde_json::json!({ "bookmarks": bookmarks })))
         }
 
         "save_bookmarks" => {
@@ -320,42 +325,42 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
                 })
                 .unwrap_or_default();
             match crate::config::save_bookmarks(&bookmarks) {
-                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         "get_prefs" => {
-            Response::ok(id, crate::config::get_prefs())
+            Ok(Response::ok(id, crate::config::get_prefs()))
         }
 
         "set_pref" => {
             let key = match require_str(p, "key") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             let value = p.get("value").cloned().unwrap_or(serde_json::Value::Null);
             match crate::config::set_prefs(key, value) {
-                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         "fs_cwd" => {
             let session = match require_str(p, "session") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             match rfs::get_cwd(session) {
-                Ok(path) => Response::ok(id, serde_json::json!({ "path": path })),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(path) => Ok(Response::ok(id, serde_json::json!({ "path": path }))),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         "fs_list" => {
             let path = match require_str(p, "path") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             let show_hidden = p
                 .get("show_hidden")
@@ -363,128 +368,128 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
                 .unwrap_or(false);
             match rfs::list_dir(path, show_hidden) {
                 Ok(entries) => {
-                    Response::ok(id, serde_json::json!({ "entries": entries, "path": path }))
+                    Ok(Response::ok(id, serde_json::json!({ "entries": entries, "path": path })))
                 }
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         "fs_stat" => {
             let path = match require_str(p, "path") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             match rfs::stat_file(path) {
-                Ok(stat) => Response::ok(id, serde_json::to_value(&stat).unwrap()),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(stat) => Ok(Response::ok(id, serde_json::to_value(&stat).unwrap())),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         "fs_read" => {
             let path = match require_str(p, "path") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             match rfs::read_file(path) {
-                Ok(content) => Response::ok(id, serde_json::json!({ "content": content })),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(content) => Ok(Response::ok(id, serde_json::json!({ "content": content }))),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         "fs_write" => {
             let path = match require_str(p, "path") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             // Allow empty content (creating empty files is valid)
             let content = p.get("content").and_then(|v| v.as_str()).unwrap_or("");
             match rfs::write_file(path, content) {
-                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         "fs_mkdir" => {
             let path = match require_str(p, "path") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             match rfs::create_dir(path) {
-                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         "fs_delete" => {
             let path = match require_str(p, "path") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             match rfs::delete_path(path) {
-                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         "fs_rename" => {
             let from = match require_str(p, "from") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             let to = match require_str(p, "to") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             match rfs::rename_path(from, to) {
-                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         "fs_download" => {
             let path = match require_str(p, "path") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             match rfs::download_file(path) {
                 Ok((name, data)) => {
-                    Response::ok(id, serde_json::json!({ "name": name, "data": data }))
+                    Ok(Response::ok(id, serde_json::json!({ "name": name, "data": data })))
                 }
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         "fs_download_url" => {
             let path = match require_str(p, "path") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
             let sig = sign_download(token, path, ts);
             let name = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or("file");
             let qs = format!("/dl?path={}&ts={}&sig={}", urlencoding::encode(path), ts, sig);
-            Response::ok(id, serde_json::json!({ "url": qs, "name": name }))
+            Ok(Response::ok(id, serde_json::json!({ "url": qs, "name": name })))
         }
 
         "fs_upload" => {
             let path = match require_str(p, "path") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             let data = match require_str(p, "data") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             match rfs::upload_file(path, data) {
-                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
+                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
+                Err(e) => Err(RpcError::Internal(e)),
             }
         }
 
         "git" => {
             let subcmd = match require_str(p, "subcmd") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             let args: Vec<String> = p
                 .get("args")
@@ -497,14 +502,14 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
                 "status", "diff", "log", "show", "branch", "rev-parse", "push", "add", "commit", "restore",
             ];
             if !ALLOWED.contains(&subcmd) {
-                return Response::err(id, ERR_INVALID_PARAMS, format!("git subcommand not allowed: {}", subcmd));
+                return Err(RpcError::InvalidParams(format!("git subcommand not allowed: {}", subcmd)));
             }
             // Arguments go directly to Command::args; no shell parses them.
             // Characters such as `|` are data (git log format separators),
             // not operators. Only NUL is impossible to represent in argv.
             for arg in &args {
                 if !valid_process_arg(arg) {
-                    return Response::err(id, ERR_INVALID_PARAMS, "invalid characters in argument".into());
+                    return Err(RpcError::InvalidParams("invalid characters in argument".into()));
                 }
             }
 
@@ -518,12 +523,12 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
                 Ok(output) => {
                     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                    Response::ok(
+                    Ok(Response::ok(
                         id,
                         serde_json::json!({ "stdout": stdout, "stderr": stderr, "code": output.status.code() }),
-                    )
+                    ))
                 }
-                Err(e) => Response::err(id, ERR_INTERNAL, e.to_string()),
+                Err(e) => Err(RpcError::Internal(e.to_string())),
             }
         }
 
@@ -539,35 +544,39 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
         | "skills_list" | "skills_save" | "skills_delete" | "skills_refresh" | "skills_read"
         | "skills_import" | "skills_files" | "skills_file"
         | "mcp_list" | "mcp_save" | "mcp_delete" => {
-            handle_project_request(req.method.as_str(), id, p)
+            Ok(handle_project_request(req.method.as_str(), id, p))
         }
 
         "fs_convert" => {
             let path = match require_str(p, "path") {
                 Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+                Err(e) => return Err(RpcError::InvalidParams(e)),
             };
             let format = p.get("format").and_then(|v| v.as_str()).unwrap_or("html");
             if format != "html" {
-                return Response::err(id, ERR_INVALID_PARAMS, "only html format supported".into());
+                return Err(RpcError::InvalidParams("only html format supported".into()));
             }
             let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
             match ext.as_str() {
                 "pptx" => match crate::pptx::to_html(std::path::Path::new(path)) {
-                    Ok(html) => Response::ok(id, serde_json::json!({ "html": html })),
-                    Err(e) => Response::err(id, ERR_INTERNAL, e),
+                    Ok(html) => Ok(Response::ok(id, serde_json::json!({ "html": html }))),
+                    Err(e) => Err(RpcError::Internal(e)),
                 },
-                _ => Response::err(id, ERR_INVALID_PARAMS, format!("unsupported file type: .{}", ext)),
+                _ => Err(RpcError::InvalidParams(format!("unsupported file type: .{}", ext))),
             }
         }
 
-        _ => Response::err(
-            id,
-            ERR_METHOD_NOT_FOUND,
-            format!("unknown method: {}", req.method),
-        ),
+        _ => Err(RpcError::MethodNotFound(format!("unknown method: {}", req.method))),
     }
 }
+
+pub(super) fn handle_request(req: &Request, token: &str) -> Response {
+    match dispatch(req, token) {
+        Ok(r) => r,
+        Err(e) => Response::from_error(req.id, e),
+    }
+}
+
 
 /// The `project_*` methods. One function so the platform gate lives in exactly
 /// one place: on mobile every method reports method-not-found and the client
