@@ -1445,6 +1445,7 @@ mod tests {
         let session = format!("tmm-auto-{}", std::process::id());
         let ws = std::env::temp_dir().join(format!("tmm-auto-ws-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(ws.join(".tmm/agents/dev")).unwrap();
+        std::fs::write(ws.join(".tmm/agents/dev/launch.json"), "{}").unwrap();
         let created = std::process::Command::new("tmux")
             .args(["new-session", "-d", "-s", &session, "-n", "dev", "-c",
                    &ws.to_string_lossy(), "sleep 60"])

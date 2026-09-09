@@ -1919,6 +1919,7 @@ mod tests {
         let session = format!("tmm-stop-{}", std::process::id());
         let ws = std::env::temp_dir().join(format!("tmm-stop-ws-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(ws.join(".tmm/agents/dev")).unwrap();
+        std::fs::write(ws.join(".tmm/agents/dev/launch.json"), "{}").unwrap();
         // Start it IN the workspace: `adopt` derives the project path from the
         // panes' cwd, so this is what makes managed_home resolve to <ws>/.tmm.
         let created = std::process::Command::new("tmux")
@@ -1966,6 +1967,7 @@ mod tests {
         let session = format!("tmm-int-{}", std::process::id());
         let ws = std::env::temp_dir().join(format!("tmm-int-ws-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(ws.join(".tmm/agents/dev")).unwrap();
+        std::fs::write(ws.join(".tmm/agents/dev/launch.json"), "{}").unwrap();
         let created = std::process::Command::new("tmux")
             .args(["new-session", "-d", "-s", &session, "-n", "dev", "-c",
                    &ws.to_string_lossy(), "sleep 60"])

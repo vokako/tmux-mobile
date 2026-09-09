@@ -1239,7 +1239,7 @@ pub fn project_for_session(session: &str) -> Result<Option<store::Project>, Stri
 pub fn managed_home(session: &str, window_name: &str) -> Option<std::path::PathBuf> {
     let project = project_for_session(session).ok().flatten()?;
     let dir = agents::home_dir(&project.path, window_name)?;
-    dir.is_dir().then_some(dir)
+    home_is_managed(&dir, window_name).then_some(dir)
 }
 
 /// Same question, when the caller already knows the workspace path (it is
@@ -1247,7 +1247,23 @@ pub fn managed_home(session: &str, window_name: &str) -> Option<std::path::PathB
 pub fn is_managed_in(workspace: Option<&str>, window_name: &str) -> bool {
     workspace
         .and_then(|ws| agents::home_dir(ws, window_name))
-        .is_some_and(|dir| dir.is_dir())
+        .is_some_and(|dir| home_is_managed(&dir, window_name))
+}
+
+/// The marker itself (board #112): the home is managed iff it carries what
+/// SPAWN wrote — `launch.json` (every backend, written before the window
+/// exists), or the pre-recipe kiro `agents/<name>.json` (refresh_hooks only
+/// backfills the recipe at the next start, and a continuously-running old
+/// agent must not be demoted meanwhile; no CLI ever re-creates either file).
+/// The directory alone stopped being the marker on 2026-09-09: `agent_remove`
+/// deletes the home while the kiro process keeps running with its KIRO_HOME
+/// env, and its next write re-created the subtree (`settings/`, `sessions/`) —
+/// the gate said "managed" again for a window the user had removed, so
+/// stop-hook auto-post and `@all` delivery resumed for it (observed
+/// 2026-08-19).
+fn home_is_managed(dir: &std::path::Path, window_name: &str) -> bool {
+    dir.join("launch.json").is_file()
+        || dir.join("agents").join(format!("{window_name}.json")).is_file()
 }
 
 /// Who spawned this managed agent, read off its launch recipe. `None` means
@@ -1794,9 +1810,11 @@ pub(crate) mod tests {
         let session = made.get("session").and_then(|v| v.as_str()).unwrap().to_string();
 
         // A managed agent: a slot in the declaration plus the isolated home
-        // that makes it "ours".
+        // that makes it "ours" — marked by the recipe spawn always writes
+        // (board #112: the directory alone is not the marker).
         let home = dir.join(".tmm").join("agents").join("dev");
         std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("launch.json"), "{}").unwrap();
         with_store(|store| {
             store.replace_slots(&id, &[store::Slot {
                 id: None, ord: 0, window_name: "dev".into(), cwd: String::new(),
@@ -1885,13 +1903,34 @@ pub(crate) mod tests {
     /// a test of its own: the marker is the isolated home `spawn` materialized,
     /// NOT the window name — a hand-started window may share the name.
     #[test]
-    fn managed_is_the_isolated_home_not_the_name() {
+    fn managed_is_the_recipe_not_the_directory() {
         let ws = std::env::temp_dir().join(format!("tmm-managed-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(ws.join(".tmm/agents/dev")).unwrap();
         let path = ws.to_string_lossy().to_string();
+        // spawn writes launch.json for every backend before the window exists —
+        // THAT is the marker, not the directory.
+        std::fs::create_dir_all(ws.join(".tmm/agents/dev")).unwrap();
+        std::fs::write(ws.join(".tmm/agents/dev/launch.json"), "{}").unwrap();
+        std::fs::write(ws.join(".tmm/agents/dev/launch.json"), "{}").unwrap();
         assert!(is_managed_in(Some(&path), "dev"), "spawn materialized this one");
         assert!(!is_managed_in(Some(&path), "byhand"), "same session, no isolated home");
         assert!(!is_managed_in(None, "dev"), "a session with no project owns nothing");
+        // The board #112 re-arm: agent_remove deleted the home, but the still-
+        // running kiro process re-creates its KIRO_HOME subtree (settings/,
+        // sessions/) on its next write. A directory without a recipe is a
+        // GHOST, never a managed agent (observed 2026-08-19).
+        std::fs::create_dir_all(ws.join(".tmm/agents/removed/settings")).unwrap();
+        std::fs::write(ws.join(".tmm/agents/removed/settings/cli.json"), "{}").unwrap();
+        assert!(
+            !is_managed_in(Some(&path), "removed"),
+            "a CLI-recreated subtree must not re-arm the gate"
+        );
+        // Pre-recipe kiro homes (spawned before launch.json existed) keep their
+        // agents/<name>.json config; refresh_hooks only backfills the recipe at
+        // the NEXT start, so a continuously-running old agent must not be
+        // demoted meanwhile.
+        std::fs::create_dir_all(ws.join(".tmm/agents/old/agents")).unwrap();
+        std::fs::write(ws.join(".tmm/agents/old/agents/old.json"), "{}").unwrap();
+        assert!(is_managed_in(Some(&path), "old"), "pre-recipe kiro home stays managed");
         // A file where the directory should be is not a home either.
         std::fs::write(ws.join(".tmm/agents/file"), "x").unwrap();
         assert!(!is_managed_in(Some(&path), "file"));

@@ -36,7 +36,8 @@
 
 - [ ] registry def 修改不达已 spawn 的 agent：需 `slots.agent_def` 列，`refresh_hooks` 再同步
   model/mcp/resources、不碰 prompt（`refresh_agent` 已部分解决，确认剩余）。
-- [ ] `is_managed_in` 在 `agent_remove` 后可被 kiro 重建 `KIRO_HOME` 子树重新武装 → 门控 `launch.json`。
+- [x] `is_managed_in` 在 `agent_remove` 后可被 kiro 重建 `KIRO_HOME` 子树重新武装 → 已门控
+  `launch.json`（或 pre-recipe 的 `agents/<name>.json`；board #112，2026-09-09）。
 - [ ] `Terminal.svelte` 触摸手势状态机 ~1300 行嵌在 effect 闭包，零测试；`kbLocked` 不变量只靠文档。
 - [x] #108：`onData` 分片/合并响应已由有界状态过滤器覆盖；原始 `?62;22;52c` 现象的来源仍待实测，见 `unresolved.md`。
 - [x] #109：完整快照会恢复历史；已修复同步 `clear()` 的假到尾事件、标记丢失与重复重绘，清除改为帧内 `CSI 3J`。

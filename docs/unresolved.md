@@ -38,7 +38,7 @@
   written at spawn, after which `refresh_hooks` could re-sync the fields that
   are ours (model, mcpServers, resources) and leave the prompt alone.
 
-## `is_managed_in` can be re-armed by the CLI after an agent is removed
+## `is_managed_in` can be re-armed by the CLI after an agent is removed — RESOLVED (board #112, 2026-09-09: gate on launch.json / pre-recipe agents/<name>.json via `home_is_managed`)
 - **Priority**: Medium
 - **Area**: Projects / agents-v2 (`projects::managed_home`)
 - **Details**: "An agent this app created" is defined as
