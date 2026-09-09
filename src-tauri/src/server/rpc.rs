@@ -149,20 +149,15 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
             Ok(Response::ok(id, serde_json::to_value(crate::system_status::read()).unwrap()))
         }
 
-        "list_sessions" => match tmux::list_sessions() {
-            Ok(sessions) => Ok(Response::ok(id, serde_json::to_value(&sessions).unwrap())),
-            Err(e) => Err(RpcError::Internal(e)),
+        "list_sessions" => {
+            let sessions = tmux::list_sessions().map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::to_value(&sessions).unwrap()))
         },
 
         "list_panes" => {
-            let session = match require_str(p, "session") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            match tmux::list_panes(session) {
-                Ok(panes) => Ok(Response::ok(id, serde_json::to_value(&panes).unwrap())),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            let session = param(p, "session")?;
+            let panes = tmux::list_panes(session).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::to_value(&panes).unwrap()))
         }
 
         // Combined sessions + panes in one round-trip. The Sessions page
@@ -186,61 +181,32 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
         }
 
         "capture_pane" => {
-            let target = match require_str(p, "target") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
+            let target = param(p, "target")?;
             let lines = p.get("lines").and_then(|v| v.as_u64()).map(|n| n as usize);
-            match tmux::capture_pane(target, lines) {
-                Ok(output) => Ok(Response::ok(id, serde_json::json!({ "output": output }))),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            let output = tmux::capture_pane(target, lines).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "output": output })))
         }
 
         "send_keys" => {
-            let target = match require_str(p, "target") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            let keys = match require_str(p, "keys") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
+            let target = param(p, "target")?;
+            let keys = param(p, "keys")?;
             let literal = p.get("literal").and_then(|v| v.as_bool()).unwrap_or(false);
-            match tmux::send_keys(target, keys, literal) {
-                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            tmux::send_keys(target, keys, literal).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
         }
 
         "paste_text" => {
-            let target = match require_str(p, "target") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            let text = match require_str(p, "text") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            match tmux::paste_text(target, text) {
-                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            let target = param(p, "target")?;
+            let text = param(p, "text")?;
+            tmux::paste_text(target, text).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
         }
 
         "send_command" => {
-            let target = match require_str(p, "target") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            let command = match require_str(p, "command") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            match tmux::send_command(target, command) {
-                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            let target = param(p, "target")?;
+            let command = param(p, "command")?;
+            tmux::send_command(target, command).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
         }
 
         // resize_pane is handled in the connection message loop (needs per-connection state)
@@ -250,54 +216,32 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
             let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("untitled");
             let path = p.get("path").and_then(|v| v.as_str());
             let command = p.get("command").and_then(|v| v.as_str());
-            match tmux::new_session(name, path, command) {
-                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            tmux::new_session(name, path, command).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
         }
 
         "kill_session" => {
-            let name = match require_str(p, "name") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            match tmux::kill_session(name) {
-                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            let name = param(p, "name")?;
+            tmux::kill_session(name).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
         }
 
         "new_window" => {
-            let session = match require_str(p, "session") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            match tmux::new_window(session) {
-                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            let session = param(p, "session")?;
+            tmux::new_window(session).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
         }
 
         "kill_window" => {
-            let target = match require_str(p, "target") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            match tmux::kill_window(target) {
-                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            let target = param(p, "target")?;
+            tmux::kill_window(target).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
         }
 
         "pane_command" => {
-            let target = match require_str(p, "target") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            match tmux::pane_command(target) {
-                Ok(cmd) => Ok(Response::ok(id, serde_json::json!({ "command": cmd }))),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            let target = param(p, "target")?;
+            let cmd = tmux::pane_command(target).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "command": cmd })))
         }
 
         "set_socket" => {
@@ -324,10 +268,8 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
                         .collect()
                 })
                 .unwrap_or_default();
-            match crate::config::save_bookmarks(&bookmarks) {
-                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            crate::config::save_bookmarks(&bookmarks).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
         }
 
         "get_prefs" => {
@@ -335,135 +277,75 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
         }
 
         "set_pref" => {
-            let key = match require_str(p, "key") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
+            let key = param(p, "key")?;
             let value = p.get("value").cloned().unwrap_or(serde_json::Value::Null);
-            match crate::config::set_prefs(key, value) {
-                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            crate::config::set_prefs(key, value).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
         }
 
         "fs_cwd" => {
-            let session = match require_str(p, "session") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            match rfs::get_cwd(session) {
-                Ok(path) => Ok(Response::ok(id, serde_json::json!({ "path": path }))),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            let session = param(p, "session")?;
+            let path = rfs::get_cwd(session).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "path": path })))
         }
 
         "fs_list" => {
-            let path = match require_str(p, "path") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
+            let path = param(p, "path")?;
             let show_hidden = p
                 .get("show_hidden")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            match rfs::list_dir(path, show_hidden) {
-                Ok(entries) => {
-                    Ok(Response::ok(id, serde_json::json!({ "entries": entries, "path": path })))
-                }
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            let entries = rfs::list_dir(path, show_hidden).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "entries": entries, "path": path })))
         }
 
         "fs_stat" => {
-            let path = match require_str(p, "path") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            match rfs::stat_file(path) {
-                Ok(stat) => Ok(Response::ok(id, serde_json::to_value(&stat).unwrap())),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            let path = param(p, "path")?;
+            let stat = rfs::stat_file(path).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::to_value(&stat).unwrap()))
         }
 
         "fs_read" => {
-            let path = match require_str(p, "path") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            match rfs::read_file(path) {
-                Ok(content) => Ok(Response::ok(id, serde_json::json!({ "content": content }))),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            let path = param(p, "path")?;
+            let content = rfs::read_file(path).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "content": content })))
         }
 
         "fs_write" => {
-            let path = match require_str(p, "path") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
+            let path = param(p, "path")?;
             // Allow empty content (creating empty files is valid)
             let content = p.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            match rfs::write_file(path, content) {
-                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            rfs::write_file(path, content).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
         }
 
         "fs_mkdir" => {
-            let path = match require_str(p, "path") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            match rfs::create_dir(path) {
-                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            let path = param(p, "path")?;
+            rfs::create_dir(path).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
         }
 
         "fs_delete" => {
-            let path = match require_str(p, "path") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            match rfs::delete_path(path) {
-                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            let path = param(p, "path")?;
+            rfs::delete_path(path).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
         }
 
         "fs_rename" => {
-            let from = match require_str(p, "from") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            let to = match require_str(p, "to") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            match rfs::rename_path(from, to) {
-                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            let from = param(p, "from")?;
+            let to = param(p, "to")?;
+            rfs::rename_path(from, to).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
         }
 
         "fs_download" => {
-            let path = match require_str(p, "path") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            match rfs::download_file(path) {
-                Ok((name, data)) => {
-                    Ok(Response::ok(id, serde_json::json!({ "name": name, "data": data })))
-                }
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            let path = param(p, "path")?;
+            let (name, data) = rfs::download_file(path).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "name": name, "data": data })))
         }
 
         "fs_download_url" => {
-            let path = match require_str(p, "path") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
+            let path = param(p, "path")?;
             let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
             let sig = sign_download(token, path, ts);
             let name = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or("file");
@@ -472,25 +354,14 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
         }
 
         "fs_upload" => {
-            let path = match require_str(p, "path") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            let data = match require_str(p, "data") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
-            match rfs::upload_file(path, data) {
-                Ok(()) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
-                Err(e) => Err(RpcError::Internal(e)),
-            }
+            let path = param(p, "path")?;
+            let data = param(p, "data")?;
+            rfs::upload_file(path, data).map_err(RpcError::Internal)?;
+            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
         }
 
         "git" => {
-            let subcmd = match require_str(p, "subcmd") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
+            let subcmd = param(p, "subcmd")?;
             let args: Vec<String> = p
                 .get("args")
                 .and_then(|v| v.as_array())
@@ -519,17 +390,13 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
             if let Some(d) = cwd {
                 child.current_dir(d);
             }
-            match child.output() {
-                Ok(output) => {
-                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                    Ok(Response::ok(
-                        id,
-                        serde_json::json!({ "stdout": stdout, "stderr": stderr, "code": output.status.code() }),
-                    ))
-                }
-                Err(e) => Err(RpcError::Internal(e.to_string())),
-            }
+            let output = child.output().map_err(|e| RpcError::Internal(e.to_string()))?;
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            Ok(Response::ok(
+                id,
+                serde_json::json!({ "stdout": stdout, "stderr": stderr, "code": output.status.code() }),
+            ))
         }
 
         // ---- projects (declarative workspaces) ----------------------------
@@ -548,19 +415,16 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
         }
 
         "fs_convert" => {
-            let path = match require_str(p, "path") {
-                Ok(s) => s,
-                Err(e) => return Err(RpcError::InvalidParams(e)),
-            };
+            let path = param(p, "path")?;
             let format = p.get("format").and_then(|v| v.as_str()).unwrap_or("html");
             if format != "html" {
                 return Err(RpcError::InvalidParams("only html format supported".into()));
             }
             let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
             match ext.as_str() {
-                "pptx" => match crate::pptx::to_html(std::path::Path::new(path)) {
-                    Ok(html) => Ok(Response::ok(id, serde_json::json!({ "html": html }))),
-                    Err(e) => Err(RpcError::Internal(e)),
+                "pptx" => {
+                    let html = crate::pptx::to_html(std::path::Path::new(path)).map_err(RpcError::Internal)?;
+                    Ok(Response::ok(id, serde_json::json!({ "html": html })))
                 },
                 _ => Err(RpcError::InvalidParams(format!("unsupported file type: .{}", ext))),
             }
