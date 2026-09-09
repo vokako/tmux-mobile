@@ -322,3 +322,7 @@ running vs idle is the one pair a reader must resolve at a glance, and a 5–7px
 ### One back-to-tail control across scrolling records
 
 (board #49): Chat and Terminal both wear global `.to-tail` from app.css — 38px token-surface circle, quiet ink/accent hover, scale press, 44px `::before`, and token-red `.news::after`; component-scoped `.to-bottom`/`.scroll-btn` rules may POSITION only (right/bottom/z), never redraw the box. The old Terminal glass square/span dot is retired.
+
+## User-facing vocabulary (the contract; moved from tmm-cli.md, board #102)
+
+One noun per concept, everywhere the USER reads: the tab is **Chat** (中文 "对话") — it was "Hub", a name that described the architecture, not the page; a **Project** (项目) is the container entity in the left column, and each project has one chat; the things that speak are **agents**. "Room" is the store's term (`proj:<session>`) and NEVER appears in UI copy — the no-recipient send is "leave a note in the chat". Internal identifiers (`hub_*` RPCs, component names, i18n keys) intentionally keep their names: they are API contracts, and renaming them buys migration risk, not clarity.

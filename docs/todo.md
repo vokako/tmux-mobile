@@ -19,8 +19,11 @@
   `materialize`/`refresh_hooks`/`normalize`/`resume_command` 退化为 trait 调用；前端从服务器取
   后端列表与资源名。守护：source-contract 测试禁止 `backends/` 之外出现后端字面量（测试与
   seed 数据例外）。现状盘点见 §D。
-- [ ] **`tmm-cli.md` 瘦身**（所有者："太长了不对"）：2335 行。目标：命令参考一屏，规则回到各
-  design doc，历史进 exec-plans。同时审视每个命令是否回答"agent 没有它就做不到什么"。
+- [x] **`tmm-cli.md` 瘦身**（所有者："太长了不对"；board #102，2026-09-09 完成）：2337 → ~340 行。
+  命令参考一屏；重复叙述删除（规则的压缩版本本就住在各 design doc）；独有内容迁走——board #30/#31
+  细则 → board.md，config drift/grok/claude-Bedrock/backend parity → agents-overview.md，
+  board #9 读取契约/抽屉切换器/项目头 → hub-feed.md，用户词汇表 → design-language.md。
+  每个命令对照信条六审过一遍，现有命令全部通过（见 tmm-cli.md What this is）。
 - [ ] **英文化**：`tenet.md`、`guidance/*.md`、本文定稿后翻成英文（所有者决定文档语言为英语）；
   是否保留 `.zh.md` 待定。
 - [ ] **接入地图**：CLAUDE.md 的非负责项与文档地图指向 `tenet.md` 与 `guidance/`；
