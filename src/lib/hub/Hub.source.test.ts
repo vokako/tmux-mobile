@@ -36,6 +36,9 @@ test('Hub dot sizing has one shared declaration without restyling embedded pages
   assert.match(source, /\.m-state\.note \.st \{ width: 9px; height: 9px; \}/u,
     'the existing receipt override still outranks the shared base');
   assert.doesNotMatch(css, /live-dot|@keyframes/u, 'status motion stays in app.css');
+  assert.match(css, /\.hub-root :where\(\.to-menu button, \.m-state\) > \.note-dot \{ border: 1px dashed var\(--text3\); background: none; \}/u,
+    'the receipt and recipient menu share one dashed note mark (#133)');
+  assert.doesNotMatch(source, /^\s*\.note-dot \{/mu);
 });
 
 test('the composer stacks above every feed layer, so its popovers are never buried', () => {

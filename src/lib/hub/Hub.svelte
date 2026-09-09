@@ -3585,7 +3585,6 @@
   .to-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .to-extra { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--accent); font-weight: 600; font-size: var(--fs-meta); font-family: var(--font-mono); }
   .to-sep { height: 1px; background: var(--border2); margin: 4px 6px; }
-  .note-dot { border: 1px dashed var(--text3); background: none; }
   .to-menu {
     position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 12;
     min-width: 168px; max-height: calc(46vh / var(--ui-zoom, 1)); overflow-y: auto;
