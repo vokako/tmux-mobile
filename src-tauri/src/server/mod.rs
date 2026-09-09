@@ -271,3 +271,79 @@ pub(super) mod test_util {
         Request { id: Some(1), method: method.to_string(), params }
     }
 }
+
+/// The wire error strings are a CONTRACT, not prose (board #146): `tmm` maps
+/// -32601 to EXIT_NOT_FOUND and -32602 to EXIT_USAGE, the client tells an old
+/// server apart by -32601, and agents read the messages. This table freezes
+/// every hand-written error literal in rpc.rs / hub_rpc.rs and one row per
+/// pass-through class (a missing param, a store error carried verbatim) BEFORE
+/// the dispatchers are folded behind a `?`-returning inner fn, so each step of
+/// that fold has to reproduce these bytes. A row moving here is a wire change
+/// and needs its own reason.
+#[cfg(test)]
+mod golden_errors {
+    use super::rpc::*;
+    use super::test_util::req;
+
+    fn check(tag: &str, r: Response, code: i32, message: &str) {
+        let e = r.error.unwrap_or_else(|| panic!("{tag}: expected an error"));
+        assert_eq!((e.code, e.message.as_str()), (code, message), "{tag}");
+    }
+
+    #[test]
+    fn every_error_literal_and_class_is_pinned() {
+        crate::projects::tests::use_test_store();
+        let session = format!("golden-{}", uuid::Uuid::new_v4());
+        let hub = |m: &str, mut p: serde_json::Value| {
+            if let Some(o) = p.as_object_mut() {
+                o.entry("session").or_insert(serde_json::Value::String(session.clone()));
+            }
+            super::hub_rpc::handle_hub_request(&req(m, p), None)
+        };
+        let rpc = |m: &str, p: serde_json::Value| handle_request(&req(m, p), "token");
+
+        // ── pass-through classes ─────────────────────────────────────────
+        check("missing param (hub)", super::hub_rpc::handle_hub_request(&req("hub_post", serde_json::json!({"body": "x"})), None),
+            ERR_INVALID_PARAMS, "missing required param: session");
+        check("missing param (rpc)", rpc("list_panes", serde_json::json!({})), ERR_INVALID_PARAMS, "missing required param: session");
+        check("store error carried verbatim", hub("hub_board_note", serde_json::json!({"id": 999999, "body": "n"})),
+            ERR_INVALID_PARAMS, "no issue #999999 on this board");
+
+        // ── hub_rpc.rs literals ──────────────────────────────────────────
+        check("hub_command", hub("hub_command", serde_json::json!({"agent": "a", "text": "model"})),
+            ERR_INVALID_PARAMS, "a command must start with '/'");
+        check("hub_search", hub("hub_search", serde_json::json!({"grep": []})),
+            ERR_INVALID_PARAMS, "grep must be a non-empty array of search terms");
+        for m in ["hub_msg_archive", "hub_msg_restore", "hub_msg_purge"] {
+            check(m, hub(m, serde_json::json!({"ids": []})), ERR_INVALID_PARAMS, "ids must be a non-empty array");
+        }
+        for m in ["hub_board_get", "hub_board_note", "hub_board_delete"] {
+            check(m, hub(m, serde_json::json!({})), ERR_INVALID_PARAMS, "id required");
+        }
+        check("hub_board_delete absent", hub("hub_board_delete", serde_json::json!({"id": 999999})),
+            ERR_INVALID_PARAMS, "no issue #999999 on this board");
+        check("unknown hub method", hub("hub_nope", serde_json::json!({})), ERR_METHOD_NOT_FOUND, "unknown hub method: hub_nope");
+
+        // ── rpc.rs literals ──────────────────────────────────────────────
+        check("git allowlist", rpc("git", serde_json::json!({"subcmd": "rm"})), ERR_INVALID_PARAMS, "git subcommand not allowed: rm");
+        let nul = format!("a{}b", char::from(0u8));
+        check("git nul", rpc("git", serde_json::json!({"subcmd": "status", "args": [nul]})), ERR_INVALID_PARAMS, "invalid characters in argument");
+        check("fs_convert format", rpc("fs_convert", serde_json::json!({"path": "x.pptx", "format": "pdf"})),
+            ERR_INVALID_PARAMS, "only html format supported");
+        check("fs_convert ext", rpc("fs_convert", serde_json::json!({"path": "x.docx"})), ERR_INVALID_PARAMS, "unsupported file type: .docx");
+        check("resize_pane", rpc("resize_pane", serde_json::json!({})), ERR_INTERNAL, "resize_pane handled elsewhere");
+        check("unknown method", rpc("nope", serde_json::json!({})), ERR_METHOD_NOT_FOUND, "unknown method: nope");
+        let root = std::env::temp_dir().join(format!("tmm-golden-{}", uuid::Uuid::new_v4()));
+        let nhub = crate::agent_notifications::AgentNotificationHub::load_at_for_tests(root);
+        check("unknown notification method", handle_notification_request(&req("agent_nope", serde_json::json!({})), &nhub),
+            ERR_METHOD_NOT_FOUND, "unknown agent notification method: agent_nope");
+
+        // `restart failed: {e}` needs a live tmux session with a managed agent
+        // whose relaunch fails — not reachable here, so the literal is pinned
+        // at the source with its code.
+        let src = include_str!("hub_rpc.rs");
+        assert!(src.contains(r#"Response::err(id, ERR_INTERNAL, format!("restart failed: {e}"))"#)
+            || src.contains(r#"RpcError::Internal(format!("restart failed: {e}"))"#),
+            "the restart-failed literal moved or changed");
+    }
+}
