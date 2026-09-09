@@ -11,6 +11,8 @@
 //! that disappears simply leaves the declaration.
 
 use super::agents;
+use super::{agent_sessions, auto_adopt_once, is_managed_in, now, recovery, seed_builtin_skills, store, with_store};
+use std::time::Duration;
 use super::store::{Slot, SlotKind};
 use crate::tmux::{self, TmuxPane};
 
@@ -222,6 +224,119 @@ pub fn merge_preserving(
     }
 
     Merge { slots, dirty }
+}
+
+
+// ---- the 20-second tick: auto-adopt, fold tmux back into the declarations, recovery scan (moved from projects/mod.rs, board #152) ----
+
+/// How often the capturer folds live tmux state back into the declaration.
+pub(super) const CAPTURE_INTERVAL: Duration = Duration::from_secs(20);
+
+/// How long a tmux session must have existed before it becomes a project on its
+/// own. Same reasoning as `SETTLE_SECS` one level up: a workspace is
+/// something you come back to, a two-minute shell is not.
+pub const SESSION_SETTLE_SECS: u64 = 120;
+
+/// Fold live tmux state into every live project's declaration once.
+/// Returns the ids that were written.
+///
+/// Two phases, and the store lock is held only in the second. Observing is
+/// tmux work — `has-session`, `list-panes` (which runs `ps` for the child
+/// commands), a `launch.json` read per window — tens to hundreds of
+/// milliseconds per project; every RPC in the server goes through
+/// `with_store`, so doing that under the lock stalled each of them behind the
+/// tick. Folding is a few SQLite statements per project and is all the lock
+/// protects.
+pub fn capture_once() -> Result<Vec<String>, String> {
+    let ts = now();
+    let sessions = agent_sessions();
+    let projects = with_store(|store| store.list_projects(false))?;
+
+    // Phase 1 — no lock: which declared sessions are live, and what tmux shows.
+    let mut seen: Vec<String> = Vec::new();
+    let mut observed: Vec<(String, String, Vec<Observed>)> = Vec::new();
+    for project in projects {
+        if !tmux::session_exists(&project.session) {
+            continue;
+        }
+        seen.push(project.id.clone());
+        match observe(&project.session, &project.path, sessions) {
+            Ok(o) => observed.push((project.id, project.path, o)),
+            Err(_) => {} // session vanished mid-scan; next tick retries
+        }
+    }
+
+    // Phase 2 — one short lock: fold the observations into the declarations.
+    with_store(|store| {
+        for id in &seen {
+            store.mark_seen(id, ts)?;
+        }
+        let mut touched = Vec::new();
+        for (id, path, observed) in observed {
+            // Deleted between the phases: nothing to fold into, and inserting
+            // slots for a vanished project would fail the whole tick.
+            if store.project(&id)?.is_none() {
+                continue;
+            }
+            let existing = store.slots(&id)?;
+            // Stop is a pause for managed agents: their isolated home is the
+            // durable membership record, so a missing window keeps its slot
+            // and exact conversation id. Remove deletes both explicitly.
+            let keep_missing = existing
+                .iter()
+                .filter(|s| s.kind == store::SlotKind::Agent)
+                .filter(|s| is_managed_in(Some(&path), &s.window_name))
+                .map(|s| s.window_name.clone())
+                .collect();
+            let merged = merge_preserving(
+                &existing,
+                &observed,
+                ts,
+                SETTLE_SECS,
+                &keep_missing,
+            );
+            if !merged.dirty {
+                continue;
+            }
+            store.replace_slots(&id, &merged.slots)?;
+            touched.push(id);
+        }
+        Ok(touched)
+    })
+}
+
+/// Background capturer, spawned once by the server.
+///
+/// The tick is tmux subprocesses, `ps`, SQLite and file reads — all blocking —
+/// so it runs on the blocking pool, never inline on a runtime worker where it
+/// would hold up every WebSocket connection's tasks for its duration.
+pub async fn capture_loop() {
+    // Built-ins materialize once per server start, before the first tick.
+    seed_builtin_skills();
+    loop {
+        tokio::time::sleep(CAPTURE_INTERVAL).await;
+        // One process-table snapshot for the whole tick (board #145): observe
+        // and the recovery scan list the same sessions back to back, and each
+        // `list_panes` used to run its own `ps` — 2 × live projects per tick.
+        let tick = tokio::task::spawn_blocking(|| {
+            tmux::with_process_snapshot(|| {
+                if let Err(e) = auto_adopt_once() {
+                    eprintln!("projects: auto-track failed: {e}");
+                }
+                if let Err(e) = capture_once() {
+                    eprintln!("projects: capture failed: {e}");
+                }
+                // Piggybacks on the capture cadence: a transient model error is
+                // noticed within one tick, and the backoff ladder is measured in
+                // tens of seconds, so 20s granularity costs nothing.
+                recovery::check_once();
+            })
+        })
+        .await;
+        if let Err(e) = tick {
+            eprintln!("projects: capture tick panicked: {e}");
+        }
+    }
 }
 
 #[cfg(test)]
