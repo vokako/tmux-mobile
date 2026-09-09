@@ -231,9 +231,11 @@ fn sniff_window_now(session: &str, window: &str) {
 // looks_like_model, the Vitals struct) stay here — more than one dialect
 // reads them.
 pub use super::backends::claude::{claude_status_line, sniff_claude};
+#[cfg(test)]
 pub(crate) use super::backends::codex::sniff_codex;
 #[cfg(test)]
 pub(crate) use super::backends::codex::{codex_context_item, codex_context_left, codex_footer};
+#[cfg(test)]
 pub(crate) use super::backends::grok::sniff_grok;
 #[cfg(test)]
 pub(crate) use super::backends::grok::{grok_context_ratio, grok_tokens};

@@ -216,14 +216,9 @@ fn materialize(
     // change a restart.
     let mcp_config = seed_mcp_config(Path::new(workspace), &mcp_defs(def))?;
 
-    let prepared = match def.backend.as_str() {
-        "kiro" => render_kiro(def, window_name, &home, &system_prompt, &skills)?,
-        "claude" => render_claude(def, window_name, &home, Path::new(workspace), &system_prompt, &skills)?,
-        "codex" => render_codex(def, window_name, &home, &system_prompt, &skills)?,
-        "grok" => render_grok(def, window_name, &home, &system_prompt, &skills)?,
-        "omp" => render_omp(def, window_name, &home, &system_prompt, &skills)?,
-        other => return Err(format!("unknown backend '{other}'")),
-    };
+    let backend = super::backends::Backend::parse(&def.backend)
+        .ok_or_else(|| format!("unknown backend '{}'", def.backend))?;
+    let prepared = backend.render(def, window_name, &home, Path::new(workspace), &system_prompt, &skills)?;
 
     // Env every spawned agent gets: its identity for tmm.
     let mut env = prepared.env;
@@ -443,7 +438,7 @@ pub fn spawn_team(session: &str, team_name: &str, brief: &str, by: &str) -> Resu
 /// no auto-post, every delivery "unconfirmed" (owner report, 2026-08-18).
 /// The kick is NOT part of the recipe: it belongs to the first launch only;
 /// a restart resumes a conversation instead.
-fn write_launch_recipe(home: &Path, backend: &str, env: &[(String, String)], cmd: &str, by: &str, team: Option<&str>, agent_def: &str, member: &str) -> Result<(), String> {
+pub(crate) fn write_launch_recipe(home: &Path, backend: &str, env: &[(String, String)], cmd: &str, by: &str, team: Option<&str>, agent_def: &str, member: &str) -> Result<(), String> {
     // `cmd` is the identity command with NO first prompt appended (spawn adds
     // that separately), so the recipe stores it verbatim. It used to strip a
     // trailing quoted argument to remove the kick — a guess that would have
@@ -473,40 +468,13 @@ fn write_launch_recipe(home: &Path, backend: &str, env: &[(String, String)], cmd
 }
 
 /// Add the backend's exact or safe-recent resume dialect to one persisted
-/// identity command. The caller separately replays the recipe environment.
+/// identity command (the dialects live on the backend files, board #128).
+/// An unknown backend relaunches verbatim, as before.
 fn resume_command(cmd: &str, backend: &str, session_id: Option<&str>) -> String {
     let exact = session_id.filter(|s| !s.is_empty());
-    match (backend, exact) {
-        ("kiro", Some(id)) => format!("{cmd} --resume-id {}", shared::shell_quote(id)),
-        ("claude" | "grok", Some(id)) => {
-            format!("{cmd} --resume {}", shared::shell_quote(id))
-        }
-        // codex's resume is a SUBCOMMAND, so it splices in after the binary
-        // instead of appending: `codex resume <id> <flags>`. The managed
-        // CODEX_HOME belongs to this one agent and `--last` is cwd-filtered,
-        // so the recent fallback cannot cross into another project/session.
-        ("codex", id) => match cmd.strip_prefix("command codex ") {
-            Some(rest) => {
-                let which = id
-                    .map(shared::shell_quote)
-                    .unwrap_or_else(|| "--last".to_string());
-                format!("command codex resume {which} {rest}")
-            }
-            // An unexpected recipe shape: relaunch without resume rather than
-            // guess at where the subcommand goes.
-            None => cmd.to_string(),
-        },
-        // The other three managed homes are isolated too; their native recent
-        // flags are cwd-scoped. This closes the window before the 20s capture
-        // tick has persisted an exact session id.
-        ("kiro", None) => format!("{cmd} --resume"),
-        ("claude" | "grok", None) => format!("{cmd} --continue"),
-        // omp: `--resume <id>` takes an id prefix; `--continue` follows the
-        // cwd-scoped breadcrumb (sessions live per encoded cwd under the
-        // isolated PI_CODING_AGENT_DIR, so it cannot cross projects).
-        ("omp", Some(id)) => format!("{cmd} --resume {}", shared::shell_quote(id)),
-        ("omp", None) => format!("{cmd} --continue"),
-        _ => cmd.to_string(),
+    match super::backends::Backend::parse(backend) {
+        Some(b) => b.resume_command(cmd, exact),
+        None => cmd.to_string(),
     }
 }
 
@@ -663,10 +631,29 @@ mod relaunch_tests {
     }
 }
 
-struct Rendered {
-    env: Vec<(String, String)>,
-    cmd: String,
-    confirmation: Option<shared::StartupConfirmation>,
+// The per-backend render family lives on the backend files (board #128);
+// production code reaches it only through Backend's methods, so these
+// re-exports exist for the test module's `use super::*` alone.
+#[cfg(test)]
+pub(crate) use super::backends::claude::{
+    claude_hooks, ensure_claude_env, ensure_claude_state, ensure_claude_status_line,
+    merge_missing_claude_env, render_claude,
+};
+#[cfg(test)]
+pub(crate) use super::backends::codex::{codex_hooks, render_codex};
+#[cfg(test)]
+pub(crate) use super::backends::grok::{grok_config_toml_from, grok_hooks, render_grok};
+#[cfg(test)]
+pub(crate) use super::backends::kiro::{
+    ensure_kiro_settings, kiro_cli_settings, kiro_hooks, migrate_launch_model, render_kiro,
+};
+#[cfg(test)]
+pub(crate) use super::backends::omp::{omp_telemetry_extension, render_omp};
+
+pub(crate) struct Rendered {
+    pub(crate) env: Vec<(String, String)>,
+    pub(crate) cmd: String,
+    pub(crate) confirmation: Option<shared::StartupConfirmation>,
 }
 
 /// The isolated home for `name`. Callers reach this only with a name that
@@ -675,7 +662,7 @@ struct Rendered {
 /// already accepted), so a rejection here is a programming error, not a
 /// user-facing one — it falls back to a path that cannot exist rather than
 /// escape the agents directory.
-fn agent_home(workspace: &str, name: &str) -> PathBuf {
+pub(crate) fn agent_home(workspace: &str, name: &str) -> PathBuf {
     super::agents::home_dir(workspace, name).unwrap_or_else(|| {
         Path::new(workspace).join(".tmm").join("agents").join("__invalid-name__")
     })
@@ -773,7 +760,7 @@ pub(crate) fn seed_mcp_config(
 
 /// MCP: an array entry that is a STRING names a central server (reg_mcp);
 /// an inline object is used as-is.
-fn mcp_defs(def: &RegAgent) -> Vec<shared::McpDef> {
+pub(crate) fn mcp_defs(def: &RegAgent) -> Vec<shared::McpDef> {
     let entries: Vec<serde_json::Value> = serde_json::from_str(&def.mcp).unwrap_or_default();
     let central = super::with_registry_mcp();
     entries
@@ -790,73 +777,6 @@ fn mcp_defs(def: &RegAgent) -> Vec<shared::McpDef> {
             obj => serde_json::from_value(obj).ok(),
         })
         .collect()
-}
-
-/// The hook set for each backend, in ONE place. `render_*` writes it at spawn
-/// and `refresh_hooks` rewrites it on every start, so a config on disk can
-/// never be older than the app that reads its events. (It was: agents spawned
-/// before `userPromptSubmit` existed kept a three-hook config, and since that
-/// hook is the only reset of the same-turn dedup flag, their first `tmm send`
-/// silently killed the stop-hook auto-post for the rest of the window's life.)
-fn kiro_hooks(notify: &str) -> Value {
-    json!({
-        // The notify helper feeds notifications AND telemetry (tool events are
-        // recognized by hook_event_name and routed to telemetry only).
-        "preToolUse":  [ { "matcher": "*", "command": notify } ],
-        "postToolUse": [ { "matcher": "*", "command": notify } ],
-        // Turn start — the ONLY reset of the same-turn dedup flag, and the
-        // event that carries the submitted prompt.
-        "userPromptSubmit": [ { "command": notify } ],
-        "stop": [ { "command": notify } ]
-    })
-}
-
-fn claude_hooks(notify: &str) -> Value {
-    json!({
-        "PreToolUse":  [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify } ] } ],
-        "PostToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify } ] } ],
-        // Turn start — resets the same-turn dedup flag and carries the
-        // submitted prompt (the delivery receipt). Shipping Stop WITHOUT this
-        // made the flag sticky: the first `tmm send` killed the auto-post for
-        // every later turn of that window, and lines typed by
-        // `deliver_mentions` were never acked (hollow ring forever). Kiro and
-        // grok had it; claude and codex did not (owner, 2026-08-22: 对齐).
-        "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
-        "Notification": [ { "matcher": "permission_prompt|agent_needs_input|agent_completed", "hooks": [ { "type": "command", "command": notify } ] } ],
-        "Stop": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
-        "StopFailure": [ { "hooks": [ { "type": "command", "command": notify } ] } ]
-    })
-}
-
-fn codex_hooks(notify: &str) -> Value {
-    json!({
-        "PreToolUse":  [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify } ] } ],
-        "PostToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify } ] } ],
-        // Same turn-start contract as claude's (measured, codex-cli 0.148.0:
-        // payload {hook_event_name:"UserPromptSubmit", prompt, session_id} on
-        // hook stdin). Codex has NO StopFailure event (binary strings checked),
-        // so `failed` cannot be derived for it.
-        "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
-        "PermissionRequest": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
-        "Stop": [ { "hooks": [ { "type": "command", "command": notify } ] } ]
-    })
-}
-
-/// grok 1.0.5 hook schema (its own docs, `~/.grok/docs/user-guide/10-hooks.md`,
-/// verified live 2026-08-21: an isolated `GROK_HOME/hooks/*.json` loads as an
-/// always-trusted "global" hook and fires). Payload keys are camelCase
-/// (`hookEventName`, `toolName`, `sessionId`, `lastAssistantMessage`), event
-/// VALUES snake_case (`user_prompt_submit`, `stop`). A `stop` fires once with
-/// `reason: "end_turn"` for the turn AND once at session end (`"shutdown"`) —
-/// the normalizer filters on the reason. An omitted matcher matches everything.
-fn grok_hooks(notify: &str) -> Value {
-    json!({
-        "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
-        "PreToolUse":  [ { "hooks": [ { "type": "command", "command": notify } ] } ],
-        "PostToolUse": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
-        "Stop": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
-        "StopFailure": [ { "hooks": [ { "type": "command", "command": notify } ] } ]
-    })
 }
 
 /// Bring a managed agent's config up to date with this build, in place. Returns
@@ -877,134 +797,21 @@ pub fn refresh_hooks(project_path: &str, window_name: &str) -> bool {
     if notifications.ensure_helper().is_err() {
         return false;
     }
+    // Each backend repairs its own on-disk surface (board #128): every half
+    // probes for its file(s) and no-ops otherwise, exactly as the inline
+    // branches always did — refresh does not need to know which backend the
+    // home belongs to.
     let mut changed = false;
-    let kiro = home.join("agents").join(format!("{window_name}.json"));
-    if kiro.is_file() {
-        changed |= patch_hooks(&kiro, kiro_hooks(&notifications.helper_command("kiro")));
-        changed |= migrate_launch_model(&home, &kiro);
-        // Settings drift is config drift: agents spawned before queue-mode
-        // (or before settings existed at all) get the canonical file on their
-        // next start, same as hooks.
-        changed |= ensure_kiro_settings(&home);
-    }
-    let claude = home.join("settings.json");
-    if claude.is_file() {
-        changed |= patch_hooks(&claude, claude_hooks(&notifications.helper_command("claude")));
-        // Channel drift is config drift too: old homes receive missing global
-        // Bedrock keys without overwriting an explicit per-agent value.
-        changed |= ensure_claude_env(&claude);
-        // statusLine is app-owned observation plumbing, like hooks: every
-        // managed Claude must paint the exact row the sniffer understands.
-        changed |= ensure_claude_status_line(&claude);
-        // Workspace trust is app-owned for managed agents: the user explicitly
-        // spawned this isolated home into this project. Pre-seeding Claude's
-        // documented project key avoids an interactive prompt nobody may be
-        // watching; the keypress confirmer remains only as a legacy fallback.
-        changed |= ensure_claude_state(&home, Path::new(project_path)).unwrap_or(false);
-    }
-    let codex = home.join("codex").join("hooks.json");
-    if codex.is_file() {
-        changed |= patch_hooks(&codex, codex_hooks(&notifications.helper_command("codex")));
-    }
-    let grok = home.join("hooks").join("tmux-mobile.json");
-    if grok.is_file() {
-        changed |= patch_hooks(&grok, grok_hooks(&notifications.helper_command("grok")));
-    }
-    // omp's hook is a generated FILE, not a key in someone else's config —
-    // rewrite it whole when this build's text differs (helper path moves,
-    // new events), same ownership rule as patch_hooks.
-    let omp_ext = home.join("extensions").join("tmm-telemetry.ts");
-    if omp_ext.is_file() {
-        let fresh = omp_telemetry_extension(&notifications.helper_command("omp"));
-        if std::fs::read_to_string(&omp_ext).ok().as_deref() != Some(fresh.as_str()) {
-            changed |= std::fs::write(&omp_ext, fresh).is_ok();
-        }
-    }
-    // Agents spawned before launch recipes existed can still be restarted with
-    // full identity: for kiro the recipe is reconstructible from the isolated
-    // home itself (env = KIRO_HOME, cmd = --agent <name>).
-    if kiro.is_file() && !home.join("launch.json").exists() {
-        // Best effort: a backfill that cannot be written changes nothing, and
-        // the restart then takes the generic launch path it took before.
-        changed |= write_launch_recipe(
-            &home,
-            "kiro",
-            &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())],
-            &format!(
-                "command kiro-cli chat --agent {} --trust-all-tools kick",
-                shared::shell_quote(window_name),
-            ),
-            // A backfilled recipe cannot know who spawned the agent — the
-            // provenance simply does not exist for pre-recipe spawns. The
-            // def provenance likewise: refresh falls back to the window name.
-            "", None, "", "")
-        .is_ok();
+    for b in super::backends::Backend::ALL {
+        changed |= b.refresh(&home, window_name, Path::new(project_path), &notifications);
     }
     changed
-}
-
-/// Move a `--model <id>` an older build put on the launch line into the agent
-/// config, where kiro actually honours it, and drop it from the recipe so the
-/// two cannot disagree. Exact information, so nothing is guessed: the id is
-/// read off the line that was really used.
-///
-/// Why it matters beyond tidiness: `refresh_hooks` also BACKFILLS recipes for
-/// pre-recipe agents, and that backfilled line has no `--model` at all — so an
-/// agent restarted through that path silently lost its model. Once the id is in
-/// the config it survives every start (`up`, restart, resume) because they all
-/// pass `--agent`.
-fn migrate_launch_model(home: &Path, config: &Path) -> bool {
-    let recipe_path = home.join("launch.json");
-    let Ok(text) = std::fs::read_to_string(&recipe_path) else { return false };
-    let Ok(mut recipe) = serde_json::from_str::<Value>(&text) else { return false };
-    let Some(cmd) = recipe.get("cmd").and_then(Value::as_str).map(str::to_string) else {
-        return false;
-    };
-    // Model ids never contain whitespace, so token splitting is exact here.
-    let mut tokens: Vec<&str> = cmd.split_whitespace().collect();
-    let Some(at) = tokens.iter().position(|t| *t == "--model") else { return false };
-    let model = tokens
-        .get(at + 1)
-        .map(|m| m.trim_matches('\'').trim_matches('"').to_string())
-        .filter(|m| !m.is_empty() && !m.starts_with('-'));
-    tokens.drain(at..(at + 2).min(tokens.len()));
-    recipe["cmd"] = json!(tokens.join(" "));
-    let recipe_written = std::fs::write(
-        &recipe_path,
-        serde_json::to_string_pretty(&recipe).unwrap_or(text),
-    )
-    .is_ok();
-    // Only fill a config that has no model of its own: a value already there
-    // came from a newer spawn (or the user) and outranks the old launch line.
-    let Some(model) = model else { return recipe_written };
-    // And only if the backend actually accepts it. An id it rejects was never
-    // the agent's model — kiro fell back to its default and said so above the
-    // splash — so carrying the typo into the config would turn a working agent
-    // into a mute one on its next restart. Dropping it preserves what was
-    // really running.
-    if let Err(e) = crate::projects::models::validate("kiro", &model) {
-        eprintln!("projects: dropping the launch line's model for a managed agent — {e}");
-        return recipe_written;
-    }
-    let config_written = std::fs::read_to_string(config)
-        .ok()
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .and_then(|mut root| {
-            let obj = root.as_object_mut()?;
-            if obj.contains_key("model") {
-                return None;
-            }
-            obj.insert("model".into(), json!(model));
-            Some(std::fs::write(config, serde_json::to_string_pretty(&root).unwrap()).is_ok())
-        })
-        .unwrap_or(false);
-    recipe_written || config_written
 }
 
 /// Replace the `hooks` key of a JSON config, leaving everything else alone.
 /// A no-op when the value already matches, so starting a project does not
 /// rewrite files for nothing.
-fn patch_hooks(path: &std::path::Path, hooks: Value) -> bool {
+pub(crate) fn patch_hooks(path: &std::path::Path, hooks: Value) -> bool {
     let Ok(text) = std::fs::read_to_string(path) else { return false };
     let Ok(mut root) = serde_json::from_str::<Value>(&text) else { return false };
     let Some(obj) = root.as_object_mut() else { return false };
@@ -1015,735 +822,18 @@ fn patch_hooks(path: &std::path::Path, hooks: Value) -> bool {
     std::fs::write(path, serde_json::to_string_pretty(&root).unwrap_or(text)).is_ok()
 }
 
-/// The CLI settings every managed kiro agent runs with (`<home>/settings/
-/// cli.json`, read because the pane launches with `KIRO_HOME=<home>`).
-///
-/// `chat.defaultInterruptBehavior = "queue"` is an owner decision, 2026-08-20
-/// ("所有 Agent 在 kiro 里边发送指令的模式 默认给我设计成 Queue 队列模式吧 不要
-/// steer 模式"): a line typed at a BUSY agent waits for the turn to end instead
-/// of steering the turn mid-flight — the agent reads it whole, as its own
-/// prompt. That is also the contract the delivery pipeline already assumes:
-/// `delivery_overdue` pauses the ack clock while a turn is open precisely
-/// because kiro "Type to queue"s what we send.
-fn kiro_cli_settings() -> Vec<(&'static str, Value)> {
-    vec![
-        ("chat.disableTrustAllConfirmation", json!(true)),
-        ("chat.defaultInterruptBehavior", json!("queue")),
-        // MCP tool schemas are DEFERRED into a compact list and loaded on
-        // demand via kiro's own tool_search (owner, 2026-08-28: "给 kiro 的
-        // mcp 工具开启 toolsearch"). Thresholds 0/0 = defer whenever any MCP
-        // tools are present, which is the progressive behavior asked for.
-        ("toolSearch.enabled", json!(true)),
-        ("toolSearch.minPct", json!(0)),
-        ("toolSearch.minTokens", json!(0)),
-    ]
-}
-
-/// Force the canonical CLI settings into a managed kiro home, leaving any
-/// other keys alone. Creates the file when it is missing (pre-settings homes),
-/// no-op write when everything already matches — the same contract as
-/// `patch_hooks`, because the app owns these configs. Returns true on change.
-fn ensure_kiro_settings(home: &Path) -> bool {
-    let dir = home.join("settings");
-    if std::fs::create_dir_all(&dir).is_err() {
-        return false;
-    }
-    let path = dir.join("cli.json");
-    let mut root = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .filter(Value::is_object)
-        .unwrap_or_else(|| json!({}));
-    let obj = root.as_object_mut().expect("filtered to object above");
-    let mut changed = !path.is_file();
-    for (key, value) in kiro_cli_settings() {
-        if obj.get(key) != Some(&value) {
-            obj.insert(key.to_string(), value);
-            changed = true;
-        }
-    }
-    changed && std::fs::write(&path, serde_json::to_string_pretty(&root).unwrap()).is_ok()
-}
-
 /// ` --effort <level>` for the backends whose CLI takes the flag (kiro,
 /// claude, grok — measured; codex takes a config override instead), or the
 /// empty string. The value was validated against `models::effort_values` at
 /// save time, so a typo cannot reach a launch line. Empty = backend default,
 /// same contract as the model.
-fn effort_flag(def: &RegAgent) -> String {
+pub(crate) fn effort_flag(def: &RegAgent) -> String {
     let effort = def.effort.trim();
     if effort.is_empty() {
         String::new()
     } else {
         format!(" --effort {}", shared::shell_quote(effort))
     }
-}
-
-fn render_kiro(
-    def: &RegAgent, name: &str, home: &Path, system_prompt: &str,
-    skills: &[crate::projects::skills::ResolvedSkill],
-) -> Result<Rendered, String> {
-    std::fs::create_dir_all(home.join("agents")).map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(home.join("settings")).map_err(|e| e.to_string())?;
-    // Fail-loud at spawn (a home without settings/cli.json would re-enable the
-    // trust-all confirmation, which nobody is there to answer); refresh_hooks
-    // reuses the same canonical list fail-soft via ensure_kiro_settings.
-    let settings: serde_json::Map<String, Value> =
-        kiro_cli_settings().into_iter().map(|(k, v)| (k.to_string(), v)).collect();
-    std::fs::write(
-        home.join("settings").join("cli.json"),
-        serde_json::to_string_pretty(&Value::Object(settings)).unwrap(),
-    )
-    .map_err(|e| e.to_string())?;
-
-    let notifications = crate::agent_notifications::AgentNotificationHub::load();
-    notifications.ensure_helper()?;
-    let notify = notifications.helper_command("kiro");
-
-    let resources: Vec<String> = skills
-        .iter()
-        .map(|sk| format!("skill://{}/SKILL.md", sk.dir.to_string_lossy()))
-        .collect();
-    let mut mcp_servers = json!({});
-    for m in &mcp_defs(def) {
-        if !m.name.is_empty() {
-            mcp_servers.as_object_mut().unwrap().insert(m.name.clone(), shared::kiro_mcp_value(m));
-        }
-    }
-    let mut conf = json!({
-        "name": name,
-        "description": format!("{} (registry agent)", def.name),
-        "prompt": system_prompt,
-        "tools": ["*"],
-        "allowedTools": ["*"],
-        "resources": resources,
-        // Native MCP again (owner, 2026-08-28: "mcp 工具还是用原生的方式调用
-        // 吧") — the context cost is handled by toolSearch instead
-        // (kiro_cli_settings enables it): schemas are DEFERRED into a compact
-        // list and loaded on demand via kiro's own tool_search. The `tmm mcp`
-        // CLI stays available as a SKILL, never taught in the prompt.
-        "mcpServers": mcp_servers,
-        "hooks": kiro_hooks(&notify),
-    });
-    // The model belongs to the agent's IDENTITY, not to one launch of it. It
-    // used to ride on `--model`, which had two costs: it was invisible in the
-    // config the owner reads (`.tmm/agents/<name>/agents/<name>.json`), and
-    // kiro-cli's TUI answers an unknown id with a warning above the splash and
-    // then runs its DEFAULT model — so a typo'd id was a silent downgrade. In
-    // the config, kiro reports it as a real error on the first turn instead,
-    // and every later start (resume, restart, `up`) reads the same field.
-    // `registry_save` rejects unknown ids up front.
-    //
-    // An empty model means what the editor's placeholder says — the BACKEND's
-    // default — so the key is omitted rather than set to a hardcoded id (the
-    // old launch line pinned `claude-sonnet-4.6`, which silently contradicted
-    // the UI and would have outlived that model).
-    let model = def.model.trim();
-    if !model.is_empty() {
-        conf["model"] = json!(model);
-    }
-    std::fs::write(home.join("agents").join(format!("{name}.json")), serde_json::to_string_pretty(&conf).unwrap())
-        .map_err(|e| e.to_string())?;
-
-    Ok(Rendered {
-        env: vec![("KIRO_HOME".into(), home.to_string_lossy().to_string())],
-        cmd: format!(
-            "command kiro-cli chat --agent {} --trust-all-tools{}",
-            shared::shell_quote(name),
-            effort_flag(def),
-        ),
-        confirmation: None,
-    })
-}
-
-fn claude_trust_key(workspace: &Path) -> PathBuf {
-    let start = std::fs::canonicalize(workspace).unwrap_or_else(|_| workspace.to_path_buf());
-    start
-        .ancestors()
-        .find(|path| path.join(".git").exists())
-        .unwrap_or(&start)
-        .to_path_buf()
-}
-
-/// Materialize onboarding + workspace trust in an isolated managed Claude home.
-/// Claude's official permissions docs name this exact persisted shape. Merge,
-/// never replace: `.claude.json` also owns session history, usage and UI state.
-fn ensure_claude_state(home: &Path, workspace: &Path) -> Result<bool, String> {
-    let path = home.join(".claude.json");
-    let mut root = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .filter(Value::is_object)
-        .unwrap_or_else(|| json!({}));
-    let obj = root.as_object_mut().expect("filtered to object");
-    let mut changed = !path.is_file();
-    if obj.get("hasCompletedOnboarding") != Some(&json!(true)) {
-        obj.insert("hasCompletedOnboarding".into(), json!(true));
-        changed = true;
-    }
-    if !obj.contains_key("theme") {
-        obj.insert("theme".into(), json!("dark"));
-        changed = true;
-    }
-    if !obj.get("projects").is_some_and(Value::is_object) {
-        obj.insert("projects".into(), json!({}));
-        changed = true;
-    }
-    let trust_key = claude_trust_key(workspace).to_string_lossy().into_owned();
-    let projects = obj.get_mut("projects").and_then(Value::as_object_mut).unwrap();
-    let entry = projects.entry(trust_key).or_insert_with(|| json!({}));
-    if !entry.is_object() {
-        *entry = json!({});
-        changed = true;
-    }
-    let project = entry.as_object_mut().unwrap();
-    if project.get("hasTrustDialogAccepted") != Some(&json!(true)) {
-        project.insert("hasTrustDialogAccepted".into(), json!(true));
-        changed = true;
-    }
-    if changed {
-        let text = format!("{}\n", serde_json::to_string_pretty(&root).unwrap());
-        std::fs::write(&path, text).map_err(|e| format!("write {}: {e}", path.display()))?;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(&path).map_err(|e| e.to_string())?.permissions().mode() & 0o777;
-        if mode != 0o600 {
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-                .map_err(|e| format!("chmod {}: {e}", path.display()))?;
-            changed = true;
-        }
-    }
-    Ok(changed)
-}
-
-fn render_claude(
-    def: &RegAgent, _name: &str, home: &Path, workspace: &Path,
-    system_prompt: &str, skills: &[crate::projects::skills::ResolvedSkill],
-) -> Result<Rendered, String> {
-    let notifications = crate::agent_notifications::AgentNotificationHub::load();
-    notifications.ensure_helper()?;
-    let notify = notifications.helper_command("claude");
-
-    let mut mcp_servers = json!({});
-    for m in &mcp_defs(def) {
-        if !m.name.is_empty() {
-            mcp_servers.as_object_mut().unwrap().insert(m.name.clone(), shared::claude_mcp_value(m));
-        }
-    }
-    let mcpfile = home.join("mcp.json");
-    std::fs::write(&mcpfile, serde_json::to_string_pretty(&json!({ "mcpServers": mcp_servers })).unwrap())
-        .map_err(|e| e.to_string())?;
-    // The isolated home is the agent's CLAUDE_CONFIG_DIR (claude's KIRO_HOME:
-    // history, session state and .claude.json live here, so a managed agent
-    // never leaks into the user's ~/.claude). That relocation also means the
-    // USER's settings layer is no longer read — so the channel config is
-    // INHERITED: the `env` block of ~/.claude/settings.json (the Bedrock
-    // switch: CLAUDE_CODE_USE_BEDROCK/AWS_REGION/ANTHROPIC_MODEL…) is copied
-    // into the isolated settings.json, grok's "auth carries, prefs do not"
-    // pattern in claude's dialect (owner, 2026-08-22: "都用bedrock渠道…复用
-    // 我们全局定义的配置 但是自己管理好类似kirohome这种"). Plugins and
-    // marketplaces deliberately do NOT carry.
-    let settingsfile = home.join("settings.json");
-    std::fs::write(
-        &settingsfile,
-        serde_json::to_string_pretty(&json!({
-            "env": shared::claude_user_env(),
-            "statusLine": shared::claude_status_line_config(),
-            "skipDangerousModePermissionPrompt": true,
-            "hooks": claude_hooks(&notify)
-        }))
-        .unwrap(),
-    )
-    .map_err(|e| e.to_string())?;
-    // A fresh CLAUDE_CONFIG_DIR otherwise parks at the theme/onboarding and
-    // workspace-trust dialogs before the TUI. Claude documents the persisted
-    // trust shape (`projects[repo_root].hasTrustDialogAccepted = true`); this
-    // home exists only because the user explicitly spawned a managed agent in
-    // this workspace, so materialize that decision before launching.
-    ensure_claude_state(home, workspace)?;
-
-    // Claude has no native skill mechanism — inject the compact index.
-    let full_prompt = if skills.is_empty() {
-        system_prompt.to_string()
-    } else {
-        format!("{}\n\n{}", system_prompt, crate::projects::skills::skills_index_text(skills))
-    };
-    // The prompt is a FILE, like every other backend now (owner, 2026-09-08:
-    // "类似的 Claude omp grok 是不是也是这种文件形式的，保证更加稳定"):
-    // claude reads the user-memory `CLAUDE.md` from CLAUDE_CONFIG_DIR — this
-    // isolated home — verified live (claude 2.1.239 quoted a marker from a
-    // relocated dir's CLAUDE.md and obeyed its instruction). The old
-    // `--append-system-prompt <6 KB literal>` was the last launch line bigger
-    // than a send-keys burst; every start path is a short line now.
-    std::fs::write(home.join("CLAUDE.md"), &full_prompt).map_err(|e| e.to_string())?;
-    // An empty model means the BACKEND default — with Bedrock that is the
-    // inherited env's ANTHROPIC_MODEL, so no `--model` is passed (the old
-    // hardcoded `sonnet` alias overrode the env and does not resolve on
-    // Bedrock). A configured model rides `--model`, which wins over env.
-    let model_arg = if def.model.trim().is_empty() {
-        String::new()
-    } else {
-        format!(" --model {}", shared::shell_quote(def.model.trim()))
-    };
-    Ok(Rendered {
-        env: vec![("CLAUDE_CONFIG_DIR".into(), home.to_string_lossy().to_string())],
-        cmd: format!(
-            "command claude --mcp-config {} --strict-mcp-config --settings {}{}{} --dangerously-skip-permissions",
-            shared::shell_quote(&mcpfile.to_string_lossy()),
-            shared::shell_quote(&settingsfile.to_string_lossy()),
-            model_arg,
-            effort_flag(def),
-        ),
-        confirmation: Some(shared::StartupConfirmation {
-            markers: shared::CLAUDE_FOLDER_TRUST_MARKERS.to_vec(),
-            ready_markers: vec!["bypass permissions on"],
-            accept_keys: vec!["Down", "Enter"],
-            timeout: std::time::Duration::from_secs(120),
-        }),
-    })
-}
-
-/// Merge missing provider-channel keys into a managed Claude settings object.
-/// Existing values are per-agent overrides and win; newly introduced global
-/// keys (for example ANTHROPIC_DEFAULT_HAIKU_MODEL replacing the deprecated
-/// small-fast key) still reach old homes on their next start.
-fn merge_missing_claude_env(conf: &mut Value, inherited: &Value) -> bool {
-    let Some(root) = conf.as_object_mut() else { return false };
-    let Some(source) = inherited.as_object().filter(|env| !env.is_empty()) else { return false };
-    if !root.get("env").is_some_and(Value::is_object) {
-        root.insert("env".into(), Value::Object(source.clone()));
-        return true;
-    }
-    let target = root.get_mut("env").and_then(Value::as_object_mut).unwrap();
-    let mut changed = false;
-    for (key, value) in source {
-        if !target.contains_key(key) {
-            target.insert(key.clone(), value.clone());
-            changed = true;
-        }
-    }
-    changed
-}
-
-/// Backfill a managed claude settings.json with missing inherited channel keys
-/// (see `backends_shared::claude_user_env`). Fail-soft: refresh must never
-/// block a start. Returns true when the file changed.
-fn ensure_claude_env(path: &Path) -> bool {
-    let Ok(text) = std::fs::read_to_string(path) else { return false };
-    let Ok(mut conf) = serde_json::from_str::<Value>(&text) else { return false };
-    let inherited = shared::claude_user_env();
-    if !merge_missing_claude_env(&mut conf, &inherited) {
-        return false;
-    }
-    std::fs::write(path, serde_json::to_string_pretty(&conf).unwrap()).is_ok()
-}
-
-fn ensure_claude_status_line(path: &Path) -> bool {
-    let Ok(text) = std::fs::read_to_string(path) else { return false };
-    let Ok(mut conf) = serde_json::from_str::<Value>(&text) else { return false };
-    let Some(root) = conf.as_object_mut() else { return false };
-    let canonical = shared::claude_status_line_config();
-    if root.get("statusLine") == Some(&canonical) {
-        return false;
-    }
-    root.insert("statusLine".into(), canonical);
-    std::fs::write(path, serde_json::to_string_pretty(&conf).unwrap()).is_ok()
-}
-
-fn render_codex(
-    def: &RegAgent, _name: &str, home: &Path, system_prompt: &str,
-    skills: &[crate::projects::skills::ResolvedSkill],
-) -> Result<Rendered, String> {
-    let codex_home = home.join("codex");
-    std::fs::create_dir_all(&codex_home).map_err(|e| e.to_string())?;
-    shared::inherit_codex_system_files(&codex_home)?;
-    let notifications = crate::agent_notifications::AgentNotificationHub::load();
-    notifications.ensure_helper()?;
-    let notify = notifications.helper_command("codex");
-
-    let mut config_args: Vec<String> = Vec::new();
-    for m in &mcp_defs(def) {
-        if !m.name.is_empty() {
-            config_args.extend(shared::codex_mcp_overrides(m));
-        }
-    }
-    let full_prompt = if skills.is_empty() {
-        system_prompt.to_string()
-    } else {
-        format!("{}\n\n{}", system_prompt, crate::projects::skills::skills_index_text(skills))
-    };
-    // The prompt is a FILE, not a launch argument (owner, 2026-09-08: "能类似
-    // 通过 kiro 那样一个文件注入进去吗…这样更优雅一些"). codex reads the
-    // global `AGENTS.md` from CODEX_HOME on every start, and this home is
-    // ISOLATED — ours to write, never the user's (config.toml here is a
-    // symlink into the user's real home; AGENTS.md is deliberately not
-    // inherited). The old `-c developer_instructions=…` override put ~6 KB on
-    // the launch line, which spawn survives (it sources a script) but the
-    // restart replay typed into the pane — and a tty burst ≳2KB is exactly
-    // what send-keys mangles (team/launch.rs). A restart also re-materializes
-    // this file (refresh_agent), so the text stays current.
-    std::fs::write(codex_home.join("AGENTS.md"), &full_prompt).map_err(|e| e.to_string())?;
-    std::fs::write(
-        codex_home.join("hooks.json"),
-        serde_json::to_vec_pretty(&json!({
-            "hooks": codex_hooks(&notify)
-        }))
-        .unwrap(),
-    )
-    .map_err(|e| e.to_string())?;
-
-    if !def.model.is_empty() {
-        config_args.push(format!("--model {}", shared::shell_quote(&def.model)));
-    }
-    // Effort is a codex CONFIG key (`model_reasoning_effort`), so it rides a
-    // `-c` override like the rest of codex's identity — the recipe replays it.
-    if !def.effort.trim().is_empty() {
-        config_args.push(shared::codex_config_override(
-            "model_reasoning_effort",
-            Value::String(def.effort.trim().to_string()),
-        ));
-    }
-    config_args.push("--dangerously-bypass-approvals-and-sandbox".into());
-    config_args.push("--dangerously-bypass-hook-trust".into());
-    Ok(Rendered {
-        env: vec![("CODEX_HOME".into(), codex_home.to_string_lossy().to_string())],
-        cmd: format!("command codex {}", config_args.join(" ")),
-        confirmation: Some(shared::StartupConfirmation {
-            markers: shared::CODEX_FOLDER_TRUST_MARKERS.to_vec(),
-            ready_markers: vec!["Starting MCP servers", "OpenAI Codex"],
-            accept_keys: vec!["Enter"],
-            timeout: std::time::Duration::from_secs(120),
-        }),
-    })
-}
-
-fn render_grok(
-    def: &RegAgent, name: &str, home: &Path, system_prompt: &str,
-    skills: &[crate::projects::skills::ResolvedSkill],
-) -> Result<Rendered, String> {
-    std::fs::create_dir_all(home.join("agents")).map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(home.join("hooks")).map_err(|e| e.to_string())?;
-    let notifications = crate::agent_notifications::AgentNotificationHub::load();
-    notifications.ensure_helper()?;
-    let notify = notifications.helper_command("grok");
-
-    // Telemetry hooks: `<GROK_HOME>/hooks/*.json` is that home's "global"
-    // scope, always trusted — no folder-trust dance (verified live, grok
-    // 1.0.5: loaded by `grok inspect`, fired on a real turn).
-    std::fs::write(
-        home.join("hooks").join("tmux-mobile.json"),
-        serde_json::to_string_pretty(&json!({ "hooks": grok_hooks(&notify) })).unwrap(),
-    )
-    .map_err(|e| e.to_string())?;
-
-    // config.toml: folder trust off (the workspace is the user's own project,
-    // spawned deliberately; an untrusted folder would gate project rules and
-    // sit the TUI at a prompt nobody sees), MCP servers, and the USER's model
-    // catalog carried over — grok auth is HOME-scoped (`auth.json` + custom
-    // [model.*] entries whose keys ride env vars), so an isolated home without
-    // the catalog is a logged-out agent (measured: "You are not authenticated").
-    std::fs::write(home.join("config.toml"), grok_config_toml(&mcp_defs(def)))
-        .map_err(|e| e.to_string())?;
-    let user_auth = grok_user_home().join("auth.json");
-    if user_auth.is_file() {
-        let _ = std::fs::copy(&user_auth, home.join("auth.json"));
-    }
-
-    // The agent definition: kiro's pattern in grok's dialect — YAML
-    // frontmatter + the system prompt as the body, selected via `--agent`.
-    // The MODEL lives here, not on the launch line (same lesson as kiro:
-    // verified that a frontmatter `model:` is honored, and it survives every
-    // start path because they all pass --agent). Skills have no isolated-home
-    // mechanism we control, so the compact index rides the prompt like claude.
-    let full_prompt = if skills.is_empty() {
-        system_prompt.to_string()
-    } else {
-        format!("{}\n\n{}", system_prompt, crate::projects::skills::skills_index_text(skills))
-    };
-    let mut fm = format!("---\nname: {name}\ndescription: {} (registry agent)\n", def.name);
-    let model = def.model.trim();
-    if !model.is_empty() {
-        fm.push_str(&format!("model: {model}\n"));
-    }
-    fm.push_str("---\n\n");
-    std::fs::write(home.join("agents").join(format!("{name}.md")), format!("{fm}{full_prompt}"))
-        .map_err(|e| e.to_string())?;
-
-    Ok(Rendered {
-        env: vec![("GROK_HOME".into(), home.to_string_lossy().to_string())],
-        cmd: format!(
-            "command grok --always-approve --agent {}{}",
-            shared::shell_quote(name),
-            effort_flag(def),
-        ),
-        confirmation: None,
-    })
-}
-
-/// Where the user's own grok lives. Only read, never written.
-fn grok_user_home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".grok")
-}
-
-/// omp (oh-my-pi) 18.x. The whole agent state — auth store (`agent.db`),
-/// `config.yml`, `mcp.json`, sessions, extensions — lives in ONE directory
-/// that `PI_CODING_AGENT_DIR` relocates (its settings docs: "the global
-/// config.yml, the auth store (agent.db), and everything else under the
-/// agent directory move with it"; verified live 2026-09-07, omp 18.0.6: a
-/// fresh dir answers prompts and grows its own agent.db). The isolated home
-/// IS that directory:
-///
-/// * auth carry: the user's `~/.omp/agent/agent.db` is the credential store
-///   (`auth_credentials` table), so it is copied in — grok's auth.json
-///   lesson; env-keyed providers (Bedrock bearer tokens) need nothing.
-/// * the MODEL lives in `<home>/config.yml` under `modelRoles.default`
-///   (identity in config, never the launch line); EFFORT rides `--thinking`,
-///   omp's own knob, enumerated in `models::effort_values`.
-/// * the system prompt is a FILE handed to `--append-system-prompt` —
-///   APPEND, deliberately not `--system-prompt`: omp's builtin prompt
-///   teaches its own tool harness (hashline edits, LSP, subagents), and
-///   replacing it would lobotomize the tools. (Verified live: a file path
-///   is read and its text reaches the prompt.)
-/// * telemetry: omp auto-loads TS extensions from `<agent-dir>/extensions/`
-///   (its extension-loading docs; the path honors PI_CODING_AGENT_DIR). The
-///   generated hook forwards turn edges and tool events to the tmm notify
-///   helper in claude's payload dialect, so the normalizer needs no new
-///   shapes — only the `omp` backend arm.
-fn render_omp(
-    def: &RegAgent, _name: &str, home: &Path, system_prompt: &str,
-    skills: &[crate::projects::skills::ResolvedSkill],
-) -> Result<Rendered, String> {
-    std::fs::create_dir_all(home.join("extensions")).map_err(|e| e.to_string())?;
-    let notifications = crate::agent_notifications::AgentNotificationHub::load();
-    notifications.ensure_helper()?;
-    std::fs::write(
-        home.join("extensions").join("tmm-telemetry.ts"),
-        omp_telemetry_extension(&notifications.helper_command("omp")),
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Auth carry: agent.db holds `auth_credentials` — an isolated home
-    // without it is a logged-out agent for OAuth-keyed providers. Best
-    // effort, like grok's auth.json copy.
-    let user_db = omp_user_agent_dir().join("agent.db");
-    if user_db.is_file() {
-        let _ = std::fs::copy(&user_db, home.join("agent.db"));
-    }
-    // Model-catalog carry (grok's config.toml lesson, in omp's dialect): the
-    // user's `models.yml` declares the custom providers/models the bundled
-    // catalog lacks — on this host the Bedrock trio (fable-5-1/opus/gpt-5.6)
-    // under `bedrock-extra` — and a registry def may name exactly such a
-    // model. An isolated home without the catalog cannot resolve it, so the
-    // file carries; UI prefs and hooks deliberately do NOT (that is what
-    // isolation is for).
-    let user_models = omp_user_agent_dir().join("models.yml");
-    if user_models.is_file() {
-        let _ = std::fs::copy(&user_models, home.join("models.yml"));
-    }
-
-    // config.yml: the model is identity, so it lives in the config the owner
-    // can read, not on the launch line (kiro's lesson). Empty = omp default.
-    let model = def.model.trim();
-    if !model.is_empty() {
-        std::fs::write(home.join("config.yml"), format!("modelRoles:\n  default: {model}\n"))
-            .map_err(|e| e.to_string())?;
-    }
-
-    // mcp.json in this home's user scope — claude's local-stdio/http shape
-    // is omp's too (its mcp-config docs name `~/.omp/agent/mcp.json`).
-    let mut servers = serde_json::Map::new();
-    for m in &mcp_defs(def) {
-        if !m.name.is_empty() {
-            servers.insert(m.name.clone(), shared::claude_mcp_value(m));
-        }
-    }
-    if !servers.is_empty() {
-        std::fs::write(
-            home.join("mcp.json"),
-            serde_json::to_string_pretty(&json!({ "mcpServers": servers })).unwrap(),
-        )
-        .map_err(|e| e.to_string())?;
-    }
-
-    // The prompt file --append-system-prompt reads. Skills have no isolated-
-    // home mechanism we control, so the compact index rides the prompt, like
-    // grok and claude.
-    let full_prompt = if skills.is_empty() {
-        system_prompt.to_string()
-    } else {
-        format!("{}\n\n{}", system_prompt, crate::projects::skills::skills_index_text(skills))
-    };
-    let prompt_path = home.join("system-prompt.md");
-    std::fs::write(&prompt_path, full_prompt).map_err(|e| e.to_string())?;
-
-    let effort = def.effort.trim();
-    let thinking = if effort.is_empty() {
-        String::new()
-    } else {
-        format!(" --thinking {}", shared::shell_quote(effort))
-    };
-    Ok(Rendered {
-        env: vec![("PI_CODING_AGENT_DIR".into(), home.to_string_lossy().to_string())],
-        cmd: format!(
-            "command omp --auto-approve --append-system-prompt {}{}",
-            shared::shell_quote(&prompt_path.to_string_lossy()),
-            thinking,
-        ),
-        confirmation: None,
-    })
-}
-
-/// Where the user's own omp agent state lives. Only read, never written.
-fn omp_user_agent_dir() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".omp").join("agent")
-}
-
-/// The telemetry extension a managed omp home carries: a hook factory (omp's
-/// documented extension shape — default export receiving the `pi` API) that
-/// forwards turn edges and tool events to the notify helper on stdin, in
-/// claude's payload dialect. Every handler is wrapped in try/catch and the
-/// child ignores errors: telemetry must never break the agent. TMUX_PANE
-/// reaches the helper because the child inherits omp's env, which inherits
-/// the pane's.
-fn omp_telemetry_extension(notify: &str) -> String {
-    // The helper command is a shell line (quoted path + backend + marker
-    // comment); embed it as a JSON string literal, which is also a valid TS
-    // string literal.
-    let cmd = serde_json::to_string(notify).unwrap();
-    format!(
-        r#"// tmux-mobile telemetry hook — auto-generated, rewritten on every start
-// (refresh_hooks). Forwards turn edges and tool events to the tmm notify
-// helper, which is a no-op outside a tmux pane. Do not edit.
-import {{ spawn }} from "node:child_process";
-
-const NOTIFY = {cmd};
-
-function send(payload: Record<string, unknown>): void {{
-  try {{
-    const child = spawn("/bin/sh", ["-c", NOTIFY], {{ stdio: ["pipe", "ignore", "ignore"] }});
-    child.on("error", () => {{}});
-    child.stdin?.write(JSON.stringify(payload));
-    child.stdin?.end();
-  }} catch {{}}
-}}
-
-function sessionId(ctx: any): string {{
-  try {{ return String(ctx?.sessionManager?.getSessionId?.() ?? ""); }} catch {{ return ""; }}
-}}
-
-function textOf(content: unknown): string {{
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {{
-    return content.map((c: any) => (typeof c?.text === "string" ? c.text : "")).join("");
-  }}
-  return "";
-}}
-
-export default function hook(pi: any): void {{
-  // agent_start fires once per user prompt, but the prompt itself is not in
-  // the session branch yet at that moment (measured, omp 18.0.6: the branch
-  // tail is still model/thinking entries). The FIRST context event after it
-  // carries the messages bound for the model — the newest user message there
-  // is the submitted prompt, the delivery receipt tmm acks against.
-  let awaitingPrompt = false;
-  pi.on("agent_start", async (_event: any, _ctx: any) => {{
-    awaitingPrompt = true;
-  }});
-  pi.on("context", async (event: any, ctx: any) => {{
-    if (!awaitingPrompt) return;
-    awaitingPrompt = false;
-    let prompt = "";
-    try {{
-      const messages = event?.messages ?? [];
-      for (let i = messages.length - 1; i >= 0; i--) {{
-        const m = messages[i] as any;
-        if (m?.role === "user") {{ prompt = textOf(m.content); break; }}
-      }}
-    }} catch {{}}
-    send({{ hook_event_name: "UserPromptSubmit", prompt, session_id: sessionId(ctx) }});
-  }});
-  // agent_end with willContinue is an auto-continuation, not a settle.
-  pi.on("agent_end", async (event: any, ctx: any) => {{
-    if (event?.willContinue) return;
-    awaitingPrompt = false;
-    let reply = "";
-    try {{
-      const messages = event?.messages ?? [];
-      for (let i = messages.length - 1; i >= 0; i--) {{
-        const m = messages[i] as any;
-        if (m?.role === "assistant") {{ reply = textOf(m.content); break; }}
-      }}
-    }} catch {{}}
-    send({{ hook_event_name: "Stop", last_assistant_message: reply, session_id: sessionId(ctx) }});
-  }});
-  pi.on("tool_call", async (event: any, ctx: any) => {{
-    send({{ hook_event_name: "PreToolUse", tool_name: event?.toolName ?? "tool", tool_input: event?.input ?? {{}}, session_id: sessionId(ctx) }});
-  }});
-  pi.on("tool_result", async (event: any, ctx: any) => {{
-    send({{ hook_event_name: "PostToolUse", tool_name: event?.toolName ?? "tool", session_id: sessionId(ctx) }});
-  }});
-}}
-"#
-    )
-}
-
-
-/// The isolated home's config.toml: folder-trust off, the user's model
-/// catalog (`[models]` + `[model.*]` — the auth-bearing half of grok config;
-/// hooks/MCP/UI prefs deliberately do NOT carry, that is what isolation is
-/// for), and the registry MCP servers in grok's `[mcp_servers.<name>]` shape.
-fn grok_config_toml(mcps: &[shared::McpDef]) -> String {
-    let user = std::fs::read_to_string(grok_user_home().join("config.toml")).ok();
-    grok_config_toml_from(mcps, user.as_deref())
-}
-
-/// The pure half, so the catalog carry is testable. TRAP, already paid for
-/// once: toml 1.x parses a DOCUMENT via `toml::Table` — `Value::from_str`
-/// parses a single value and fails on any real config with "expected nothing",
-/// which silently dropped the whole catalog and left every spawned grok at a
-/// login screen (caught live, 2026-08-21).
-fn grok_config_toml_from(mcps: &[shared::McpDef], user_config: Option<&str>) -> String {
-    let mut root = toml::value::Table::new();
-    let mut trust = toml::value::Table::new();
-    trust.insert("enabled".into(), toml::Value::Boolean(false));
-    root.insert("folder_trust".into(), toml::Value::Table(trust));
-    if let Some(user) = user_config.and_then(|t| t.parse::<toml::Table>().ok()) {
-        for key in ["models", "model"] {
-            if let Some(v) = user.get(key) {
-                root.insert(key.into(), v.clone());
-            }
-        }
-    }
-    let mut servers = toml::value::Table::new();
-    for m in mcps {
-        let Some(cmd) = m.command.as_deref().filter(|c| !c.is_empty()) else { continue };
-        if m.name.is_empty() {
-            continue;
-        }
-        let mut t = toml::value::Table::new();
-        t.insert("command".into(), toml::Value::String(cmd.to_string()));
-        if !m.args.is_empty() {
-            t.insert(
-                "args".into(),
-                toml::Value::Array(m.args.iter().map(|a| toml::Value::String(a.clone())).collect()),
-            );
-        }
-        if !m.env.is_empty() {
-            let mut env = toml::value::Table::new();
-            for (k, v) in &m.env {
-                env.insert(k.clone(), toml::Value::String(v.clone()));
-            }
-            t.insert("env".into(), toml::Value::Table(env));
-        }
-        servers.insert(m.name.clone(), toml::Value::Table(t));
-    }
-    if !servers.is_empty() {
-        root.insert("mcp_servers".into(), toml::Value::Table(servers));
-    }
-    let body = toml::to_string(&root).unwrap_or_default();
-    format!("# Written by tmux-mobile — regenerated at every spawn.\n{body}")
 }
 
 fn tmm_dir() -> Option<PathBuf> {

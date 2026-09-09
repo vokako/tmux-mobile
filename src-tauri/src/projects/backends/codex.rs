@@ -149,3 +149,114 @@ pub(crate) fn codex_context_left(line: &str) -> Option<u8> {
     Some((100 - left) as u8)
 }
 
+
+use serde_json::{json, Value};
+use std::path::Path;
+
+use crate::projects::spawn::{patch_hooks, Rendered};
+use crate::projects::store::RegAgent;
+
+use super::shared;
+
+pub(crate) fn codex_hooks(notify: &str) -> Value {
+    json!({
+        "PreToolUse":  [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify } ] } ],
+        "PostToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify } ] } ],
+        // Same turn-start contract as claude's (measured, codex-cli 0.148.0:
+        // payload {hook_event_name:"UserPromptSubmit", prompt, session_id} on
+        // hook stdin). Codex has NO StopFailure event (binary strings checked),
+        // so `failed` cannot be derived for it.
+        "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
+        "PermissionRequest": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
+        "Stop": [ { "hooks": [ { "type": "command", "command": notify } ] } ]
+    })
+}
+
+pub(crate) fn render_codex(
+    def: &RegAgent, _name: &str, home: &Path, system_prompt: &str,
+    skills: &[crate::projects::skills::ResolvedSkill],
+) -> Result<Rendered, String> {
+    let codex_home = home.join("codex");
+    std::fs::create_dir_all(&codex_home).map_err(|e| e.to_string())?;
+    shared::inherit_codex_system_files(&codex_home)?;
+    let notifications = crate::agent_notifications::AgentNotificationHub::load();
+    notifications.ensure_helper()?;
+    let notify = notifications.helper_command("codex");
+
+    let mut config_args: Vec<String> = Vec::new();
+    for m in &crate::projects::spawn::mcp_defs(def) {
+        if !m.name.is_empty() {
+            config_args.extend(shared::codex_mcp_overrides(m));
+        }
+    }
+    let full_prompt = if skills.is_empty() {
+        system_prompt.to_string()
+    } else {
+        format!("{}\n\n{}", system_prompt, crate::projects::skills::skills_index_text(skills))
+    };
+    // The prompt is a FILE, not a launch argument (owner, 2026-09-08: "能类似
+    // 通过 kiro 那样一个文件注入进去吗…这样更优雅一些"). codex reads the
+    // global `AGENTS.md` from CODEX_HOME on every start, and this home is
+    // ISOLATED — ours to write, never the user's (config.toml here is a
+    // symlink into the user's real home; AGENTS.md is deliberately not
+    // inherited). The old `-c developer_instructions=…` override put ~6 KB on
+    // the launch line, which spawn survives (it sources a script) but the
+    // restart replay typed into the pane — and a tty burst ≳2KB is exactly
+    // what send-keys mangles (team/launch.rs). A restart also re-materializes
+    // this file (refresh_agent), so the text stays current.
+    std::fs::write(codex_home.join("AGENTS.md"), &full_prompt).map_err(|e| e.to_string())?;
+    std::fs::write(
+        codex_home.join("hooks.json"),
+        serde_json::to_vec_pretty(&json!({
+            "hooks": codex_hooks(&notify)
+        }))
+        .unwrap(),
+    )
+    .map_err(|e| e.to_string())?;
+
+    if !def.model.is_empty() {
+        config_args.push(format!("--model {}", shared::shell_quote(&def.model)));
+    }
+    // Effort is a codex CONFIG key (`model_reasoning_effort`), so it rides a
+    // `-c` override like the rest of codex's identity — the recipe replays it.
+    if !def.effort.trim().is_empty() {
+        config_args.push(shared::codex_config_override(
+            "model_reasoning_effort",
+            Value::String(def.effort.trim().to_string()),
+        ));
+    }
+    config_args.push("--dangerously-bypass-approvals-and-sandbox".into());
+    config_args.push("--dangerously-bypass-hook-trust".into());
+    Ok(Rendered {
+        env: vec![("CODEX_HOME".into(), codex_home.to_string_lossy().to_string())],
+        cmd: format!("command codex {}", config_args.join(" ")),
+        confirmation: Some(shared::StartupConfirmation {
+            markers: shared::CODEX_FOLDER_TRUST_MARKERS.to_vec(),
+            ready_markers: vec!["Starting MCP servers", "OpenAI Codex"],
+            accept_keys: vec!["Enter"],
+            timeout: std::time::Duration::from_secs(120),
+        }),
+    })
+}
+
+
+/// The codex half of `refresh_hooks`.
+pub(crate) fn refresh(home: &Path, notify: &str) -> bool {
+    let hooks = home.join("codex").join("hooks.json");
+    hooks.is_file() && patch_hooks(&hooks, codex_hooks(notify))
+}
+
+/// codex's resume is a SUBCOMMAND, so it splices in after the binary instead
+/// of appending: `codex resume <id> <flags>`. The managed CODEX_HOME belongs
+/// to this one agent and `--last` is cwd-filtered, so the recent fallback
+/// cannot cross into another project/session. An unexpected recipe shape
+/// relaunches without resume rather than guessing where the subcommand goes.
+pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
+    match cmd.strip_prefix("command codex ") {
+        Some(rest) => {
+            let which = id.map(shared::shell_quote).unwrap_or_else(|| "--last".to_string());
+            format!("command codex resume {which} {rest}")
+        }
+        None => cmd.to_string(),
+    }
+}

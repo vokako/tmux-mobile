@@ -120,3 +120,249 @@ pub fn sniff_claude(pane: &str) -> Vitals {
     v
 }
 
+
+use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
+
+use crate::projects::spawn::{effort_flag, patch_hooks, Rendered};
+use crate::projects::store::RegAgent;
+
+use super::shared;
+
+pub(crate) fn claude_hooks(notify: &str) -> Value {
+    json!({
+        "PreToolUse":  [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify } ] } ],
+        "PostToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify } ] } ],
+        // Turn start — resets the same-turn dedup flag and carries the
+        // submitted prompt (the delivery receipt). Shipping Stop WITHOUT this
+        // made the flag sticky: the first `tmm send` killed the auto-post for
+        // every later turn of that window, and lines typed by
+        // `deliver_mentions` were never acked (hollow ring forever). Kiro and
+        // grok had it; claude and codex did not (owner, 2026-08-22: 对齐).
+        "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
+        "Notification": [ { "matcher": "permission_prompt|agent_needs_input|agent_completed", "hooks": [ { "type": "command", "command": notify } ] } ],
+        "Stop": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
+        "StopFailure": [ { "hooks": [ { "type": "command", "command": notify } ] } ]
+    })
+}
+
+pub(crate) fn claude_trust_key(workspace: &Path) -> PathBuf {
+    let start = std::fs::canonicalize(workspace).unwrap_or_else(|_| workspace.to_path_buf());
+    start
+        .ancestors()
+        .find(|path| path.join(".git").exists())
+        .unwrap_or(&start)
+        .to_path_buf()
+}
+
+/// Materialize onboarding + workspace trust in an isolated managed Claude home.
+/// Claude's official permissions docs name this exact persisted shape. Merge,
+/// never replace: `.claude.json` also owns session history, usage and UI state.
+pub(crate) fn ensure_claude_state(home: &Path, workspace: &Path) -> Result<bool, String> {
+    let path = home.join(".claude.json");
+    let mut root = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    let obj = root.as_object_mut().expect("filtered to object");
+    let mut changed = !path.is_file();
+    if obj.get("hasCompletedOnboarding") != Some(&json!(true)) {
+        obj.insert("hasCompletedOnboarding".into(), json!(true));
+        changed = true;
+    }
+    if !obj.contains_key("theme") {
+        obj.insert("theme".into(), json!("dark"));
+        changed = true;
+    }
+    if !obj.get("projects").is_some_and(Value::is_object) {
+        obj.insert("projects".into(), json!({}));
+        changed = true;
+    }
+    let trust_key = claude_trust_key(workspace).to_string_lossy().into_owned();
+    let projects = obj.get_mut("projects").and_then(Value::as_object_mut).unwrap();
+    let entry = projects.entry(trust_key).or_insert_with(|| json!({}));
+    if !entry.is_object() {
+        *entry = json!({});
+        changed = true;
+    }
+    let project = entry.as_object_mut().unwrap();
+    if project.get("hasTrustDialogAccepted") != Some(&json!(true)) {
+        project.insert("hasTrustDialogAccepted".into(), json!(true));
+        changed = true;
+    }
+    if changed {
+        let text = format!("{}\n", serde_json::to_string_pretty(&root).unwrap());
+        std::fs::write(&path, text).map_err(|e| format!("write {}: {e}", path.display()))?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&path).map_err(|e| e.to_string())?.permissions().mode() & 0o777;
+        if mode != 0o600 {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                .map_err(|e| format!("chmod {}: {e}", path.display()))?;
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
+pub(crate) fn render_claude(
+    def: &RegAgent, _name: &str, home: &Path, workspace: &Path,
+    system_prompt: &str, skills: &[crate::projects::skills::ResolvedSkill],
+) -> Result<Rendered, String> {
+    let notifications = crate::agent_notifications::AgentNotificationHub::load();
+    notifications.ensure_helper()?;
+    let notify = notifications.helper_command("claude");
+
+    let mut mcp_servers = json!({});
+    for m in &crate::projects::spawn::mcp_defs(def) {
+        if !m.name.is_empty() {
+            mcp_servers.as_object_mut().unwrap().insert(m.name.clone(), shared::claude_mcp_value(m));
+        }
+    }
+    let mcpfile = home.join("mcp.json");
+    std::fs::write(&mcpfile, serde_json::to_string_pretty(&json!({ "mcpServers": mcp_servers })).unwrap())
+        .map_err(|e| e.to_string())?;
+    // The isolated home is the agent's CLAUDE_CONFIG_DIR (claude's KIRO_HOME:
+    // history, session state and .claude.json live here, so a managed agent
+    // never leaks into the user's ~/.claude). That relocation also means the
+    // USER's settings layer is no longer read — so the channel config is
+    // INHERITED: the `env` block of ~/.claude/settings.json (the Bedrock
+    // switch: CLAUDE_CODE_USE_BEDROCK/AWS_REGION/ANTHROPIC_MODEL…) is copied
+    // into the isolated settings.json, grok's "auth carries, prefs do not"
+    // pattern in claude's dialect (owner, 2026-08-22: "都用bedrock渠道…复用
+    // 我们全局定义的配置 但是自己管理好类似kirohome这种"). Plugins and
+    // marketplaces deliberately do NOT carry.
+    let settingsfile = home.join("settings.json");
+    std::fs::write(
+        &settingsfile,
+        serde_json::to_string_pretty(&json!({
+            "env": shared::claude_user_env(),
+            "statusLine": shared::claude_status_line_config(),
+            "skipDangerousModePermissionPrompt": true,
+            "hooks": claude_hooks(&notify)
+        }))
+        .unwrap(),
+    )
+    .map_err(|e| e.to_string())?;
+    // A fresh CLAUDE_CONFIG_DIR otherwise parks at the theme/onboarding and
+    // workspace-trust dialogs before the TUI. Claude documents the persisted
+    // trust shape (`projects[repo_root].hasTrustDialogAccepted = true`); this
+    // home exists only because the user explicitly spawned a managed agent in
+    // this workspace, so materialize that decision before launching.
+    ensure_claude_state(home, workspace)?;
+
+    // Claude has no native skill mechanism — inject the compact index.
+    let full_prompt = if skills.is_empty() {
+        system_prompt.to_string()
+    } else {
+        format!("{}\n\n{}", system_prompt, crate::projects::skills::skills_index_text(skills))
+    };
+    // The prompt is a FILE, like every other backend now (owner, 2026-09-08:
+    // "类似的 Claude omp grok 是不是也是这种文件形式的，保证更加稳定"):
+    // claude reads the user-memory `CLAUDE.md` from CLAUDE_CONFIG_DIR — this
+    // isolated home — verified live (claude 2.1.239 quoted a marker from a
+    // relocated dir's CLAUDE.md and obeyed its instruction). The old
+    // `--append-system-prompt <6 KB literal>` was the last launch line bigger
+    // than a send-keys burst; every start path is a short line now.
+    std::fs::write(home.join("CLAUDE.md"), &full_prompt).map_err(|e| e.to_string())?;
+    // An empty model means the BACKEND default — with Bedrock that is the
+    // inherited env's ANTHROPIC_MODEL, so no `--model` is passed (the old
+    // hardcoded `sonnet` alias overrode the env and does not resolve on
+    // Bedrock). A configured model rides `--model`, which wins over env.
+    let model_arg = if def.model.trim().is_empty() {
+        String::new()
+    } else {
+        format!(" --model {}", shared::shell_quote(def.model.trim()))
+    };
+    Ok(Rendered {
+        env: vec![("CLAUDE_CONFIG_DIR".into(), home.to_string_lossy().to_string())],
+        cmd: format!(
+            "command claude --mcp-config {} --strict-mcp-config --settings {}{}{} --dangerously-skip-permissions",
+            shared::shell_quote(&mcpfile.to_string_lossy()),
+            shared::shell_quote(&settingsfile.to_string_lossy()),
+            model_arg,
+            effort_flag(def),
+        ),
+        confirmation: Some(shared::StartupConfirmation {
+            markers: shared::CLAUDE_FOLDER_TRUST_MARKERS.to_vec(),
+            ready_markers: vec!["bypass permissions on"],
+            accept_keys: vec!["Down", "Enter"],
+            timeout: std::time::Duration::from_secs(120),
+        }),
+    })
+}
+
+/// Merge missing provider-channel keys into a managed Claude settings object.
+/// Existing values are per-agent overrides and win; newly introduced global
+/// keys (for example ANTHROPIC_DEFAULT_HAIKU_MODEL replacing the deprecated
+/// small-fast key) still reach old homes on their next start.
+pub(crate) fn merge_missing_claude_env(conf: &mut Value, inherited: &Value) -> bool {
+    let Some(root) = conf.as_object_mut() else { return false };
+    let Some(source) = inherited.as_object().filter(|env| !env.is_empty()) else { return false };
+    if !root.get("env").is_some_and(Value::is_object) {
+        root.insert("env".into(), Value::Object(source.clone()));
+        return true;
+    }
+    let target = root.get_mut("env").and_then(Value::as_object_mut).unwrap();
+    let mut changed = false;
+    for (key, value) in source {
+        if !target.contains_key(key) {
+            target.insert(key.clone(), value.clone());
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// Backfill a managed claude settings.json with missing inherited channel keys
+/// (see `backends_shared::claude_user_env`). Fail-soft: refresh must never
+/// block a start. Returns true when the file changed.
+pub(crate) fn ensure_claude_env(path: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(path) else { return false };
+    let Ok(mut conf) = serde_json::from_str::<Value>(&text) else { return false };
+    let inherited = shared::claude_user_env();
+    if !merge_missing_claude_env(&mut conf, &inherited) {
+        return false;
+    }
+    std::fs::write(path, serde_json::to_string_pretty(&conf).unwrap()).is_ok()
+}
+
+pub(crate) fn ensure_claude_status_line(path: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(path) else { return false };
+    let Ok(mut conf) = serde_json::from_str::<Value>(&text) else { return false };
+    let Some(root) = conf.as_object_mut() else { return false };
+    let canonical = shared::claude_status_line_config();
+    if root.get("statusLine") == Some(&canonical) {
+        return false;
+    }
+    root.insert("statusLine".into(), canonical);
+    std::fs::write(path, serde_json::to_string_pretty(&conf).unwrap()).is_ok()
+}
+
+
+/// The claude half of `refresh_hooks`: hooks, channel drift (missing global
+/// Bedrock keys backfilled without overwriting per-agent overrides), the
+/// official statusLine, and pre-seeded workspace trust.
+pub(crate) fn refresh(home: &Path, workspace: &Path, notify: &str) -> bool {
+    let mut changed = false;
+    let settings = home.join("settings.json");
+    if settings.is_file() {
+        changed |= patch_hooks(&settings, claude_hooks(notify));
+        changed |= ensure_claude_env(&settings);
+        changed |= ensure_claude_status_line(&settings);
+        changed |= ensure_claude_state(home, workspace).unwrap_or(false);
+    }
+    changed
+}
+
+/// claude resume dialect: `--resume <id>` exact, `--continue` recent
+/// (cwd-scoped, and the isolated home is this one agent's).
+pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
+    match id {
+        Some(id) => format!("{cmd} --resume {}", shared::shell_quote(id)),
+        None => format!("{cmd} --continue"),
+    }
+}

@@ -79,6 +79,58 @@ impl Backend {
         }
     }
 
+    /// Render an agent's isolated home from its definition — prompt, backend
+    /// config, hooks, launch command (board #128). Each arm is the backend's
+    /// own file; `workspace` is read by claude alone (trust pre-seeding).
+    #[allow(clippy::too_many_arguments)]
+    pub fn render(
+        self,
+        def: &crate::projects::store::RegAgent,
+        window_name: &str,
+        home: &std::path::Path,
+        workspace: &std::path::Path,
+        system_prompt: &str,
+        skills: &[crate::projects::skills::ResolvedSkill],
+    ) -> Result<crate::projects::spawn::Rendered, String> {
+        match self {
+            Backend::Kiro => kiro::render_kiro(def, window_name, home, system_prompt, skills),
+            Backend::Claude => claude::render_claude(def, window_name, home, workspace, system_prompt, skills),
+            Backend::Codex => codex::render_codex(def, window_name, home, system_prompt, skills),
+            Backend::Grok => grok::render_grok(def, window_name, home, system_prompt, skills),
+            Backend::Omp => omp::render_omp(def, window_name, home, system_prompt, skills),
+        }
+    }
+
+    /// The backend's resume dialect on one persisted identity command.
+    pub fn resume_command(self, cmd: &str, id: Option<&str>) -> String {
+        match self {
+            Backend::Kiro => kiro::resume_command(cmd, id),
+            Backend::Claude => claude::resume_command(cmd, id),
+            Backend::Codex => codex::resume_command(cmd, id),
+            Backend::Grok => grok::resume_command(cmd, id),
+            Backend::Omp => omp::resume_command(cmd, id),
+        }
+    }
+
+    /// Repair this backend's on-disk surface in a managed home (hooks,
+    /// settings, channel keys, recipe backfill). Probes for its own files and
+    /// no-ops when the home is not this backend's.
+    pub fn refresh(
+        self,
+        home: &std::path::Path,
+        window_name: &str,
+        workspace: &std::path::Path,
+        notifications: &crate::agent_notifications::AgentNotificationHub,
+    ) -> bool {
+        match self {
+            Backend::Kiro => kiro::refresh(home, window_name, &notifications.helper_command("kiro")),
+            Backend::Claude => claude::refresh(home, workspace, &notifications.helper_command("claude")),
+            Backend::Codex => codex::refresh(home, &notifications.helper_command("codex")),
+            Backend::Grok => grok::refresh(home, &notifications.helper_command("grok")),
+            Backend::Omp => omp::refresh(home, &notifications.helper_command("omp")),
+        }
+    }
+
     /// Read the CLI's own status furniture from a pane capture — each
     /// backend paints its own dialect, and reading one CLI's screen with
     /// another's grammar yields confident nonsense (agent-status.md).
