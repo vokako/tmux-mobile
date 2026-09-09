@@ -18,6 +18,42 @@ page layers stay mounted (`visibility: hidden`) so state survives tab switches, 
 
 every send path calls `resumeLiveTail()` — drop the selection, stop momentum, unpin `touchScrolling`, snap to bottom, repaint from `lastContent`. Without it a suppressed render never recovers: the server skips frames whose state equals the last one it *sent*, so it never re-sends the one the client dropped, and the typed characters only appear when an unrelated repaint (resize / visibility / pane switch) happens. `unlockKeyboard()` must never `clearTimeout(endTouchScrollTimer)` — that timer is the only pending reset of `touchScrolling`.
 
+### Snapshot replacement stays inside the synchronized frame
+
+Snapshots include tmux history (`capture-pane -S -get_scrollback()`, default
+500 lines) plus the pane; xterm's local history is also capped at 500. Replaying
+a full snapshot restores that history. The old "permanent scrollback loss"
+description was therefore a misdiagnosis, and simply deleting `term.clear()`
+would append duplicate history on each replay.
+
+The real defect (#109, 2026-09-09) was **synchronous** `clear()` before the
+queued `write()`. It emits `onScroll` with `baseY = viewportY = 0`. While the
+reader is in history, our handler mistakes that for a return to tail: it
+clears `hasNewContent` (the `.to-tail` news indicator) and queues another
+rewrite. Each rewrite can repeat the false transition.
+
+`terminal-frame.ts` now wraps the existing body/padding/cursor bytes in ONE
+queued synchronized-output write: `CSI ?2026h`, hide cursor, **CSI 3J**,
+home, frame body, show cursor, `CSI ?2026l`. The erase is unconditional in
+the byte stream (a no-op with empty history), so consecutive frames queued
+before either is parsed still erase/rebuild in order. No out-of-band
+`clear()`/`reset()`, second cache, delta renderer or extra scroll guard.
+After restoring the viewport, the write callback derives the final tail/news
+state directly: a history-free replacement may emit no scroll event at all.
+The same `_writeToXtermNow` path handles updates, resize/reconnect and
+tail/show replay; pane switches still create a fresh xterm. Hidden-frame
+recording, scrollback deferral, input-to-tail and `.to-tail` remain unchanged.
+
+Measured with **xterm 6.0.0**, **Chromium 152** (Node **22.23.2** for unit
+tests): in a 60x8 terminal with 50 history rows, reading at viewport 12,
+one requested old rewrite caused **8 completed redraws** (the probe cap),
+8 false zero-scroll events and loss of the new-output flag. The in-frame
+erase produced one redraw, no false-tail event, preserved the flag, and
+kept the same history and viewport 12. Both versions ultimately displayed
+the same text; this is not a claim of persistent history loss or a measured
+text flash. Real-xterm tests also cover repeated snapshots, queued frame
+ordering, resize, cursor/blank-row restoration and the bounded history.
+
 ### Ctrl keys must be tmux named keys
 
 with `extended-keys on`, tmux DROPS raw C0 bytes (`send-keys -l $'\x03'`) sent to panes in extended key mode (`#{pane_key_mode}`=`Ext` — every modern agent TUI). `tmux::send_keys` literal mode therefore splits C0 bytes into named keys (`C-c`, `M-C-x`); don't bypass it.

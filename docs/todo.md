@@ -37,7 +37,7 @@
 - [ ] `is_managed_in` 在 `agent_remove` 后可被 kiro 重建 `KIRO_HOME` 子树重新武装 → 门控 `launch.json`。
 - [ ] `Terminal.svelte` 触摸手势状态机 ~1300 行嵌在 effect 闭包，零测试；`kbLocked` 不变量只靠文档。
 - [x] #108：`onData` 分片/合并响应已由有界状态过滤器覆盖；原始 `?62;22;52c` 现象的来源仍待实测，见 `unresolved.md`。
-- [ ] 终端全量重写时 `term.clear()` 丢 xterm 侧 scrollback。
+- [x] #109：完整快照会恢复历史；已修复同步 `clear()` 的假到尾事件、标记丢失与重复重绘，清除改为帧内 `CSI 3J`。
 - [ ] 遥测按窗口 INDEX 而身份是 NAME（`renumber-windows` 下错位）；hook→consume 间重命名丢 post；
   相同 body 混淆回执；投递无背压；`SPAWN_CAP` 计入非我方窗口。
 - [ ] backend parity：claude `/` palette 未转录；claude/codex/grok 无 auto-continue；codex 无 StopFailure。

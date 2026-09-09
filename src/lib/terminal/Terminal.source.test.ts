@@ -5,6 +5,22 @@ import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('./Terminal.svelte', import.meta.url), 'utf8');
 
+test('full snapshots use one queued frame without an out-of-band clear (#109)', () => {
+  assert.match(source, /import \{ writeTerminalFrame \} from '\.\/terminal-frame\.ts';/u);
+  assert.match(source, /writeTerminalFrame\(term, body \+ padAft/u, 'the existing frame body/cursor pipeline uses the tested writer');
+  assert.doesNotMatch(source, /term\.(?:clear|reset)\(\)/u, 'no synchronous scroll-to-zero event can trigger another rewrite');
+  const writer = source.slice(source.indexOf('writeTerminalFrame(term,'), source.indexOf('// xterm.js setup + subscription'));
+  assert.match(writer, /termAtBottom = term\.buffer\.active\.viewportY >= term\.buffer\.active\.baseY;\s*if \(termAtBottom\) hasNewContent = false;/u,
+    'completion publishes the final tail state even when a history-free frame emits no scroll event');
+  // These gates are deliberately unchanged: reading history defers output,
+  // hidden terminals only record it, and showing one replays through the same
+  // frame path. The existing resumeLiveTail tests pin every input path.
+  assert.match(source, /if \(!visible\) \{\s*if \(content != null\) lastContent = content;\s*return;\s*\}/u);
+  assert.match(source, /if \(!visible\) \{ wasVisible = false; return; \}/u);
+  assert.match(source, /if \(termAtBottom\) writeToXterm\(content, lastCursor\);\s*else hasNewContent = true;/u);
+  assert.match(source, /class="to-tail scroll-btn" class:news=\{hasNewContent\}/u, 'new output still uses the one to-tail control');
+});
+
 test('DA/DSR filtering carries across onData callbacks and belongs to one xterm instance (#108)', () => {
   const setup = source.indexOf('const responseFilter = createTerminalResponseFilter();');
   assert.ok(setup > source.indexOf('term = new Terminal('), 'the filter is instance-local, not shared across split panes');

@@ -163,10 +163,8 @@
 - **Area**: Build / Platform
 - **Details**: iOS build not yet implemented. Needs Xcode + xcodegen + Apple Developer account. Basic setup: `rustup target add aarch64-apple-ios aarch64-apple-ios-sim && npx tauri ios init && npx tauri ios dev`
 
-## Terminal scrollback reset on full rewrite
-- **Priority**: Medium
-- **Area**: Terminal
-- **Details**: `writeToXterm` calls `term.clear()` when `buf.baseY > 0`, dropping all xterm-side scrollback on each full rewrite. tmux only returns ~500 lines per capture, so scrollback effectively caps at the server snapshot length, and any extra history xterm had built up is lost after each push. Fix needs delta-based content updates instead of full rewrite, or server-side scrollback streaming. Affects: `src/lib/terminal/Terminal.svelte:writeToXterm`.
+## ~~Terminal scrollback reset on full rewrite~~
+- Resolved #109, 2026-09-09: a full snapshot already includes history and restores it; deleting the clear duplicates that history. The measured defect was synchronous `clear()` emitting a false scroll-to-tail event before the queued write, clearing the new-output indicator and repeatedly requeuing the frame. Erasing with `CSI 3J` inside the existing synchronized-output write removes that transient event. Chromium 152/xterm 6.0.0: 8 repeated redraws at the probe cap became one; history, reading position and the news flag remain intact. History beyond the authoritative server snapshot is a separate design topic, not implemented here. See [terminal-rendering.md](design-docs/pages/terminal-rendering.md#snapshot-replacement-stays-inside-the-synchronized-frame).
 
 ## ~~Chat parser runs on every pane output~~
 - Resolved 2026-07 by deletion: the chat feature (ChatView + parsers.js and

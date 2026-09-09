@@ -24,6 +24,7 @@
   import { cycleItem } from '../app/shortcuts.ts';
   import { createDoubleTapDetector, createOneShotCtrl, encodeTerminalShortcut } from './terminal-keyboard.ts';
   import { createTerminalResponseFilter } from './terminal-responses.ts';
+  import { writeTerminalFrame } from './terminal-frame.ts';
   import { openExternalUrl } from '../core/external-links.ts';
 
   // Timing constants
@@ -547,7 +548,6 @@
       }
     }
 
-    if (buf.baseY > 0) term.clear();
     // Build the body so each line ends with SGR reset + erase-to-EOL. This
     // overwrites the previous frame's cells *in place* — xterm never has a
     // "fully blank" intermediate state, so there is no visible flash.
@@ -568,13 +568,17 @@
     // Synchronized Output (mode 2026): tell xterm to defer rendering until
     // the whole batch is parsed. Effectively wraps the entire frame in a
     // single render commit, avoiding any partial-paint glimpses.
-    term.write('\x1b[?2026h\x1b[?25l\x1b[H' + body + padAft + '\x1b[0m\x1b[0J' + cursorSeq + '\x1b[?25h\x1b[?2026l', () => {
+    writeTerminalFrame(term, body + padAft + '\x1b[0m\x1b[0J' + cursorSeq, () => {
       if (!term || touchScrolling) return;
       if (atBottom) {
         term.scrollToBottom();
       } else {
         term.scrollToLine(Math.min(prevViewport, term.buffer.active.baseY));
       }
+      // A history-free replacement can finish without any onScroll event.
+      // Publish the final position, not a user gesture that requeues a frame.
+      termAtBottom = term.buffer.active.viewportY >= term.buffer.active.baseY;
+      if (termAtBottom) hasNewContent = false;
     });
   }
 
