@@ -110,8 +110,10 @@ the registry keeps no duplicate open flags. Missing callbacks fall through.
 Each disposer belongs to one registration, so an old owner cannot remove
 its replacement even when both register the same function.
 
-Hub still publishes one callback through `onGoBack`; cleanup removes its
-registrations. The original guards remain: a truthy palette consumes even
+Hub still publishes one callback through `onGoBack`; cleanup removes each
+owner's registrations. Since board #133 (2026-09-09), Composer registers its
+recipient/palette/interrupt slots; Hub owns the other twelve. The original
+guards remain: a truthy palette consumes even
 without items, busy action confirmation falls through, and Files is called
 only for an open Files partition and consumes only on a true return.
 Message actions/raw view are not Back layers; Board delegation is not added.

@@ -36,7 +36,8 @@ and offers a shared dialect only when the managed roster has exactly one.
 Substitution replaces the first matching token, appends missing-token
 references in attachment order, and retains `String.replace` semantics.
 The existing command/mention/readline parsers and command tables stay in
-`hub.ts`; Hub keeps `send()`, staging, state, effects, DOM and both send gates.
+`hub.ts`; Hub keeps `send()`, staging and both send gates. Board #133 moves
+the view-owned state and DOM as described below.
 
 The mounted Hub test holds a file upload unresolved, presses Enter and
 observes no post; after upload it observes the complete addressed body.
@@ -61,6 +62,39 @@ The receipt and recipient menu share the dashed `.note-dot` in
 is relocated once, with the same two-class specificity and restricted parent
 selectors, so extracting the Composer does not duplicate it or restyle
 embedded Files/Terminal/Board content.
+
+### View ownership (board #133, 2026-09-09)
+
+`Composer.svelte` owns the capsule, textarea/mirror sizing, paste/key adapters,
+palette/model cache, readline kill buffer, recipient popover and interrupt
+arm/timer. It is unkeyed and lives as long as Hub: changing rooms does not
+reset the kill buffer or model cache. Private CSS moves with its markup;
+compact ancestor selectors cross the Svelte boundary at the same specificity.
+
+Hub still owns the draft binding, recipient/preference writes, attachment
+generation/jobs/pending set, staging, `send()` and every RPC. Composer receives
+explicit state and commands, not a Hub store or feed/roster DOM references.
+The named `caret`/`focus` methods replace staging's two textarea accesses;
+height/focus intents retain the original parent tail behavior. Thumbnail
+preview passes the original local object URL to Hub's existing Lightbox.
+
+Composer registers only recipient/palette/interrupt with the existing fixed
+Back registry and disposes those registrations on unmount. The capture-phase
+listeners remain in Hub in their original order; their Composer portions
+delegate to live child methods, not copied open flags. Parent recipient
+selection still closes the picker and disarms synchronously. No browser
+history listener, new dismissal mechanism or RPC race fix is part of this move.
+
+Verification on Svelte 5.53.5 / Vite 6.4.1 / Node 22.23.2: seven moved
+handlers and `send()` are AST-identical; staging/growth differ only by their
+named boundary calls; all 73 moved CSS rule bodies match. Chromium
+152.0.7977.64 produced 54 identical text/rect/computed-style signatures
+across the six variants. The font-mirror negative control removed only the
+mirror's command-font selector: its tail marker moved from (552.58, 849.5)
+to (983.13, 809), failing the geometry assertion. The selector was restored.
+The restored build passes that assertion again. Two additional desktop/compact
+long-recipient signatures also match; real PNG paste stages a thumbnail whose
+original local URL opens in the existing Lightbox in both layouts.
 
 ### Words beside a picture of the words: the text is the paste (2026-09-08)
 

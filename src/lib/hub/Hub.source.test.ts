@@ -41,28 +41,19 @@ test('Hub dot sizing has one shared declaration without restyling embedded pages
   assert.doesNotMatch(source, /^\s*\.note-dot \{/mu);
 });
 
-test('the composer stacks above every feed layer, so its popovers are never buried', () => {
+test('the feed layers remain below the Composer stacking context', () => {
   // Board #1: the recipient menu opened UNDER a pinned bubble — .to-wrap's own
   // z-index:2 capped it below .ask-top's 6. The rule is decided ONCE at the
   // composer: it is a stacking context whose level beats the feed's layers
   // (pinned 6, actions overlay 8), so anything opening out of it — the
   // recipient menu, the / palette — wins without per-popover arithmetic.
-  // `rule('.composer')` would find `.hub-root.compact .composer` first, so
-  // anchor on the base declaration at the start of its own line.
-  const composer = /\n  \.composer \{([^}]*)\}/u.exec(source)?.[1] ?? '';
-  assert.match(composer, /position:\s*relative/u, 'the composer must be positioned to form a stacking context');
+  // Composer.source.test pins the other half at 15 after #133.
   const z = (css: string) => Number(/z-index:\s*(\d+)/u.exec(css)?.[1] ?? NaN);
-  const composerZ = z(composer);
-  assert.ok(Number.isFinite(composerZ), 'the composer carries an explicit z-index');
   for (const sel of ['.msg.ask-top', '.msg.ask-bottom']) {
     const feedZ = z(rule(sel));
     assert.ok(Number.isFinite(feedZ), `${sel} still declares a z-index`);
-    assert.ok(composerZ > feedZ, `composer (${composerZ}) must stack above ${sel} (${feedZ})`);
+    assert.ok(15 > feedZ, `Composer (15) must stack above ${sel} (${feedZ})`);
   }
-  // And inside the composer the palette must stay above the recipient menu —
-  // both exist in the same context; the palette is the newer layer.
-  assert.ok(z(rule('.cmd-menu')) > z(rule('.to-menu')), 'palette above recipient menu inside the composer');
-
 });
 
 test('an uncached room unfolds: skeletons while it loads, then the feed from its tail and the roster from the left (motion.md wave 8)', () => {
@@ -83,9 +74,6 @@ test('an uncached room unfolds: skeletons while it loads, then the feed from its
 
 test('Hub hover surfaces keep the shared status vocabulary (board #87)', () => {
   assert.match(source, /class="win-pill state-ctl"[\s\S]{0,200}?use:hoverInfo=\{\(\) => pillInfo\(a\)\}/u, 'the drawer window pill');
-  const chip = /<button class="to-chip"[\s\S]*?>/u.exec(source)?.[0] ?? '';
-  assert.match(chip, /use:hoverInfo=\{toChipInfo\}/u, 'the recipient chip explains its destination');
-  assert.ok(!/\stitle=/u.test(chip), 'and carries no native title');
   // The tone of the state row is the SAME family the dot paints — no second
   // colour language (rule 6).
   assert.match(source, /function stateTone\(state\) \{\s*switch \(stateDotColor\(state\)\)/u, 'the hover tone derives from stateDotColor');
@@ -121,22 +109,23 @@ test('Hub retains roster actions and the original dismissal state (#132)', () =>
   assert.doesNotMatch(source, /function cardClick|function toggleAgentMenu|class="roster"|class="a-menu pop-layer"/u);
 });
 
-test('the composer\u2019s two upward menus grow from the chip like every other popover (motion.md wave 6)', () => {
-  // Both are absolutely positioned above the capsule, so the corner touching
-  // their trigger is the bottom-left one; the atom only touches opacity /
-  // transform / pointer-events, and rests with `transform: none`, so the
-  // menus' own `position: absolute; bottom: calc(100% + 6px)` still places them.
-
-  for (const menu of ['to-menu', 'cmd-menu']) {
-    const re = new RegExp(`<div class="${menu} pop-layer" class:ready=\\{(\\w+) > 0\\} style:--pop-origin="bottom left"[^>]*bind:clientHeight=\\{\\1\\}`, 'u');
-    assert.match(source, re, `.${menu} is measured, then grows from bottom left`);
-  }
-  // A closed menu forgets its height, so the NEXT opening is measured (and
-  // animated) again instead of appearing already `.ready`.
-  assert.match(source, /if \(!recipientOpen\) toMenuH = 0;/u, 'the recipient menu re-measures per opening');
-  assert.match(source, /if \(!palette\?\.items\.length\) cmdMenuH = 0;/u, 'the palette re-measures per opening');
-  assert.match(rule('.to-menu'), /position: absolute; bottom: calc\(100% \+ 6px\)/u, 'the recipient menu keeps its own placement');
-  assert.match(rule('.cmd-menu'), /position: absolute; bottom: calc\(100% \+ 6px\)/u, 'the palette keeps its own placement');
+test('Hub keeps Composer transport and capture listeners at the coordinator boundary (#133)', () => {
+  assert.match(source, /<Composer bind:this=\{composer\} bind:composerText \{selected\} \{compact\} \{recipient\}/u);
+  assert.match(source, /onselect=\{setRecipient\} onsend=\{send\} onstage=\{stageFiles\} onremove=\{removeAttachment\}/u);
+  assert.match(source, /onmodels=\{modelsList\} oninterrupt=\{fireInterrupt\}/u);
+  assert.match(source, /onheightchange=\{\(\) => \{ if \(following\) scrollFeed\(true\); \}\}/u);
+  assert.match(source, /onfocus=\{\(\) => \{ following = true; scrollFeed\(true\); setTimeout\(\(\) => scrollFeed\(true\), 300\); \}\}/u);
+  assert.match(source, /let at = composer\?\.caret\(\) \?\? composerText\.length;/u);
+  assert.match(source, /composer\?\.focus\(\);/u);
+  assert.match(source, /composer\?\.recipientChanged\(\);/u);
+  assert.match(source, /hubPrefs\.setDraft\(selected, composerText\)/u);
+  const drawer = source.indexOf("if (!termOpen || !visible) return;");
+  const roster = source.indexOf("if (!menuFor) return;");
+  const transients = source.indexOf("if (!msgOpen && !composer?.hasTransient()) return;");
+  assert.ok(drawer < roster && roster < transients, 'the existing capture effects keep their order');
+  assert.match(source, /if \(msgOpen && !t\?\.closest\?\.\('\.m-acts, \.bubble'\)\) msgOpen = '';\s*composer\?\.dismissOutside\(e\);/u);
+  assert.match(source, /if \(msgOpen\) \{ msgOpen = ''; e\.stopPropagation\(\); \}\s*composer\?\.dismissEscape\(e\);/u);
+  assert.doesNotMatch(source, /let (recipientOpen|paletteOff|intArm|composerEl)|function growComposer/u);
 });
 
 test('the agent filter remains visible and leavable inside the feed (board #3)', () => {
@@ -163,9 +152,6 @@ test('Back registers the original live guards and publishes one local dispatcher
     lightbox: "if (shotView) { shotView = ''; return true; }",
     contextMenu: 'if (ctxAt) { closeCtx(); return true; }',
     agentMenu: "if (menuFor) { menuFor = ''; return true; }",
-    recipient: 'if (recipientOpen) { recipientOpen = false; return true; }',
-    palette: 'if (palette) { paletteOff = true; return true; }',
-    interrupt: 'if (intArm) { intArm = false; return true; }',
     action: 'if (pendingAct && !acting) { pendingAct = null; return true; }',
     trash: 'if (trashAsk) { trashAsk = null; return true; }',
     picker: 'if (pickerOpen) { pickerOpen = false; return true; }',
@@ -180,7 +166,9 @@ test('Back registers the original live guards and publishes one local dispatcher
     assert.ok(region.includes(`backLayers.register('${layer}', () => { ${guard} return false; })`),
       `${layer} keeps its original guard/action inside a live callback`);
   }
-  assert.equal([...region.matchAll(/backLayers\.register\(/g)].length, 15);
+  assert.equal([...region.matchAll(/backLayers\.register\(/g)].length, 12);
+  assert.match(source, /registerBack=\{onGoBack \? backLayers\.register : null\}/u,
+    'Composer registers its three original slots with the same registry');
   assert.match(region, /onGoBack\(backLayers\.back\);/u);
   assert.match(region, /return \(\) => \{ for \(const dispose of disposers\) dispose\(\); \};/u);
   assert.doesNotMatch(region, /onGoBack\(\(\) =>|addEventListener|popstate|pushState/u,
@@ -542,23 +530,6 @@ test('the add-agent button is reachable in every project', () => {
   assert.match(source, /\{#if selected && !managedAgents\.length && registry\.length\}/u);
 });
 
-test('a command-shaped draft styles the composer, with the mirror in step', () => {
-
-  // The look mirrors send()'s own branch (slashCommand + a target), so the
-  // capsule never promises a command that send() would deliver as prose.
-  assert.match(source, /class:cmd=\{composerIsCmd\}/u);
-  assert.match(source, /const composerIsCmd = \$derived/u);
-  // The metrics trap: growComposer's mirror re-lays-out the text to find the
-  // last line. If the input flips to monospace and the mirror does not, the
-  // send button's collision zone is measured in the wrong font.
-  assert.match(
-    source,
-    /\.compose-shell\.cmd \.c-input, \.compose-shell\.cmd :global\(\.c-mirror\) \{ font-family: var\(--font-mono\)/u,
-  );
-  // And the height re-measures when the font flips, not just when text changes.
-  assert.match(source, /void composerIsCmd;/u);
-});
-
 test('a confirmed project verb runs on the row it was asked on, never on `selected`', () => {
   // The context menu opens on ANY sidebar row; the confirm dialog then fired
   // `rows.find(… === selected)`, closing whichever project was OPEN instead of
@@ -723,28 +694,6 @@ test('the drawer wears the app ground and its head is the page-head\u2019s twin 
     'the drawer suppresses any child page-head — the drawer head is the only header');
 });
 
-test('paste and the + button stage attachments through ONE pipeline (board #25)', () => {
-  // The composer textarea accepts pasted images/files: onpaste routes through
-  // pastedFiles() (files win over co-riding text) into the SAME stageFiles()
-  // the file picker uses — a second upload path would drift (token insertion,
-  // re-encode, .tmm/uploads layout) the moment either one changed.
-  assert.match(source, /class="c-input"[^>]*onpaste=\{onComposerPaste\}/su,
-    'the composer textarea must wire onpaste');
-  const handler = /function onComposerPaste\(e\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
-  assert.match(handler, /pastedFiles\(e\.clipboardData\)/u, 'files come from the pure extractor');
-  assert.match(handler, /preventDefault/u, 'a file paste suppresses the default text insertion');
-  // Office/browser pastes ship a PNG rendering beside the words; the words are
-  // the paste. The decision is the pure textIsThePaste and it runs BEFORE the
-  // default insertion is suppressed (owner, 2026-09-08: "从 ppt 上粘贴过来的文字，
-  // 总是被粘贴为了一个图片").
-  assert.match(handler, /if \(textIsThePaste\(e\.clipboardData\?\.getData\('text\/plain'\), files\)\) return;[\s\S]*preventDefault/u,
-    'text beside an image-only set wins, decided before preventDefault');
-  assert.match(handler, /stageFiles\(files\)/u, 'staging is the shared pipeline');
-  const picker = /async function onPickFiles\(e\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
-  assert.match(picker, /stageFiles\(files\)/u, 'the + button goes through the same pipeline');
-  assert.doesNotMatch(picker, /fsUpload|encodeImage/u, 'the picker holds no upload logic of its own');
-});
-
 test('the drawer follows the project — partition parked and restored per room (board #23)', () => {
   // Owner: "chat的右侧边栏打开哪个的状态前端帮我记住，这样我切换不同的
   // project 回来原来的视图还在". ONE record point per direction — openDrawer
@@ -792,7 +741,8 @@ test('a stage job dies with its room, and nothing sends while one is in flight (
   const sendFn = /async function send\(\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
   assert.ok(sendFn, 'send found');
   assert.match(sendFn, /if \(attaching\) return;/u, 'send() refuses while a stage job is in flight');
-  assert.match(source, /disabled=\{!selected \|\| attaching \|\|/u, 'the send button is disabled too');
+  assert.match(source, /\{pending\} \{attaching\} \{failed\} \{sendable\}/u,
+    'the view receives the same gate verdicts; its button contract lives in Composer.source');
   // The gate answers PER GENERATION, and every job books/releases only its
   // OWN entry: a stale job neither holds the new room's send closed nor —
   // via its finally — unlocks a job the new room started. A count or a flag
@@ -837,20 +787,13 @@ test('a failed attachment is a chip that blocks send, never a console line', () 
     'the per-file catch guards staleness before it touches the room');
   const sendFn = /async function send\(\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
   assert.match(sendFn, /if \(failed\) return;/u, 'send() refuses while a failed chip stands');
-  assert.match(source, /disabled=\{!selected \|\| attaching \|\| failed \|\|/u, 'and the button is disabled too');
   assert.match(source, /const sendable = \$derived\(!!composerText\.trim\(\) \|\| pending\.some\(\(a\) => !a\.error\)\);/u,
     'a failed chip alone is not content');
-  assert.match(source, /\{#each pending as a, i \(a\.key\)\}\s*\n\s*\{#if a\.error\}/u, 'the error state renders first, keyed by key (a failed chip has no path)');
-  const err = rule('.pend-chip.err');
-  assert.match(err, /var\(--status-danger\)/u, 'the danger token, not a literal');
-  assert.ok(!/#[0-9a-f]{3,8}\b/iu.test(err), 'no literal colour');
 });
 
 test('composer calculations use the pure helpers without moving send or its gates (#117)', () => {
-  assert.match(source, /import \{ ALL_TARGET, attachmentBody, attachToken, paletteBackendFor \} from '\.\/hub-composer\.ts';/u);
-  assert.match(source, /const paletteBackend = \$derived\(paletteBackendFor\(composerText, recipient, agents\)\);/u,
-    'the helper receives the whole roster, including direct windows');
-  const send = source.slice(source.indexOf('async function send()'), source.indexOf('let mirrorEl'));
+  assert.match(source, /import \{ ALL_TARGET, attachmentBody, attachToken \} from '\.\/hub-composer\.ts';/u);
+  const send = /async function send\(\) \{[\s\S]*?\n  \}/u.exec(source)?.[0] ?? '';
   const interpolation = send.indexOf('const body = attachmentBody(raw, atts);');
   assert.ok(interpolation > send.indexOf('if (attaching) return;'));
   assert.ok(interpolation > send.indexOf('if (failed) return;'));
@@ -885,32 +828,6 @@ test('the title caret expands the NAME — left-aligned on its real rect (board 
   // against the button's right edge — measured live, svg.right == button.right
   // — and read as clipped the moment the wash showed (owner, 2026-09-01).
   assert.match(source, /\.title-caret \{ width: 20px; padding: 0;/u, 'the 20px caret zeroes the UA padding');
-});
-
-test('the composer scrollbar exists exactly while overflowing, and placeholders are short (board #34)', async () => {
-  // hidden → auto → hidden: the base CSS state is hidden (an empty composer
-  // never shows a track), growComposer flips it in its ONE measurement — the
-  // same `scrollHeight > maxH + 1` verdict that drives the padding — so a
-  // shrink or the post-send reset (growComposer re-runs on composerText)
-  // lands back on hidden immediately.
-  assert.match(source, /const overflowing = el\.scrollHeight > maxH \+ 1;/u, 'one verdict for scrollbar AND padding');
-  assert.match(source, /el\.style\.overflowY = overflowing \? 'auto' : 'hidden';/u, 'the toggle rides that verdict');
-  assert.match(source, /resize: none; overflow-y: hidden;/u, 'the base state is hidden');
-  // Not hidden PERMANENTLY: a long message must really scroll — the .c-input
-  // block declares overflow-y exactly once (the hidden base; auto comes only
-  // from the JS toggle), and no masking the scrollbar.
-  const cInput = source.match(/\n  \.c-input \{[^}]*\}/su)?.[0] ?? '';
-  assert.equal([...cInput.matchAll(/overflow-y/g)].length, 1, 'one overflow-y in .c-input, the hidden base');
-  assert.ok(!/\.c-input[^}]*scrollbar-width:\s*none/su.test(source), 'the real scrollbar is never masked away');
-
-  // The placeholders name the reach; the menu labels the destinations once.
-  const i18n = await readFile(new URL('../core/i18n.svelte.ts', import.meta.url), 'utf8');
-  assert.equal([...i18n.matchAll(/hubComposerAll: 'Message every agent…',/g)].length, 1, 'EN all is short');
-  assert.equal([...i18n.matchAll(/hubComposerRoom: 'Leave a note…',/g)].length, 1, 'EN room is short');
-  assert.equal([...i18n.matchAll(/hubComposerAll: '发给所有 agent…',/g)].length, 1, 'zh all is short');
-  assert.equal([...i18n.matchAll(/hubComposerRoom: '留一句话…',/g)].length, 1, 'zh room is short');
-  assert.doesNotMatch(source, /t\('hubTo(?:All|Room)Hint'\)/u,
-    'destination labels need no explanatory subtitle');
 });
 
 test('leaving at the tail means returning to the tail — and ONLY then (board #38)', () => {
