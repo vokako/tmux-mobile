@@ -124,12 +124,10 @@
   rows under the lock and probes tmux outside. A source test rejects any
   `with_store` closure in `projects/mod.rs` that names `tmux::`; `rename`
   is the one marked exception (session rename and row re-key under one lock).
-- [ ] `with_store`'s first-use init is not race-safe: it `Store::open`s and
-  then `OnceLock::set`s, so two threads first calling it together both open
-  and both migrate the same file ("migrate to 1: table projects already
-  exists", reproduced in a #149 probe). Harmless today because the server's
-  first use is single-threaded at startup; `get_or_init` (or opening at
-  startup) closes it.
+- [x] `with_store`'s first-use init was not race-safe (board #150, 2026-09-09):
+  two first callers both opened and migrated the same file. The cold path is
+  now serialised (`open_once`: init lock + re-read), one open per process, a
+  failed open still not cached; red-then-green test with two racing threads.
 - [ ] The `@all` recipient is stored as `'all'` but not restored by `pickLead`;
   `hubLog` drops `since_ts` when `before_seq` is present.
 - [x] Vitals and pane inspection policy is **decided** (owner, 2026-09-09):

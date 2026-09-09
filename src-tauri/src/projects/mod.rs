@@ -78,16 +78,35 @@ fn agent_sessions() -> &'static (dyn capture::AgentSessions + Send + Sync) {
 /// returned rather than panicking so a broken database degrades to "the
 /// Projects page is unavailable" instead of taking the server down.
 fn with_store<T>(f: impl FnOnce(&mut Store) -> Result<T, String>) -> Result<T, String> {
-    let cell = match STORE.get() {
-        Some(c) => c,
-        None => {
-            let store = Store::open(&db_path())?;
-            let _ = STORE.set(Mutex::new(store));
-            STORE.get().ok_or("state.db unavailable")?
-        }
-    };
+    let cell = open_once(&STORE, || Store::open(&db_path()))?;
     let mut guard = cell.lock().map_err(|_| "state.db lock poisoned".to_string())?;
     f(&mut guard)
+}
+
+/// First use opens the store; every later use finds it. Exactly ONE caller
+/// opens (board #150): the cold path is serialised by `OPENING`, and a caller
+/// that waited re-reads the cell before opening — with the bare
+/// `open → OnceLock::set` shape two first callers both ran the migration
+/// ladder on the same file (reproduced in the #149 probe), and the ladder's
+/// rebuild steps (deliveries v20/v21 DROP+RENAME) are not safe to run twice at
+/// once. A failed open is NOT cached (`get_or_init` would have to cache it):
+/// the next caller tries again, so a database that was unavailable for a
+/// moment does not take the Projects page down for the process.
+fn open_once<'a>(
+    cell: &'a OnceLock<Mutex<Store>>,
+    open: impl FnOnce() -> Result<Store, String>,
+) -> Result<&'a Mutex<Store>, String> {
+    static OPENING: Mutex<()> = Mutex::new(());
+    if let Some(c) = cell.get() {
+        return Ok(c);
+    }
+    let _opening = OPENING.lock().map_err(|_| "state.db init lock poisoned".to_string())?;
+    if let Some(c) = cell.get() {
+        return Ok(c);
+    }
+    let store = open()?;
+    let _ = cell.set(Mutex::new(store));
+    cell.get().ok_or_else(|| "state.db unavailable".to_string())
 }
 
 // ---- ids and names ------------------------------------------------------
@@ -2334,6 +2353,27 @@ pub(crate) mod tests {
         }
         assert!(checked >= 40, "scan found only {checked} with_store closures");
         assert!(bad.is_empty(), "tmux work under the store lock at {bad:?}");
+    }
+
+    /// Two threads first-calling a cold store together must produce ONE open:
+    /// the migration ladder has rebuild steps (deliveries v20/v21 DROP+RENAME)
+    /// that are not safe to run twice at once (board #150; reproduced in #149's
+    /// probe as "migrate to 1: table projects already exists"). The open here
+    /// is slow on purpose so both callers are inside the cold window.
+    #[test]
+    fn a_cold_store_is_opened_exactly_once_under_a_race() {
+        static CELL: OnceLock<Mutex<Store>> = OnceLock::new();
+        static OPENS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let slow_open = || {
+            OPENS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(80));
+            Store::open_memory()
+        };
+        let a = std::thread::spawn(move || open_once(&CELL, slow_open).map(|_| ()));
+        let b = std::thread::spawn(move || open_once(&CELL, slow_open).map(|_| ()));
+        a.join().unwrap().unwrap();
+        b.join().unwrap().unwrap();
+        assert_eq!(OPENS.load(std::sync::atomic::Ordering::SeqCst), 1, "both first callers opened (and would have migrated) the store");
     }
 }
 
