@@ -151,6 +151,23 @@ The Files markdown preview calls `renderMarkdown` from `src/lib/core/markdown.ts
 ### Heavy preview libraries load on first use
 pdf.js, mermaid and highlight.js (+15 grammars) are `import()`ed by memoized loaders (`loadPdfjs`, `loadMermaid`, `loadHljs`) the first time a PDF, a mermaid fence or a code/text file is opened. Files is statically imported by App and the Hub drawer, so the static imports it had put 1.5 MB into the entry chunk of the primary (Android) target: 2.30 MB (652 KB gzip) before, 1.14 MB (344 KB gzip) after (review, 2026-09-03). The highlighter is a `$state`: the lined preview and the editor overlay render escaped-and-plain until it lands, then re-render highlighted; a markdown file with no diagram never loads mermaid. KaTeX stays static because `core/markdown.ts` (chat) needs it on the first message.
 
+### Navigation ownership (#110, 2026-09-09)
+
+`file-nav.ts` owns the non-reactive directory and linked-preview histories,
+file request generation and preview/info Back decisions. One factory instance
+belongs to each Files component; the full Files page and Hub drawer never
+share these stacks. `file-view-state.ts` still owns editor-exit and cwd-follow
+decisions. Files applies the results through its existing RPC, confirmation,
+motion, browser-history and DOM-scroll code.
+
+This is a behavior-preserving extraction of the #106 implementation, not a
+new navigation model: linked origins precede Git/parent fallback, loaded text
+info first returns to its preview, directory Back retraces visits, and only
+tab visits climb below the directory stack. Clearing either history does not
+implicitly invalidate a file request; the existing call sites still advance
+the generation explicitly. Unit tests characterize each decision and preserve
+the captured listing/file/scroll references.
+
 ### Markdown Image MIME
 Infer MIME from image file extension, not from parent markdown file's mime_hint.
 

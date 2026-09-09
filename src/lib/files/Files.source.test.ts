@@ -6,8 +6,8 @@ const source = await readFile(new URL('./Files.svelte', import.meta.url), 'utf8'
 
 test('back retraces the USER\u2019s steps — a history, not a parent walk (board #17)', () => {
   // Every user navigation pushes where they WERE…
-  assert.match(source, /function navTo\(path, slide = ''\) \{\s*\n\s*if \(cwd && path !== cwd\) dirHist\.push\(cwd\);/u,
-    'one navigate-with-history helper');
+  assert.match(source, /function navTo\(path, slide = ''\) \{\s*\n\s*fileNav\.rememberDirectory\(cwd, path\);/u,
+    'one navigate-with-history helper delegates to the tested state owner');
   for (const site of [
     /navTo\(entry\.path, 'fwd'\);/u,   // entering a directory
     /navTo\(parent, 'back'\);/u,       // the up button
@@ -18,13 +18,14 @@ test('back retraces the USER\u2019s steps — a history, not a parent walk (boar
   // …back pops exactly that path FIRST; the user's own steps always outrank
   // the parent climb below them (board #47 reopened the climb — see the next
   // test — but never above the pop, and never through navTo).
-  assert.match(source, /if \(popDir\(\)\) return true;[\s\S]{0,700}?if \(!jumped/u,
+  assert.match(source, /if \(popDir\(\)\) return true;[\s\S]{0,900}?directoryBackFloor\(cwd, jumped\)/u,
     'the back gesture\u2019s directory step is the pop, before the gated climb');
   assert.ok(!source.includes('if (cwd !== \'/\') { goUp(); return true; }'),
     'the UNGATED history-pushing parent walk stays retired (goUp/navTo would bounce)');
   // External moves are new ENTRY POINTS, not steps: they reset the history.
-  const resets = source.split('dirHist = []').length - 1;
-  assert.equal(resets, 4, 'declaration, session switch, cwd follow and directory handoff reset; a file reference keeps its origin (#106)');
+  const resets = source.split('fileNav.resetDirectories()').length - 1;
+  assert.equal(resets, 3, 'session switch, cwd follow and directory handoff reset; a file reference keeps its origin (#106)');
+  assert.doesNotMatch(source, /let (?:dirHist|fileHist|fileSeq)\b/u, 'history and request state live only in file-nav.ts');
 });
 
 test('a directory\u2019s entrance is ONE beat, at answer time (board #93)', () => {
@@ -129,7 +130,7 @@ test('below its own path, a tab visit climbs to the parent — never the termina
   // so it must replenish the APP entry consumed by this pop; otherwise a
   // deep path stalls after the pre-existing entries run out. Only a
   // chat-jumped visit falls through to App's return slot (the conversation).
-  assert.match(source, /if \(popDir\(\)\) return true;[\s\S]{0,900}?if \(!jumped && cwd && cwd !== '\/'\) \{\s*pendingSlide = 'back';\s*navPush\(\);\s*loadDir\(cwd\.replace\(\/\\\/\[\^\/\]\+\\\/\?\$\/, ''\) \|\| '\/'\);\s*return true;\s*\}/u,
+  assert.match(source, /if \(popDir\(\)\) return true;[\s\S]{0,900}?const parent = directoryBackFloor\(cwd, jumped\);\s*if \(parent\) \{\s*pendingSlide = 'back';\s*navPush\(\);\s*loadDir\(parent\);\s*return true;\s*\}/u,
     'the climb sits under the user-path pop, replenishes app history, and loads without pushing dir history');
 });
 
@@ -197,7 +198,8 @@ test('navRequest can ask for a FILE: land in its directory with the preview open
   assert.match(source, /onclick=\{previewLinkClick\} onauxclick=\{previewLinkClick\}/u, 'all preview formats route primary and middle clicks');
   assert.match(source, /resolvePathRef\(docDir, ref\)/u, 'relative refs resolve against the document');
   assert.match(source, /installPathLinkHandler\(doc, openPreviewRef\)/u, 'iframe documents install the same path policy');
-  assert.match(source, /const previous = fileHist\.pop\(\);/u, 'Back restores a linked preview before the directory floor');
+  assert.match(source, /fileNav\.backFromPreview\(\{ cwd, currentFile, fromGit \}\)/u, 'the tested history owner chooses Back before the directory floor');
+  assert.match(source, /step\.kind === 'restore'\) \{ restoreFileLocation\(step\.location\); return; \}/u, 'the component applies the captured location, including DOM scroll');
   assert.match(source, /if \(view === 'preview'\) \{ backToList\(\); return true; \}/u, 'the browser back handler uses the same preview history');
   assert.match(source, /handoff \|\| \(!!sourceRequest && !lastSourceDir\)/u, 'the first cwd response records the baseline without overriding a path handoff');
   const listPanel = source.slice(source.indexOf('{#snippet listPanel()}'), source.indexOf('{#snippet previewPanel()}'));

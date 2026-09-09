@@ -23,6 +23,7 @@
   import { copyText } from '../core/clipboard.ts';
   import { untrack } from 'svelte';
   import { directoryLoadState, leaveDecision, cwdFollowStep } from './file-view-state.ts';
+  import { createFileNavigation, directoryBackFloor } from './file-nav.ts';
   import { installExternalLinkHandler } from '../core/external-links.ts';
   import { handlePathLinkClick, installPathLinkHandler, resolvePathRef } from '../core/path-links.ts';
   import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadHttp, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from '../core/ws.ts';
@@ -162,10 +163,11 @@
       // once the older entries run out. At / there is nothing above, so it
       // falls through (App re-pushes). A chat-jumped visit stands aside:
       // its floor is the conversation, App's return slot below.
-      if (!jumped && cwd && cwd !== '/') {
+      const parent = directoryBackFloor(cwd, jumped);
+      if (parent) {
         pendingSlide = 'back';
         navPush();
-        loadDir(cwd.replace(/\/[^/]+\/?$/, '') || '/');
+        loadDir(parent);
         return true;
       }
       return false;
@@ -477,18 +479,16 @@
   // rule, a directory handoff) RESETS the stack instead: it is a new entry point.
   // Below the stack, a tab visit climbs parent directories to / (board #47);
   // only a chat-jumped visit leaves the page, via App's return slot.
-  let dirHist = [];
+  const fileNav = createFileNavigation();
   // Linked previews sit above the directory history: Back returns to the
   // document/list that supplied the link, including its reading position.
-  let fileHist = [];
-  let fileSeq = 0;
   let previewBodyEl = $state(null);
   function fileLocation() {
     return { cwd, entries, view, currentFile, fromGit, scroll: previewBodyEl?.scrollTop ?? 0,
       frameScroll: htmlPreviewEl?.contentDocument?.scrollingElement?.scrollTop ?? 0 };
   }
   function restoreFileLocation(previous) {
-    ++fileSeq;
+    fileNav.nextFile();
     ++loadSeq;
     previewLoading = false;
     loading = false;
@@ -501,12 +501,12 @@
     });
   }
   function navTo(path, slide = '') {
-    if (cwd && path !== cwd) dirHist.push(cwd);
+    fileNav.rememberDirectory(cwd, path);
     pendingSlide = slide;
     loadDir(path);
   }
   function popDir() {
-    const prev = dirHist.pop();
+    const prev = fileNav.popDirectory();
     if (prev == null) return false;
     pendingSlide = 'back';
     loadDir(prev);
@@ -597,14 +597,14 @@
   $effect(() => {
     if (!visible) { void session; return; }
     if (session !== prevSession) {
-      ++fileSeq;
-      fileHist = [];
+      fileNav.nextFile();
+      fileNav.resetFiles();
       // cwd still holds the OLD session's position — nothing else resets it.
       browsed.set(prevSession, { cwd, sourceDir: lastSourceDir });
       prevSession = session;
       const parked = browsed.get(session);
       lastSourceDir = parked?.sourceDir ?? '';
-      dirHist = []; // a session switch is a new entry point, not a step
+      fileNav.resetDirectories(); // a session switch is a new entry point, not a step
       if (parked?.cwd) {
         // An unsaved editor holds the switch behind the discard dialog
         // (leaveEditor); the parked position is a hint, the text is not.
@@ -634,7 +634,7 @@
       leaveEditor(() => {
         cwd = r.path;
         view = 'list';
-        dirHist = []; // the follow rule moved us — a new entry point
+        fileNav.resetDirectories(); // the follow rule moved us — a new entry point
         loadDir(r.path);
       });
     }).catch(() => {
@@ -668,7 +668,7 @@
       const to = navRequest.path;
       leaveEditor(() => {
         view = 'list';
-        dirHist = []; // a drawer/see-here handoff is a new entry point
+        fileNav.resetDirectories(); // a drawer/see-here handoff is a new entry point
         loadDir(to);
       });
     }
@@ -689,7 +689,7 @@
   let pendingSlide = ''; // 'fwd' | 'back' — set by the navigation, consumed when its answer lands
   let loadSeq = 0;
   async function loadDir(path, purpose = 'navigate') {
-    if (purpose === 'navigate') { ++fileSeq; fileHist = []; }
+    if (purpose === 'navigate') { fileNav.nextFile(); fileNav.resetFiles(); }
     const my = ++loadSeq; // several callers can navigate concurrently around a
     loading = true;       // session switch — the NEWEST intent wins (DirPicker's rule)
     error = '';
@@ -753,23 +753,23 @@
     return false;
   }
 
-  async function loadPreviewContent(file, my = ++fileSeq) {
+  async function loadPreviewContent(file, my = fileNav.nextFile()) {
     previewLoading = true;
     try {
       const { path, name, stat } = file;
       if (stat.mime_hint === 'application/pdf') {
         const r = await fsDownload(path);
-        if (my !== fileSeq) return false;
+        if (!fileNav.isCurrentFile(my)) return false;
         currentFile = { ...file, pdfData: r.data };
         enterView('preview');
       } else if (stat.mime_hint.startsWith('image/')) {
         const r = await fsDownload(path);
-        if (my !== fileSeq) return false;
+        if (!fileNav.isCurrentFile(my)) return false;
         currentFile = { ...file, dataUrl: `data:${stat.mime_hint};base64,${r.data}` };
         enterView('preview');
       } else if (stat.is_text && stat.size <= 512 * 1024) {
         const r = await fsRead(path);
-        if (my !== fileSeq) return false;
+        if (!fileNav.isCurrentFile(my)) return false;
         if (mimeCategory(stat.mime_hint || '') !== 'markdown') loadHljs(); // lined view: highlight when it lands
         showAllLines = false; // the cap is per file
         currentFile = { ...file, content: r.content };
@@ -777,12 +777,12 @@
         enterView('preview');
       } else if (/\.pptx$/i.test(name)) {
         const r = await fsConvert(path);
-        if (my !== fileSeq) return false;
+        if (!fileNav.isCurrentFile(my)) return false;
         currentFile = { ...file, convertedHtml: r.html };
         enterView('preview');
       }
     } catch (e) {
-      if (my !== fileSeq) return false;
+      if (!fileNav.isCurrentFile(my)) return false;
       pendingViewSlide = '';
       error = e.message;
       previewLoading = false;
@@ -813,9 +813,9 @@
     // A file open is async like a directory: record the slide, fire it when
     // the view swaps to the ANSWER (board #93 round three — the tap-time
     // slide replayed over the still-visible list before the preview landed).
-    const my = ++fileSeq;
+    const my = fileNav.nextFile();
     let previous = linked ? fileLocation() : null;
-    if (!linked) fileHist = [];
+    if (!linked) fileNav.resetFiles();
     pendingViewSlide = 'fwd';
     if (entry.type === 'broken') {
       pendingViewSlide = '';
@@ -832,27 +832,27 @@
     error = '';
     try {
       const stat = await fsStat(entry.path);
-      if (my !== fileSeq) return;
+      if (!fileNav.isCurrentFile(my)) return;
       const path = stat.path || entry.path; // server expands ~ without resolving symlinks
       if (linked) {
         const parent = path.slice(0, path.lastIndexOf('/')) || '/';
         // Listing and preview used to race: a late navigate-list response
         // erased the new preview. Position the listing without closing it.
         await loadDir(parent, 'refresh');
-        if (my !== fileSeq) return;
+        if (!fileNav.isCurrentFile(my)) return;
         if (!previous.cwd) previous = fileLocation();
       }
       currentFile = { path, name: entry.name, stat };
       addRecent(entry.path, entry.name);
       navPush();
       if (stat.size > PREVIEW_SIZE_LIMIT || !isPreviewable(stat, entry.name)) {
-        if (previous) fileHist.push(previous);
+        if (previous) fileNav.rememberFile(previous);
         enterView('info');
         previewLoading = false;
         return;
       }
     } catch (e) {
-      if (my !== fileSeq) return;
+      if (!fileNav.isCurrentFile(my)) return;
       pendingViewSlide = '';
       // A dead path reference is an EXPECTED miss (a chat link may outlive
       // its file) — say so in words, not in errno (board #99: "即使路径不对，
@@ -863,8 +863,8 @@
     }
     previewLoading = false;
     if (await loadPreviewContent(currentFile, my)) {
-      if (previous) fileHist.push(previous);
-    } else if (previous && my === fileSeq) {
+      if (previous) fileNav.rememberFile(previous);
+    } else if (previous && fileNav.isCurrentFile(my)) {
       restoreFileLocation(previous);
     }
   }
@@ -965,22 +965,24 @@
   }
 
   function backToList() {
-    const previous = fileHist.pop();
-    if (previous) { restoreFileLocation(previous); return; }
-    ++fileSeq;
+    applyFileBack(fileNav.backFromPreview({ cwd, currentFile, fromGit }));
+  }
+
+  function applyFileBack(step) {
+    if (step.kind === 'preview') { navAnim('back'); view = 'preview'; return; }
+    if (step.kind === 'restore') { restoreFileLocation(step.location); return; }
+    fileNav.nextFile();
     navAnim('back');
-    if (fromGit) { fromGit = false; view = 'git'; } else {
+    if (step.kind === 'git') { fromGit = false; view = 'git'; } else {
       // Stay in the file's parent directory, not session cwd
-      const dir = currentFile?.path?.replace(/\/[^/]+$/, '') || cwd;
       view = 'list';
-      if (dir !== cwd) loadDir(dir);
+      if (step.path !== cwd) loadDir(step.path);
     }
     currentFile = null;
   }
 
   function backFromInfo() {
-    if (currentFile?.content != null) { navAnim('back'); view = 'preview'; }
-    else backToList();
+    applyFileBack(fileNav.backFromInfo({ cwd, currentFile, fromGit }));
   }
 
   function backToPreview() {
