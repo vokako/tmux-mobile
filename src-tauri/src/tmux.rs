@@ -718,6 +718,7 @@ pub fn send_command(target: &str, command: &str) -> Result<(), String> {
     } else {
         send_keys(target, command, true)?;
     }
+    // backend-quirk(measured): codex-cli 0.148.0 needs a beat before Enter.
     // A beat between the text and the Enter. An agent TUI that receives the
     // burst back-to-back can treat the Enter as part of a paste and leave the
     // line sitting in its composer unsubmitted — measured live on codex-cli
@@ -726,6 +727,7 @@ pub fn send_command(target: &str, command: &str) -> Result<(), String> {
     // ("the TUI needs a beat to settle"). 200 ms is imperceptible next to a
     // model turn; shells do not care either way.
     std::thread::sleep(std::time::Duration::from_millis(200));
+    // backend-quirk(measured): kiro-cli 2.18.1 opens a file picker on `@`.
     // kiro-cli's terminal UI (2.18.1) opens a fuzzy FILE PICKER the moment an
     // `@` is typed — pasted or keyed, idle or mid-turn — and filters it with
     // the text that follows. Every delivery starts `@name`, so in a workspace
@@ -748,6 +750,7 @@ pub fn send_command(target: &str, command: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// backend-quirk(measured): kiro-cli 2.18.1's picker footer is the only gate.
 /// kiro-cli's `@` file picker, recognised by its footer ("esc to cancel · ↵ to
 /// select"). Both halves are required: a running turn shows "Thinking…
 /// (esc to cancel)" with nothing to select, and Escape there would cancel it.

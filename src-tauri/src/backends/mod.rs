@@ -229,4 +229,89 @@ mod tests {
         assert_eq!(Backend::parse("kimi"), None);
         assert_eq!(Backend::DEFAULT.name(), "kiro");
     }
+
+    /// Backend names are spelled in `src/backends/` and nowhere else (board
+    /// #101/#131; tenet 2: adding a backend touches one file). A quoted
+    /// literal outside it is knowledge that has leaked — the class of drift
+    /// that let omp miss `registry_save` (2026-09-07). The scan reads every
+    /// `src/**/*.rs`, ignores comments, and skips exactly three things:
+    /// tests (a file's column-0 `#[cfg(test)]` module and any `*test*` file),
+    /// the store.rs seed region fenced by `// backend-seeds:begin/end` (a
+    /// seed is registry data), and a statement whose preceding comment block
+    /// carries `// backend-quirk(measured): …` — the marker for a measured,
+    /// screen-triggered adaptation that generic code has to keep (tmux.rs's
+    /// codex beat and kiro picker; the owner accepted those, 2026-09-09).
+    /// Marker comments, never line numbers: the exemption moves with the
+    /// code it explains.
+    #[test]
+    fn backend_literals_live_only_in_backends() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        walk(&root, &mut files);
+        files.sort();
+        assert!(files.len() > 20, "the walk found only {} files", files.len());
+
+        let literals: Vec<String> = Backend::NAMES.iter().map(|n| format!("\"{n}\"")).collect();
+        let mut leaks: Vec<String> = Vec::new();
+        let mut scanned = 0usize;
+        for path in &files {
+            let rel = path.strip_prefix(&root).unwrap().display().to_string();
+            if rel.starts_with("backends/") || rel.contains("test") {
+                continue;
+            }
+            scanned += 1;
+            let src = std::fs::read_to_string(path).unwrap();
+            let lines: Vec<&str> = src.lines().collect();
+            let end = lines.iter().position(|l| l.starts_with("#[cfg(test)]")).unwrap_or(lines.len());
+            let mut in_seeds = false;
+            let mut quirk = false;
+            for line in &lines[..end] {
+                let t = line.trim_start();
+                if t.starts_with("//") {
+                    if t.contains("backend-seeds:begin") {
+                        in_seeds = true;
+                    } else if t.contains("backend-seeds:end") {
+                        in_seeds = false;
+                    } else if t.contains("backend-quirk(measured):") {
+                        quirk = true;
+                    }
+                    continue;
+                }
+                // Code line: strip a trailing comment, then look for a literal.
+                let code = match t.find("//") {
+                    Some(k) if !t[..k].contains('"') => &t[..k],
+                    _ => t,
+                };
+                let hit = literals.iter().any(|l| code.contains(l.as_str()));
+                if hit && !in_seeds && !quirk {
+                    leaks.push(format!("{rel}: {}", t.trim_end()));
+                }
+                // A quirk marker covers the statement it introduces; the first
+                // code line after the comment block ends its reach.
+                if !t.is_empty() {
+                    quirk = false;
+                }
+            }
+        }
+        assert!(scanned >= 20, "scanned only {scanned} files");
+        assert!(
+            leaks.is_empty(),
+            "backend names spelled outside src/backends/ (move the knowledge, or fence a seed / mark a measured quirk): {leaks:#?}"
+        );
+        // The fences must still be there for the exemption to mean anything.
+        let store = std::fs::read_to_string(root.join("projects/store.rs")).unwrap();
+        assert!(store.contains("backend-seeds:begin") && store.contains("backend-seeds:end"));
+        let tmux = std::fs::read_to_string(root.join("tmux.rs")).unwrap();
+        assert!(tmux.matches("backend-quirk(measured):").count() >= 2, "tmux.rs lost its quirk markers");
+    }
 }

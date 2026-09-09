@@ -2002,6 +2002,10 @@ impl Store {
                 .map_err(|e| format!("upgrade default Kiro agent: {e}"))?;
             return Ok(());
         }
+        // backend-seeds:begin — the shipped default agent per backend. The
+        // ONE place outside src/backends/ allowed to spell backend names: a
+        // seed is registry DATA (a name, a persona), not backend knowledge,
+        // and the literal guard (backends::tests) skips this fenced region.
         let seeds = [
             RegAgent {
                 name: "kiro".into(),
@@ -2055,6 +2059,7 @@ impl Store {
                 can_hire: true,
             },
         ];
+        // backend-seeds:end
         for s in &seeds {
             self.reg_save(s, now)?;
         }
