@@ -115,7 +115,21 @@
   the old tasks `,@+` bare-passthrough bought nothing its tests exercised).
   Every call site names it directly (board #144, 2026-09-09: the three alias
   names and their duplicate tests are gone; the union table is the one test).
-- [ ] `auto_adopt_with` invokes tmux while holding the store lock.
+- [x] `auto_adopt_with` invokes tmux while holding the store lock (board
+  #149, 2026-09-09; measured: an adopt held the lock 90 ms — two pane
+  listings — and a concurrent store RPC waited 84 ms; `list()` ran one
+  `has-session` (~9 ms) per project under the lock on every project_list).
+  The tmux half of an adoption is `adopt_facts`, read with no lock; the row
+  half re-checks "already tracked" under the lock (0.4 ms). `list()` reads
+  rows under the lock and probes tmux outside. A source test rejects any
+  `with_store` closure in `projects/mod.rs` that names `tmux::`; `rename`
+  is the one marked exception (session rename and row re-key under one lock).
+- [ ] `with_store`'s first-use init is not race-safe: it `Store::open`s and
+  then `OnceLock::set`s, so two threads first calling it together both open
+  and both migrate the same file ("migrate to 1: table projects already
+  exists", reproduced in a #149 probe). Harmless today because the server's
+  first use is single-threaded at startup; `get_or_init` (or opening at
+  startup) closes it.
 - [ ] The `@all` recipient is stored as `'all'` but not restored by `pickLead`;
   `hubLog` drops `since_ts` when `before_seq` is present.
 - [x] Vitals and pane inspection policy is **decided** (owner, 2026-09-09):

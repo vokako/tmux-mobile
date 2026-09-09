@@ -38,7 +38,8 @@
 - Use exact tmux targets, `=name:`; `-t name` performs prefix/glob matching.
   Escape delimiters according to the installed tmux version.
 - Run synchronous I/O (rusqlite, tmux subprocesses, sleep) in `spawn_blocking`.
-  Do not hold a `std::Mutex` guard across `await` or a store lock while observing tmux.
+  Do not hold a `std::Mutex` guard across `await` or a store lock while observing tmux
+  (tested for `projects/mod.rs`: `no_tmux_work_runs_under_the_store_lock`, board #149).
 - Use `PRAGMA foreign_keys=OFF` for SQLite migrations; PATCH updates each
   field through COALESCE.
 - Treat agent configuration on disk as code. Hook/prompt structure changes

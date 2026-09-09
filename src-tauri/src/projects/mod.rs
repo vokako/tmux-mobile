@@ -146,20 +146,25 @@ use crate::tmux;
 /// is: tracked sessions live in the Projects section, everything else stays in
 /// the session list.
 pub fn list(include_archived: bool) -> Result<Value, String> {
-    let projects = with_store(|store| {
+    // Rows under the lock, tmux outside it (board #149): `has-session` is a
+    // subprocess (~9 ms here) and this ran it per project while every other
+    // store caller queued — 7 live projects = ~60 ms of lock per list.
+    let rows = with_store(|store| {
         let projects = store.list_projects(include_archived)?;
         let mut out = Vec::with_capacity(projects.len());
-        for p in &projects {
+        for p in projects {
             let slots = store.slots(&p.id)?;
-            let live = tmux::session_exists(&p.session);
-            out.push(json!({
-                "project": p,
-                "slots": slots,
-                "live": live,
-            }));
+            out.push((p, slots));
         }
         Ok(out)
     })?;
+    let projects: Vec<Value> = rows
+        .into_iter()
+        .map(|(p, slots)| {
+            let live = tmux::session_exists(&p.session);
+            json!({ "project": p, "slots": slots, "live": live })
+        })
+        .collect();
     Ok(json!({ "projects": projects }))
 }
 
@@ -268,16 +273,35 @@ pub fn adopt(session: &str, name: Option<&str>) -> Result<Value, String> {
         return Err(format!("no such tmux session: {session}"));
     }
     let ts = now();
-    with_store(|store| adopt_in(store, session, name, ts))
+    let facts = adopt_facts(session)?;
+    with_store(|store| adopt_in(store, session, name, ts, &facts))
 }
 
+/// The tmux half of an adoption, read OUTSIDE the store lock (board #149):
+/// the session's workspace and its windows. Two pane listings ≈ 90 ms on this
+/// host, during which every other store caller used to queue.
+struct AdoptFacts {
+    path: String,
+    observed: Vec<capture::Observed>,
+}
+
+fn adopt_facts(session: &str) -> Result<AdoptFacts, String> {
+    let path = canonical(&session_workspace(session)?)?;
+    let observed = capture::observe(session, &path, agent_sessions())?;
+    Ok(AdoptFacts { path, observed })
+}
+
+/// The row half of an adoption: only SQLite inside. The already-tracked check
+/// runs here, under the lock, so two adopters racing on one session still get
+/// the same answer they always did.
 fn adopt_in(
     store: &mut Store,
     session: &str,
     name: Option<&str>,
     ts: u64,
+    facts: &AdoptFacts,
 ) -> Result<Value, String> {
-    let path = canonical(&session_workspace(session)?)?;
+    let path = facts.path.clone();
     if let Some(existing) = store.project_by_session(session)? {
         return Err(format!(
             "session {session} is already tracked as project '{}'",
@@ -300,8 +324,7 @@ fn adopt_in(
         room: String::new(),   // insert_project freezes it as proj:<session>
     };
     store.insert_project(&project)?;
-    let observed = capture::observe(session, &path, agent_sessions())?;
-    let merged = capture::merge(&[], &observed, ts, capture::SETTLE_SECS);
+    let merged = capture::merge(&[], &facts.observed, ts, capture::SETTLE_SECS);
     // Settle immediately: these windows already exist and are the reason
     // the user is adopting the session.
     let slots: Vec<Slot> = merged
@@ -334,21 +357,30 @@ pub fn auto_adopt_once() -> Result<Vec<String>, String> {
 /// The decision half of `auto_adopt_once`, taking the session ages as data so
 /// the guards are testable without waiting two minutes.
 fn auto_adopt_with(created: &[(String, u64)], ts: u64) -> Result<Vec<String>, String> {
+    // Lock once to learn what is known, read tmux with no lock held, then
+    // lock once more for the row writes (board #149). `adopt_in` re-checks
+    // "already tracked" under the lock, so a session adopted by hand between
+    // the two locks is refused exactly as before.
+    let known: Vec<String> =
+        with_store(|store| Ok(store.list_projects(true)?.into_iter().map(|p| p.session).collect()))?;
+    let mut candidates: Vec<(&String, AdoptFacts)> = Vec::new();
+    for (session, created_at) in created {
+        if known.contains(session) || ts.saturating_sub(*created_at) < SESSION_SETTLE_SECS {
+            continue;
+        }
+        match adopt_facts(session) {
+            Ok(facts) => candidates.push((session, facts)),
+            Err(e) => eprintln!("projects: cannot track session {session}: {e}"),
+        }
+    }
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
     with_store(|store| {
-        let known: Vec<String> = store
-            .list_projects(true)?
-            .into_iter()
-            .map(|p| p.session)
-            .collect();
         let mut adopted = Vec::new();
-        for (session, created_at) in created {
-            if known.contains(session)
-                || ts.saturating_sub(*created_at) < SESSION_SETTLE_SECS
-            {
-                continue;
-            }
-            match adopt_in(store, session, None, ts) {
-                Ok(_) => adopted.push(session.clone()),
+        for (session, facts) in &candidates {
+            match adopt_in(store, session, None, ts, facts) {
+                Ok(_) => adopted.push((*session).clone()),
                 Err(e) => eprintln!("projects: cannot track session {session}: {e}"),
             }
         }
@@ -427,6 +459,11 @@ pub fn rename(id: &str, name: &str) -> Result<Value, String> {
         let mut session = project.session.clone();
         let mut renamed_session = false;
         if wanted != project.session {
+            // store-lock(tmux-ok): the ONE place tmux is touched under the store
+            // lock on purpose — the session rename and the row re-key must not
+            // drift apart (below), and the has-session check above is the
+            // refuse-before-write precondition of the same act. One rename, a
+            // handful of milliseconds, user-initiated (board #149 kept it).
             // tmux first: if it refuses anyway (a session created between the
             // check and here), the declaration must not drift away from it.
             let live = tmux::session_exists(&project.session);
@@ -2260,4 +2297,43 @@ pub(crate) mod tests {
         let _ = tmux::kill_session(session);
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    /// architecture.md Must: never hold the store lock while observing tmux
+    /// (board #149; the capture tick once queued every RPC behind a tmux walk,
+    /// 2026-09-03, and adopt/list did the same in smaller doses — measured here:
+    /// an adopt held the lock 90 ms, a list ~9 ms per project). Every
+    /// `with_store(|…| …)` closure in this file must be SQLite only. The one
+    /// deliberate exception carries `// store-lock(tmux-ok):` with its reason
+    /// (rename keeps the session rename and the row re-key under one lock).
+    #[test]
+    fn no_tmux_work_runs_under_the_store_lock() {
+        let src = include_str!("mod.rs");
+        let prod = &src[..src.find("\n#[cfg(test)]\n").unwrap()];
+        let mut at = 0;
+        let mut checked = 0;
+        let mut bad = Vec::new();
+        while let Some(k) = prod[at..].find("with_store(|") {
+            let start = at + k;
+            let mut depth = 0i32;
+            let mut end = start + "with_store".len();
+            for (off, c) in prod[start + "with_store".len()..].char_indices() {
+                depth += (c == '(') as i32 - (c == ')') as i32;
+                if depth == 0 {
+                    end = start + "with_store".len() + off + 1;
+                    break;
+                }
+            }
+            let body = &prod[start..end];
+            checked += 1;
+            let touches_tmux = ["tmux::", "capture::observe", "session_workspace("].iter().any(|t| body.contains(t));
+            if touches_tmux && !body.contains("// store-lock(tmux-ok):") {
+                let line = prod[..start].matches('\n').count() + 1;
+                bad.push(format!("line {line}"));
+            }
+            at = end;
+        }
+        assert!(checked >= 40, "scan found only {checked} with_store closures");
+        assert!(bad.is_empty(), "tmux work under the store lock at {bad:?}");
+    }
 }
+
