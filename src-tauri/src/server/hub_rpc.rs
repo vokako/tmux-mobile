@@ -2078,90 +2078,143 @@ mod tests {
         assert_eq!(r.result.expect("result")["has_more"], true);
     }
 
-    /// `crate::projects` is compiled out on android/ios, so every top-level
-    /// function in this file that reads it MUST carry the desktop cfg gate.
-    /// Nothing in the normal loop catches a missing one: `cargo test`, `cargo
-    /// build` and the dev server all target the desktop, where the module
-    /// exists — the error only appears in `npm run build:android`, which nobody
-    /// runs per change. It broke exactly that way (board #16): `deliver_chat_line`
-    /// was inserted directly beneath `deliver_mentions`' `#[cfg]`, adopted the
+    /// `crate::projects` is compiled out on android/ios, so every item in
+    /// these files that reads it MUST carry the desktop cfg gate. Nothing in
+    /// the normal loop catches a missing one: `cargo test`, `cargo build` and
+    /// the dev server all target the desktop, where the module exists — the
+    /// error only appears in `npm run build:android`, which nobody runs per
+    /// change. It broke exactly that way (board #16): `deliver_chat_line` was
+    /// inserted directly beneath `deliver_mentions`' `#[cfg]`, adopted the
     /// gate (a doc comment between an attribute and its item is legal, so the
     /// attribute binds to whatever item follows), and left `deliver_mentions`
-    /// ungated — 10 errors, two commits before
-    /// anyone noticed.
+    /// ungated — 10 errors, two commits before anyone noticed. `chrono` is a
+    /// desktop-gated dependency exactly like `crate::projects` (Cargo.toml
+    /// target block) and broke the build the same silent way on 2026-09-09
+    /// (context_stamp/delivered_chat_line, found by the board #100 smoke
+    /// build).
     ///
-    /// So the guard is a source contract, checked on the desktop where it is
-    /// cheap, instead of a cross-compile nobody runs.
+    /// Since board #129 the same contract holds for `src/backends/*.rs` (an
+    /// UNGATED leaf: the enum and the hook payload dialects compile on the
+    /// phone, while render/sniff/refresh/known reach into `crate::projects`
+    /// and gate themselves item by item) and for `agent_notifications.rs`
+    /// (the inbox consumer the phone compiles). So the guard is a source
+    /// contract, checked on the desktop where it is cheap, instead of a
+    /// cross-compile nobody runs. Negative control on 2026-09-09: removing
+    /// the gate above `kiro::render_kiro` failed this test naming it.
     #[test]
     fn projects_readers_are_desktop_gated() {
-        const GATE: &str = "target_os = \"android\"";
-        let src = include_str!("hub_rpc.rs");
-        // `chrono` is a desktop-gated dependency exactly like `crate::projects`
-        // (Cargo.toml target block) — an ungated user broke the Android build
-        // the same silent way on 2026-09-09 (context_stamp/delivered_chat_line,
-        // found by the board #100 smoke build).
-        let lines: Vec<&str> = src.lines().collect();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files: Vec<std::path::PathBuf> =
+            vec![root.join("server/hub_rpc.rs"), root.join("agent_notifications.rs")];
+        let mut backends: Vec<_> = std::fs::read_dir(root.join("backends"))
+            .expect("src/backends exists")
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.extension().is_some_and(|x| x == "rs"))
+            .collect();
+        backends.sort();
+        assert!(backends.len() >= 6, "expected the five backend files + mod/shared, found {}", backends.len());
+        files.extend(backends);
 
-        // Column-0 `fn` only: this is about the file's own top-level items.
-        // Anything nested (an impl, a mod, this test module) inherits its
-        // parent's gate.
-        let is_top_fn = |l: &str| {
-            ["fn ", "pub fn ", "pub(crate) fn ", "pub(super) fn "]
-                .iter()
-                .any(|p| l.starts_with(p))
-        };
-
-        let mut checked = 0usize;
-        let mut ungated: Vec<&str> = Vec::new();
-        for (i, line) in lines.iter().enumerate() {
-            if !is_top_fn(line) {
-                continue;
-            }
-            // The body: from this line until braces balance again.
-            let mut depth = 0i32;
-            let mut body = String::new();
-            for l in &lines[i..] {
-                body.push_str(l);
-                body.push('\n');
-                depth += l.chars().filter(|c| *c == '{').count() as i32;
-                depth -= l.chars().filter(|c| *c == '}').count() as i32;
-                if depth <= 0 && body.contains('{') {
-                    break;
-                }
-            }
-            if !body.contains("crate::projects") && !body.contains("chrono::") {
-                continue;
-            }
-            checked += 1;
-            // The preamble: the contiguous run of attributes and doc comments
-            // above the signature. A gate anywhere in it counts — the rule under
-            // test is "gated", not "gated on a particular line".
-            let mut gated = false;
-            for l in lines[..i].iter().rev() {
-                let t = l.trim_start();
-                if !(t.starts_with('#') || t.starts_with("//")) {
-                    break;
-                }
-                if t.contains(GATE) {
-                    gated = true;
-                    break;
-                }
-            }
-            if !gated {
-                ungated.push(line);
-            }
+        let mut total = 0usize;
+        let mut ungated: Vec<String> = Vec::new();
+        for path in &files {
+            let src = std::fs::read_to_string(path).unwrap();
+            let (checked, bad) = ungated_desktop_readers(&src);
+            total += checked;
+            let name = path.strip_prefix(&root).unwrap().display().to_string();
+            ungated.extend(bad.into_iter().map(|l| format!("{name}: {l}")));
         }
 
         assert!(
             ungated.is_empty(),
-            "these read crate::projects with no desktop gate, so they break the Android build: {ungated:#?}"
+            "these read crate::projects / chrono with no desktop gate, so they break the Android build: {ungated:#?}"
         );
-        // A guard that silently stops finding anything is not a guard. These
-        // three are the delivery helpers the regression hit; if they are renamed
-        // away, this count is the tripwire that says so.
+        // A guard that silently stops finding anything is not a guard. hub_rpc
+        // alone holds the three delivery helpers the regression hit, and every
+        // backend file gates at least its renderer; if the scan stops matching,
+        // this count is the tripwire that says so.
         assert!(
-            checked >= 3,
-            "expected at least 3 gated projects readers here, found {checked} — did the scan stop matching?"
+            total >= 12,
+            "expected at least 12 gated projects readers across these files, found {total} — did the scan stop matching?"
         );
+    }
+
+    /// The scan behind `projects_readers_are_desktop_gated`: every top-level
+    /// item (`fn`, `use`, `impl` method) whose text reaches `crate::projects`
+    /// or `chrono::` must have the desktop gate somewhere in the contiguous
+    /// run of attributes and comments above it — the rule is "gated", not
+    /// "gated on a particular line". Column-0 items and the methods of a
+    /// column-0 `impl` are checked; anything deeper inherits its parent's
+    /// gate, and the file's `#[cfg(test)]` module (column 0, always last) ends
+    /// the scan. A gate on the item's own statements is also accepted (the
+    /// inbox consumer's shape). Returns (items checked, offending signatures).
+    fn ungated_desktop_readers(src: &str) -> (usize, Vec<String>) {
+        const GATE: &str = "target_os = \"android\"";
+        let lines: Vec<&str> = src.lines().collect();
+        let end = lines.iter().position(|l| l.starts_with("#[cfg(test)]")).unwrap_or(lines.len());
+        let is_fn = |t: &str| {
+            ["fn ", "pub fn ", "pub(crate) fn ", "pub(super) fn "].iter().any(|p| t.starts_with(p))
+        };
+        let reaches = |text: &str| text.contains("crate::projects") || text.contains("chrono::");
+
+        let mut checked = 0usize;
+        let mut ungated = Vec::new();
+        let mut depth = 0i32;
+        let mut in_impl = false;
+        for (i, line) in lines[..end].iter().enumerate() {
+            let indent = line.len() - line.trim_start().len();
+            let t = line.trim_start();
+            if depth == 0 && t.starts_with("impl ") {
+                in_impl = true;
+            }
+            let top_use = depth == 0 && (t.starts_with("use ") || t.starts_with("pub use ") || t.starts_with("pub(crate) use "));
+            let item_fn = is_fn(t) && (depth == 0 || (depth == 1 && in_impl && indent == 4));
+            if top_use || item_fn {
+                // The item's text: a `use` is its line(s) up to `;`, a fn runs
+                // until its braces balance again.
+                let mut body = String::new();
+                let mut d = 0i32;
+                for l in &lines[i..] {
+                    body.push_str(l);
+                    body.push('\n');
+                    d += l.chars().filter(|c| *c == '{').count() as i32;
+                    d -= l.chars().filter(|c| *c == '}').count() as i32;
+                    if top_use && l.contains(';') && d <= 0 {
+                        break;
+                    }
+                    if item_fn && d <= 0 && body.contains('{') {
+                        break;
+                    }
+                }
+                if reaches(&body) {
+                    checked += 1;
+                    // A body that gates its own statements (`consume_file`
+                    // reaches telemetry only under `#[cfg]` blocks) is the
+                    // other legal shape; the cross-compile is what proves it
+                    // covers every reference, this guard only rejects the
+                    // wholly ungated item.
+                    let mut gated = body.contains(GATE);
+                    for l in lines[..i].iter().rev() {
+                        let a = l.trim_start();
+                        if !(a.starts_with('#') || a.starts_with("//")) {
+                            break;
+                        }
+                        if a.contains(GATE) {
+                            gated = true;
+                            break;
+                        }
+                    }
+                    if !gated {
+                        ungated.push(t.to_string());
+                    }
+                }
+            }
+            depth += line.chars().filter(|c| *c == '{').count() as i32;
+            depth -= line.chars().filter(|c| *c == '}').count() as i32;
+            if depth <= 0 {
+                in_impl = false;
+            }
+        }
+        (checked, ungated)
     }
 }
