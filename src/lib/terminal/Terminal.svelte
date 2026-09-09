@@ -20,6 +20,7 @@
   import { compactLineGeometry } from './terminal-line-geometry.ts';
   import { selStart, selContains, selLength, selForDrag, selFromExclusive, wordBounds } from './selection-model.ts';
   import { pointToCell, handleGrabOffset, snapHandleColumn, selectionView, hitSelectionHandle } from './terminal-gesture-geometry.ts';
+  import { scrollSamples, scrollStep, releaseVelocity, coastStep, edgeDirection, edgeStep } from './terminal-gesture-motion.ts';
   import { computeCursorLayout } from './cursor-layout.ts';
   import { restoreViewportAfterPaneSwitch } from './terminal-viewport.ts';
   import { cycleItem } from '../app/shortcuts.ts';
@@ -40,10 +41,6 @@
   const CELL_W_RATIO = 0.6;
   const CELL_H_RATIO = 1.2;
 
-  // Touch scrolling physics
-  const MOMENTUM_MAX_PX = 240;
-  const MOMENTUM_FRICTION = 0.95;
-  const MOMENTUM_MIN_V = 0.05;
   const SCROLLBAR_TOUCH_WIDTH = 30;
 
   // `embedded` = rendered inside a split-screen cell. The cell uses this
@@ -1061,14 +1058,9 @@
     // ramps with proximity to the edge (1 px/frame deep in the zone is
     // ~1 row per 3 frames; pressed against the edge it's ~4 rows/frame...
     // we keep it gentle: 1 row per N frames scaling to 2 rows/frame).
-    const EDGE_SCROLL_ZONE_PX = 36;
     function updateEdgeScroll(clientY) {
       const rect = termEl.getBoundingClientRect();
-      const topDist = clientY - rect.top;
-      const botDist = rect.bottom - clientY;
-      let dir = 0;
-      if (topDist < EDGE_SCROLL_ZONE_PX) dir = -1;
-      else if (botDist < EDGE_SCROLL_ZONE_PX) dir = 1;
+      const dir = edgeDirection(clientY, rect.top, rect.bottom);
       edgeScrollDir = dir;
       if (dir !== 0 && !edgeScrollId) {
         let acc = 0;
@@ -1078,16 +1070,12 @@
             return;
           }
           const rect2 = termEl.getBoundingClientRect();
-          const dist = edgeScrollDir < 0
-            ? Math.max(0, lastDragY + handleGrabDy - rect2.top)
-            : Math.max(0, rect2.bottom - (lastDragY + handleGrabDy));
-          // 0 px from edge → 2 rows/frame; at zone boundary → ~0.25
-          const speed = 0.25 + (1 - Math.min(1, dist / EDGE_SCROLL_ZONE_PX)) * 1.75;
-          acc += speed * edgeScrollDir;
-          const lines = Math.trunc(acc);
+          const step = edgeStep(acc, edgeScrollDir, lastDragY + handleGrabDy, rect2.top, rect2.bottom);
+          acc = step.accumulated;
+          const lines = step.lines;
           if (lines !== 0) {
             term.scrollLines(lines);
-            acc -= lines;
+            acc = step.remainder;
             // Viewport moved under the stationary finger — re-map the
             // endpoint so the selection keeps extending row by row.
             applyHandleDragAt(lastDragX, lastDragY);
@@ -1260,25 +1248,22 @@
       const now = Date.now();
       const y = t0.clientY;
       const dy = touchY - y;
-      const dt = Math.max(1, now - lastMoveTime);
+      const previousMoveTime = lastMoveTime;
       touchY = y;
       lastMoveTime = now;
       accumulatedDy += dy;
       totalDist += Math.abs(dy);
       const lh = lineHeight();
-      // Track velocity in px/ms, keep last 5 samples within 100ms
-      velocitySamples.push({ v: dy / dt, t: now });
-      while (velocitySamples.length > 5 || (velocitySamples.length > 1 && now - velocitySamples[0].t > 100)) {
-        velocitySamples.shift();
-      }
-      const lines = Math.trunc(accumulatedDy / lh);
+      velocitySamples = scrollSamples(velocitySamples, dy, now, previousMoveTime);
+      const step = scrollStep(accumulatedDy, lh);
+      const lines = step.lines;
       if (lines !== 0) {
         didScroll = true;
         if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
         if (touchMode === 'down') touchMode = 'scroll';
         touchScrolling = true;
         term.scrollLines(lines);
-        accumulatedDy -= lines * lh;
+        accumulatedDy = step.remainder;
         if (e.cancelable) e.preventDefault();
       }
     };
@@ -1339,31 +1324,20 @@
       // 'scroll' or anything that left touchScrolling=true
       touchMode = 'idle';
       if (touchScrolling && velocitySamples.length > 0) {
-        // Weighted average of recent velocity samples (newer = heavier)
-        let wSum = 0, wTotal = 0;
-        for (let i = 0; i < velocitySamples.length; i++) {
-          const w = i + 1;
-          wSum += velocitySamples[i].v * w;
-          wTotal += w;
-        }
-        const avgVelocity = wSum / wTotal; // px/ms
         const lh = lineHeight();
-        // Cap velocity at 240px/frame equivalent, then convert to lines/frame
-        const maxPxPerFrame = MOMENTUM_MAX_PX;
-        const cappedPx = Math.max(-maxPxPerFrame, Math.min(maxPxPerFrame, avgVelocity * 16));
-        let v = cappedPx / lh;
+        let v = releaseVelocity(velocitySamples, lh);
         if (Math.abs(v) > 0.1) {
           let acc = 0;
-          const friction = MOMENTUM_FRICTION;
           const coast = () => {
-            v *= friction;
-            acc += v;
-            const lines = Math.trunc(acc);
+            const step = coastStep(v, acc);
+            v = step.velocity;
+            acc = step.accumulated;
+            const lines = step.lines;
             if (lines !== 0) {
               term.scrollLines(lines);
-              acc -= lines;
+              acc = step.remainder;
             }
-            if (Math.abs(v) > MOMENTUM_MIN_V) {
+            if (step.running) {
               momentumId = requestAnimationFrame(coast);
             } else {
               momentumId = null;

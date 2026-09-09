@@ -257,6 +257,43 @@ while the executable cap was already 240px. The comment now matches the
 constant. Characterization pins that value; extraction must not tune it or
 change the time model.
 
+### Motion Decision Ownership (#142, 2026-09-09)
+
+`terminal-gesture-motion.ts` now owns sample collection, whole-line/remainder
+splitting, weighted release velocity, a coast frame and edge direction/frame
+calculations. Time and frame state are inputs; the module has no browser,
+timer, xterm or Svelte dependency. One signed `Math.trunc` splitter serves
+pixel scrolling (with the measured line height) and line-unit coasts.
+
+The sample helper returns a bounded copy instead of mutating its input.
+Terminal remains the sole owner of that private list and assigns the result
+at the old collection point; existing sample objects are retained. Pruning
+still happens on collection, not through a new release-time age check.
+Same-time/backward clocks retain the one-millisecond denominator floor.
+
+All scheduling and mode transitions stay in the closure: the nonempty
+sample guard and strict `>0.1` coast-start condition, rAF ownership/cancel,
+200/500ms release paths, and edge-drag stop conditions are unchanged.
+Accumulated state is published before `scrollLines`, and its remainder
+after that call, as before. Fixed-frame friction and speed are not converted
+to elapsed-time physics. Selection, keyboard lock, input-to-tail and
+hidden-frame rules remain their existing mechanisms.
+
+Sixteen unit cases cover the 100ms/five-sample boundaries, clock reversal,
+signed fractional carry, weighting/capping, decay termination and edge ramps.
+The formula/AST audit also checks scheduling-call and mode-write order.
+On Chromium 152.0.7977.64 with real xterm 6.0.0, the original and extracted
+code both scroll `+3` / `-3` lines over four live coast frames after release;
+input then cancels the queued coast. Changing `Math.trunc` to `Math.floor`
+fails the unit vector and produces `-4` instead of `-3` in the real browser.
+Restoring truncation returns green.
+
+The 92-state #141 matrix still matches, including selection API arguments;
+88 PNGs are byte-identical and four Copy captures differ only in the existing
+toast timing. This is not a physical Android/IME verification. The controller
+boundary must be re-reviewed after these pure moves land, before moving its
+state, timers or listeners.
+
 ## Characterization Before Extraction
 
 Board #139 (2026-09-09) adds source contracts and a real-Terminal Chromium

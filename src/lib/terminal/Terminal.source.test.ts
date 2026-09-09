@@ -367,14 +367,18 @@ test('geometry adapters read the live rectangle and the single cellSize source (
   assert.match(hit, /if \(!selection \|\| !selUI \|\| !termEl\) return null;\s*const rect = termEl\.getBoundingClientRect\(\);\s*return hitSelectionHandle/u);
 });
 
-test('gesture motion keeps signed remainder and the measured fixed-frame rules (#139)', () => {
-  assert.match(source, /const MOMENTUM_MAX_PX = 240;/u);
-  assert.match(source, /const MOMENTUM_FRICTION = 0\.95;/u);
-  assert.match(source, /const MOMENTUM_MIN_V = 0\.05;/u);
-  assert.match(source, /velocitySamples\.length > 5 \|\| \(velocitySamples\.length > 1 && now - velocitySamples\[0\]\.t > 100\)/u);
-  assert.match(source, /const lines = Math\.trunc\(accumulatedDy \/ lh\);/u);
-  assert.match(source, /accumulatedDy -= lines \* lh;/u);
-  assert.match(source, /v \*= friction;\s*acc \+= v;\s*const lines = Math\.trunc\(acc\);/u);
-  assert.match(source, /const EDGE_SCROLL_ZONE_PX = 36;/u);
-  assert.match(source, /const speed = 0\.25 \+ \(1 - Math\.min\(1, dist \/ EDGE_SCROLL_ZONE_PX\)\) \* 1\.75;/u);
+test('motion decisions are pure while state writes and scheduling stay in Terminal (#142)', () => {
+  // #142 moves the numeric #139 contracts into motion unit vectors.
+  assert.match(source, /import \{ scrollSamples, scrollStep, releaseVelocity, coastStep, edgeDirection, edgeStep \} from '\.\/terminal-gesture-motion\.ts';/u);
+  assert.match(source, /const previousMoveTime = lastMoveTime;\s*touchY = y;\s*lastMoveTime = now;/u);
+  assert.match(source, /velocitySamples = scrollSamples\(velocitySamples, dy, now, previousMoveTime\);\s*const step = scrollStep\(accumulatedDy, lh\);/u);
+  assert.match(source, /term\.scrollLines\(lines\);\s*accumulatedDy = step\.remainder;/u,
+    'the scroll remainder is still published after the xterm call');
+  assert.match(source, /if \(touchScrolling && velocitySamples\.length > 0\) \{\s*const lh = lineHeight\(\);\s*let v = releaseVelocity\(velocitySamples, lh\);\s*if \(Math\.abs\(v\) > 0\.1\)/u);
+  assert.match(source, /const step = coastStep\(v, acc\);\s*v = step\.velocity;\s*acc = step\.accumulated;/u);
+  assert.match(source, /if \(step\.running\) \{\s*momentumId = requestAnimationFrame\(coast\);\s*\} else \{\s*momentumId = null;\s*scheduleEndTouchScroll\(200\);/u);
+  assert.match(source, /const dir = edgeDirection\(clientY, rect\.top, rect\.bottom\);\s*edgeScrollDir = dir;/u);
+  assert.match(source, /const step = edgeStep\(acc, edgeScrollDir, lastDragY \+ handleGrabDy, rect2\.top, rect2\.bottom\);/u);
+  assert.match(source, /acc = step\.remainder;[\s\S]*?applyHandleDragAt\(lastDragX, lastDragY\);[\s\S]*?edgeScrollId = requestAnimationFrame\(tick\);/u);
+  assert.doesNotMatch(source, /const MOMENTUM_|const EDGE_SCROLL_ZONE_PX/u, 'one owner for motion coefficients');
 });
