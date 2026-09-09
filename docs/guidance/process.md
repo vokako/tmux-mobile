@@ -49,6 +49,10 @@
   follow the code.
 - Run Rust tests with `--test-threads=1`; isolate flaky shared-tmux tests
   on a separate socket.
+- During negative verification, undo the temporary breakage by stashing or
+  keeping a copy — never `git checkout` a file with uncommitted work in it
+  (2026-09-09, board #113: the checkout restored HEAD and silently discarded
+  the entire uncommitted fix, which had to be rebuilt from session notes).
 - UI changes include screenshots or device observations for both layouts.
   CLI changes identify the tested CLI version.
 - Update progress through `tmm status working`, finish with `tmm done`,
