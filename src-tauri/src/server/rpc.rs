@@ -119,14 +119,13 @@ pub(super) fn valid_process_arg(arg: &str) -> bool {
 /// The dispatcher proper (board #146): every arm is a `Result`, so a missing
 /// param or a tmux/fs error is a `?` with its wire code already chosen
 /// (`RpcError`), and `handle_request` below is the one place a `Response`
-/// is built. Arm order and every message are exactly what the inline
+/// is built (`Response::from_outcome`). Arm order and every message are exactly what the inline
 /// `match … return Response::err` shape produced.
-fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
-    let id = req.id;
+fn dispatch(req: &Request, token: &str) -> Result<serde_json::Value, RpcError> {
     let p = &req.params;
 
     match req.method.as_str() {
-        "ping" => Ok(Response::ok(id, serde_json::json!("pong"))),
+        "ping" => Ok(serde_json::json!("pong")),
 
         // The backends this server can spawn, with the client's resource
         // names for each (board #130). No params, no session, no gate: the
@@ -135,7 +134,7 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
         // this and falls back to them only when an OLDER server says
         // method-not-found.
         "backends_list" => {
-            Ok(Response::ok(id, serde_json::json!({ "backends": crate::backends::Backend::list_json() })))
+            Ok(serde_json::json!({ "backends": crate::backends::Backend::list_json() }))
         }
 
         // ---- server system vitals (board #56) ------------------------------
@@ -146,18 +145,18 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
         // with unknowable fields as null/0 for the client's verdict rule.
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         "system_status" => {
-            Ok(Response::ok(id, serde_json::to_value(crate::system_status::read()).unwrap()))
+            Ok(serde_json::to_value(crate::system_status::read()).unwrap())
         }
 
         "list_sessions" => {
             let sessions = tmux::list_sessions().map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::to_value(&sessions).unwrap()))
+            Ok(serde_json::to_value(&sessions).unwrap())
         },
 
         "list_panes" => {
             let session = param(p, "session")?;
             let panes = tmux::list_panes(session).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::to_value(&panes).unwrap()))
+            Ok(serde_json::to_value(&panes).unwrap())
         }
 
         // Combined sessions + panes in one round-trip. The Sessions page
@@ -174,17 +173,17 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
                 Ok(v) => v,
                 Err(e) => return Err(RpcError::Internal(e)),
             };
-            Ok(Response::ok(id, serde_json::json!({
+            Ok(serde_json::json!({
                 "sessions": sessions,
                 "panes": panes,
-            })))
+            }))
         }
 
         "capture_pane" => {
             let target = param(p, "target")?;
             let lines = p.get("lines").and_then(|v| v.as_u64()).map(|n| n as usize);
             let output = tmux::capture_pane(target, lines).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "output": output })))
+            Ok(serde_json::json!({ "output": output }))
         }
 
         "send_keys" => {
@@ -192,21 +191,21 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
             let keys = param(p, "keys")?;
             let literal = p.get("literal").and_then(|v| v.as_bool()).unwrap_or(false);
             tmux::send_keys(target, keys, literal).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
+            Ok(serde_json::json!({ "ok": true }))
         }
 
         "paste_text" => {
             let target = param(p, "target")?;
             let text = param(p, "text")?;
             tmux::paste_text(target, text).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
+            Ok(serde_json::json!({ "ok": true }))
         }
 
         "send_command" => {
             let target = param(p, "target")?;
             let command = param(p, "command")?;
             tmux::send_command(target, command).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
+            Ok(serde_json::json!({ "ok": true }))
         }
 
         // resize_pane is handled in the connection message loop (needs per-connection state)
@@ -217,31 +216,31 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
             let path = p.get("path").and_then(|v| v.as_str());
             let command = p.get("command").and_then(|v| v.as_str());
             tmux::new_session(name, path, command).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
+            Ok(serde_json::json!({ "ok": true }))
         }
 
         "kill_session" => {
             let name = param(p, "name")?;
             tmux::kill_session(name).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
+            Ok(serde_json::json!({ "ok": true }))
         }
 
         "new_window" => {
             let session = param(p, "session")?;
             tmux::new_window(session).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
+            Ok(serde_json::json!({ "ok": true }))
         }
 
         "kill_window" => {
             let target = param(p, "target")?;
             tmux::kill_window(target).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
+            Ok(serde_json::json!({ "ok": true }))
         }
 
         "pane_command" => {
             let target = param(p, "target")?;
             let cmd = tmux::pane_command(target).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "command": cmd })))
+            Ok(serde_json::json!({ "command": cmd }))
         }
 
         "set_socket" => {
@@ -250,12 +249,12 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
             tmux::set_socket(socket);
-            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
+            Ok(serde_json::json!({ "ok": true }))
         }
 
         "get_bookmarks" => {
             let bookmarks = crate::config::get_bookmarks();
-            Ok(Response::ok(id, serde_json::json!({ "bookmarks": bookmarks })))
+            Ok(serde_json::json!({ "bookmarks": bookmarks }))
         }
 
         "save_bookmarks" => {
@@ -269,24 +268,24 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
                 })
                 .unwrap_or_default();
             crate::config::save_bookmarks(&bookmarks).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
+            Ok(serde_json::json!({ "ok": true }))
         }
 
         "get_prefs" => {
-            Ok(Response::ok(id, crate::config::get_prefs()))
+            Ok(crate::config::get_prefs())
         }
 
         "set_pref" => {
             let key = param(p, "key")?;
             let value = p.get("value").cloned().unwrap_or(serde_json::Value::Null);
             crate::config::set_prefs(key, value).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
+            Ok(serde_json::json!({ "ok": true }))
         }
 
         "fs_cwd" => {
             let session = param(p, "session")?;
             let path = rfs::get_cwd(session).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "path": path })))
+            Ok(serde_json::json!({ "path": path }))
         }
 
         "fs_list" => {
@@ -296,19 +295,19 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             let entries = rfs::list_dir(path, show_hidden).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "entries": entries, "path": path })))
+            Ok(serde_json::json!({ "entries": entries, "path": path }))
         }
 
         "fs_stat" => {
             let path = param(p, "path")?;
             let stat = rfs::stat_file(path).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::to_value(&stat).unwrap()))
+            Ok(serde_json::to_value(&stat).unwrap())
         }
 
         "fs_read" => {
             let path = param(p, "path")?;
             let content = rfs::read_file(path).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "content": content })))
+            Ok(serde_json::json!({ "content": content }))
         }
 
         "fs_write" => {
@@ -316,32 +315,32 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
             // Allow empty content (creating empty files is valid)
             let content = p.get("content").and_then(|v| v.as_str()).unwrap_or("");
             rfs::write_file(path, content).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
+            Ok(serde_json::json!({ "ok": true }))
         }
 
         "fs_mkdir" => {
             let path = param(p, "path")?;
             rfs::create_dir(path).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
+            Ok(serde_json::json!({ "ok": true }))
         }
 
         "fs_delete" => {
             let path = param(p, "path")?;
             rfs::delete_path(path).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
+            Ok(serde_json::json!({ "ok": true }))
         }
 
         "fs_rename" => {
             let from = param(p, "from")?;
             let to = param(p, "to")?;
             rfs::rename_path(from, to).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
+            Ok(serde_json::json!({ "ok": true }))
         }
 
         "fs_download" => {
             let path = param(p, "path")?;
             let (name, data) = rfs::download_file(path).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "name": name, "data": data })))
+            Ok(serde_json::json!({ "name": name, "data": data }))
         }
 
         "fs_download_url" => {
@@ -350,14 +349,14 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
             let sig = sign_download(token, path, ts);
             let name = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or("file");
             let qs = format!("/dl?path={}&ts={}&sig={}", urlencoding::encode(path), ts, sig);
-            Ok(Response::ok(id, serde_json::json!({ "url": qs, "name": name })))
+            Ok(serde_json::json!({ "url": qs, "name": name }))
         }
 
         "fs_upload" => {
             let path = param(p, "path")?;
             let data = param(p, "data")?;
             rfs::upload_file(path, data).map_err(RpcError::Internal)?;
-            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
+            Ok(serde_json::json!({ "ok": true }))
         }
 
         "git" => {
@@ -393,10 +392,7 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
             let output = child.output().map_err(|e| RpcError::Internal(e.to_string()))?;
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            Ok(Response::ok(
-                id,
-                serde_json::json!({ "stdout": stdout, "stderr": stderr, "code": output.status.code() }),
-            ))
+            Ok(serde_json::json!({ "stdout": stdout, "stderr": stderr, "code": output.status.code() }))
         }
 
         // ---- projects (declarative workspaces) ----------------------------
@@ -411,7 +407,7 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
         | "skills_list" | "skills_save" | "skills_delete" | "skills_refresh" | "skills_read"
         | "skills_import" | "skills_files" | "skills_file"
         | "mcp_list" | "mcp_save" | "mcp_delete" => {
-            Ok(handle_project_request(req.method.as_str(), id, p))
+            handle_project_request(req.method.as_str(), p)
         }
 
         "fs_convert" => {
@@ -424,7 +420,7 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
             match ext.as_str() {
                 "pptx" => {
                     let html = crate::pptx::to_html(std::path::Path::new(path)).map_err(RpcError::Internal)?;
-                    Ok(Response::ok(id, serde_json::json!({ "html": html })))
+                    Ok(serde_json::json!({ "html": html }))
                 },
                 _ => Err(RpcError::InvalidParams(format!("unsupported file type: .{}", ext))),
             }
@@ -435,10 +431,7 @@ fn dispatch(req: &Request, token: &str) -> Result<Response, RpcError> {
 }
 
 pub(super) fn handle_request(req: &Request, token: &str) -> Response {
-    match dispatch(req, token) {
-        Ok(r) => r,
-        Err(e) => Response::from_error(req.id, e),
-    }
+    Response::from_outcome(req.id, dispatch(req, token))
 }
 
 
@@ -446,7 +439,7 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
 /// one place: on mobile every method reports method-not-found and the client
 /// hides the Projects page.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn handle_project_request(method: &str, id: Option<u64>, p: &serde_json::Value) -> Response {
+fn handle_project_request(method: &str, p: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
     use crate::projects;
 
     let need_id = |key: &str| -> Result<String, String> { require_str(p, key).map(str::to_string) };
@@ -540,30 +533,29 @@ fn handle_project_request(method: &str, id: Option<u64>, p: &serde_json::Value) 
         other => Err(format!("unknown project method: {other}")),
     };
 
-    match outcome {
-        Ok(value) => Response::ok(id, value),
-        // A missing/blank param is the client's fault, everything else is ours.
-        Err(e) if e.starts_with("missing required param") => {
-            Response::err(id, ERR_INVALID_PARAMS, e)
+    // A missing/blank param is the client's fault, everything else is ours.
+    // (A string sniff, kept as it was — board #146 typed the outcome without
+    // changing which code any message gets.)
+    outcome.map_err(|e| {
+        if e.starts_with("missing required param") {
+            RpcError::InvalidParams(e)
+        } else {
+            RpcError::Internal(e)
         }
-        Err(e) => Response::err(id, ERR_INTERNAL, e),
-    }
+    })
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
-fn handle_project_request(method: &str, id: Option<u64>, _p: &serde_json::Value) -> Response {
-    Response::err(
-        id,
-        ERR_METHOD_NOT_FOUND,
-        format!("{method} is unavailable on this platform"),
-    )
+fn handle_project_request(method: &str, _p: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+    Err(RpcError::MethodNotFound(format!("{method} is unavailable on this platform")))
 }
 
 // Subscription polling task: captures pane content and sends diffs
 pub(super) fn handle_subscribe(params: &serde_json::Value, subs: &mut HashMap<String, String>) -> Response {
-    let target = match require_str(params, "target") {
-        Ok(s) => s,
-        Err(e) => return Response::err(None, ERR_INVALID_PARAMS, e),
+    // Subscriptions answer without an id (they are notifications on the wire).
+    let target = match param(params, "target") {
+        Ok(t) => t,
+        Err(e) => return Response::from_error(None, e),
     };
     subs.insert(target.to_string(), String::new());
     // Record "last opened from tmux-mobile" for MRU sorting on the Sessions
@@ -577,9 +569,9 @@ pub(super) fn handle_subscribe(params: &serde_json::Value, subs: &mut HashMap<St
 }
 
 pub(super) fn handle_unsubscribe(params: &serde_json::Value, subs: &mut HashMap<String, String>) -> Response {
-    let target = match require_str(params, "target") {
-        Ok(s) => s,
-        Err(e) => return Response::err(None, ERR_INVALID_PARAMS, e),
+    let target = match param(params, "target") {
+        Ok(t) => t,
+        Err(e) => return Response::from_error(None, e),
     };
     subs.remove(target);
     Response::ok(None, serde_json::json!({ "unsubscribed": target }))
@@ -664,19 +656,13 @@ mod tests {
 /// Only the hook management surface remains. (Lived in team_rpc.rs until the
 /// Team system was deleted whole, board #100.)
 pub(super) fn handle_notification_request(req: &Request, hub: &crate::agent_notifications::AgentNotificationHub) -> Response {
-    let id = req.id;
-    match req.method.as_str() {
-        "agent_hooks_status" => Response::ok(id, serde_json::to_value(hub.hook_status()).unwrap()),
-        "agent_hooks_install" => match hub.install_hooks() {
-            Ok(status) => Response::ok(id, serde_json::to_value(status).unwrap()),
-            Err(error) => Response::err(id, ERR_INTERNAL, error),
-        },
-        "agent_hooks_remove" => match hub.remove_hooks() {
-            Ok(status) => Response::ok(id, serde_json::to_value(status).unwrap()),
-            Err(error) => Response::err(id, ERR_INTERNAL, error),
-        },
-        other => Response::err(id, ERR_METHOD_NOT_FOUND, format!("unknown agent notification method: {other}")),
-    }
+    let outcome = match req.method.as_str() {
+        "agent_hooks_status" => Ok(serde_json::to_value(hub.hook_status()).unwrap()),
+        "agent_hooks_install" => hub.install_hooks().map(|s| serde_json::to_value(s).unwrap()).map_err(RpcError::Internal),
+        "agent_hooks_remove" => hub.remove_hooks().map(|s| serde_json::to_value(s).unwrap()).map_err(RpcError::Internal),
+        other => Err(RpcError::MethodNotFound(format!("unknown agent notification method: {other}"))),
+    };
+    Response::from_outcome(req.id, outcome)
 }
 
 #[cfg(test)]

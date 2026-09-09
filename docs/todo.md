@@ -136,9 +136,12 @@
   `bin/tmm.rs` 1312 / `vitals.rs` 1308:
   split store by projects/registry/board/activity, move mod.rs skills into
   `skills.rs`, and move spawn `render_*` functions into backend files.
-- [ ] The 750-line `hub_rpc.rs` match mixes dispatch, delivery and board
-  notification policy. Replace about 40 `require_str→match→err` branches
-  with a `?`-returning inner function.
+- [ ] The `hub_rpc.rs` match mixes dispatch, delivery and board notification
+  policy. (The boilerplate half closed with board #146, 2026-09-09: both
+  dispatchers are `?`-returning inner fns over `RpcError`, ~90 `match →
+  Response::err` sites collapsed, every wire code and message byte-identical
+  and pinned by `server::golden_errors`. The policy-mixing half — delivery
+  and board-notice decisions living inside arms — is still open.)
 - [x] `Store::hub_search` matches in SQL (board #124, 2026-09-09): `LIKE` with
   `%`/`_`/`\` escaped, ASCII `lower()` on both sides (identical to the old
   `to_ascii_lowercase` — SQLite `lower()` is ASCII-only without ICU), limit in
