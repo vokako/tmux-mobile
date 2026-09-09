@@ -1,5 +1,6 @@
 // Pure display logic for the Hub view — testable with node --test, no Svelte.
 import type { HubAgent, HubActivityEvent } from '../core/ws.ts';
+import { backendColorToken } from '../core/agents.ts';
 
 /**
  * THE status colour language — one progression, read at a glance (owner,
@@ -147,6 +148,10 @@ export function gapWalkStep<T extends { ts?: number }>(
  * the other tokens — a literal colour in a component is a new visual species
  * (design-language.md §Colour); this only names the token (review C, 2026-09-03). */
 export function backendColor(backend: string | null | undefined): string {
+  // The served list names the token (board #130); the switch is the older-
+  // server fallback plus kimi, which is detected but never spawned.
+  const token = backendColorToken(backend);
+  if (token) return `var(${token})`;
   switch (backend) {
     case 'kiro': case 'claude': case 'codex': case 'kimi': case 'grok': case 'omp':
       return `var(--backend-${backend})`;

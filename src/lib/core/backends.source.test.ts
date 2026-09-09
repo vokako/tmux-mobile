@@ -39,11 +39,10 @@ function backendArrays(source: string): string[] {
   return hits;
 }
 
-// The one array the client still holds, until #130 replaces it with the
-// server's list and this allowance goes to zero (2026-09-09). The fallback
-// lists #130 adds to core/agents.ts take its place as the ONLY allowed site.
+// The ONLY allowed site: core/agents.ts's frozen fallback list, the shape an
+// OLDER server (pre-#130, no `backends_list`) is answered with. AgentsPage's
+// own array went with #130 (2026-09-09) and its allowance with it.
 const ALLOWED: Record<string, number> = {
-  'hub/AgentsPage.svelte': 1,
   'core/agents.ts': 1,
 };
 
@@ -66,6 +65,6 @@ test('the allowance is not larger than what exists (a removed array lowers it)',
     const hits = backendArrays(source).length;
     assert.ok(hits <= n, `${rel} has ${hits} backend arrays, allowance ${n}`);
     // An allowance nobody uses is a hole waiting for a new mirror.
-    if (rel === 'hub/AgentsPage.svelte') assert.ok(hits === n || hits === 0, `${rel}: tighten ALLOWED to ${hits}`);
+    assert.equal(hits, n, `${rel}: tighten ALLOWED to ${hits}`);
   }
 });

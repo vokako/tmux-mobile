@@ -15,7 +15,8 @@
   import { copyText } from './lib/core/clipboard.ts';
   import { hubRooms, systemStatus } from './lib/core/ws.ts';
   import SystemStatus from './lib/system/SystemStatus.svelte';
-  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable, listPanes, listSessions } from './lib/core/ws.ts';
+  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable, listPanes, listSessions, backendsList } from './lib/core/ws.ts';
+  import { setServedBackends } from './lib/core/agents.ts';
   import { t } from './lib/core/i18n.svelte.ts';
   import { layout } from './lib/app/layout.svelte.ts';
   import { applyFontVars } from './lib/app/fonts.svelte.ts';
@@ -668,8 +669,18 @@
     } catch {}
     resubscribeAll();
     probeHub();
+    loadBackends();
     // Tell Terminal to reset stale resize state + re-fit against the new server.
     window.dispatchEvent(new Event('ws-reconnected'));
+  }
+
+  // The server's backend list, once per connection (board #130). Fail-soft:
+  // an older server without the method, or a timeout, leaves the client on
+  // its frozen fallback list rather than on an empty one.
+  function loadBackends() {
+    backendsList()
+      .then((r) => setServedBackends(r?.backends ?? null))
+      .catch(() => setServedBackends(null));
   }
 
   function onConnected() {
@@ -686,6 +697,7 @@
     // Mirrors onReconnectSuccess; on a first-ever connect both are no-ops.
     resubscribeAll();
     probeHub();
+    loadBackends();
     window.dispatchEvent(new Event('ws-reconnected'));
   }
 

@@ -6,6 +6,7 @@
 // changes server-side, change it here — every consumer then fails to
 // type-check instead of silently reading `undefined`.
 import type { ProjectRow } from '../projects/projects.ts';
+import type { BackendInfo } from './agents.ts';
 import type { SystemStatus as SystemStatusReading } from '../system/system.ts';
 export interface TmuxSession {
   name: string;
@@ -1009,6 +1010,9 @@ export interface RegTeam {
 export const teamsList = () => call<{ teams: RegTeam[] }>('teams_list');
 export const teamsSave = (def: RegTeam) => call('teams_save', { def });
 export const teamsDelete = (name: string) => call('teams_delete', { name });
+/** The backends this server can spawn, with the client's resource names for
+ * each (name, avatar path, colour token, effort levels), first = default. */
+export const backendsList = () => call<{ backends: BackendInfo[] }>('backends_list');
 /** The model ids a backend accepts. `models` is null where the backend cannot
  * enumerate them (claude/codex take aliases), and the editor keeps the field as
  * free text in that case. */

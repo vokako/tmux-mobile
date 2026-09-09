@@ -11,24 +11,18 @@
   import { registryList, registrySave, registryDelete, modelsList, skillsList, skillsSave, skillsDelete, skillsRefresh, skillsImport, skillsFiles, skillsFile, mcpList, mcpSave, mcpDelete, teamsList, teamsSave, teamsDelete, globalPromptGet, globalPromptSet } from '../core/ws.ts';
   import { renderMarkdown } from '../core/markdown.ts';
   import { backendColor } from '../hub/hub.ts';
-  import { backendIcon } from '../core/agents.ts';
+  import { backendIcon, spawnableBackends, defaultBackend, backendEfforts } from '../core/agents.ts';
   import { moveMs, revealMs } from '../ui/motion.ts';
   import { hoverInfo } from '../ui/hover.ts';
   import Select from '../ui/Select.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
-  /** The backends a registry agent can run on — the same list the server
-   * validates against in `registry_save`. */
-  const BACKENDS = ['kiro', 'claude', 'codex', 'grok', 'omp'];
-  // Reasoning-effort levels each backend's CLI accepts — mirrors the server's
-  // models::effort_values (measured per CLI, 2026-08-22). '' = backend default.
-  const EFFORTS = {
-    kiro: ['low', 'medium', 'high', 'xhigh', 'max'],
-    claude: ['low', 'medium', 'high', 'xhigh', 'max'],
-    codex: ['minimal', 'low', 'medium', 'high', 'xhigh'],
-    grok: ['low', 'medium', 'high', 'xhigh'],
-  };
-
+  // The backends a registry agent can run on and the effort levels each
+  // accepts come from the SERVER (`backends_list`, board #130) — the client
+  // kept hand mirrors of both and the effort one had drifted (omp was
+  // missing). Read on each reload so a list that arrived after the page
+  // painted still lands; core/agents.ts holds the older-server fallback.
+  let backends = $state(spawnableBackends());
   // `section` narrows the page to ONE kind — 'agents' | 'teams' | 'skills' |
   // 'mcp' — for the phone's Settings, where each is its own second-level page
   // (owner, 2026-09-02: "把 team agent mcp skill 分开几个二级设置页面吧，在手机
@@ -206,6 +200,7 @@
     // "I could not ask" is not "there is nothing": keep the last known lists
     // on a failed RPC (same rule as the Hub roster). Wiping them meant one
     // timed-out call emptied the whole page until the next visit.
+    backends = spawnableBackends();
     try { defs = (await registryList()).agents ?? []; } catch { /* keep last */ }
     try { teams = (await teamsList()).teams ?? []; } catch { /* keep last */ }
     try { skills = (await skillsList()).skills ?? []; } catch { /* keep last */ }
@@ -287,7 +282,7 @@
     const mcpEntries = parseRefs(agent.mcp);
     return {
       name: agent.name ?? '',
-      backend: agent.backend ?? 'kiro',
+      backend: agent.backend ?? defaultBackend(),
       model: agent.model ?? '',
       effort: agent.effort ?? '',
       system: agent.system ?? '',
@@ -361,7 +356,7 @@
     ? `${t('teamsSubTeam')} · ${m.team}`
     : m.base
       ? `${t('teamsCustomAgent')} · ${m.base}`
-      : `${t('teamsBare')} · ${m.agent?.backend ?? 'kiro'}`;
+      : `${t('teamsBare')} · ${m.agent?.backend ?? defaultBackend()}`;
   $effect(() => {
     for (const m of editingTeam?.members ?? []) {
       if (!m.base && m.agent) ensureModels(m.agent.backend);
@@ -520,7 +515,7 @@
           mcpSel: mcpEntries.filter((x) => typeof x === 'string'),
           mcpExtra: mcpEntries.filter((x) => typeof x !== 'string'),
         }
-      : { name: '', backend: 'kiro', model: '', effort: '', system: '', can_hire: false, skillSel: [], mcpSel: [], mcpExtra: [] };
+      : { name: '', backend: defaultBackend(), model: '', effort: '', system: '', can_hire: false, skillSel: [], mcpSel: [], mcpExtra: [] };
   }
   function toggleSel(list, name) {
     return list.includes(name) ? list.filter((n) => n !== name) : [...list, name];
@@ -830,7 +825,7 @@
                   {:else if backendIcon(memberBackend(m))}
                     <img class="member-ava" src={backendIcon(memberBackend(m))} alt={memberBackend(m)} />
                   {:else}
-                    <span class="member-ava fallback" style:background={backendColor(memberBackend(m) || 'kiro')}
+                    <span class="member-ava fallback" style:background={backendColor(memberBackend(m) || defaultBackend())}
                       >{memberName(m).slice(0, 1).toUpperCase()}</span>
                   {/if}
                   <span class="member-copy">
@@ -886,7 +881,7 @@
                         </label>
                         <label>{t('agentsEffort')}
                           <Select bind:value={m.effort} dense
-                            options={[{ value: '', label: t('teamsInherit') }, ...(EFFORTS[baseBackend(m)] ?? [])]}
+                            options={[{ value: '', label: t('teamsInherit') }, ...backendEfforts(baseBackend(m))]}
                             ariaLabel={t('agentsEffort')} />
                         </label>
                       </div>
@@ -901,7 +896,7 @@
                       <div class="row3">
                         <label>{t('agentsBackend')}
                           <Select bind:value={m.agent.backend} dense ariaLabel={t('agentsBackend')}
-                            options={BACKENDS.map((b) => ({ value: b, icon: backendIcon(b) ?? undefined }))} />
+                            options={backends.map((b) => ({ value: b, icon: backendIcon(b) ?? undefined }))} />
                         </label>
                         <label>{t('agentsModel')}
                           <Select bind:value={m.agent.model} editable dense options={modelsByBackend[m.agent.backend] ?? []}
@@ -909,7 +904,7 @@
                         </label>
                         <label>{t('agentsEffort')}
                           <Select bind:value={m.agent.effort} dense
-                            options={[{ value: '', label: t('agentsModelDefault') }, ...(EFFORTS[m.agent.backend] ?? [])]}
+                            options={[{ value: '', label: t('agentsModelDefault') }, ...backendEfforts(m.agent.backend)]}
                             ariaLabel={t('agentsEffort')} />
                         </label>
                       </div>
@@ -986,7 +981,7 @@
         <div class="row2">
           <label>{t('agentsBackend')}
             <Select bind:value={editing.backend} dense ariaLabel={t('agentsBackend')}
-              options={BACKENDS.map((b) => ({ value: b, icon: backendIcon(b) ?? undefined }))} />
+              options={backends.map((b) => ({ value: b, icon: backendIcon(b) ?? undefined }))} />
           </label>
           <label>{t('agentsModel')}
             <!-- Editable Select, not a native <datalist>: the OS suggestion
@@ -1005,7 +1000,7 @@
                  and a silent fallback to the default. '' = backend default,
                  same contract as the model. -->
             <Select bind:value={editing.effort} dense
-              options={[{ value: '', label: t('agentsModelDefault') }, ...(EFFORTS[editing.backend] ?? [])]}
+              options={[{ value: '', label: t('agentsModelDefault') }, ...backendEfforts(editing.backend)]}
               ariaLabel={t('agentsEffort')} />
           </label>
           <div></div>

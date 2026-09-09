@@ -66,6 +66,30 @@ impl Backend {
         }
     }
 
+    /// One backend as the CLIENT sees it (`backends_list`, board #130): the
+    /// name, its avatar and colour-token RESOURCE NAMES, and the effort
+    /// levels its editor offers. The two resource names are DERIVED from the
+    /// name by convention (`/assets/<name>.svg`, `--backend-<name>`), never
+    /// declared per backend — the test below pins that both files exist for
+    /// every variant, so adding a backend without its avatar or token is a
+    /// failing test, not a lettered fallback on the phone. Efforts ride along
+    /// because the client kept a hand mirror of them and it had already
+    /// drifted (omp's list existed here and nowhere on the client).
+    pub fn describe(self) -> serde_json::Value {
+        serde_json::json!({
+            "name": self.name(),
+            "icon": format!("/assets/{}.svg", self.name()),
+            "color": format!("--backend-{}", self.name()),
+            "efforts": self.effort_values(),
+        })
+    }
+
+    /// `describe` over ALL, in the canonical order — the first entry is the
+    /// client's default (`DEFAULT` is `ALL[0]`, pinned below).
+    pub fn list_json() -> serde_json::Value {
+        serde_json::Value::Array(Backend::ALL.iter().map(|b| b.describe()).collect())
+    }
+
     /// The reasoning-effort levels this backend's CLI accepts — a FIXED enum
     /// per backend, measured per CLI, never guessed (each list's provenance
     /// is on the backend file).
@@ -313,5 +337,24 @@ mod tests {
         assert!(store.contains("backend-seeds:begin") && store.contains("backend-seeds:end"));
         let tmux = std::fs::read_to_string(root.join("tmux.rs")).unwrap();
         assert!(tmux.matches("backend-quirk(measured):").count() >= 2, "tmux.rs lost its quirk markers");
+    }
+
+    /// `describe` derives resource names by convention; this is where the
+    /// convention is enforced (board #130): every spawnable backend ships
+    /// its avatar under public/assets and its colour token in app.css, and
+    /// the list's first entry is the documented default.
+    #[test]
+    fn every_backend_has_its_avatar_and_colour_token() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let css = std::fs::read_to_string(root.join("src/app.css")).unwrap();
+        for b in Backend::ALL {
+            let icon = root.join("public/assets").join(format!("{}.svg", b.name()));
+            assert!(icon.is_file(), "{} avatar missing: {}", b.name(), icon.display());
+            assert!(css.contains(&format!("--backend-{}:", b.name())), "{} colour token missing from app.css", b.name());
+        }
+        let list = Backend::list_json();
+        assert_eq!(list[0]["name"], Backend::DEFAULT.name());
+        assert_eq!(list.as_array().unwrap().len(), Backend::ALL.len());
+        assert_eq!(list[4]["efforts"].as_array().unwrap().len(), Backend::Omp.effort_values().len());
     }
 }

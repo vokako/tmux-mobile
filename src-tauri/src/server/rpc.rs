@@ -85,6 +85,16 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
     match req.method.as_str() {
         "ping" => Response::ok(id, serde_json::json!("pong")),
 
+        // The backends this server can spawn, with the client's resource
+        // names for each (board #130). No params, no session, no gate: the
+        // list lives in the ungated `backends` leaf, so a phone-hosted
+        // server answers too. The client drops its hand-kept mirrors for
+        // this and falls back to them only when an OLDER server says
+        // method-not-found.
+        "backends_list" => {
+            Response::ok(id, serde_json::json!({ "backends": crate::backends::Backend::list_json() }))
+        }
+
         // ---- server system vitals (board #56) ------------------------------
         // Desktop-only like the project_* methods: the sampler is not
         // compiled for Android/iOS (a phone is a client of a desktop server),
