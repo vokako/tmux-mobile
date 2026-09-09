@@ -118,10 +118,13 @@
 
 ## C. Quality Debt (P2)
 
-- [ ] `Hub.svelte` has 4094 lines, with contiguous Feed / Composer / Roster /
-  Sidebar / Drawer / Dialogs blocks. Coupled state includes
-  `selected`/`agents`/`feed`/`following`/`recipient`/`roomCache`;
-  the `onGoBack` chain needs a layer stack.
+- [x] Hub decomposition (#114 family, through #136, 2026-09-09):
+  `Hub.svelte` is 1872 lines, down from the measured 4577-line starting point.
+  Sidebar, Roster, Composer, Feed and Drawer own their views; pure reading,
+  composer and history decisions are tested modules. Back uses the original
+  fixed-priority registry, not a chronological stack. Room/transport/cache,
+  shared state/preferences, routing, action authority and the small
+  spawn-coupled picker remain in Hub.
 - [ ] `store.rs` 2989 / `projects/mod.rs` 2223 / `spawn.rs` 2364 /
   `bin/tmm.rs` 1312 / `vitals.rs` 1308:
   split store by projects/registry/board/activity, move mod.rs skills into

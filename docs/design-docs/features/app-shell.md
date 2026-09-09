@@ -126,6 +126,10 @@ recipient/palette priority, the compact floor and registration cleanup.
 Since board #134 (2026-09-09), Feed owns Copy/Raw state and registers live
 `isOpen`/`outside`/`escape` callbacks with Hub's existing capture listener.
 No flags are copied and no new listener or Back layer is installed.
+Board #136 (2026-09-09) moves the Drawer view without moving those listeners
+or its parent-owned state. Its controlled Files directory and Back callback
+preserve the existing dispatcher path; Terminal stays keyed by target and
+hidden partitions retain the original visibility gates.
 
 **The dance is the phone's** (review, 2026-09-03). Everything above — the seed, the re-push after a consumed pop, the `popstate` router — is gated on `layout.isTouchDevice`, and `navPush()` is a no-op that returns `false` on a desktop layout. A desktop browser has no back gesture to protect, and the unconditional seed + re-push had made the app a page you could not Back out of: the browser's Back button did nothing, forever. On the phone nothing changed. Callers that later spend an entry with `history.back()` (the gear's toggle via `prefsPushed`, Settings' compact drill via `onDrill`'s return value → `drillPushed`) only do so when their push was real, so a narrow desktop window never `history.back()`s out of the app. The gate is reactive: switching the layout mode in Settings installs or removes the router live (entries already pushed before a switch to desktop are simply popped by the browser with nothing listening). `App.source.test.ts` pins the gate. Files' own `navPush` (a page-local push, Files-owned) still pushes on desktop; those entries are consumed silently by Back until the app's real root is reached — harmless, but the one remaining desktop push.
 

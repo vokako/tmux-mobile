@@ -197,6 +197,34 @@ page/drawer heads for the filler, feed/terminal body for the empty state.
 Embedded pages do not inherit a generic override and no component copies
 the declarations.
 
+**Drawer view ownership** (#136, 2026-09-09): `Drawer.svelte` owns the
+unchanged section, private CSS, window-list derivations and window hover
+description. Hub keeps the `termOpen && !compact` mount gate, all persistent
+open/view/target/request/expanded state, per-room preferences, navigation
+commands and capture listeners. The view emits narrow pick/expand/close/
+maximize/new-issue intents. Files' current directory remains one controlled
+binding and its Back callback still reaches the parent dispatcher.
+
+The real Terminal remains keyed only by `termTarget`, laid out while another
+partition is visible, and receives the original active/visible gates.
+Files and Board retain their existing conditional mounts, and Board gains
+no Back delegation. Shared SideHandle, status dots and one-header rules
+remain the same mechanisms. The optional ~60-line agent picker stays with
+spawn coordination: moving it would add a wide interface for little
+reduction, and it does not justify a HubDialogs wrapper around shared dialogs.
+
+Verification on Node 22.23.2 / Svelte 5.53.5 / Vite 6.4.1: four moved
+declarations/functions, all 43 retained functions and the 11 Hub effects
+match their prior bodies; the 16 private CSS rules form an exact partition.
+Chromium 152.0.7977.64 uses the real Terminal/Files/Board and xterm 6.0.0,
+with only fixed RPC responses and build-layer instance/write counters.
+Six variants cover target-key replacement, hidden-frame suppression and
+replay, window folding, native modified links, Files Back, navigation,
+per-room restore and the actual SideHandle drag/reset. All 42 captured
+layout/style signatures match. The negative control passes a hidden
+terminal `visible=true`: its write count rises from 2 to 3 on a hidden frame
+and the assertion fails. Restoring the partition gate returns green.
+
 The drawer's single bar is the window pills (state dot, name, `direct` tag) + roster count + open-full/close; the tmux-style statusline underneath was merged away (owner: "上面和下面有两个 bar…可以把它们合并一下" — it listed the same windows and called the same `pickWindow`; the pills carry state and actions, so they survived). The bar shows AGENT windows only (board #92: "只 filter 出当前有效的 agent window，其他 window 可以帮我折叠起来"): shells fold behind a `+N` pill of the same family, one tap unfolds (the pill becomes `−`), a room switch folds back — with ONE exception, the window the terminal is currently SHOWING keeps its pill even inside the folded set, because the bar may never hide the current pane. While the partition is open, selecting an agent in the chat (card click, composer picker, "talk to") retargets the drawer to that agent's window through the same `pickWindow` (board #91) — choosing who you talk to is choosing whose pane you watch, the reading `openDrawer` already makes when it seats the recipient's window first (board #76); it only follows a name that matches a roster window (@all and the room do not) and never opens a closed drawer. The divider is a real splitter: the drawer column is `var(--hub-drawer-w)` (320–900, default 520, persisted `tmux_hub_drawer_w`), reusing the parametric `SideHandle` (ONE resize affordance, ui-unification) — it was a fixed grid that looked draggable and was not.
 
 ### The chat header opens, closes and NAMES the project (moved from tmm-cli.md, board #102)

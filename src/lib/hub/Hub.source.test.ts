@@ -7,6 +7,19 @@ const source = await readFile(new URL('./Hub.svelte', import.meta.url), 'utf8');
 const rule = (selector: string) =>
   source.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
 
+test('Hub keeps the Drawer mount gate, durable state and navigation authority (#136)', () => {
+  assert.match(source, /\{#if termOpen && !compact\}\s*<!--[^]*?-->\s*<Drawer/u);
+  assert.match(source, /bind:drawerFilesDir onpick=\{pickWindow\} onclose=\{closeDrawer\}/u);
+  assert.match(source, /onfilesback=\{\(back\) => \{ drawerFilesBack = back; \}\}/u);
+  assert.match(source, /onexpand=\{\(\) => \(winsExpanded = !winsExpanded\)\}/u);
+  assert.match(source, /termTarget = ''; termCommand = ''; winsExpanded = false;/u);
+  assert.match(source, /onterminal=\{\(\) => \{ const m = [^]*?if \(m\) openTerminal\(selected, termTarget, termCommand\); \}\}/u);
+  assert.match(source, /onfiles=\{\(\) => openFilesTab\?\.\(selected, drawerFilesDir\)\}/u);
+  assert.match(source, /onboard=\{\(\) => openBoardTab\?\.\(selected\)\}/u);
+  assert.match(source, /drawerBoardNew = \{ n: \(drawerBoardNew\?\.n \?\? 0\) \+ 1 \}/u);
+  assert.doesNotMatch(source, /<Terminal |<Files |<Board |function pillInfo|const winPills/u);
+});
+
 test('Hub keeps Feed coordination and exposes only the agreed reading boundary (#134)', () => {
   assert.match(source, /<Feed bind:this=\{feedView\}/u);
   assert.match(source, /bind:following bind:newBelow/u);
@@ -60,12 +73,13 @@ test('an uncached room unfolds: skeletons while it loads, then the feed from its
 });
 
 test('Hub hover surfaces keep the shared status vocabulary (board #87)', () => {
-  assert.match(source, /class="win-pill state-ctl"[\s\S]{0,200}?use:hoverInfo=\{\(\) => pillInfo\(a\)\}/u, 'the drawer window pill');
   // The tone of the state row is the SAME family the dot paints — no second
   // colour language (rule 6).
   assert.match(source, /function stateTone\(state\) \{\s*switch \(stateDotColor\(state\)\)/u, 'the hover tone derives from stateDotColor');
   assert.match(source, /bind:menuFor bind:cardsEl \{stateLabel\} \{stateTone\}/u,
     'Roster consumes the existing shared formatters');
+  assert.match(source, /\{agents\} \{panes\} \{managedAgents\} \{winsExpanded\} \{stateLabel\} \{stateTone\}/u,
+    'Drawer consumes the same formatters without copying them (#136)');
 });
 
 test('Hub keeps selection, Back and consequential actions around the extracted Sidebar (#121)', () => {
@@ -142,32 +156,6 @@ test('Back registers the original live guards and publishes one local dispatcher
   assert.match(region, /return \(\) => \{ for \(const dispose of disposers\) dispose\(\); \};/u);
   assert.doesNotMatch(region, /onGoBack\(\(\) =>|addEventListener|popstate|pushState/u,
     'the old dispatch chain and event routing do not coexist with the registry');
-  const board = /<Board session=\{selected\}[^>]*>/u.exec(source)?.[0] ?? '';
-  assert.ok(board);
-  assert.doesNotMatch(board, /onGoBack/u, 'Board delegation is a separate behavior change');
-});
-
-test('the drawer pills show AGENT windows; the rest fold behind +N (board #92)', () => {
-  // The switcher is for watching agents; shells and other windows are noise
-  // that pushed the agent pills out of the bar ("只 filter 出当前有效的 agent
-  // window，其他 window 可以帮我折叠起来"). Folded windows stay one tap away
-  // behind a +N pill of the same family; the window currently ON SCREEN is
-  // always a pill even when it belongs to the folded set — the bar may never
-  // hide what the terminal is showing.
-  assert.match(source, /const winPills = \$derived\(winsExpanded \? agents\s*\n\s*: agents\.filter\(\(a\) => a\.agent \|\| termTarget\.startsWith\(`\$\{selected\}:\$\{a\.window\}\.`\)\)\);/u,
-    'collapsed = agent windows plus the one on screen; expanded = everything');
-  assert.match(source, /const winsFolded = \$derived\(agents\.length - winPills\.length\);/u,
-    'the +N counts what is hidden');
-  assert.match(source, /\{#each winPills as a \(a\.window\)\}/u, 'the pill loop reads the filtered list');
-  assert.match(source, /\{#if winsFolded > 0 \|\| winsExpanded\}/u,
-    'the toggle appears only when something is (or was) folded');
-  const toggle = /<button class="win-pill state-ctl more"[\s\S]{0,600}?<\/button>/u.exec(source)?.[0] ?? '';
-  assert.match(toggle, /onclick=\{\(\) => \(winsExpanded = !winsExpanded\)\}/u, 'one tap folds and unfolds');
-  assert.match(toggle, /winsExpanded \? t\('hubWinLess'\) : t\('hubWinMore'\)\.replace\('\{n\}', String\(winsFolded\)\)/u,
-    'the toggle explains itself in words, not just a glyph');
-  // A room switch clears the transient unfold with the rest of the drawer state.
-  assert.match(source, /termTarget = ''; termCommand = ''; winsExpanded = false;/u,
-    'entering a room folds the bar back');
 });
 
 test('selecting an agent retargets an OPEN terminal partition (board #91)', () => {
@@ -359,8 +347,8 @@ test('the drawer has a board partition, and the tap prefers it on desktop (board
   // The task sidebar: the REAL Board component, embedded, following the room's
   // project — the same split the files partition makes (page on the phone,
   // partition on desktop).
-  assert.match(source, /\{#if drawerView === 'board'\}[\s\S]{0,400}?<Board session=\{selected\}[^>]*embedded issueRequest=\{drawerIssueReq\}/u,
-    'the drawer hosts the embedded Board');
+  assert.match(source, /\{drawerView\} \{drawerFilesReq\} \{drawerIssueReq\} \{drawerBoardNew\}/u,
+    'the view receives the existing partition requests');
   assert.match(source, /drawerView = 'board'; openDrawer\(\);/u, 'the feed tap opens the partition on desktop');
   assert.match(source, /if \(mobile \|\| compact\) \{ openBoardTab\?\.\(selected, id\); return; \}/u,
     'the phone still jumps to the board page');
@@ -437,34 +425,6 @@ test('the Chat header path is selectable prose and a double-click copies the ful
   assert.match(css, /user-select:\s*text/u, 'mouse drag selection explicitly overrides the app shell');
   assert.match(css, /-webkit-user-select:\s*text/u, 'WebKit selection is explicit too');
   assert.match(css, /cursor:\s*text/u, 'the cursor advertises selectable prose');
-});
-
-test('the drawer wears the app ground and its head is the page-head\u2019s twin (board #23)', () => {
-  // A hardcoded #000 drawer leaked out as a black seam beside the chat column
-  // ("侧边栏竖线现在是一个黑色的线条"): the terminal paints its OWN theme-
-  // adapted background, so every uncovered sliver of the drawer read as black
-  // in a light app. The drawer's ground is the app's.
-  const drawer = /\.drawer \{ display: flex;[^}]*\}/u.exec(source)?.[0] ?? '';
-  assert.match(drawer, /background: var\(--bg\);/u, 'the drawer sits on the theme ground');
-  assert.ok(!source.includes('background: #000'), 'no hardcoded black ground anywhere in the Hub');
-  // The two top bars must read as ONE line through the divider ("横条…没对齐，
-  // 颜色不一致"): same 42px min-height + box-sizing as app.css .page-head,
-  // same border token, and NO private background (bg2 was the mismatch).
-  const head = /\.drawer-head \{[^}]*\}/u.exec(source)?.[0] ?? '';
-  assert.match(head, /min-height: 42px; box-sizing: border-box;/u, 'the head shares the page-head height');
-  assert.match(head, /border-bottom: 1px solid var\(--border\);/u, 'and the page-head border');
-  assert.ok(!head.includes('background'), 'transparent over the shared ground — no second color');
-  // The board partition's + lives in the drawer head and reaches the embedded
-  // Board as a request (its own page-head is gone — see Board.source.test).
-  assert.match(source, /drawerBoardNew = \{ n: \(drawerBoardNew\?\.n \?\? 0\) \+ 1 \}/u, 'the + issues a request');
-  assert.match(source, /<Board [^>]*createRequest=\{drawerBoardNew\}/u, 'and the Board receives it');
-  // Parent-owned suppression (the lead's belt over the child's gate): the
-  // drawer KNOWS the embedding, so it enforces the one-header contract itself —
-  // any page-head a prop/HMR/child-path drift might leak into the partition
-  // neither shows nor keeps its height. display:none, not visibility: a
-  // hidden-but-laid-out header would still push the board down ("保留高度").
-  assert.match(source, /\.board-body :global\(\.page-head\) \{ display: none; \}/u,
-    'the drawer suppresses any child page-head — the drawer head is the only header');
 });
 
 test('the drawer follows the project — partition parked and restored per room (board #23)', () => {
@@ -615,7 +575,7 @@ test('a path reference in a bubble opens the file preview, not the void (board #
     'the drawer request carries the file and a bumped n');
   assert.match(source, /drawerView = 'files'; openDrawer\(\);/u, 'and the files drawer opens');
   assert.match(source, /openFilesTab\?\.\(target, [^)]*file[^)]*\)/u, 'compact hands off using the project captured at the click');
-  assert.match(source, /navRequest=\{drawerFilesReq\}/u, 'the drawer embed is wired to receive it');
+  assert.match(source, /\{drawerFilesReq\}/u, 'the drawer view receives the original file request');
   // A relative path resolves against the project's cwd before it travels.
   assert.match(source, /fsCwd\(/u, 'relative refs resolve against the project cwd');
 });
