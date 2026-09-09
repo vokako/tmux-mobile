@@ -66,7 +66,7 @@
 - [ ] Would killing the server now leave a person or agent blocked?
 - [ ] Is there a second definition of managed identity, detection, validation
   or the backend list?
-- [ ] Do backend literals (`"kiro"|"claude"|"codex"|"grok"|"omp"`) appear outside backend files?
+- [ ] Do backend literals (`"kiro"|"claude"|"codex"|"grok"|"omp"`) appear outside backend files? (Tested: `backends::tests::backend_literals_live_only_in_backends`, `core/backends.source.test.ts` — a measured quirk in generic code needs a `// backend-quirk(measured):` marker.)
 - [ ] Were tmux targets and format strings checked against the relevant version?
 - [ ] Is synchronous I/O running on a tokio worker, or a lock held across await?
 - [ ] Does migration work on an old database with `foreign_keys=OFF`?

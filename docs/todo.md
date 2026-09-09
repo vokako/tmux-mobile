@@ -20,14 +20,16 @@
   `team_bridge.rs`, `server/team_rpc.rs`, `src/lib/team/`, `team/` and
   `TEAM_*` configuration were removed. Documents such as `team.md` were
   archived in `exec-plans/`.
-- [ ] **Consolidate backend knowledge:** one `Backend` trait/enum, one file
-  per backend, containing detection needles, launch command, resume syntax,
-  rendering, hook installation/payload parsing, effort values, status-line
-  inspection, icons and color names.
-  `materialize`/`refresh_hooks`/`normalize`/`resume_command` become trait calls;
-  the frontend obtains backend lists and resource names from the server.
-  Source-contract tests reject backend literals outside `backends/`, except
-  tests and seed data. See the inventory in section D.
+- [x] **Consolidate backend knowledge** (board #101, #127–#131, completed
+  2026-09-09): `enum Backend` in `src-tauri/src/backends/mod.rs`, one file per
+  backend holding detection row, resume syntax, rendering, hooks, payload
+  reading, effort values, models and status-line sniff; `materialize`/
+  `refresh_hooks`/`normalize`/`resume_command` dispatch through the enum; the
+  client reads the backend list and resource names from `backends_list`
+  (#130). Two source tests reject backend literals outside `backends/` and
+  hand-written backend arrays on the client (exemptions: tests, the fenced
+  seed region, `// backend-quirk(measured):` markers). Rules and reasons:
+  agents-overview.md § "Backend knowledge lives in one file per backend".
 - [x] **Shorten `tmm-cli.md`** (owner: "太长了不对"; board #102, completed
   2026-09-09): 2337 to about 340 lines. The command reference fits one screen.
   Redundant narrative was removed; condensed rules already live in their
@@ -197,7 +199,10 @@ The recorded problems were their scattered ownership. Progress (board #101):
 and 5 (renderers, hooks, per-backend refresh probes, resume dialects), #129
 closed 2 and 3 (hook payload reading and the KNOWN rows live on the backend
 files; `src-tauri/src/backends/` is an UNGATED leaf module so the mobile
-inbox consumer reads the same dialects). 8 is #130, the guard is #131.
+inbox consumer reads the same dialects), #130 closes 8 (server-published
+list), #131 closes 9 by name — the two tmux.rs adaptations stay, marked
+`// backend-quirk(measured):` for the literal guard and the reader. Section
+closed; kept as the record of what the scattering looked like.
 
 1. No `Backend` type; one backend's knowledge spread across at least twelve
    match/if branches. Adding omp on 2026-09-07 missed `registry_save`.
