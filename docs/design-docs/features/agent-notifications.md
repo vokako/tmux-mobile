@@ -68,6 +68,18 @@ runtime worker it stalled every RPC sharing that thread for the duration.
   config from the built-in agent, then merges only the owned Stop hook. The
   installer also writes the v3 workspace/global hook format for forward
   compatibility; it never edits unrelated custom agents.
+- Grok 1.0.5 (camelCase `hookEventName`; `stop` counts only with reason
+  `end_turn`, `stop_failure` is failed) and OMP (our own telemetry extension
+  emits claude-shaped `Stop`) are read the same way.
+
+**Where each dialect lives (board #129, 2026-09-09):** every backend's payload
+reading — `normalize_kind`, `is_user_prompt_submit`, claude's `is_idle_nudge`
+— is a function on that backend's file in `src-tauri/src/backends/`, next to
+the hook it installs (one hook contract, one file). `normalize` here is only
+the shell: `Backend::parse` at the door, then the backend's own reader; an
+unknown backend is rejected exactly as before. `backends/` is an ungated leaf
+module because this consumer compiles for the phone too — the measured payload
+tests in this file pin every dialect and did not change.
 
 (Historical: the unread inbox collapsed duplicate completion events from one
 turn by backend session, pane, event kind and a short time window. Telemetry

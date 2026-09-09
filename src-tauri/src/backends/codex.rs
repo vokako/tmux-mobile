@@ -12,6 +12,7 @@ pub(crate) fn models_fetch() -> Option<Vec<String>> {
     None
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::projects::vitals::{looks_like_model, Vitals};
 
 /// codex's status furniture, measured on codex-cli 0.148.0 (2026-08-22,
@@ -36,6 +37,7 @@ use crate::projects::vitals::{looks_like_model, Vitals};
 /// string; `100% context left` is its zero-use rendering) and, in the
 /// `/status` card, `NN% left (21.5K used / 258K)` — both say LEFT where kiro
 /// says USED, so those readings are `100 - NN`.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn sniff_codex(pane: &str) -> Vitals {
     let mut v = Vitals::default();
     for line in pane.lines().rev() {
@@ -72,6 +74,7 @@ pub(crate) struct CodexFooter {
 
 /// One `tui.status_line` paint → its readings, or `None` when the line does
 /// not have the footer's anchors (see `sniff_codex`).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn codex_footer(line: &str) -> Option<CodexFooter> {
     let mut model: Option<(String, Option<String>)> = None;
     let mut context_pct = None;
@@ -93,6 +96,7 @@ pub(crate) fn codex_footer(line: &str) -> Option<CodexFooter> {
 /// (`xai.grok-4.6`, `gpt-5.2-codex` — every model id does) and the effort,
 /// when present, is one plain lowercase word; a `…`-truncated word
 /// (`defa…`) is not an effort.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn codex_model_item(seg: &str) -> Option<(String, Option<String>)> {
     let mut toks = seg.split_whitespace();
     let model = toks.next()?;
@@ -115,6 +119,7 @@ pub(crate) fn codex_model_item(seg: &str) -> Option<(String, Option<String>)> {
 /// `Context 5% used` (`context-used`) → 5; `Context 99% left`
 /// (`context-remaining`) → 1. The literal `Context` word is the anchor: a
 /// bare `5%` is never accepted.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn codex_context_item(seg: &str) -> Option<u8> {
     let rest = seg.strip_prefix("Context")?.trim_start();
     let (num, tail) = rest.split_once('%')?;
@@ -130,6 +135,7 @@ pub(crate) fn codex_context_item(seg: &str) -> Option<u8> {
 /// card) → share of the context USED (`100 - NN`), matching kiro's own
 /// wording for `Vitals::context_pct`. The trailing words are the anchor: a
 /// bare `NN%` is never accepted (same rule as kiro's pie-glyph requirement).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn codex_context_left(line: &str) -> Option<u8> {
     let s = line.trim().trim_matches('\u{2502}').trim();
     let idx = s.find("% context left").or_else(|| {
@@ -151,13 +157,18 @@ pub(crate) fn codex_context_left(line: &str) -> Option<u8> {
 
 
 use serde_json::{json, Value};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::path::Path;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::projects::spawn::{patch_hooks, Rendered};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::projects::store::RegAgent;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use super::shared;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn codex_hooks(notify: &str) -> Value {
     json!({
         "PreToolUse":  [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify } ] } ],
@@ -172,6 +183,7 @@ pub(crate) fn codex_hooks(notify: &str) -> Value {
     })
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn render_codex(
     def: &RegAgent, _name: &str, home: &Path, system_prompt: &str,
     skills: &[crate::projects::skills::ResolvedSkill],
@@ -215,7 +227,7 @@ pub(crate) fn render_codex(
     .map_err(|e| e.to_string())?;
 
     if !def.model.is_empty() {
-        config_args.push(format!("--model {}", shared::shell_quote(&def.model)));
+        config_args.push(format!("--model {}", crate::shell::quote(&def.model)));
     }
     // Effort is a codex CONFIG key (`model_reasoning_effort`), so it rides a
     // `-c` override like the rest of codex's identity — the recipe replays it.
@@ -241,6 +253,7 @@ pub(crate) fn render_codex(
 
 
 /// The codex half of `refresh_hooks`.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn refresh(home: &Path, notify: &str) -> bool {
     let hooks = home.join("codex").join("hooks.json");
     hooks.is_file() && patch_hooks(&hooks, codex_hooks(notify))
@@ -254,7 +267,7 @@ pub(crate) fn refresh(home: &Path, notify: &str) -> bool {
 pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
     match cmd.strip_prefix("command codex ") {
         Some(rest) => {
-            let which = id.map(shared::shell_quote).unwrap_or_else(|| "--last".to_string());
+            let which = id.map(crate::shell::quote).unwrap_or_else(|| "--last".to_string());
             format!("command codex resume {which} {rest}")
         }
         None => cmd.to_string(),
@@ -267,6 +280,7 @@ pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
 /// The managed-home dialect (`resume_command` above) DOES use `--last`:
 /// an isolated CODEX_HOME is this one agent's and codex cwd-filters it.
 /// One file, both halves of the same fact (todo §D2).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn known() -> crate::projects::agents::KnownAgent {
     crate::projects::agents::KnownAgent {
         backend: "codex",
@@ -275,4 +289,27 @@ pub(crate) fn known() -> crate::projects::agents::KnownAgent {
         resume_recent: None,
         resume_id: Some("codex resume {id}"),
     }
+}
+
+/// codex's hook payload dialect (board #129): claude's key spelling,
+/// `PermissionRequest` for the ask, `Stop` for a turn's end.
+pub(crate) fn normalize_kind(
+    payload: &serde_json::Map<String, Value>,
+) -> Result<&'static str, String> {
+    let event = crate::agent_notifications::string_field(payload, &["hook_event_name"]);
+    match event.as_deref() {
+        Some("PermissionRequest") => Ok("permission_required"),
+        Some("Stop") => Ok("completed"),
+        _ => Err("unsupported Codex event".into()),
+    }
+}
+
+/// codex speaks kiro's spelling here (measured on codex-cli 0.148.0 — the
+/// payload also carries `prompt` + `session_id`, same as kiro/claude). Same
+/// sticky-dedup incident as claude's when this arm was missing.
+pub(crate) fn is_user_prompt_submit(payload: &Value) -> bool {
+    payload
+        .get("hook_event_name")
+        .and_then(Value::as_str)
+        .is_some_and(|e| e.eq_ignore_ascii_case("userpromptsubmit"))
 }

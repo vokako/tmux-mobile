@@ -79,8 +79,48 @@ impl Backend {
         }
     }
 
+    /// The kind ("completed"/"failed"/"permission_required"/"input_required")
+    /// carried by one hook payload, read with this backend's own key spelling
+    /// and screening rules — each arm lives on the backend's file (board
+    /// #129). Compiled on every target: the mobile shell consumes the same
+    /// inbox envelopes.
+    pub fn normalize_kind(
+        self,
+        payload: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<&'static str, String> {
+        match self {
+            Backend::Kiro => kiro::normalize_kind(payload),
+            Backend::Claude => claude::normalize_kind(payload),
+            Backend::Codex => codex::normalize_kind(payload),
+            Backend::Grok => grok::normalize_kind(payload),
+            Backend::Omp => omp::normalize_kind(payload),
+        }
+    }
+
+    /// True when the payload marks the start of a new user turn (resets the
+    /// auto-post dedup flag), in this backend's spelling.
+    pub fn is_user_prompt_submit(self, payload: &serde_json::Value) -> bool {
+        match self {
+            Backend::Kiro => kiro::is_user_prompt_submit(payload),
+            Backend::Claude => claude::is_user_prompt_submit(payload),
+            Backend::Codex => codex::is_user_prompt_submit(payload),
+            Backend::Grok => grok::is_user_prompt_submit(payload),
+            Backend::Omp => omp::is_user_prompt_submit(payload),
+        }
+    }
+
+    /// True for claude's idle reminder — an event that must never read as an
+    /// ask (board #75). Only claude has one.
+    pub fn is_idle_nudge(self, payload: &serde_json::Value) -> bool {
+        match self {
+            Backend::Claude => claude::is_idle_nudge(payload),
+            _ => false,
+        }
+    }
+
     /// The backend's detection/relaunch row for the KNOWN table
     /// (projects/agents.rs assembles it from ALL, board #129).
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub fn known(self) -> crate::projects::agents::KnownAgent {
         match self {
             Backend::Kiro => kiro::known(),
@@ -94,6 +134,7 @@ impl Backend {
     /// Render an agent's isolated home from its definition — prompt, backend
     /// config, hooks, launch command (board #128). Each arm is the backend's
     /// own file; `workspace` is read by claude alone (trust pre-seeding).
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     #[allow(clippy::too_many_arguments)]
     pub fn render(
         self,
@@ -127,6 +168,7 @@ impl Backend {
     /// Repair this backend's on-disk surface in a managed home (hooks,
     /// settings, channel keys, recipe backfill). Probes for its own files and
     /// no-ops when the home is not this backend's.
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub fn refresh(
         self,
         home: &std::path::Path,
@@ -148,6 +190,7 @@ impl Backend {
     /// another's grammar yields confident nonsense (agent-status.md).
     /// `agent` anchors kiro's positional status line; the other dialects
     /// ignore it.
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub fn sniff(self, pane: &str, agent: &str) -> crate::projects::vitals::Vitals {
         match self {
             Backend::Kiro => kiro::sniff_kiro(pane, agent),

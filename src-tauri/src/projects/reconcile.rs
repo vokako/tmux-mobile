@@ -9,7 +9,7 @@ use super::agents;
 use super::store::{Project, Slot, SlotKind};
 // ONE shell quoter for every line typed into a pane — the same one `spawn`
 // uses. This module carried its own copy with a narrower safe set.
-use crate::projects::backends::shared::shell_quote;
+use crate::backends::shared::shell_quote;
 use crate::tmux;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -203,7 +203,7 @@ fn stage_relaunch_script(project_path: &str, window_name: &str, full: &str) -> O
     if !home.is_dir() {
         return None;
     }
-    let script = crate::projects::backends::shared::write_launch_script(&home, window_name, full).ok()?;
+    let script = crate::backends::shared::write_launch_script(&home, window_name, full).ok()?;
     Some(format!(". {}", shell_quote(&script.to_string_lossy())))
 }
 

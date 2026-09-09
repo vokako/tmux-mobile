@@ -3,6 +3,7 @@ pub mod config;
 pub mod fs;
 pub mod pptx;
 pub mod server;
+pub mod backends;
 pub mod shell;
 pub mod mcp_cli;
 pub mod tasks;

@@ -129,7 +129,7 @@ pub fn sniff_remembered(
 ) -> Vitals {
     // The dialect dispatch is the Backend's (board #127); an unknown or
     // absent backend reads with kiro's grammar, exactly as before.
-    let mut v = super::backends::Backend::parse(backend)
+    let mut v = crate::backends::Backend::parse(backend)
         .map(|b| b.sniff(pane, agent))
         .unwrap_or_else(|| sniff_kiro(pane, agent));
     let now = now_secs();
@@ -230,17 +230,17 @@ fn sniff_window_now(session: &str, window: &str) {
 // stable. The SHARED parsing helpers (EFFORTS, PIE, context_pct, branch,
 // looks_like_model, the Vitals struct) stay here — more than one dialect
 // reads them.
-pub use super::backends::claude::{claude_status_line, sniff_claude};
+pub use crate::backends::claude::{claude_status_line, sniff_claude};
 #[cfg(test)]
-pub(crate) use super::backends::codex::sniff_codex;
+pub(crate) use crate::backends::codex::sniff_codex;
 #[cfg(test)]
-pub(crate) use super::backends::codex::{codex_context_item, codex_context_left, codex_footer};
+pub(crate) use crate::backends::codex::{codex_context_item, codex_context_left, codex_footer};
 #[cfg(test)]
-pub(crate) use super::backends::grok::sniff_grok;
+pub(crate) use crate::backends::grok::sniff_grok;
 #[cfg(test)]
-pub(crate) use super::backends::grok::{grok_context_ratio, grok_tokens};
-pub(crate) use super::backends::kiro::sniff_kiro;
-pub(crate) use super::backends::omp::sniff_omp;
+pub(crate) use crate::backends::grok::{grok_context_ratio, grok_tokens};
+pub(crate) use crate::backends::kiro::sniff_kiro;
+pub(crate) use crate::backends::omp::sniff_omp;
 
 /// The effort words kiro accepts. A segment matching one of these IS the effort
 /// segment, wherever it sits — matching by position alone would mistake a model

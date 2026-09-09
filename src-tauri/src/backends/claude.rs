@@ -13,12 +13,14 @@ pub(crate) fn models_fetch() -> Option<Vec<String>> {
     None
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::projects::vitals::{context_pct, Vitals, EFFORTS};
 
 /// Format Claude Code's official statusLine JSON into one compact, stable row.
 /// This is invoked by the local `tmm claude-statusline` command configured in
 /// Claude settings. The `[CC]` anchor is intentionally unique: `sniff_claude`
 /// can read the pane without guessing from ordinary conversation text.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn claude_status_line(input: &str) -> Option<String> {
     let data: serde_json::Value = serde_json::from_str(input).ok()?;
     let model = data
@@ -65,6 +67,7 @@ pub fn claude_status_line(input: &str) -> Option<String> {
     Some(parts.join(" · "))
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn short_tokens(tokens: u64) -> String {
     fn scaled(tokens: u64, unit: u64, suffix: char) -> String {
         if tokens % unit == 0 {
@@ -88,6 +91,7 @@ fn short_tokens(tokens: u64) -> String {
 /// Claude's built-in footer is not a stable machine format; statusLine is its
 /// official extension point and hands us exact model/context data. Parsing only
 /// our `[CC]` row makes ordinary output (including pasted examples) inert.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn sniff_claude(pane: &str) -> Vitals {
     let mut v = Vitals::default();
     for line in pane.lines().rev().take(24) {
@@ -122,13 +126,18 @@ pub fn sniff_claude(pane: &str) -> Vitals {
 
 
 use serde_json::{json, Value};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::path::{Path, PathBuf};
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::projects::spawn::{effort_flag, patch_hooks, Rendered};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::projects::store::RegAgent;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use super::shared;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn claude_hooks(notify: &str) -> Value {
     json!({
         "PreToolUse":  [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify } ] } ],
@@ -146,6 +155,7 @@ pub(crate) fn claude_hooks(notify: &str) -> Value {
     })
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn claude_trust_key(workspace: &Path) -> PathBuf {
     let start = std::fs::canonicalize(workspace).unwrap_or_else(|_| workspace.to_path_buf());
     start
@@ -158,6 +168,7 @@ pub(crate) fn claude_trust_key(workspace: &Path) -> PathBuf {
 /// Materialize onboarding + workspace trust in an isolated managed Claude home.
 /// Claude's official permissions docs name this exact persisted shape. Merge,
 /// never replace: `.claude.json` also owns session history, usage and UI state.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn ensure_claude_state(home: &Path, workspace: &Path) -> Result<bool, String> {
     let path = home.join(".claude.json");
     let mut root = std::fs::read_to_string(&path)
@@ -208,6 +219,7 @@ pub(crate) fn ensure_claude_state(home: &Path, workspace: &Path) -> Result<bool,
     Ok(changed)
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn render_claude(
     def: &RegAgent, _name: &str, home: &Path, workspace: &Path,
     system_prompt: &str, skills: &[crate::projects::skills::ResolvedSkill],
@@ -275,14 +287,14 @@ pub(crate) fn render_claude(
     let model_arg = if def.model.trim().is_empty() {
         String::new()
     } else {
-        format!(" --model {}", shared::shell_quote(def.model.trim()))
+        format!(" --model {}", crate::shell::quote(def.model.trim()))
     };
     Ok(Rendered {
         env: vec![("CLAUDE_CONFIG_DIR".into(), home.to_string_lossy().to_string())],
         cmd: format!(
             "command claude --mcp-config {} --strict-mcp-config --settings {}{}{} --dangerously-skip-permissions",
-            shared::shell_quote(&mcpfile.to_string_lossy()),
-            shared::shell_quote(&settingsfile.to_string_lossy()),
+            crate::shell::quote(&mcpfile.to_string_lossy()),
+            crate::shell::quote(&settingsfile.to_string_lossy()),
             model_arg,
             effort_flag(def),
         ),
@@ -299,6 +311,7 @@ pub(crate) fn render_claude(
 /// Existing values are per-agent overrides and win; newly introduced global
 /// keys (for example ANTHROPIC_DEFAULT_HAIKU_MODEL replacing the deprecated
 /// small-fast key) still reach old homes on their next start.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn merge_missing_claude_env(conf: &mut Value, inherited: &Value) -> bool {
     let Some(root) = conf.as_object_mut() else { return false };
     let Some(source) = inherited.as_object().filter(|env| !env.is_empty()) else { return false };
@@ -320,6 +333,7 @@ pub(crate) fn merge_missing_claude_env(conf: &mut Value, inherited: &Value) -> b
 /// Backfill a managed claude settings.json with missing inherited channel keys
 /// (see `backends_shared::claude_user_env`). Fail-soft: refresh must never
 /// block a start. Returns true when the file changed.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn ensure_claude_env(path: &Path) -> bool {
     let Ok(text) = std::fs::read_to_string(path) else { return false };
     let Ok(mut conf) = serde_json::from_str::<Value>(&text) else { return false };
@@ -330,6 +344,7 @@ pub(crate) fn ensure_claude_env(path: &Path) -> bool {
     std::fs::write(path, serde_json::to_string_pretty(&conf).unwrap()).is_ok()
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn ensure_claude_status_line(path: &Path) -> bool {
     let Ok(text) = std::fs::read_to_string(path) else { return false };
     let Ok(mut conf) = serde_json::from_str::<Value>(&text) else { return false };
@@ -346,6 +361,7 @@ pub(crate) fn ensure_claude_status_line(path: &Path) -> bool {
 /// The claude half of `refresh_hooks`: hooks, channel drift (missing global
 /// Bedrock keys backfilled without overwriting per-agent overrides), the
 /// official statusLine, and pre-seeded workspace trust.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn refresh(home: &Path, workspace: &Path, notify: &str) -> bool {
     let mut changed = false;
     let settings = home.join("settings.json");
@@ -362,7 +378,7 @@ pub(crate) fn refresh(home: &Path, workspace: &Path, notify: &str) -> bool {
 /// (cwd-scoped, and the isolated home is this one agent's).
 pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
     match id {
-        Some(id) => format!("{cmd} --resume {}", shared::shell_quote(id)),
+        Some(id) => format!("{cmd} --resume {}", crate::shell::quote(id)),
         None => format!("{cmd} --continue"),
     }
 }
@@ -370,6 +386,7 @@ pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
 /// This backend's detection/relaunch row (board #129). `claude --help`:
 /// `-c/--continue` — most recent conversation in this directory;
 /// `--resume <id>` exact. The recipe dialect is `resume_command` above.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn known() -> crate::projects::agents::KnownAgent {
     crate::projects::agents::KnownAgent {
         backend: "claude",
@@ -378,4 +395,41 @@ pub(crate) fn known() -> crate::projects::agents::KnownAgent {
         resume_recent: Some("claude --continue"),
         resume_id: Some("claude --resume {id}"),
     }
+}
+
+/// claude's hook payload dialect (board #129): `Notification` subtypes carry
+/// the ask kinds; `Stop`/`StopFailure` end a turn. The idle nudge is NOT an
+/// ask (board #75) — `is_idle_nudge` below screens it before this runs.
+pub(crate) fn normalize_kind(
+    payload: &serde_json::Map<String, Value>,
+) -> Result<&'static str, String> {
+    let event = crate::agent_notifications::string_field(payload, &["hook_event_name"]);
+    let notification_type =
+        crate::agent_notifications::string_field(payload, &["notification_type"]);
+    match (event.as_deref(), notification_type.as_deref()) {
+        (Some("Notification"), Some("permission_prompt")) => Ok("permission_required"),
+        (Some("Notification"), Some("agent_needs_input")) => Ok("input_required"),
+        (Some("Notification"), Some("agent_completed")) | (Some("Stop"), _) => Ok("completed"),
+        (Some("StopFailure"), _) => Ok("failed"),
+        _ => Err("unsupported Claude event".into()),
+    }
+}
+
+/// claude shares kiro's snake_case key with PascalCase values
+/// ("UserPromptSubmit"). It shipped WITHOUT this arm once, which made the
+/// dedup flag sticky for its windows: the first `tmm send` suppressed the
+/// auto-post for every later turn, and deliveries were never acked.
+pub(crate) fn is_user_prompt_submit(payload: &Value) -> bool {
+    payload
+        .get("hook_event_name")
+        .and_then(Value::as_str)
+        .is_some_and(|e| e.eq_ignore_ascii_case("userpromptsubmit"))
+}
+
+/// Claude Code's idle reminder (`Notification` / `idle_prompt`): fires ~60 s
+/// after a turn ended with nobody typing. Not an ask — the consumer drops it
+/// before normalize runs (board #75).
+pub(crate) fn is_idle_nudge(payload: &Value) -> bool {
+    payload.get("hook_event_name").and_then(Value::as_str) == Some("Notification")
+        && payload.get("notification_type").and_then(Value::as_str) == Some("idle_prompt")
 }

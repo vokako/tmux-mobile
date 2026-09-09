@@ -185,7 +185,12 @@ In this inventory, `backend` was `&str` and the five literals were scattered:
 
 **Not a problem, per the owner:** the five CLIs genuinely differ in configuration,
 hook dialects and status lines. Separate implementations are necessary.
-The recorded problems were their scattered ownership:
+The recorded problems were their scattered ownership. Progress (board #101):
+#127 closed 1 and 7 (`enum Backend`, models, sniff dialects), #128 closed 4
+and 5 (renderers, hooks, per-backend refresh probes, resume dialects), #129
+closed 2 and 3 (hook payload reading and the KNOWN rows live on the backend
+files; `src-tauri/src/backends/` is an UNGATED leaf module so the mobile
+inbox consumer reads the same dialects). 8 is #130, the guard is #131.
 
 1. No `Backend` type; one backend's knowledge spread across at least twelve
    match/if branches. Adding omp on 2026-09-07 missed `registry_save`.

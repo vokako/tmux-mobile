@@ -29,6 +29,7 @@ pub(crate) fn models_fetch() -> Option<Vec<String>> {
     (!models.is_empty()).then_some(models)
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::projects::vitals::Vitals;
 
 /// Read what grok's screen says about its current state. grok 1.0.5 paints two
@@ -44,6 +45,7 @@ use crate::projects::vitals::Vitals;
 /// themselves BY SHAPE: the ratio must be `N[K|M] / N[K|M]` at the end of a
 /// line, the model must sit in a `╰…╯` border. Bottom-up, newest paint wins —
 /// the footer is redrawn at the bottom, and stale headers scroll upward.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn sniff_grok(pane: &str) -> Vitals {
     let mut v = Vitals::default();
     for line in pane.lines().rev() {
@@ -73,6 +75,7 @@ pub fn sniff_grok(pane: &str) -> Vitals {
 /// corners — and the FIRST `·`-segment inside is the model; what follows is
 /// the approval mode (`always-approve`), which changes per keypress and is not
 /// a vital.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn grok_footer_model(line: &str) -> Option<String> {
     let s = line.trim();
     if !(s.starts_with('╰') && s.ends_with('╯')) {
@@ -91,6 +94,7 @@ pub(crate) fn grok_footer_model(line: &str) -> Option<String> {
 /// sides must parse as token counts and the ratio must make sense (used ≤
 /// total); a `3 / 5` in ordinary output fails the K/M requirement on the
 /// total, which is what keeps arithmetic in a diff from becoming a reading.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn grok_context_ratio(line: &str) -> Option<u8> {
     let s = line.trim_end();
     let (head, total_txt) = s.rsplit_once('/')?;
@@ -110,6 +114,7 @@ pub(crate) fn grok_context_ratio(line: &str) -> Option<u8> {
 }
 
 /// `47K` → 47_000, `1.2M` → 1_200_000, `800` → 800.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn grok_tokens(s: &str) -> Option<f64> {
     let s = s.trim();
     let (num, mult) = match s.strip_suffix('M') {
@@ -125,11 +130,15 @@ pub(crate) fn grok_tokens(s: &str) -> Option<f64> {
 
 
 use serde_json::{json, Value};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::path::{Path, PathBuf};
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::projects::spawn::{effort_flag, patch_hooks, Rendered};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::projects::store::RegAgent;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use super::shared;
 
 /// grok 1.0.5 hook schema (its own docs, `~/.grok/docs/user-guide/10-hooks.md`,
@@ -139,6 +148,7 @@ use super::shared;
 /// VALUES snake_case (`user_prompt_submit`, `stop`). A `stop` fires once with
 /// `reason: "end_turn"` for the turn AND once at session end (`"shutdown"`) —
 /// the normalizer filters on the reason. An omitted matcher matches everything.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn grok_hooks(notify: &str) -> Value {
     json!({
         "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
@@ -149,6 +159,7 @@ pub(crate) fn grok_hooks(notify: &str) -> Value {
     })
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn render_grok(
     def: &RegAgent, name: &str, home: &Path, system_prompt: &str,
     skills: &[crate::projects::skills::ResolvedSkill],
@@ -205,7 +216,7 @@ pub(crate) fn render_grok(
         env: vec![("GROK_HOME".into(), home.to_string_lossy().to_string())],
         cmd: format!(
             "command grok --always-approve --agent {}{}",
-            shared::shell_quote(name),
+            crate::shell::quote(name),
             effort_flag(def),
         ),
         confirmation: None,
@@ -213,6 +224,7 @@ pub(crate) fn render_grok(
 }
 
 /// Where the user's own grok lives. Only read, never written.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn grok_user_home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".grok")
 }
@@ -221,6 +233,7 @@ pub(crate) fn grok_user_home() -> PathBuf {
 /// catalog (`[models]` + `[model.*]` — the auth-bearing half of grok config;
 /// hooks/MCP/UI prefs deliberately do NOT carry, that is what isolation is
 /// for), and the registry MCP servers in grok's `[mcp_servers.<name>]` shape.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn grok_config_toml(mcps: &[shared::McpDef]) -> String {
     let user = std::fs::read_to_string(grok_user_home().join("config.toml")).ok();
     grok_config_toml_from(mcps, user.as_deref())
@@ -231,6 +244,7 @@ pub(crate) fn grok_config_toml(mcps: &[shared::McpDef]) -> String {
 /// parses a single value and fails on any real config with "expected nothing",
 /// which silently dropped the whole catalog and left every spawned grok at a
 /// login screen (caught live, 2026-08-21).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn grok_config_toml_from(mcps: &[shared::McpDef], user_config: Option<&str>) -> String {
     let mut root = toml::value::Table::new();
     let mut trust = toml::value::Table::new();
@@ -275,6 +289,7 @@ pub(crate) fn grok_config_toml_from(mcps: &[shared::McpDef], user_config: Option
 
 
 /// The grok half of `refresh_hooks`.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn refresh(home: &Path, notify: &str) -> bool {
     let hooks = home.join("hooks").join("tmux-mobile.json");
     hooks.is_file() && patch_hooks(&hooks, grok_hooks(notify))
@@ -283,7 +298,7 @@ pub(crate) fn refresh(home: &Path, notify: &str) -> bool {
 /// grok resume dialect: `--resume <id>` exact, `--continue` recent.
 pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
     match id {
-        Some(id) => format!("{cmd} --resume {}", shared::shell_quote(id)),
+        Some(id) => format!("{cmd} --resume {}", crate::shell::quote(id)),
         None => format!("{cmd} --continue"),
     }
 }
@@ -292,6 +307,7 @@ pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
 /// `-c/--continue` — "Continue the most recent session for the current
 /// working directory" (cwd-scoped, so safe, unlike codex's machine-wide
 /// --last); `--resume <id>` exact. Recipe dialect: `resume_command` above.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn known() -> crate::projects::agents::KnownAgent {
     crate::projects::agents::KnownAgent {
         backend: "grok",
@@ -300,4 +316,34 @@ pub(crate) fn known() -> crate::projects::agents::KnownAgent {
         resume_recent: Some("grok --continue"),
         resume_id: Some("grok --resume {id}"),
     }
+}
+
+/// grok's hook payload dialect (board #129), measured on grok 1.0.5: the key
+/// is camelCase `hookEventName`; a turn's true end is `stop` with reason
+/// "end_turn" — a second observe-only stop fires at session teardown
+/// ("shutdown"/"channel_closed") and must not read as a completion.
+/// `stop_failure` is the API-error end of a turn.
+pub(crate) fn normalize_kind(
+    payload: &serde_json::Map<String, Value>,
+) -> Result<&'static str, String> {
+    let event = crate::agent_notifications::string_field(payload, &["hookEventName"]);
+    match event.as_deref() {
+        Some("stop") => {
+            let reason = crate::agent_notifications::string_field(payload, &["reason"]);
+            if reason.as_deref() != Some("end_turn") {
+                return Err("grok stop without end_turn is not a completion".into());
+            }
+            Ok("completed")
+        }
+        Some("stop_failure") => Ok("failed"),
+        _ => Err("unsupported grok event".into()),
+    }
+}
+
+/// grok 1.0.5: camelCase key, snake_case value (measured).
+pub(crate) fn is_user_prompt_submit(payload: &Value) -> bool {
+    payload
+        .get("hookEventName")
+        .and_then(Value::as_str)
+        .is_some_and(|e| e.eq_ignore_ascii_case("user_prompt_submit"))
 }

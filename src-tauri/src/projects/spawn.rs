@@ -23,7 +23,7 @@
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
-use crate::projects::backends::shared;
+use crate::backends::shared;
 use crate::tmux;
 
 use super::store::RegAgent;
@@ -216,7 +216,7 @@ fn materialize(
     // change a restart.
     let mcp_config = seed_mcp_config(Path::new(workspace), &mcp_defs(def))?;
 
-    let backend = super::backends::Backend::parse(&def.backend)
+    let backend = crate::backends::Backend::parse(&def.backend)
         .ok_or_else(|| format!("unknown backend '{}'", def.backend))?;
     let prepared = backend.render(def, window_name, &home, Path::new(workspace), &system_prompt, &skills)?;
 
@@ -472,7 +472,7 @@ pub(crate) fn write_launch_recipe(home: &Path, backend: &str, env: &[(String, St
 /// An unknown backend relaunches verbatim, as before.
 fn resume_command(cmd: &str, backend: &str, session_id: Option<&str>) -> String {
     let exact = session_id.filter(|s| !s.is_empty());
-    match super::backends::Backend::parse(backend) {
+    match crate::backends::Backend::parse(backend) {
         Some(b) => b.resume_command(cmd, exact),
         None => cmd.to_string(),
     }
@@ -635,20 +635,20 @@ mod relaunch_tests {
 // production code reaches it only through Backend's methods, so these
 // re-exports exist for the test module's `use super::*` alone.
 #[cfg(test)]
-pub(crate) use super::backends::claude::{
+pub(crate) use crate::backends::claude::{
     claude_hooks, ensure_claude_env, ensure_claude_state, ensure_claude_status_line,
     merge_missing_claude_env, render_claude,
 };
 #[cfg(test)]
-pub(crate) use super::backends::codex::{codex_hooks, render_codex};
+pub(crate) use crate::backends::codex::{codex_hooks, render_codex};
 #[cfg(test)]
-pub(crate) use super::backends::grok::{grok_config_toml_from, grok_hooks, render_grok};
+pub(crate) use crate::backends::grok::{grok_config_toml_from, grok_hooks, render_grok};
 #[cfg(test)]
-pub(crate) use super::backends::kiro::{
+pub(crate) use crate::backends::kiro::{
     ensure_kiro_settings, kiro_cli_settings, kiro_hooks, migrate_launch_model, render_kiro,
 };
 #[cfg(test)]
-pub(crate) use super::backends::omp::{omp_telemetry_extension, render_omp};
+pub(crate) use crate::backends::omp::{omp_telemetry_extension, render_omp};
 
 pub(crate) struct Rendered {
     pub(crate) env: Vec<(String, String)>,
@@ -802,7 +802,7 @@ pub fn refresh_hooks(project_path: &str, window_name: &str) -> bool {
     // branches always did — refresh does not need to know which backend the
     // home belongs to.
     let mut changed = false;
-    for b in super::backends::Backend::ALL {
+    for b in crate::backends::Backend::ALL {
         changed |= b.refresh(&home, window_name, Path::new(project_path), &notifications);
     }
     changed

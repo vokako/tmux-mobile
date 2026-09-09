@@ -50,7 +50,7 @@ fn known() -> &'static [KnownAgent] {
                 resume_id: None,
             },
         ];
-        rows.extend(super::backends::Backend::ALL.into_iter().map(|b| b.known()));
+        rows.extend(crate::backends::Backend::ALL.into_iter().map(|b| b.known()));
         rows
     })
 }
@@ -61,7 +61,7 @@ fn known() -> &'static [KnownAgent] {
 /// arm existed while `registry_save` still said "must be kiro|claude|codex|
 /// grok"). Detection (`KNOWN`) is wider: kimi/openclaw are recognized in
 /// panes but not spawnable.
-pub const SPAWNABLE_BACKENDS: &[&str] = &super::backends::Backend::NAMES;
+pub const SPAWNABLE_BACKENDS: &[&str] = &crate::backends::Backend::NAMES;
 
 /// The longest agent name we accept — a tmux window name and a directory
 /// component; anything longer is a mistake, not an identity.

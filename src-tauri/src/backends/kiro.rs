@@ -26,6 +26,7 @@ pub(crate) fn models_fetch() -> Option<Vec<String>> {
     (!models.is_empty()).then_some(models)
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::projects::vitals::{branch, context_pct, looks_like_model, Vitals, EFFORTS};
 
 /// Read what the last lines of a pane say about the agent's current state.
@@ -35,6 +36,7 @@ use crate::projects::vitals::{branch, context_pct, looks_like_model, Vitals, EFF
 /// identity, which is accepted as the one narrow fallback. The anchor is not a
 /// filter: fields that identify themselves by shape (context and branch) are
 /// read even when it never appears, because narrow panes wrap later segments.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn sniff_kiro(pane: &str, agent: &str) -> Vitals {
     let mut v = Vitals::default();
     // Bottom-up: the newest paint of the status line is the last one.
@@ -125,11 +127,15 @@ pub fn sniff_kiro(pane: &str, agent: &str) -> Vitals {
 
 
 use serde_json::{json, Value};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::path::Path;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::projects::spawn::{effort_flag, patch_hooks, Rendered};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::projects::store::RegAgent;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use super::shared;
 
 /// The hook set for each backend, in ONE place. `render_*` writes it at spawn
@@ -138,6 +144,7 @@ use super::shared;
 /// before `userPromptSubmit` existed kept a three-hook config, and since that
 /// hook is the only reset of the same-turn dedup flag, their first `tmm send`
 /// silently killed the stop-hook auto-post for the rest of the window's life.)
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn kiro_hooks(notify: &str) -> Value {
     json!({
         // The notify helper feeds notifications AND telemetry (tool events are
@@ -161,6 +168,7 @@ pub(crate) fn kiro_hooks(notify: &str) -> Value {
 /// prompt. That is also the contract the delivery pipeline already assumes:
 /// `delivery_overdue` pauses the ack clock while a turn is open precisely
 /// because kiro "Type to queue"s what we send.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn kiro_cli_settings() -> Vec<(&'static str, Value)> {
     vec![
         ("chat.disableTrustAllConfirmation", json!(true)),
@@ -179,6 +187,7 @@ pub(crate) fn kiro_cli_settings() -> Vec<(&'static str, Value)> {
 /// other keys alone. Creates the file when it is missing (pre-settings homes),
 /// no-op write when everything already matches — the same contract as
 /// `patch_hooks`, because the app owns these configs. Returns true on change.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn ensure_kiro_settings(home: &Path) -> bool {
     let dir = home.join("settings");
     if std::fs::create_dir_all(&dir).is_err() {
@@ -211,6 +220,7 @@ pub(crate) fn ensure_kiro_settings(home: &Path) -> bool {
 /// agent restarted through that path silently lost its model. Once the id is in
 /// the config it survives every start (`up`, restart, resume) because they all
 /// pass `--agent`.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn migrate_launch_model(home: &Path, config: &Path) -> bool {
     let recipe_path = home.join("launch.json");
     let Ok(text) = std::fs::read_to_string(&recipe_path) else { return false };
@@ -259,6 +269,7 @@ pub(crate) fn migrate_launch_model(home: &Path, config: &Path) -> bool {
     recipe_written || config_written
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn render_kiro(
     def: &RegAgent, name: &str, home: &Path, system_prompt: &str,
     skills: &[crate::projects::skills::ResolvedSkill],
@@ -329,7 +340,7 @@ pub(crate) fn render_kiro(
         env: vec![("KIRO_HOME".into(), home.to_string_lossy().to_string())],
         cmd: format!(
             "command kiro-cli chat --agent {} --trust-all-tools{}",
-            shared::shell_quote(name),
+            crate::shell::quote(name),
             effort_flag(def),
         ),
         confirmation: None,
@@ -341,6 +352,7 @@ pub(crate) fn render_kiro(
 /// migration, canonical settings, and the pre-recipe backfill — a home whose
 /// `agents/<name>.json` exists but whose recipe does not is an old spawn
 /// whose restart identity is reconstructible from the isolated home itself.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn refresh(home: &Path, window_name: &str, notify: &str) -> bool {
     let mut changed = false;
     let config = home.join("agents").join(format!("{window_name}.json"));
@@ -360,7 +372,7 @@ pub(crate) fn refresh(home: &Path, window_name: &str, notify: &str) -> bool {
                 &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())],
                 &format!(
                     "command kiro-cli chat --agent {} --trust-all-tools kick",
-                    shared::shell_quote(window_name),
+                    crate::shell::quote(window_name),
                 ),
                 // A backfilled recipe cannot know who spawned the agent — the
                 // provenance does not exist for pre-recipe spawns; refresh
@@ -376,7 +388,7 @@ pub(crate) fn refresh(home: &Path, window_name: &str, notify: &str) -> bool {
 /// isolated KIRO_HOME scopes it to this one agent).
 pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
     match id {
-        Some(id) => format!("{cmd} --resume-id {}", shared::shell_quote(id)),
+        Some(id) => format!("{cmd} --resume-id {}", crate::shell::quote(id)),
         None => format!("{cmd} --resume"),
     }
 }
@@ -386,6 +398,7 @@ pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
 /// conversation from this directory"; `--resume-id <SESSION_ID>` exact.
 /// The recipe-based resume dialect lives in `resume_command` above — same
 /// knowledge, the template form serves adopted/hand-started windows.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn known() -> crate::projects::agents::KnownAgent {
     crate::projects::agents::KnownAgent {
         backend: "kiro",
@@ -394,4 +407,25 @@ pub(crate) fn known() -> crate::projects::agents::KnownAgent {
         resume_recent: Some("kiro-cli chat --resume"),
         resume_id: Some("kiro-cli chat --resume-id {id}"),
     }
+}
+
+/// kiro's hook payload dialect (board #129): snake_case `hook_event_name`,
+/// a turn's end is `stop`/`Stop`.
+pub(crate) fn normalize_kind(
+    payload: &serde_json::Map<String, Value>,
+) -> Result<&'static str, String> {
+    let event = crate::agent_notifications::string_field(payload, &["hook_event_name"]);
+    if !matches!(event.as_deref(), Some("stop" | "Stop")) {
+        return Err("unsupported Kiro event".into());
+    }
+    Ok("completed")
+}
+
+/// kiro marks a new user turn with `hook_event_name: userPromptSubmit`
+/// (case-insensitive) — resets the auto-post dedup flag.
+pub(crate) fn is_user_prompt_submit(payload: &Value) -> bool {
+    payload
+        .get("hook_event_name")
+        .and_then(Value::as_str)
+        .is_some_and(|e| e.eq_ignore_ascii_case("userpromptsubmit"))
 }

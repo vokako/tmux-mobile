@@ -56,7 +56,7 @@ pub fn list(backend: &str) -> Option<Vec<String>> {
 pub fn effort_values(backend: &str) -> &'static [&'static str] {
     // The knowledge lives on the backend's own file (board #127); an unknown
     // backend has no levels, exactly as before.
-    super::backends::Backend::parse(backend).map(|b| b.effort_values()).unwrap_or(&[])
+    crate::backends::Backend::parse(backend).map(|b| b.effort_values()).unwrap_or(&[])
 }
 
 /// Effort validation mirrors model validation: empty = the backend default and
@@ -96,7 +96,7 @@ pub fn validate(backend: &str, model: &str) -> Result<(), String> {
 /// Ask the backend's own CLI (the fetch lives on the backend files,
 /// board #127). `None` = no authoritative list, so no validation.
 fn fetch(backend: &str) -> Option<Vec<String>> {
-    super::backends::Backend::parse(backend)?.models_fetch()
+    crate::backends::Backend::parse(backend)?.models_fetch()
 }
 
 #[cfg(test)]

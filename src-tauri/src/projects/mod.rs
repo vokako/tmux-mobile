@@ -9,7 +9,6 @@
 //! server, so nothing here would ever run on Android/iOS.
 
 pub mod agents;
-pub(crate) mod backends;
 pub mod capture;
 pub mod global_prompt;
 pub mod models;
