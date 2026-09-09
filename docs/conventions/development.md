@@ -121,7 +121,11 @@ The release keystore is NOT in the repository. `gen/android/app/build.gradle.kts
 reads `src-tauri/gen/android/key.properties` (gitignored; copy
 `key.properties.example` and fill in `storeFile`, `storePassword`, `keyAlias`,
 `keyPassword`; `storeFile` is relative to `gen/android/`). Without the file a
-release build still succeeds but the APK is unsigned, and gradle says so.
+release build still succeeds but the APK is unsigned, and gradle says so — in
+a Git worktree both files are absent (gitignored), so symlink `key.properties`
+AND `keystore.jks` from the launch checkout before `npm run build:android`
+there (2026-09-09, board #131: the first worktree build produced
+`app-universal-release-unsigned.apk` and the postflight flagged it).
 
 Why: until 2026-09-03 `keystore.jks` and its passwords were committed in the
 gradle script. Anyone with the repository could sign an update that installed
