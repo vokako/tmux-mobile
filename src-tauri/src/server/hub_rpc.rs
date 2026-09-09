@@ -9,7 +9,9 @@
 //! desktop-gated — messages live in its `hub_msgs` table since board #107),
 //! so mobile answers method-not-found and clients degrade gracefully.
 
-use super::rpc::{param, Request, Response, RpcError, ERR_INTERNAL, ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND};
+use super::rpc::{param, Request, Response, RpcError};
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use super::rpc::ERR_METHOD_NOT_FOUND;
 
 /// Bus room for a project's hub chat.
 ///
@@ -31,14 +33,13 @@ pub(super) fn project_room(session: &str) -> String {
 /// The hub dispatcher proper (board #146): every arm is a `Result`, so a
 /// missing param or a store error is a `?` with its wire code already chosen
 /// (`RpcError`), and `handle_hub_request` below is the one place a
-/// `Response` is built. Arm order and every message are exactly what the
+/// `Response` is built (`Response::from_outcome`). Arm order and every message are exactly what the
 /// inline `match … return Response::err` shape produced.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notifications::AgentNotificationHub>) -> Result<Response, RpcError> {
+fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notifications::AgentNotificationHub>) -> Result<serde_json::Value, RpcError> {
     use crate::projects::rooms;
     use crate::projects::telemetry;
 
-    let id = req.id;
     let p = &req.params;
     // The one method that is about EVERY room: when did we last talk in each?
     // It answers before the session gate below, because it has no session to
@@ -52,7 +53,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
         for (s, w, st) in crate::projects::telemetry::all_states() {
             states.insert(format!("{s}:{w}"), serde_json::Value::String(st));
         }
-        return Ok(Response::ok(id, serde_json::json!({ "rooms": crate::projects::rooms::room_latest(), "states": states })));
+        return Ok(serde_json::json!({ "rooms": crate::projects::rooms::room_latest(), "states": states }));
     }
     // The board twin of `hub_rooms`: issue counts per column for EVERY
     // project's board, one grouped read (board #39) — the Board sidebar
@@ -61,7 +62,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
     // param by design, so it answers before the session gate like the other
     // all-rooms reads; same authenticated reader as everything here.
     if req.method == "hub_board_counts" {
-        return Ok(Response::ok(id, crate::projects::board_counts().map_err(RpcError::Internal)?));
+        return Ok(crate::projects::board_counts().map_err(RpcError::Internal)?);
     }
     let asked = param(p, "session")?;
     // Resolve the caller's session name to the project's CURRENT one, ONCE, here.
@@ -126,7 +127,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
                 return Err(RpcError::InvalidParams(format!("no managed agent named '{agent}' in session '{session}'")));
             }
             let _ = rooms::post(&room, "human", &format!("[tmm] {} → {}", text, sent.join(", ")));
-            Ok(Response::ok(id, serde_json::json!({ "sent": sent, "command": text })))
+            Ok(serde_json::json!({ "sent": sent, "command": text }))
         }
 
         "hub_post" => {
@@ -158,7 +159,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
                 let seq = msg.get("seq").and_then(|v| v.as_i64());
                 deliver_mentions(session, from, &body, &room, seq);
             }
-            Ok(Response::ok(id, msg))
+            Ok(msg)
         }
 
         // Read the project chat, optionally incremental (`since_ts`, exclusive)
@@ -228,7 +229,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
                     obj.insert("has_more".into(), serde_json::json!(more && !reached_cursor));
                 }
             }
-            Ok(Response::ok(id, history))
+            Ok(history)
         }
 
         // Keyword search over the room's FULL history — `hub_log` pages, this
@@ -271,7 +272,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
                     });
                 }
             }
-            Ok(Response::ok(id, result))
+            Ok(result)
         }
 
         // Deleting a message is TWO steps, because a transcript is a record and a
@@ -311,18 +312,18 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
                             done += 1;
                         }
                     }
-                    Ok(Response::ok(id, serde_json::json!({ "archived": done })))
+                    Ok(serde_json::json!({ "archived": done }))
                 }
                 "hub_msg_restore" => {
                     let n = crate::projects::unarchive_msgs(&room, &ids).map_err(RpcError::Internal)?;
-                    Ok(Response::ok(id, serde_json::json!({ "restored": n })))
+                    Ok(serde_json::json!({ "restored": n }))
                 },
                 _ => {
                     // Forget the message itself first: if that fails the archive row
                     // stays, so the message is still listed and can be tried again.
                     let n = rooms::delete_messages(&room, &ids).map_err(RpcError::Internal)?;
                     let _ = crate::projects::unarchive_msgs(&room, &ids);
-                    Ok(Response::ok(id, serde_json::json!({ "deleted": n })))
+                    Ok(serde_json::json!({ "deleted": n }))
                 }
             }
         }
@@ -336,22 +337,22 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
                     serde_json::json!({ "id": id, "ts": ts, "from": sender, "body": body, "archived_at": at })
                 })
                 .collect();
-            Ok(Response::ok(id, serde_json::json!({ "messages": rows })))
+            Ok(serde_json::json!({ "messages": rows }))
         }
 
         // Derived agent states for a session: one row per live window, agent
         // detection + status derivation joined at read time.
-        "hub_agents" => Ok(Response::ok(id, agent_states(session))),
+        "hub_agents" => Ok(agent_states(session)),
 
         // ---- the project task board (owner, 2026-08-29): the human writes
         // issues on the board page, agents read/update through `tmm board`.
         // Session-scoped like the chat room; note/move/save record WHO acted.
-        "hub_board_list" => Ok(Response::ok(id, crate::projects::board_list(session).map_err(RpcError::InvalidParams)?)),
+        "hub_board_list" => Ok(crate::projects::board_list(session).map_err(RpcError::InvalidParams)?),
         "hub_board_get" => {
             let Some(issue_id) = p.get("id").and_then(|v| v.as_i64()) else {
                 return Err(RpcError::InvalidParams("id required".into()));
             };
-            Ok(Response::ok(id, crate::projects::board_get(session, issue_id).map_err(RpcError::InvalidParams)?))
+            Ok(crate::projects::board_get(session, issue_id).map_err(RpcError::InvalidParams)?)
         }
         "hub_board_save" => {
             let issue_id = p.get("id").and_then(|v| v.as_i64());
@@ -433,7 +434,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
                     deliver_chat_line(session, assignee, &line);
                 }
             }
-            Ok(Response::ok(id, serde_json::json!({ "ok": true, "id": saved })))
+            Ok(serde_json::json!({ "ok": true, "id": saved }))
         }
         "hub_board_note" => {
             let Some(issue_id) = p.get("id").and_then(|v| v.as_i64()) else {
@@ -456,14 +457,14 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
                     deliver_chat_line(session, &assignee, &line);
                 }
             }
-            Ok(Response::ok(id, serde_json::json!({ "ok": true })))
+            Ok(serde_json::json!({ "ok": true }))
         }
         "hub_board_delete" => {
             let Some(issue_id) = p.get("id").and_then(|v| v.as_i64()) else {
                 return Err(RpcError::InvalidParams("id required".into()));
             };
             match crate::projects::board_delete(session, issue_id) {
-                Ok(true) => Ok(Response::ok(id, serde_json::json!({ "ok": true }))),
+                Ok(true) => Ok(serde_json::json!({ "ok": true })),
                 Ok(false) => Err(RpcError::InvalidParams(format!("no issue #{issue_id} on this board"))),
                 Err(e) => Err(RpcError::InvalidParams(e)),
             }
@@ -509,16 +510,13 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
             // back so a client never has to reconstruct it.
             let oldest = events.first().map(|e| serde_json::json!({ "ts": e.ts, "id": e.id }));
             let (total, first_ts, _last_ts) = telemetry::events_stats(session);
-            Ok(Response::ok(
-                id,
-                serde_json::json!({
+            Ok(serde_json::json!({
                     "events": events,
                     "has_more": has_more,
                     "oldest": oldest,
                     "total": total,
                     "first_ts": first_ts,
-                }),
-            ))
+                }))
         }
 
         // Stop / restart ONE agent. The window is the agent's life: killing it
@@ -556,7 +554,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
             // half of the composer's interrupt affordance (owner,
             // 2026-08-24: "发送 interrupt 的状态在消息列表里也要展示").
             let _ = rooms::post(&room, agent, &format!("[tmm] interrupted {agent}"));
-            Ok(Response::ok(id, serde_json::json!({ "interrupted": agent })))
+            Ok(serde_json::json!({ "interrupted": agent }))
         }
 
         // Eject an agent from the project: stop it, drop its slot, remove its
@@ -565,7 +563,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
             let agent = param(p, "agent")?;
             let v = crate::projects::agent_remove(session, agent).map_err(RpcError::InvalidParams)?;
             let _ = rooms::post(&room, agent, &format!("[tmm] removed {agent}"));
-            Ok(Response::ok(id, v))
+            Ok(v)
         }
 
         "hub_agent_stop" | "hub_agent_restart" => {
@@ -591,7 +589,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
             }
             if !restart {
                 let _ = rooms::post(&room, agent, &format!("[tmm] stopped {agent}"));
-                return Ok(Response::ok(id, serde_json::json!({ "stopped": agent })));
+                return Ok(serde_json::json!({ "stopped": agent }));
             }
             // Recreate from the declaration. A window younger than the capture
             // loop's 120 s rule may not be in it yet, so fall back to a fresh
@@ -622,7 +620,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
                 }
             }
             let _ = rooms::post(&room, agent, &format!("[tmm] restarted {agent}"));
-            Ok(Response::ok(id, serde_json::json!({ "restarted": agent, "resumed": resumed })))
+            Ok(serde_json::json!({ "restarted": agent, "resumed": resumed }))
         }
 
         // Spawn a registry agent into this project (tmm spawn / the UI's
@@ -646,7 +644,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
                 };
                 let _ = rooms::post(&room, who, &line);
             }
-            Ok(Response::ok(id, result))
+            Ok(result)
         }
         "hub_spawn" => {
             let agent = param(p, "agent")?;
@@ -668,7 +666,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
                 format!("[tmm] spawned {win} — {brief}")
             };
             let _ = rooms::post(&room, who, &line);
-            Ok(Response::ok(id, result))
+            Ok(result)
         }
 
         other => Err(RpcError::MethodNotFound(format!("unknown hub method: {other}"))),
@@ -677,10 +675,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(super) fn handle_hub_request(req: &Request, notifications: Option<&crate::agent_notifications::AgentNotificationHub>) -> Response {
-    match dispatch_hub(req, notifications) {
-        Ok(r) => r,
-        Err(e) => Response::from_error(req.id, e),
-    }
+    Response::from_outcome(req.id, dispatch_hub(req, notifications))
 }
 
 
