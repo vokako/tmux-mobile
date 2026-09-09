@@ -1158,13 +1158,22 @@ impl Store {
     /// The newest `limit` messages matching ANY of `terms` (substring,
     /// ASCII-case-insensitive, body or sender), oldest first. `room = None`
     /// searches every room.
+    ///
+    /// The match runs in SQL (board #124): the old shape selected every row
+    /// of the scope newest-first and filtered with `contains()` in Rust —
+    /// fine while hits were dense, but a rare or absent term materialized the
+    /// whole table (34 ms at 50k rows, measured). `LIKE` with `%`/`_`/`\`
+    /// escaped keeps substring semantics; `lower()` matches the old
+    /// `to_ascii_lowercase` exactly because SQLite's `lower()` is ASCII-only
+    /// without ICU — case-insensitivity for ASCII, byte-verbatim for
+    /// everything else, which is the behaviour the Rust path always had.
     pub fn hub_search(
         &self,
         room: Option<&str>,
         terms: &[String],
         limit: i64,
     ) -> Result<Vec<HubMsg>, String> {
-        let limit = limit.clamp(1, 500) as usize;
+        let limit = limit.clamp(1, 500);
         let terms: Vec<String> = terms
             .iter()
             .map(|t| t.trim().to_ascii_lowercase())
@@ -1173,27 +1182,33 @@ impl Store {
         if terms.is_empty() {
             return Ok(Vec::new());
         }
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT seq, id, ts, room, sender, to_json, kind, body FROM hub_msgs
-                 WHERE (?1 IS NULL OR room = ?1) ORDER BY seq DESC",
-            )
-            .map_err(|e| format!("prepare hub search: {e}"))?;
-        let mut hits: Vec<HubMsg> = Vec::new();
-        let rows = stmt
-            .query_map(rusqlite::params![room], hub_msg_row)
-            .map_err(|e| format!("query hub search: {e}"))?;
-        for row in rows.filter_map(Result::ok) {
-            let body = row.body.to_ascii_lowercase();
-            let from = row.sender.to_ascii_lowercase();
-            if terms.iter().any(|t| body.contains(t) || from.contains(t)) {
-                hits.push(row);
-                if hits.len() >= limit {
-                    break;
-                }
-            }
+        // One `%term%` pattern per term, LIKE-escaped so a literal `%`/`_` in
+        // the query stays literal.
+        let escape = |t: &str| t.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        let patterns: Vec<String> = terms.iter().map(|t| format!("%{}%", escape(t))).collect();
+        let clause = patterns
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                let p = i + 2; // ?1 is the room
+                format!("lower(body) LIKE ?{p} ESCAPE '\\' OR lower(sender) LIKE ?{p} ESCAPE '\\'")
+            })
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let sql = format!(
+            "SELECT seq, id, ts, room, sender, to_json, kind, body FROM hub_msgs
+             WHERE (?1 IS NULL OR room = ?1) AND ({clause})
+             ORDER BY seq DESC LIMIT {limit}"
+        );
+        let mut stmt = self.conn.prepare(&sql).map_err(|e| format!("prepare hub search: {e}"))?;
+        let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(room.map(str::to_string))];
+        for p in &patterns {
+            args.push(Box::new(p.clone()));
         }
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())), hub_msg_row)
+            .map_err(|e| format!("query hub search: {e}"))?;
+        let mut hits: Vec<HubMsg> = rows.filter_map(Result::ok).collect();
         hits.reverse();
         Ok(hits)
     }
@@ -3426,4 +3441,24 @@ mod tests {
         // Unknown ids are simply not there.
         assert_eq!(store.unarchive_msgs("proj:a", &["nope".to_string()]).unwrap(), 0);
     }
+    /// Board #124: the match moved into SQL `LIKE`, and a literal `%` or `_`
+    /// in the query must stay literal — unescaped they are wildcards, and
+    /// "50%" would match "50x" while "r_s" matched any "rXs".
+    #[test]
+    fn hub_search_escapes_like_wildcards() {
+        let store = Store::open_memory().unwrap();
+        store.hub_append("proj:esc", "e1", 10, "human", "[]", "msg", "take 50% off today").unwrap();
+        store.hub_append("proj:esc", "e2", 20, "human", "[]", "msg", "take 50x off today").unwrap();
+        store.hub_append("proj:esc", "e3", 30, "human", "[]", "msg", "an under_score name").unwrap();
+        store.hub_append("proj:esc", "e4", 40, "human", "[]", "msg", "an underXscore name").unwrap();
+        let hits = |term: &str| {
+            store.hub_search(Some("proj:esc"), &[term.to_string()], 50).unwrap()
+                .into_iter().map(|m| m.id).collect::<Vec<_>>()
+        };
+        assert_eq!(hits("50%"), vec!["e1"], "a literal % is not a wildcard");
+        assert_eq!(hits("under_s"), vec!["e3"], "a literal _ is not a wildcard");
+        assert_eq!(hits("UNDER_S"), vec!["e3"], "ASCII case-insensitive, as before");
+        assert!(hits("zzz").is_empty());
+    }
+
 }

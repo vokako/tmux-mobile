@@ -126,9 +126,13 @@
 - [ ] The 750-line `hub_rpc.rs` match mixes dispatch, delivery and board
   notification policy. Replace about 40 `require_str→match→err` branches
   with a `?`-returning inner function.
-- [ ] `Store::hub_search` (board #107) scans all rows and filters in Rust.
-  Current scale is acceptable, but move matching into SQL (`lower(body) LIKE`)
-  or FTS before rooms grow (reviewer, 2026-09-09).
+- [x] `Store::hub_search` matches in SQL (board #124, 2026-09-09): `LIKE` with
+  `%`/`_`/`\` escaped, ASCII `lower()` on both sides (identical to the old
+  `to_ascii_lowercase` — SQLite `lower()` is ASCII-only without ICU), limit in
+  SQL. Measured at 50k rows: the no-hit full scan fell 34.5 ms → 18.8 ms (row
+  materialization eliminated); dense-hit pages unchanged (~0.3–1 ms). An
+  unanchored substring can never use an index — FTS stays the next step if
+  rooms outgrow this.
 - [x] #110: Files navigation history/Back decisions moved into `file-nav.ts`;
   preview body/CSS and renderers moved into `FilePreview.svelte` /
   `file-preview.ts`, preserving behavior.
