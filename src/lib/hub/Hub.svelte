@@ -39,6 +39,7 @@
   import { ALL_TARGET, attachmentBody, attachToken, paletteBackendFor } from './hub-composer.ts';
   import { walkFeedGap } from './hub-history.ts';
   import { createHubBackRegistry } from './hub-back.ts';
+  import { groupRoster } from './roster.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
   import { backendIcon } from '../core/agents.ts';
   import { anchorOf, menuPlacement, popOrigin, viewBox } from '../ui/placement.ts';
@@ -172,44 +173,7 @@
   /** The roster in display order, same-team cards folded into ONE group at
    * the position of their first member (board #74: "视图上放到一个 group 里").
    * Solo agents are groups of one with no team. */
-  const rosterGroups = $derived.by(() => {
-    // A TREE: `team` is a path (`dev/review`) once teams nest, so a group can
-    // hold sub-groups. Order = first appearance.
-    const root = { team: null, path: '', agents: [], children: [] };
-    const nodeFor = (path) => {
-      let node = root;
-      let acc = '';
-      for (const seg of path.split('/')) {
-        acc = acc ? `${acc}/${seg}` : seg;
-        let child = node.children.find((c) => c.path === acc);
-        if (!child) { child = { team: seg, path: acc, agents: [], children: [] }; node.children.push(child); node.order = node.order ?? []; node.order.push(child); }
-        node = child;
-      }
-      return node;
-    };
-    // Items at each level keep arrival order across agents and sub-groups.
-    const items = new Map([[root, []]]);
-    for (const a of managedAgents) {
-      const node = a.team ? nodeFor(a.team) : root;
-      if (!items.has(node)) items.set(node, []);
-      // register the node itself in its parent's item list on first sight
-      if (node !== root) {
-        let parent = root;
-        let acc = '';
-        const segs = node.path.split('/');
-        for (let i = 0; i < segs.length; i++) {
-          acc = acc ? `${acc}/${segs[i]}` : segs[i];
-          const child = parent.children.find((c) => c.path === acc);
-          if (!items.has(parent)) items.set(parent, []);
-          if (!items.get(parent).includes(child)) items.get(parent).push(child);
-          parent = child;
-        }
-      }
-      items.get(node).push(a);
-    }
-    const build = (node) => (items.get(node) ?? []).map((x) => (x.children ? { ...x, items: build(x) } : x));
-    return build(root);
-  });
+  const rosterGroups = $derived(groupRoster(managedAgents));
   // Declared but not running — a stopped agent still belongs to the room.
   const stopped = $derived(stoppedAgents(selectedRow?.slots, managedAgents));
   /** A stopped slot's declared backend — the SAME face the live card wears,

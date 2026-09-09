@@ -122,6 +122,12 @@ Back floor, ContextMenu action construction, confirmations and RPCs; callbacks
 carry the clicked row identity. No wrapper, per-project key or copied shared
 style atom is introduced.
 
+**Roster grouping ownership** (board #132, 2026-09-09): `roster.ts` owns the
+existing team-tree construction. Solo agents and groups keep first-appearance
+order at each level; full team paths distinguish nested groups with the same
+leaf name. Agent objects retain identity. This is a mechanical extraction,
+not a new grouping or sorting policy.
+
 ### An unsent line belongs to its project
 
 the composer's draft is per session (`hubPrefs.draft/setDraft`, `tmux_hub_drafts`), so switching projects parks the old draft and picks up that project's own — carrying the text across put a half-written line in front of the wrong agents — and a reload restores it, because a half-written message is work (owner, 2026-08-19). Written on every keystroke: one small JSON string, and a debounce loses the last characters exactly when the tab goes away. `draftUpdate()` (pure + tested) holds the two rules that regress silently — an empty draft REMOVES its key (else every project ever visited leaves a row) and the text is capped at `DRAFT_MAX` so a pasted file cannot fill localStorage and take the other prefs with it — and returns the SAME object when nothing changed, which is how the keystroke path skips the write. `renameSession` moves the draft key with the lead and read marker.
