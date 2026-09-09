@@ -20,9 +20,9 @@ use crate::tmux;
 
 use super::download::{handle_http_download, looks_like_dl_request};
 use super::rpc::{handle_request, handle_subscribe, handle_unsubscribe, Request, Response, Subscriptions, ERR_AUTH, ERR_INTERNAL, ERR_PARSE};
-use super::team_rpc::{handle_notification_request, handle_team_request, team_push_loop};
+use super::rpc::handle_notification_request;
 use super::wire::{bytes_to_hex, decode_wire_payload, derive_key, derive_session_keys, encode_wire_payload, hex_to_bytes, provided_token_matches, HalfCipher, E2E_VERSION};
-use super::{AuthTracker, NotificationHub, OptTeam, Outbound, ResizeTracker,
+use super::{AuthTracker, NotificationHub, Outbound, ResizeTracker,
     AUTH_LOCKOUT_SECS, AUTH_TRACKER_GC_AFTER_SECS, CONN_ID_COUNTER, MAX_AUTH_FAILURES,
     MAX_CAPTURE_FAILURES, SUBSCRIPTION_POLL_MS};
 
@@ -184,7 +184,7 @@ async fn subscription_loop(
     }
 }
 
-pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, grace_secs: u64, team: OptTeam, notifications: NotificationHub) {
+pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, grace_secs: u64, notifications: NotificationHub) {
     // Peek at the request prelude to distinguish HTTP download from
     // WebSocket. 256 bytes covers the request line even with a reverse-proxy
     // path prefix; peek doesn't consume, so the WS handshake still sees the
@@ -226,10 +226,10 @@ pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<S
         }
     };
 
-    handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, resize_tracker, conn_id, conn_started_at, grace_secs, team, notifications).await;
+    handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, resize_tracker, conn_id, conn_started_at, grace_secs, notifications).await;
 }
 
-pub(super) async fn handle_connection_ws<S>(ws_stream: tokio_tungstenite::WebSocketStream<S>, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, conn_id: u64, conn_started_at: std::time::Instant, grace_secs: u64, team: OptTeam, notifications: NotificationHub)
+pub(super) async fn handle_connection_ws<S>(ws_stream: tokio_tungstenite::WebSocketStream<S>, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, conn_id: u64, conn_started_at: std::time::Instant, grace_secs: u64, notifications: NotificationHub)
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
@@ -249,12 +249,9 @@ where
     // conn_id allocated above so the "connected" log line carries it.
     let hostname = gethostname::gethostname().to_string_lossy().to_string();
     let mut authenticated = false;
-    // team message-push task: started once, right after auth succeeds (it
-    // enqueues Encrypted frames, which need the session cipher in place).
-    // Aborted at teardown alongside the other per-connection tasks.
-    let mut team_push_handle: Option<tokio::task::JoinHandle<()>> = None;
-    // hub message-push task (board #107): the project rooms' own channel,
-    // started with the team one and aborted with it on disconnect.
+    // hub message-push task (board #107): the project rooms' own broadcast
+    // channel, started once right after auth succeeds and aborted on
+    // disconnect. Desktop-only, like the store it reads.
     #[cfg_attr(any(target_os = "android", target_os = "ios"), allow(unused_mut))]
     let mut hub_push_handle: Option<tokio::task::JoinHandle<()>> = None;
     // Receive-side cipher lives in this task and guards strict decrypt
@@ -515,9 +512,6 @@ where
                             let _ = out_tx.send(Outbound::InitCipher(HalfCipher::new(&send_key)));
                             let resp = serde_json::to_string(&serde_json::json!({"result":{"authenticated":true,"machine_id":*machine_id,"hostname":&hostname,"e2e":e2e_version}})).unwrap();
                             let _ = out_tx.send(Outbound::Encrypted(resp));
-                            if let Some(ref a) = team {
-                                team_push_handle = Some(tokio::spawn(team_push_loop(out_tx.clone(), a.clone())));
-                            }
                             #[cfg(not(any(target_os = "android", target_os = "ios")))]
                             {
                                 hub_push_handle = Some(tokio::spawn(super::hub_rpc::hub_push_loop(out_tx.clone())));
@@ -540,9 +534,6 @@ where
                         auth_tracker.lock().await.remove(&addr.ip());
                         let r = Response::ok(req.id, serde_json::json!({ "authenticated": true, "machine_id": *machine_id, "hostname": &hostname }));
                         let _ = out_tx.send(Outbound::Plain(serde_json::to_string(&r).unwrap()));
-                        if let Some(ref a) = team {
-                            team_push_handle = Some(tokio::spawn(team_push_loop(out_tx.clone(), a.clone())));
-                        }
                         #[cfg(not(any(target_os = "android", target_os = "ios")))]
                         {
                             hub_push_handle = Some(tokio::spawn(super::hub_rpc::hub_push_loop(out_tx.clone())));
@@ -571,7 +562,6 @@ where
                 let tracker_c = resize_tracker.clone();
                 let out_tx_c = out_tx.clone();
                 let token_c = token.clone();
-                let team_c = team.clone();
                 let notifications_c = notifications.clone();
                 tokio::spawn(async move {
                     // Every handler below that touches SQLite, spawns tmux, or
@@ -592,9 +582,6 @@ where
                             let mut map = subs_c.lock().await;
                             handle_unsubscribe(&req.params, &mut map)
                         }
-                        m if m.starts_with("team_") => tokio::task::spawn_blocking(move || handle_team_request(&req, team_c.as_deref()))
-                            .await
-                            .unwrap_or_else(|e| Response::err(None, ERR_INTERNAL, format!("task panic: {}", e))),
                         m if m.starts_with("hub_") => tokio::task::spawn_blocking(move || super::hub_rpc::handle_hub_request(&req, Some(&notifications_c)))
                             .await
                             .unwrap_or_else(|e| Response::err(None, ERR_INTERNAL, format!("task panic: {}", e))),
@@ -666,9 +653,6 @@ where
     sub_handle.abort();
     ping_handle.abort();
     if let Some(h) = hub_push_handle.take() {
-        h.abort();
-    }
-    if let Some(h) = team_push_handle.take() {
         h.abort();
     }
     drop(out_tx); // close the channel so the send task finishes

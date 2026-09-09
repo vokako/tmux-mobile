@@ -716,3 +716,53 @@ mod tests {
     }
 }
 
+/// The `agent_notifications_*` unread-inbox RPCs retired 2026-09-01 with the
+/// old notification-dot UI (owner: "原来我用的感觉不是很好用") — the project
+/// room's auto-post + read cursor and the derived status dots replaced it.
+/// Only the hook management surface remains. (Lived in team_rpc.rs until the
+/// Team system was deleted whole, board #100.)
+pub(super) fn handle_notification_request(req: &Request, hub: &crate::agent_notifications::AgentNotificationHub) -> Response {
+    let id = req.id;
+    match req.method.as_str() {
+        "agent_hooks_status" => Response::ok(id, serde_json::to_value(hub.hook_status()).unwrap()),
+        "agent_hooks_install" => match hub.install_hooks() {
+            Ok(status) => Response::ok(id, serde_json::to_value(status).unwrap()),
+            Err(error) => Response::err(id, ERR_INTERNAL, error),
+        },
+        "agent_hooks_remove" => match hub.remove_hooks() {
+            Ok(status) => Response::ok(id, serde_json::to_value(status).unwrap()),
+            Err(error) => Response::err(id, ERR_INTERNAL, error),
+        },
+        other => Response::err(id, ERR_METHOD_NOT_FOUND, format!("unknown agent notification method: {other}")),
+    }
+}
+
+#[cfg(test)]
+mod notification_tests {
+    use super::*;
+    use super::super::test_util::req;
+    use crate::agent_notifications::AgentNotificationHub;
+
+    // ─── the retired unread-inbox RPCs stay retired (board #37) ─────────
+    /// An old client still calls `agent_notifications_list`/`mark_read`; it
+    /// must get a soft METHOD_NOT_FOUND — never a panic, never a resurrected
+    /// snapshot — while the hook-management surface on the SAME dispatcher
+    /// keeps answering.
+    #[test]
+    fn retired_notification_rpcs_degrade_soft_and_hooks_survive() {
+        let root = std::env::temp_dir().join(format!("tmm-retired-rpc-{}", uuid::Uuid::new_v4()));
+        let hub = AgentNotificationHub::load_at_for_tests(root.clone());
+        for method in ["agent_notifications_list", "agent_notifications_mark_read"] {
+            let resp = handle_notification_request(
+                &req(method, serde_json::json!({ "session": "s", "window": 0 })),
+                &hub,
+            );
+            let err = resp.error.expect("retired method answers with an error");
+            assert_eq!(err.code, ERR_METHOD_NOT_FOUND, "{method}");
+            assert!(resp.result.is_none(), "{method} must not return a snapshot");
+        }
+        let resp = handle_notification_request(&req("agent_hooks_status", serde_json::json!({})), &hub);
+        assert!(resp.error.is_none() && resp.result.is_some(), "hook status still answers");
+        let _ = std::fs::remove_dir_all(root);
+    }
+}

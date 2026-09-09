@@ -10,164 +10,12 @@ pub use wire::{encode_wire_payload, decode_wire_payload, derive_session_keys, Se
 use wire::HalfCipher;
 mod download;
 use download::{looks_like_dl_request, handle_http_download};
-mod team_rpc;
 mod hub_rpc;
 mod rpc;
 mod connection;
 pub use connection::handle_connection;
 use connection::{enable_tcp_keepalive, handle_connection_ws, ws_config};
 
-// ─── team multi-agent bus bridge ────────────────────────────────────────
-// The Team tab talks to the team group-chat bus, which lives in a desktop-only
-// sub-crate (heavy axum/rmcp/rusqlite deps the phone never builds). To keep
-// server.rs compiling on Android/iOS, the bus is reached only through this
-// JSON-only trait object: the desktop build supplies a concrete impl wrapping
-// `agora::Bus`; mobile builds always pass `None` and never call it.
-//
-// All methods speak `serde_json::Value` so no team type crosses this boundary.
-// Every chat operation is scoped to a `room` (= a team). Multiple teams are
-// fully isolated rooms sharing one daemon/db; the phone passes the active
-// room with each call, and pushes are tagged with their room so the client
-// can filter to the team currently in view.
-pub trait TeamBridge: Send + Sync {
-    /// Recent messages for `room`, oldest first: `{ "messages": [...] }`.
-    fn history(&self, room: &str, limit: i64) -> serde_json::Value;
-    /// One PAGE of `room`'s messages, oldest first, walking backwards:
-    /// `{ messages, has_more, head_seq }`. `before_seq` is exclusive; `None` is
-    /// the newest page, which is byte-for-byte what `history` answers.
-    ///
-    /// The room is never pruned — the transcript is the record — so a client that
-    /// wants a small first load needs a way to ask for the REST later, and the
-    /// bus's `seq` (a message's log position) is the cursor for it: stable,
-    /// gapless, and already on every message the client holds, which a millisecond
-    /// timestamp is not.
-    ///
-    /// Defaulted rather than required: a bridge that cannot page (a test double,
-    /// an older impl) answers the newest page and says there is no more, which is
-    /// exactly the behaviour every caller had before paging existed.
-    fn history_page(&self, room: &str, before_seq: Option<i64>, limit: i64) -> serde_json::Value {
-        let mut v = self.history(room, limit);
-        if let Some(obj) = v.as_object_mut() {
-            obj.entry("has_more").or_insert(serde_json::json!(false));
-            let _ = before_seq;
-        }
-        v
-    }
-    /// ONE message by its id, however old it is: `Some(message)` or `None`.
-    ///
-    /// An exact lookup, not a scan of the newest page — which is what the archive
-    /// path used to do (`history(room, 1000)`), so a message older than that was
-    /// invisible to it. Now that a client can scroll back to any message, "the
-    /// newest 1000" is not a place where correctness may live.
-    ///
-    /// Defaulted for the same reason `history_page` is: a bridge that cannot look
-    /// up falls back to searching the newest page, i.e. the old behaviour.
-    fn message_by_id(&self, room: &str, id: &str) -> Option<serde_json::Value> {
-        self.history(room, 1000)
-            .get("messages")?
-            .as_array()?
-            .iter()
-            .find(|m| m.get("id").and_then(|v| v.as_str()) == Some(id))
-            .cloned()
-    }
-    /// The newest `limit` messages matching ANY of `terms` (substring,
-    /// ASCII-case-insensitive, body or sender), oldest first:
-    /// `{ "messages": [...] }`. `room = None` searches EVERY room — each hit's
-    /// `room` field says where it was said, which is what makes a cross-project
-    /// answer readable.
-    ///
-    /// Defaulted like `history_page`: a bridge that cannot search scans the
-    /// newest page of the one room it was asked about, and answers empty for
-    /// the global scope it has no way to enumerate.
-    fn search_messages(&self, room: Option<&str>, terms: &[String], limit: i64) -> serde_json::Value {
-        let Some(room) = room else {
-            return serde_json::json!({ "messages": [] });
-        };
-        let hit = |m: &serde_json::Value| {
-            let field = |k: &str| m.get(k).and_then(|v| v.as_str()).unwrap_or("").to_ascii_lowercase();
-            let (body, from) = (field("body"), field("from"));
-            terms.iter().map(|t| t.trim().to_ascii_lowercase()).filter(|t| !t.is_empty())
-                .any(|t| body.contains(&t) || from.contains(&t))
-        };
-        let msgs: Vec<serde_json::Value> = self
-            .history(room, 1000)
-            .get("messages")
-            .and_then(|v| v.as_array())
-            .map(|a| a.iter().filter(|m| hit(m)).cloned().collect())
-            .unwrap_or_default();
-        let skip = msgs.len().saturating_sub(limit.max(1) as usize);
-        serde_json::json!({ "messages": msgs[skip..] })
-    }
-    /// Roster + presence for `room`: `{ "roster": [...] }`.
-    fn roster(&self, room: &str) -> serde_json::Value;
-    /// Post as a participant in `room`. Returns the stored message JSON.
-    fn post(&self, room: &str, from: &str, body: &str, requires_reply: bool) -> Result<serde_json::Value, String>;
-    /// Post a body with server-known recipients stored in the message envelope.
-    fn post_routed(
-        &self,
-        room: &str,
-        from: &str,
-        body: &str,
-        to: &[String],
-        requires_reply: bool,
-    ) -> Result<serde_json::Value, String> {
-        let _ = to;
-        self.post(room, from, body, requires_reply)
-    }
-    /// Newest message timestamp (ms) per room: `{ "<room>": ts }`. Used to order
-    /// projects by their conversation, so it must include rooms with no running
-    /// team.
-    fn room_latest(&self) -> serde_json::Value;
-    /// Forget messages by id, for good. The archive is the reversible half of
-    /// deleting; this is the half that is not.
-    fn delete_messages(&self, room: &str, ids: &[String]) -> Result<usize, String>;
-    /// Force an agent's stored status in `room` (supervisor idle-sleep:
-    /// `"sleeping"` to park, `"idle"` to wake). No-op if the agent is unknown.
-    fn set_agent_status(&self, room: &str, agent: &str, status: &str) -> Result<(), String>;
-    /// Desired-roster employees for `room`: `{ "employees": [...] }`.
-    fn employees(&self, room: &str) -> serde_json::Value;
-    /// Seed an employee into `room`'s desired roster (used by the supervisor).
-    fn seed_employee(&self, room: &str, name: &str, spec: &serde_json::Value) -> Result<(), String>;
-    /// Raw employee list for `room` as `(name, spec, state)` for the
-    /// supervisor's reconcile loop.
-    fn employee_specs(&self, room: &str) -> Vec<(String, serde_json::Value, String)>;
-    /// Whether `room` is still a registered (not-yet-closed) team. The
-    /// supervisor uses this to exit cleanly when its team is closed.
-    fn room_exists(&self, room: &str) -> bool;
-    /// Start a team for `workspace` from `template` (named roster; empty =
-    /// "default"): derive its stable room from workspace+template, seed the
-    /// roster, and launch agents into a per-Team tmux session. Idempotent for
-    /// the same workspace+template pair. Returns `{ room, started, workspace }`.
-    fn start_team(&self, workspace: &str, template: &str) -> serde_json::Value;
-    /// Stop a team: kill its tmux session and forget it (the chat log persists
-    /// in the db). Returns true if the room was known.
-    fn close_team(&self, room: &str) -> bool;
-    /// All known teams: `[{ room, workspace, session, started, agents }]`.
-    fn teams(&self) -> serde_json::Value;
-    /// All roster templates: `[{ name, agents:[…] }]`.
-    fn templates(&self) -> serde_json::Value;
-    /// Save (overwrite) a template's agent array.
-    fn save_template(&self, name: &str, agents: &serde_json::Value) -> Result<(), String>;
-    /// Delete a template (the built-in "default" is protected).
-    fn delete_template(&self, name: &str) -> Result<(), String>;
-    /// The global system prompt prepended to every agent's brief.
-    fn system_prompt(&self) -> String;
-    /// Save the global system prompt (empty clears it).
-    fn save_system_prompt(&self, text: &str) -> Result<(), String>;
-    /// The default workspace to offer in the UI when none is chosen (the
-    /// current terminal session's cwd if known, else the user's home).
-    fn default_workspace(&self) -> String;
-    /// A receiver of newly-broadcast messages across ALL rooms, each
-    /// pre-serialized to a JSON string (the `room` field is inside each
-    /// message). The client filters to the team currently in view.
-    fn subscribe(&self) -> tokio::sync::broadcast::Receiver<String>;
-    /// Open (or re-open) a plain chat room on the bus — no tmux session, no
-    /// roster, no supervisor. This is the project-hub substrate: room id is
-    /// `proj:<session>` and the caller owns that convention. Idempotent.
-    fn open_room(&self, room: &str) -> Result<(), String>;
-}
-
-pub type OptTeam = Option<Arc<dyn TeamBridge>>;
 pub type NotificationHub = Arc<AgentNotificationHub>;
 
 // ─── RoomPoster implementation ───────────────────────────────────────────────
@@ -269,7 +117,7 @@ enum Outbound {
 }
 
 pub async fn start(host: &str, port: u16, token: &str) -> Result<(), Box<dyn std::error::Error>> {
-    start_with_socket(host, port, token, "unknown", None, None, None, 600, None).await
+    start_with_socket(host, port, token, "unknown", None, None, None, 600).await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -282,7 +130,6 @@ pub async fn start_with_socket(
     tls_cert: Option<String>,
     tls_key: Option<String>,
     disconnect_grace_secs: u64,
-    team: OptTeam,
 ) -> Result<(), Box<dyn std::error::Error>> {
     tmux::set_socket(socket);
     // Best-effort harden existing config.toml so upgraded installs with the
@@ -372,7 +219,6 @@ pub async fn start_with_socket(
         let auth_tracker = auth_tracker.clone();
         let control_mgr = resize_tracker.clone();
         let grace = disconnect_grace_secs;
-        let team_c = team.clone();
         let notifications_c = notifications.clone();
         if let Some(ref acceptor) = tls_acceptor {
             let acceptor = acceptor.clone();
@@ -406,13 +252,13 @@ pub async fn start_with_socket(
                         let conn_id = CONN_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         let conn_started_at = std::time::Instant::now();
                         println!("📱 Client connected (TLS): {} (conn_id={})", addr, conn_id);
-                        handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, control_mgr, conn_id, conn_started_at, grace, team_c, notifications_c).await;
+                        handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, control_mgr, conn_id, conn_started_at, grace, notifications_c).await;
                     }
                     Err(e) => eprintln!("❌ TLS handshake failed for {}: {}", addr, e),
                 }
             });
         } else {
-            tokio::spawn(handle_connection(stream, addr, token, machine_id, auth_tracker, control_mgr, grace, team_c, notifications_c));
+            tokio::spawn(handle_connection(stream, addr, token, machine_id, auth_tracker, control_mgr, grace, notifications_c));
         }
     }
 }

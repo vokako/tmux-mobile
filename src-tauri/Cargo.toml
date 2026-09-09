@@ -1,6 +1,3 @@
-[workspace]
-members = ["crates/agora"]
-
 [package]
 name = "tmux-mobile"
 version = "0.8.0"
@@ -82,14 +79,9 @@ flate2 = "1"
 socket2 = "0.5"
 tauri-plugin-notification = { version = "2", optional = true }
 
-# agora: the multi-agent group-chat bus. Desktop-only — Android/iOS never run
-# the in-process MCP daemon (they connect to a desktop server over WS), so the
-# heavy deps (axum/rmcp/rusqlite) are excluded from the mobile build entirely.
-# `projects` (state.db) is desktop-only for the same reason: the phone is a
-# client of a desktop server, so it never needs SQLite compiled in. Version
-# pinned to agora's so both link ONE bundled SQLite.
+# `projects` (state.db) is desktop-only: the phone is a client of a desktop
+# server, so it never needs SQLite compiled in.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-agora = { path = "crates/agora" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 # Server system vitals for board #56 (CPU / memory / root-disk shown in the
 # desktop client). Pinned EXACT: the crate's reading APIs have a history of
@@ -104,8 +96,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 # only the desktop server answers `system_status` (a phone is a client).
 sysinfo = { version = "=0.39.6", default-features = false, features = ["system", "disk"] }
 # Local wall-clock formatting for the lines we type into an agent's pane and for
-# `tmm log`. Already in this graph (agora -> rmcp -> chrono), so declaring it
-# directly adds no compilation; desktop-gated because those two paths are.
+# `tmm log`; desktop-gated because those two paths are.
 chrono = { version = "0.4.44", default-features = false, features = ["clock", "std"] }
 
 # `npm run tauri:dev:release` and `tauri build` use this profile.

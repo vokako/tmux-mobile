@@ -24,7 +24,7 @@ const OWNER_MARKER: &str = "tmux-mobile-agent-notify";
 // ── Room poster ──────────────────────────────────────────────────────────────
 
 /// Minimal posting interface injected into the hook consumer so final replies
-/// can be recorded and delivered without naming the agora bus or TeamBridge.
+/// can be recorded and delivered without naming the hub's message store.
 pub trait RoomPoster: Send + Sync {
     /// Record `body` in the room, then deliver it once to each reply target.
     /// `[reply]` deliveries create no reverse edge, preventing ping-pong.
@@ -80,7 +80,7 @@ impl AgentNotificationHub {
         Self::load_at(config::config_dir().join("agent-notifications"))
     }
 
-    /// Test-only constructor for OTHER modules' boundary tests (team_rpc's
+    /// Test-only constructor for OTHER modules' boundary tests (rpc.rs's
     /// retired-RPC pin): same as `load_at`, kept off the public API.
     #[cfg(test)]
     pub(crate) fn load_at_for_tests(root: PathBuf) -> Self {
@@ -698,7 +698,7 @@ fn kiro_default_path() -> PathBuf {
 }
 
 /// ALWAYS quotes — deliberately not the quote-if-needed `shell_quote` the
-/// launchers share (`team::backends`): this one writes hook command strings
+/// launchers share (`projects::backends::shared`): this one writes hook command strings
 /// into the agents' config files, and the quoted form is what
 /// `patch_hooks`/`refresh_hooks` compare against on disk. Switching to the
 /// minimal form would mark every existing agent's hooks stale once. It is
