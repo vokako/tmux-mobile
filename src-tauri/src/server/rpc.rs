@@ -587,7 +587,9 @@ fn handle_project_request(method: &str, id: Option<u64>, p: &serde_json::Value) 
         // backend cannot enumerate them (claude/codex) — the field stays free
         // text there.
         "models_list" => {
-            let backend = p.get("backend").and_then(|v| v.as_str()).unwrap_or("kiro");
+            // Absent backend = the documented default (board #127); the literal
+            // lived inline here and was invisible to the backend map.
+            let backend = p.get("backend").and_then(|v| v.as_str()).unwrap_or(crate::projects::backends::Backend::DEFAULT.name());
             Ok(serde_json::json!({
                 "backend": backend,
                 "models": projects::models::list(backend),

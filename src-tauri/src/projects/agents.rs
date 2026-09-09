@@ -112,7 +112,7 @@ const KNOWN: &[KnownAgent] = &[
 /// arm existed while `registry_save` still said "must be kiro|claude|codex|
 /// grok"). Detection (`KNOWN`) is wider: kimi/openclaw are recognized in
 /// panes but not spawnable.
-pub const SPAWNABLE_BACKENDS: &[&str] = &["kiro", "claude", "codex", "grok", "omp"];
+pub const SPAWNABLE_BACKENDS: &[&str] = &super::backends::Backend::NAMES;
 
 /// The longest agent name we accept — a tmux window name and a directory
 /// component; anything longer is a mistake, not an identity.
