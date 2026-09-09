@@ -796,3 +796,43 @@ test('Feed observes its box once across data updates and releases the observer o
   assert.equal(owner?.disconnected, true);
   assert.equal(pushed.size, 0);
 });
+
+test('Feed settles image load/error before reapplying live tail intent', { timeout: 60000 }, async (context) => {
+  const fixture = await compiledHub();
+  const { rpc } = roomFixture();
+  const app = await fixture.mount(context, {
+    props: { visible: true },
+    setup(window) { window.HTMLCanvasElement.prototype.getContext = () => null; },
+    modules: [{
+      ...rpc,
+      hubLog: async () => ({ messages: [
+        { id: 'image', seq: 1, ts: 100, from: 'alice', body: '![](/fixture/chart.png)' },
+      ], has_more: false }),
+      fsDownloadHttp: async () => ({ url: 'https://mount.test/chart.png' }),
+    }],
+  });
+  try {
+    for (let i = 0; i < 10; i++) await app.flush();
+    const feed = app.document.querySelector<HTMLElement>('.feed')!;
+    const image = feed.querySelector<HTMLImageElement>('.ci')!;
+    assert.ok(image);
+    // Observe the write and DOM-update order only. jsdom supplies no image
+    // dimensions; cold/cached pixel gaps and history intent belong to Chromium.
+    const writes: boolean[] = [];
+    Object.defineProperty(feed, 'scrollTop', {
+      configurable: true, get: () => 0,
+      set: () => { writes.push(!!feed.querySelector('.ci-ref.failed')); },
+    });
+    image.dispatchEvent(new app.window.Event('load'));
+    assert.deepEqual(writes, [], 'the capture handler must wait for the component update');
+    await app.flush();
+    assert.ok(writes.length > 0, 'a loaded image reapplies the live tail');
+    assert.ok(writes.every((failed) => !failed));
+    writes.length = 0;
+    image.dispatchEvent(new app.window.Event('error'));
+    assert.deepEqual(writes, []);
+    await app.flush();
+    assert.ok(writes.length > 0, 'a failed image also changes the content height');
+    assert.ok(writes.every(Boolean), 'the fallback is rendered before measuring/writing the tail');
+  } finally { await app.close(); }
+});

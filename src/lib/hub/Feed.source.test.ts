@@ -62,7 +62,13 @@ test('resize restores a retained layout snapshot through one observer and one tr
     'a resize-generated scroll cannot overwrite the old reading or tail intent');
   assert.match(source, /if \(!acceptResize && reading\?\.session === selected && !sameReadingSize\(reading\.size, size\)\) return;/u);
   assert.match(source, /Object\.values\(stepsChoice\); Object\.values\(stepsAll\);/u);
-  assert.match(source, /onloadcapture=\{queueReadingCapture\} onerrorcapture=\{queueReadingCapture\}/u);
+  // #137 deliberately extends resource completion: settle the image view,
+  // reapply live tail through its existing writer, otherwise remember history.
+  assert.match(source, /onloadcapture=\{onContentLoad\} onerrorcapture=\{onContentLoad\}/u);
+  const resource = source.slice(source.indexOf('async function onContentLoad()'), source.indexOf('function resizePending()'));
+  assert.match(resource, /const element = feedEl, session = selected, tail = following;/u);
+  assert.match(resource, /await settled\(\);\s*if \(feedEl !== element \|\| selected !== session\) return;/u);
+  assert.match(resource, /if \(tail && following\) writeTail\(\);\s*else queueReadingCapture\(\);/u);
   assert.match(source, /if \(!feedEl \|\| !visible\) return;/u);
   assert.match(source, /const current = \(\) => feedEl === element && selected === session;/u);
   assert.match(source, /before\.ref\.parentElement === feedEl/u);

@@ -84,6 +84,15 @@
     captureQueued = true;
     settled().then(() => { captureQueued = false; rememberReading(); });
   }
+  async function onContentLoad() {
+    const element = feedEl, session = selected, tail = following;
+    // Capture runs before ChatImage updates its loaded/error view. Finish that
+    // update before measuring, without turning a history reader into live tail.
+    await settled();
+    if (feedEl !== element || selected !== session) return;
+    if (tail && following) writeTail();
+    else queueReadingCapture();
+  }
   function resizePending() {
     return reading?.session === selected && reading.element === feedEl
       && !sameReadingSize(reading.size, readingSize());
@@ -536,7 +545,7 @@
 
 <div class="feed-wrap">
 <div class="feed subtle-scroll" class:reveal-tail={justLoaded} bind:this={feedEl} onscroll={onFeedScroll}
-  onloadcapture={queueReadingCapture} onerrorcapture={queueReadingCapture}>
+  onloadcapture={onContentLoad} onerrorcapture={onContentLoad}>
   <!-- The double-click filter is a MODE, so it says so (board #3, owner:
        "注意ui上体现我们现在的筛选状态，以及可以再退出"): a compact pill
        INSIDE the feed — as a feed-wrap sibling it became a full-height

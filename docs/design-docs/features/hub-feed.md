@@ -128,9 +128,9 @@ Hidden views disconnect the observer and retain the snapshot; reconnecting
 on show handles a size changed while hidden. A room reset clears it, and
 zero-sized boxes never replace a usable snapshot.
 
-The existing cached-image room-return gap/following issue is tracked
-separately in #137. Resize tail checks first establish the live-tail state;
-this change does not claim to fix that room-return behavior.
+The existing cached-image room-return gap/following issue was kept separate
+as #137 (resource completion below). Resize tail checks first establish the
+live-tail state; #135 did not fix that room-return behavior.
 
 Verification: the original 519.1875px regression fails the 1px check before
 the fix, then measures -0.8125px after it. Width/height changes, container-only
@@ -140,6 +140,36 @@ reading matrix still passes. The negative control keeps RO but drops its
 retained-snapshot argument: 519.1875px returns and fails. Restoring the
 argument returns green. A mounted observer spy verifies one registration
 across data updates and disposal on unmount; it does not simulate geometry.
+
+### Image completion preserves live tail after settling (#137, 2026-09-09)
+
+An image can acquire its intrinsic height after the room's initial tail
+write. Feed's load/error capture previously only updated the reading
+snapshot, leaving the physical tail behind. This is not cache-specific:
+on Chromium 152.0.7977.64, a controlled cold HTTP image grew from a 2px
+border-only box to 82px and left exactly 80px of gap. A decoded data-URL
+room return reproduced the same gap intermittently; warm HTTP cache often
+made the dimensions available before the initial write. Cached load events
+still fired. `following` could remain true at the wrong physical position,
+or a subsequent scroll could turn that gap into history intent.
+
+Feed now captures the room, element and tail intent at resource completion,
+awaits Svelte's `settled()` (capture precedes ChatImage's loaded/error update),
+and uses the existing `writeTail` only if the identity and live intent still
+hold. A history reader only updates the existing reading snapshot. The
+writer's visibility gate still defers hidden jumps to the existing show
+path. No timer, extra observer, image-size estimate or second tail writer
+is introduced; `following`/`newBelow` remain parent-owned bindings.
+
+The real-Hub mount regression fails before the fix and proves load/error
+wiring and fallback-before-write ordering, without inventing jsdom geometry.
+Chromium checks cold loads, HTTP/data cache returns, filtering/resizing before
+return, native history scrolling with news, hidden loading/show and outgoing
+room completion across desktop/compact and light/dark/reduced motion.
+All 48 tail checks finish at 0px. Restoring only the old capture-handler
+wiring fails the mounted regression and restores the 80px cold-load gap;
+restoring the handler returns both checks to green. Node 22.23.2,
+Svelte 5.53.5 and Vite 6.4.1 were used for the isolated build.
 
 ### A layout mutation goes through `withReadingAnchor`
 
