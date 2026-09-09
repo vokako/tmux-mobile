@@ -1,0 +1,82 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { pathRef, resolvePathRef, handlePathLinkClick, installPathLinkHandler } from './path-links.ts';
+import { installExternalLinkHandler } from './external-links.ts';
+
+test('file references share one decoder across chat and previews (#99, #106)', () => {
+  for (const [href, expected] of [
+    ['/local/home/u/notes.md', '/local/home/u/notes.md'],
+    ['temp/AGENTS.global.draft.md', 'temp/AGENTS.global.draft.md'],
+    ['./docs/fonts.md', './docs/fonts.md'],
+    ['~/notes.md', '~/notes.md'],
+    ['src/Hub.svelte#L123', 'src/Hub.svelte'],
+    ['/a/spawn.rs:587', '/a/spawn.rs'],
+    ['src/hub.ts:12:5', 'src/hub.ts'],
+    ['spawn.rs:587', 'spawn.rs'],
+    ['temp/notes:2026.md', 'temp/notes:2026.md'],
+    ['my%20notes.md#intro', 'my notes.md'],
+    ['notes%broken.md', 'notes%broken.md'],
+    ['https://example.com/a.md', ''], ['http://example.com', ''],
+    ['mailto:a@b.c', ''], ['#heading', ''], ['//example.com/x', ''],
+    ['javascript:alert(1)', ''], ['', ''],
+  ] as const) assert.equal(pathRef(href), expected, href);
+  assert.equal(pathRef(null), '');
+  assert.equal(pathRef(undefined), '');
+});
+
+test('relative references resolve against the project or document directory, not the HTTP origin', () => {
+  assert.equal(resolvePathRef('/project/docs', '../src/file.ts'), '/project/src/file.ts');
+  assert.equal(resolvePathRef('/project', './docs/notes.md'), '/project/docs/notes.md');
+  assert.equal(resolvePathRef('/project', '/other/notes.md'), '/other/notes.md');
+  assert.equal(resolvePathRef('/project', '~/notes.md'), '~/notes.md');
+});
+
+test('primary, Cmd/Ctrl and middle activation route once; other auxiliary buttons and URLs do not', () => {
+  for (const gesture of [
+    { type: 'click', button: 0 }, { type: 'click', button: 0, metaKey: true },
+    { type: 'click', button: 0, ctrlKey: true }, { type: 'auxclick', button: 1 },
+  ]) {
+    const calls: string[] = [];
+    let prevented = false;
+    // Partial DOM boundary: only methods used by the handler.
+    const event = {
+      ...gesture, get defaultPrevented() { return prevented; },
+      target: { closest: () => ({ getAttribute: () => '../notes.md:5' }) },
+      preventDefault() { prevented = true; calls.push('prevent'); },
+      stopPropagation() { calls.push('stop'); },
+    } as unknown as MouseEvent;
+    assert.equal(handlePathLinkClick(event, path => calls.push(path)), true);
+    assert.equal(handlePathLinkClick(event, path => calls.push(path)), false);
+    assert.deepEqual(calls, ['prevent', 'stop', '../notes.md']);
+  }
+  for (const [href, button] of [['notes.md', 2], ['https://example.com', 1], ['#intro', 1]] as const) {
+    assert.equal(handlePathLinkClick({
+      type: 'auxclick', button,
+      target: { closest: () => ({ getAttribute: () => href }) },
+    } as unknown as MouseEvent, () => assert.fail('not a path activation')), false);
+  }
+});
+
+test('capture external handler cannot open a path before its router, including iframe documents', () => {
+  const root = new EventTarget();
+  const calls: string[] = [];
+  const disposeExternal = installExternalLinkHandler(root as unknown as Document, {
+    windowRef: { open() { calls.push('external'); } } as unknown as Window,
+  });
+  const disposePath = installPathLinkHandler(root as unknown as Document, path => calls.push(path));
+  for (const type of ['click', 'auxclick']) {
+    const event = new Event(type, { cancelable: true });
+    Object.defineProperties(event, {
+      button: { value: type === 'auxclick' ? 1 : 0 },
+      target: { value: { closest: () => ({
+        getAttribute: () => 'notes.md',
+        href: 'http://localhost:5173/notes.md',
+      }) } },
+    });
+    root.dispatchEvent(event);
+    assert.equal(event.defaultPrevented, true);
+  }
+  assert.deepEqual(calls, ['notes.md', 'notes.md']);
+  disposeExternal();
+  disposePath();
+});

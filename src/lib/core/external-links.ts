@@ -22,13 +22,12 @@ export function isTauriWindow(windowRef: Window | null = browserWindow()): boole
 export function externalWebUrlFromAnchor(anchor: HTMLAnchorElement | null | undefined): string | null {
   if (!anchor) return null;
 
-  const rawHref = anchor.getAttribute?.('href');
-  if (isExternalWebUrl(rawHref)) return rawHref;
-
-  // `href` is the browser-resolved value. Markdown commonly contains relative
-  // or protocol-relative destinations, and checking only the source attribute
-  // lets those navigate the embedded WebView.
-  return isExternalWebUrl(anchor.href) ? anchor.href : null;
+  const rawHref = anchor.getAttribute?.('href')?.trim();
+  // Only an explicit network reference may use the resolved URL. A path's
+  // browser-resolved href is HTTP too, but belongs to Files, not window.open
+  // (#106: this capture handler ran before the context-aware bubble handler).
+  if (rawHref?.startsWith('//')) return isExternalWebUrl(anchor.href) ? anchor.href : null;
+  return isExternalWebUrl(rawHref) ? rawHref : null;
 }
 
 export async function openExternalUrl(url: string, {
@@ -49,6 +48,7 @@ export async function openExternalUrl(url: string, {
 }
 
 export async function handleExternalLinkClick(event: MouseEvent, runtime?: RuntimeOptions): Promise<boolean> {
+  if (event.defaultPrevented) return false;
   if (event.type === 'auxclick' && event.button !== 1) return false;
 
   const anchor = (event.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null;

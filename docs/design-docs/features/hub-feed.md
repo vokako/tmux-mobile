@@ -36,7 +36,16 @@ the terminal drawer regrids the columns and every message rewraps, so the same s
 
 ### A path reference in a bubble is a DOOR, not a dead anchor
 
-Agents talk in file paths — `[temp/AGENTS.global.draft.md](/local/…/temp/AGENTS.global.draft.md)` — and marked renders a schemeless href as a plain `<a>` the webview would 404 on. Board #99 (owner: "这种路径引用，最好能够点击直接右侧侧边栏文件预览打开"): the bubble's click handler consumes a PATH link first — `pathRef()` (hub.ts, pure + tested) recognises "ours" as exactly the hrefs a browser cannot follow (no scheme; `#anchor` and `//host` and http/https/mailto keep their native behaviour, still guarded by `markedSafeUrl`) and drops any `#Lnn` suffix. A relative path resolves against the project's `fs_cwd` — the base the agent's words meant — `~` passes through for the server to expand. Desktop routes into the RIGHT DRAWER's embedded Files via `drawerFilesReq` (the `drawerIssueReq` pattern: `{ file, n }`, a bumped `n` re-fires); compact hands off to the Files PAGE through the same `openFilesTab` every drawer feature uses. On the Files side, `navRequest.file` is the second form of the imperative "go there": the list lands in the file's PARENT (so back and the crumbs mean something) and the preview opens through the one `openEntry` path — stat, previewability, recents, nav history — never a bespoke preview call. The path route wins over the bubble's tap-toggle (`.m-acts`), which otherwise would flip open under the click.
+Agents talk in file paths — `[temp/AGENTS.global.draft.md](/local/…/temp/AGENTS.global.draft.md)` — and marked renders a schemeless href as a plain `<a>` the webview would 404 on. Board #99 (owner: "这种路径引用，最好能够点击直接右侧侧边栏文件预览打开"): the bubble's click handler consumes a PATH link first. `core/path-links.ts` owns the shared classification and path decoder: `#anchor`, `//host`, HTTP(S) and mailto keep their existing behavior, while paths lose `#Lnn` and grep-style `:line[:column]` suffixes. A relative path resolves against the project's `fs_cwd`, captured at click time; `~` is expanded by the server. Desktop routes into the RIGHT DRAWER's embedded Files via `drawerFilesReq` (`{ file, n }`); compact hands off through `openFilesTab`. Files opens through its existing stat/previewability/recents path, positions the parent listing and retains the previous preview for Back. The path route wins over the bubble's tap-toggle (`.m-acts`).
+
+Board #106 (2026-09-09, Chromium 152): ordinary clicks actually opened BOTH
+Files and a browser tab, because the App capture handler externalized resolved
+path hrefs before this bubble handler ran. External classification now uses
+the literal URL, not a filesystem path resolved against the HTTP origin.
+Primary, Cmd/Ctrl and middle clicks all use the shared path handler; Hub's
+Back handler delegates into the Files drawer before closing it. See
+[file-handling.md](file-handling.md#file-references-stay-in-files-106-2026-09-09)
+for preview/iframe routing and the event-order evidence.
 
 ### Right-click and long press are ONE mechanism
 

@@ -24,6 +24,7 @@
   import { untrack } from 'svelte';
   import { directoryLoadState, leaveDecision, cwdFollowStep } from './file-view-state.ts';
   import { installExternalLinkHandler } from '../core/external-links.ts';
+  import { handlePathLinkClick, installPathLinkHandler, resolvePathRef } from '../core/path-links.ts';
   import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadHttp, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from '../core/ws.ts';
 
   // Tauri plugin imports (tree-shaken in browser builds). The platform flags
@@ -145,8 +146,8 @@
         leaveEditor(() => { navAnim('back'); view = 'preview'; });
         return true;
       }
-      if (view === 'info') { navAnim('back'); view = fromGit ? (fromGit = false, 'git') : currentFile?.content != null ? 'preview' : 'list'; return true; }
-      if (view === 'preview') { navAnim('back'); if (fromGit) { fromGit = false; view = 'git'; } else { view = 'list'; } currentFile = null; return true; }
+      if (view === 'info') { backFromInfo(); return true; }
+      if (view === 'preview') { backToList(); return true; }
       if (view === 'local') { navAnim('back'); view = 'list'; return true; }
       // The directory step retraces the user's OWN path (board #17); at the
       // entry point the stack is empty and the floor decides — App returns a
@@ -473,10 +474,32 @@
   // page (entering a directory, a crumb, a bookmark, the up/home buttons)
   // pushes where they WERE, and back pops exactly that path — so back retraces
   // the user's own steps. An EXTERNAL move (session switch, the cwd follow
-  // rule, a drawer handoff) RESETS the stack instead: it is a new entry point.
+  // rule, a directory handoff) RESETS the stack instead: it is a new entry point.
   // Below the stack, a tab visit climbs parent directories to / (board #47);
   // only a chat-jumped visit leaves the page, via App's return slot.
   let dirHist = [];
+  // Linked previews sit above the directory history: Back returns to the
+  // document/list that supplied the link, including its reading position.
+  let fileHist = [];
+  let fileSeq = 0;
+  let previewBodyEl = $state(null);
+  function fileLocation() {
+    return { cwd, entries, view, currentFile, fromGit, scroll: previewBodyEl?.scrollTop ?? 0,
+      frameScroll: htmlPreviewEl?.contentDocument?.scrollingElement?.scrollTop ?? 0 };
+  }
+  function restoreFileLocation(previous) {
+    ++fileSeq;
+    ++loadSeq;
+    previewLoading = false;
+    loading = false;
+    pendingViewSlide = '';
+    ({ cwd, entries, view, currentFile, fromGit } = previous);
+    navAnim('back');
+    requestAnimationFrame(() => {
+      if (previewBodyEl) previewBodyEl.scrollTop = previous.scroll;
+      if (htmlPreviewEl?.contentDocument?.scrollingElement) htmlPreviewEl.contentDocument.scrollingElement.scrollTop = previous.frameScroll;
+    });
+  }
   function navTo(path, slide = '') {
     if (cwd && path !== cwd) dirHist.push(cwd);
     pendingSlide = slide;
@@ -494,8 +517,8 @@
     // The view branches slide NOW (they swap instantly); the directory pop's
     // slide rides its answer (board #93 — the entrance is one beat).
     if (view === 'edit') { navAnim('back'); view = 'preview'; }
-    else if (view === 'info') { navAnim('back'); view = fromGit ? (fromGit = false, 'git') : currentFile?.content != null ? 'preview' : 'list'; }
-    else if (view === 'preview') { navAnim('back'); if (fromGit) { fromGit = false; view = 'git'; } else { view = 'list'; } currentFile = null; }
+    else if (view === 'info') backFromInfo();
+    else if (view === 'preview') backToList();
     else popDir();
   }
 
@@ -574,6 +597,8 @@
   $effect(() => {
     if (!visible) { void session; return; }
     if (session !== prevSession) {
+      ++fileSeq;
+      fileHist = [];
       // cwd still holds the OLD session's position — nothing else resets it.
       browsed.set(prevSession, { cwd, sourceDir: lastSourceDir });
       prevSession = session;
@@ -594,11 +619,16 @@
     // session may be '' when Files is opened before any terminal pane exists —
     // the server then reports the user's home directory. Once a terminal/team
     // session appears, its cwd differs from home and we follow it.
-    fsCwd(session).then(r => {
+    const sourceSession = session;
+    const sourceRequest = navRequest;
+    const handoff = !!sourceRequest && sourceRequest.n !== lastNav;
+    fsCwd(sourceSession).then(r => {
+      if (session !== sourceSession || navRequest !== sourceRequest) return;
       // The follow is DISARMED before it asks (lastSourceDir moves first): a
       // cancelled follow is skipped for this event, not queued — the next
       // re-run sees the same cwd and stays quiet (file-view-state.test.ts).
-      const step = cwdFollowStep(r.path, lastSourceDir, untrack(() => ({ view, edited: isEdited })));
+      const step = cwdFollowStep(r.path, lastSourceDir, untrack(() => ({ view, edited: isEdited })),
+        handoff || (!!sourceRequest && !lastSourceDir));
       lastSourceDir = step.lastSourceDir;
       if (step.move === 'none') return;
       leaveEditor(() => {
@@ -608,7 +638,7 @@
         loadDir(r.path);
       });
     }).catch(() => {
-      if (!lastSourceDir) { lastSourceDir = '/'; cwd = '/'; loadDir('/'); }
+      if (session === sourceSession && !navRequest && !lastSourceDir) { lastSourceDir = '/'; cwd = '/'; loadDir('/'); }
     });
   });
 
@@ -633,16 +663,7 @@
       // preview opens on the file itself through the one openEntry path
       // (stat, previewability, recents, nav history).
       const file = navRequest.file;
-      const cut = file.lastIndexOf('/');
-      const parent = cut > 0 ? file.slice(0, cut) : '/';
-      const name = file.slice(cut + 1);
-      leaveEditor(() => {
-        view = 'list';
-        dirHist = []; // a drawer/see-here handoff is a new entry point
-        loadDir(parent);
-        openEntry({ type: 'file', name, path: file });
-      });
-      fsCwd(session).then((r) => { if (r.path) lastSourceDir = r.path; }).catch(() => {});
+      leaveEditor(() => openFileRef(file));
     } else if (navRequest.path) {
       const to = navRequest.path;
       leaveEditor(() => {
@@ -650,10 +671,6 @@
         dirHist = []; // a drawer/see-here handoff is a new entry point
         loadDir(to);
       });
-      // Disarm the cwd-follow for the CURRENT real cwd: without this a
-      // same-moment session switch re-follows the project root and stomps
-      // the requested directory.
-      fsCwd(session).then((r) => { if (r.path) lastSourceDir = r.path; }).catch(() => {});
     }
   });
 
@@ -672,6 +689,7 @@
   let pendingSlide = ''; // 'fwd' | 'back' — set by the navigation, consumed when its answer lands
   let loadSeq = 0;
   async function loadDir(path, purpose = 'navigate') {
+    if (purpose === 'navigate') { ++fileSeq; fileHist = []; }
     const my = ++loadSeq; // several callers can navigate concurrently around a
     loading = true;       // session switch — the NEWEST intent wins (DirPicker's rule)
     error = '';
@@ -735,20 +753,23 @@
     return false;
   }
 
-  async function loadPreviewContent(file) {
+  async function loadPreviewContent(file, my = ++fileSeq) {
     previewLoading = true;
     try {
       const { path, name, stat } = file;
       if (stat.mime_hint === 'application/pdf') {
         const r = await fsDownload(path);
+        if (my !== fileSeq) return false;
         currentFile = { ...file, pdfData: r.data };
         enterView('preview');
       } else if (stat.mime_hint.startsWith('image/')) {
         const r = await fsDownload(path);
+        if (my !== fileSeq) return false;
         currentFile = { ...file, dataUrl: `data:${stat.mime_hint};base64,${r.data}` };
         enterView('preview');
       } else if (stat.is_text && stat.size <= 512 * 1024) {
         const r = await fsRead(path);
+        if (my !== fileSeq) return false;
         if (mimeCategory(stat.mime_hint || '') !== 'markdown') loadHljs(); // lined view: highlight when it lands
         showAllLines = false; // the cap is per file
         currentFile = { ...file, content: r.content };
@@ -756,44 +777,34 @@
         enterView('preview');
       } else if (/\.pptx$/i.test(name)) {
         const r = await fsConvert(path);
+        if (my !== fileSeq) return false;
         currentFile = { ...file, convertedHtml: r.html };
         enterView('preview');
       }
     } catch (e) {
+      if (my !== fileSeq) return false;
       pendingViewSlide = '';
       error = e.message;
+      previewLoading = false;
+      return false;
     }
     previewLoading = false;
+    return true;
   }
 
-  /** `a/b/../c` → `/a/c`: resolve a document-relative ref without touching
-   * the server. Used by the markdown preview's own path links (board #99). */
-  function absJoin(base, rel) {
-    const out = [];
-    for (const p of `${base}/${rel}`.split('/')) {
-      if (!p || p === '.') continue;
-      if (p === '..') out.pop(); else out.push(p);
-    }
-    return '/' + out.join('/');
+  function openFileRef(file) {
+    return openEntry({ type: 'file', name: file.slice(file.lastIndexOf('/') + 1), path: file }, true);
   }
 
-  /** A path link inside a PREVIEWED markdown file (board #99 round two): the
-   * renderer emits a plain anchor, and a schemeless href used to be a raw
-   * navigation — the webview left the app. Ours = exactly what a browser
-   * cannot follow; relative refs mean "next to this document". */
-  function mdLinkClick(e) {
-    const a = e.target?.closest?.('a');
-    if (!a) return;
-    const href = a.getAttribute('href') ?? '';
-    if (!href || href.startsWith('#') || href.startsWith('//') || /^[a-zA-Z][a-zA-Z0-9+.-]*:/u.test(href)) return;
-    e.preventDefault();
-    const ref = href.split('#')[0].replace(/:\d+(?::\d+)?$/u, ''); // grep-style :line[:col] means the file
+  function openPreviewRef(ref) {
     const docDir = currentFile?.path ? currentFile.path.slice(0, currentFile.path.lastIndexOf('/')) : cwd;
-    const abs = ref.startsWith('/') || ref.startsWith('~') ? ref : absJoin(docDir, ref);
-    openEntry({ type: 'file', name: abs.slice(abs.lastIndexOf('/') + 1), path: abs });
+    void openFileRef(resolvePathRef(docDir, ref));
+  }
+  function previewLinkClick(e) {
+    handlePathLinkClick(e, openPreviewRef);
   }
 
-  async function openEntry(entry) {
+  async function openEntry(entry, linked = false) {
     if (entry.type === 'dir') {
       navPush();
       navTo(entry.path, 'fwd');
@@ -802,6 +813,9 @@
     // A file open is async like a directory: record the slide, fire it when
     // the view swaps to the ANSWER (board #93 round three — the tap-time
     // slide replayed over the still-visible list before the preview landed).
+    const my = ++fileSeq;
+    let previous = linked ? fileLocation() : null;
+    if (!linked) fileHist = [];
     pendingViewSlide = 'fwd';
     if (entry.type === 'broken') {
       pendingViewSlide = '';
@@ -815,17 +829,30 @@
     // whole list flash/re-render every time you click a file in the desktop
     // two-pane layout (on mobile the list was hidden so it went unnoticed).
     previewLoading = true;
+    error = '';
     try {
       const stat = await fsStat(entry.path);
-      currentFile = { path: entry.path, name: entry.name, stat };
+      if (my !== fileSeq) return;
+      const path = stat.path || entry.path; // server expands ~ without resolving symlinks
+      if (linked) {
+        const parent = path.slice(0, path.lastIndexOf('/')) || '/';
+        // Listing and preview used to race: a late navigate-list response
+        // erased the new preview. Position the listing without closing it.
+        await loadDir(parent, 'refresh');
+        if (my !== fileSeq) return;
+        if (!previous.cwd) previous = fileLocation();
+      }
+      currentFile = { path, name: entry.name, stat };
       addRecent(entry.path, entry.name);
       navPush();
       if (stat.size > PREVIEW_SIZE_LIMIT || !isPreviewable(stat, entry.name)) {
+        if (previous) fileHist.push(previous);
         enterView('info');
         previewLoading = false;
         return;
       }
     } catch (e) {
+      if (my !== fileSeq) return;
       pendingViewSlide = '';
       // A dead path reference is an EXPECTED miss (a chat link may outlive
       // its file) — say so in words, not in errno (board #99: "即使路径不对，
@@ -835,19 +862,26 @@
       return;
     }
     previewLoading = false;
-    await loadPreviewContent(currentFile);
+    if (await loadPreviewContent(currentFile, my)) {
+      if (previous) fileHist.push(previous);
+    } else if (previous && my === fileSeq) {
+      restoreFileLocation(previous);
+    }
   }
 
   async function reloadPreview() {
-    if (!currentFile?.path) return;
+    const file = currentFile;
+    if (!file?.path) return;
     try {
-      if (currentFile.stat?.is_text) {
-        const r = await fsRead(currentFile.path);
+      if (file.stat?.is_text) {
+        const r = await fsRead(file.path);
+        if (currentFile !== file) return;
         currentFile.content = r.content;
         currentFile = currentFile; // trigger reactivity
-      } else if (currentFile.stat?.mime_hint?.startsWith('image/')) {
-        const r = await fsDownload(currentFile.path);
-        currentFile.dataUrl = `data:${currentFile.stat.mime_hint};base64,${r.data}`;
+      } else if (file.stat?.mime_hint?.startsWith('image/')) {
+        const r = await fsDownload(file.path);
+        if (currentFile !== file) return;
+        currentFile.dataUrl = `data:${file.stat.mime_hint};base64,${r.data}`;
         currentFile = currentFile;
       }
     } catch {}
@@ -931,6 +965,9 @@
   }
 
   function backToList() {
+    const previous = fileHist.pop();
+    if (previous) { restoreFileLocation(previous); return; }
+    ++fileSeq;
     navAnim('back');
     if (fromGit) { fromGit = false; view = 'git'; } else {
       // Stay in the file's parent directory, not session cwd
@@ -939,6 +976,11 @@
       if (dir !== cwd) loadDir(dir);
     }
     currentFile = null;
+  }
+
+  function backFromInfo() {
+    if (currentFile?.content != null) { navAnim('back'); view = 'preview'; }
+    else backToList();
   }
 
   function backToPreview() {
@@ -1508,7 +1550,10 @@
 
   function attachHtmlPreviewLinks() {
     removeHtmlPreviewLinks();
-    removeHtmlPreviewLinks = installExternalLinkHandler(htmlPreviewEl?.contentDocument);
+    const doc = htmlPreviewEl?.contentDocument;
+    const removePaths = installPathLinkHandler(doc, openPreviewRef);
+    const removeExternal = installExternalLinkHandler(doc);
+    removeHtmlPreviewLinks = () => { removePaths(); removeExternal(); };
   }
 
   $effect(() => () => removeHtmlPreviewLinks());
@@ -1668,10 +1713,6 @@
       </div>
     {/if}
 
-    {#if error}
-      <div class="error appear">{error}</div>
-    {/if}
-
     <!-- File list. Also the drop target for OS files (board #22): the browser
          path via the HTML5 events here, the compiled app via the webview's
          drag-drop event hit-testing this element's rect. -->
@@ -1739,10 +1780,10 @@
         <button class="act-btn" onclick={() => { view = 'info'; navPush(); }}><Icon name="info" size={14} /></button>
       </div>
     </div>
-    <div class="preview-body" style="--file-font-size:{fontSize}px">
+    <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+    <div class="preview-body" bind:this={previewBodyEl} onclick={previewLinkClick} onauxclick={previewLinkClick} style="--file-font-size:{fontSize}px">
       {#if mimeCategory(currentFile.stat?.mime_hint) === 'markdown'}
-        <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-        <div class="md-render" bind:this={previewEl} onclick={mdLinkClick}>{@html renderMarkdown(currentFile.content)}</div>
+        <div class="md-render" bind:this={previewEl}>{@html renderMarkdown(currentFile.content)}</div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'csv'}
         <div class="csv-render">{@html renderCsv(currentFile.content)}</div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'html'}
@@ -1846,7 +1887,7 @@
 {#snippet infoPanel()}
     <!-- File info -->
     <div class="preview-header">
-      <button class="back-btn" onclick={() => { navAnim('back'); view = currentFile?.content != null ? 'preview' : 'list'; }}><Icon name="chevron-left" size={16} /></button>
+      <button class="back-btn" onclick={backFromInfo}><Icon name="chevron-left" size={16} /></button>
       <span class="preview-name">{currentFile?.name}</span>
       <div class="preview-actions">
         {#if isPreviewable(currentFile?.stat, currentFile?.name)}
@@ -1877,6 +1918,9 @@
   class:snap={swipeSnap} class:drill-fwd={navAnimClass === 'fwd'} class:drill-back={navAnimClass === 'back'}
   style:transform={swipeDX > 0 ? `translateX(${swipeDX}px)` : ''}
   ontouchstart={onTouchStart} ontouchmove={onTouchMove} ontouchend={onTouchEnd} ontouchcancel={onTouchCancel}>
+  {#if error}
+    <div class="error appear">{error}</div>
+  {/if}
   {#if splitEligible}
     <!-- Desktop: folder browser (left) | draggable splitter | preview (right). -->
     <div class="files-split">

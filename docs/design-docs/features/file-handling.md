@@ -35,13 +35,57 @@ HTTP(S) links from previews must not navigate the embedded WebView. App-level
 links, Markdown, and converted HTML use the shared delegated handler in
 `external-links.js`; a raw HTML preview installs the same handler directly on
 the sandbox iframe's document because DOM events do not cross iframe boundaries.
-The handler evaluates the anchor's resolved `href`, not only its literal
-attribute, so relative and protocol-relative Markdown links cannot bypass it.
+The handler classifies the literal `href`: explicit HTTP(S) URLs and
+protocol-relative network URLs are external; schemeless file paths and
+`#fragment` links are not. Only protocol-relative URLs use the browser's
+resolved `href`.
 It listens to both primary `click` and middle-button `auxclick`; other auxiliary
 buttons remain available for their normal context-menu behavior.
 Tauri opens links through `plugin-opener`; browser mode uses a separate
 `noopener` tab. A Tauri opener error is reported and never falls back to
 `window.open`, which could create another in-app WebView.
+
+### File references stay in Files (#106, 2026-09-09)
+
+Root cause: the document's **capture** external-link handler used resolved
+`anchor.href`, turning `/local/.../notes.md` into `http://localhost:5173/local/...`.
+It called `window.open` before the Hub/Files bubble handler routed the same
+click into a preview. The late #99 `preventDefault` net could not undo a
+programmatic open. Reproduced on Chromium 152.0.7977.64 against the current
+`:5173` module, not inferred from an old client.
+
+`core/path-links.ts` owns path classification, line-suffix stripping, URI
+decoding and filesystem-relative resolution. Hub uses the project cwd; all
+Files previews use the source document's directory. Plain, Cmd/Ctrl and
+middle clicks route through the same handler. The preview body covers
+Markdown, converted HTML and other rendered content; the sandbox HTML
+iframe installs that same handler on its own document because events cannot
+bubble into the parent. It keeps `allow-same-origin` only. PDF currently
+renders canvases without an annotation/link layer; CSV renders escaped table
+cells, not an iframe or active links. No new renderer is introduced.
+
+Linked previews retain their origin (document/list, parent listing and reading
+position). Back buttons and mobile browser/gesture Back consume this history
+before the directory floor; Hub delegates its Back handler into the Files
+drawer before closing it. Desktop browser toolbar Back retains the app-shell
+contract (no global history trap). An initial reference opens with its parent
+listing below it. Listing the
+target's parent must not race and clear the preview: it is awaited as a
+non-navigating listing refresh. Newer file/directory intents invalidate older
+file loads. Missing files leave the existing preview and show the localized
+path error; they never fall back to browser navigation.
+
+On first mount (also the mobile chat-to-Files jump), a cwd response records
+the source directory but does not override an explicit path handoff. The
+same `cwdFollowStep` decision owns this precedence; a later real cwd change
+still follows normally. Previously the concurrent follow could send the
+newly opened preview back to the session directory.
+
+True HTTP(S) URLs retain the external opener in both browser and Tauri;
+mailto and document fragments retain their native behavior. The app-wide
+path net remains only for otherwise unrouted surfaces, not as the fix for
+an incorrect external classification. Unit tests reproduce the capture/router
+ordering and source contracts pin the primary, auxiliary and iframe wiring.
 
 ### Content Security Policy and opener scope
 

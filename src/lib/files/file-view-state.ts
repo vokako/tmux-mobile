@@ -28,7 +28,9 @@ export function leaveDecision({ view, edited }: EditorGuard): LeaveDecision {
  *  is skipped for that event, never queued — the same cwd will not ask again
  *  until it changes. */
 export interface CwdFollowStep { lastSourceDir: string; move: 'none' | LeaveDecision }
-export function cwdFollowStep(reported: string, lastSourceDir: string, guard: EditorGuard): CwdFollowStep {
+export function cwdFollowStep(reported: string, lastSourceDir: string, guard: EditorGuard, handoff = false): CwdFollowStep {
   if (!reported || reported === lastSourceDir) return { lastSourceDir, move: 'none' };
-  return { lastSourceDir: reported, move: leaveDecision(guard) };
+  // A path request is the user's destination; still record the source cwd so
+  // the next effect cannot replay this follow over the newly opened preview.
+  return { lastSourceDir: reported, move: handoff ? 'none' : leaveDecision(guard) };
 }

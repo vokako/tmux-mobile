@@ -11,7 +11,7 @@
 //
 // Bubble phase at the window, checked AFTER `defaultPrevented`: a routed
 // click passes through untouched; only the unrouted rest is stopped.
-import { pathRef } from '../hub/hub.ts';
+import { pathRef } from '../core/path-links.ts';
 
 /** The decision, pure for tests: swallow when nobody routed it and the href
  * is a path. */
@@ -22,6 +22,7 @@ export function shouldSwallowPathClick(defaultPrevented: boolean, href: string |
 
 export function installPathLinkNet(win: Window): () => void {
   const onClick = (e: MouseEvent) => {
+    if (e.type === 'auxclick' && e.button !== 1) return;
     const a = (e.target as Element | null)?.closest?.('a');
     if (!a) return;
     if (shouldSwallowPathClick(e.defaultPrevented, a.getAttribute('href'))) e.preventDefault();

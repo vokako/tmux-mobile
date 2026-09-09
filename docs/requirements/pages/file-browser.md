@@ -24,10 +24,14 @@ directory, or the server's home directory when no session is open yet.
 ## Interactions
 - Tap directory → navigate into it
 - Tap file → preview (or info page if file size > 5 MB or not previewable)
-- Tap a link in Markdown, converted content, or an HTML preview whose resolved
-  destination is HTTP(S) → open it in the system browser; never navigate the
-  app WebView
-- Desktop left-click and middle-click both follow this external-browser path
+- Tap a path reference in chat, Markdown, converted content, or an HTML
+  preview → open it in Files, with the target's parent listing and a Back
+  route to the source preview/list. Relative paths resolve against the
+  project (chat) or source document's directory (previews), never the web origin.
+- Explicit HTTP(S) and protocol-relative web links open in the system browser
+  (a separate tab in browser mode); never navigate the app WebView.
+- Desktop left-click, Cmd/Ctrl-click and middle-click share this destination
+  policy: paths stay inside Files; real web URLs open externally.
 - Background/resume and WebSocket reconnect refresh directory data without closing the active preview or editor
 - From info page → tap preview (eye) button to load preview on demand
 - Long file names in the list scroll horizontally on touch drag
@@ -96,8 +100,8 @@ Both rules are implemented once in `src/lib/files/persisted-list.ts`
 - A text file over 3000 lines previews its head; "Show all N lines" renders the rest (one DOM row per line — the cap keeps a 512 KB log from freezing a phone)
 - Code highlighting arrives after the first-use load of highlight.js; the lines are readable (escaped, unhighlighted) in the meantime
 - HTML preview iframe: `allow-same-origin` only, NO `allow-scripts` (sandbox escape prevention)
-- HTML preview installs a parent-owned capture handler in the sandbox document
-  so links open externally even though iframe click events cannot reach App
+- HTML preview installs parent-owned path and external handlers in the sandbox
+  document, since iframe click events cannot reach App
 - Android downloads go to `/storage/emulated/0/Download/TmuxMobile/`, opened via FileProvider + Intent
 - Android's downloaded-files list is sorted by filesystem modification time descending (newest first)
 - Download progress ring and label use the same clamped integer percentage; the ring has exact, non-rounded endpoints

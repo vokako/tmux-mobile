@@ -22,12 +22,33 @@ test('recognizes only absolute HTTP links as external web URLs', () => {
   assert.equal(isExternalWebUrl('javascript:alert(1)'), false);
 });
 
-test('uses the browser-resolved URL for relative Markdown links', () => {
-  const anchor = asAnchor({
-    getAttribute: () => '../guide',
-    href: 'http://localhost:5173/guide',
-  });
-  assert.equal(externalWebUrlFromAnchor(anchor), 'http://localhost:5173/guide');
+test('file paths and fragments never become external through browser URL resolution (#106)', async () => {
+  for (const raw of ['../guide', '/local/home/u/file.md:12', 'notes.md', '#section']) {
+    const anchor = asAnchor({
+      getAttribute: () => raw,
+      href: new URL(raw, 'http://localhost:5173/').href,
+    });
+    assert.equal(externalWebUrlFromAnchor(anchor), null, raw);
+    for (const gesture of [{ type: 'click', button: 0 }, { type: 'click', button: 0, metaKey: true }, { type: 'auxclick', button: 1 }]) {
+      const calls: string[] = [];
+      const handled = await handleExternalLinkClick(asEvent({
+        ...gesture,
+        target: { closest: () => anchor },
+        preventDefault() { calls.push('prevent'); },
+      }), {
+        windowRef: asWindow({ open() { calls.push('open'); } }),
+      });
+      assert.equal(handled, false, `${raw}: ${JSON.stringify(gesture)}`);
+      assert.deepEqual(calls, [], 'capture must leave this for the context-aware file handler');
+    }
+  }
+});
+
+test('explicit protocol-relative web links still resolve to HTTP(S)', () => {
+  assert.equal(externalWebUrlFromAnchor(asAnchor({
+    getAttribute: () => '//example.com/guide',
+    href: 'http://example.com/guide',
+  })), 'http://example.com/guide');
 });
 
 test('does not externalize non-web protocols', () => {

@@ -24,7 +24,7 @@ test('back retraces the USER\u2019s steps — a history, not a parent walk (boar
     'the UNGATED history-pushing parent walk stays retired (goUp/navTo would bounce)');
   // External moves are new ENTRY POINTS, not steps: they reset the history.
   const resets = source.split('dirHist = []').length - 1;
-  assert.equal(resets, 5, 'the declaration + session switch, cwd follow rule, and the two navRequest handoff forms (dir / file, board #99) reset');
+  assert.equal(resets, 4, 'declaration, session switch, cwd follow and directory handoff reset; a file reference keeps its origin (#106)');
 });
 
 test('a directory\u2019s entrance is ONE beat, at answer time (board #93)', () => {
@@ -182,8 +182,10 @@ test('navRequest can ask for a FILE: land in its directory with the preview open
   // parent (so back lands somewhere sensible) and the preview opens on the
   // file itself — one request, both halves.
   assert.match(source, /if \(navRequest\.file\)/u, 'the file form exists');
-  assert.match(source, /loadDir\(parent\)/u, 'the list lands in the parent directory');
-  assert.match(source, /openEntry\(\{ type: 'file', name, path: file \}\)/u,
+  assert.match(source, /await loadDir\(parent, 'refresh'\)/u, 'the parent listing cannot race and close the preview');
+  assert.match(source, /leaveEditor\(\(\) => openFileRef\(file\)\)/u,
+    'external file requests retain their origin too');
+  assert.match(source, /openEntry\(\{ type: 'file', name: file\.slice\(file\.lastIndexOf\('\/'\) \+ 1\), path: file \}, true\)/u,
     'and the preview opens through the one openEntry path (stat, recents, nav history)');
   // Round two (owner: "文件侧边栏上有一个报错 stat error… 然后弹出了一个新的
   // 页面"): the markdown PREVIEW renders anchors too, and a path href there
@@ -191,9 +193,15 @@ test('navRequest can ask for a FILE: land in its directory with the preview open
   // intercepts its own path links: relative refs resolve against the
   // PREVIEWED FILE's directory, and the target opens through openEntry like
   // any row tap. Real URLs keep the browser's behaviour.
-  assert.match(source, /function mdLinkClick\(e\)/u, 'the preview link handler exists');
-  assert.match(source, /onclick=\{mdLinkClick\}/u, 'and the md-render container wears it');
-  assert.match(source, /function absJoin\(base, rel\)/u, 'relative refs resolve against the document');
+  assert.match(source, /handlePathLinkClick\(e, openPreviewRef\)/u, 'preview and chat share one path handler');
+  assert.match(source, /onclick=\{previewLinkClick\} onauxclick=\{previewLinkClick\}/u, 'all preview formats route primary and middle clicks');
+  assert.match(source, /resolvePathRef\(docDir, ref\)/u, 'relative refs resolve against the document');
+  assert.match(source, /installPathLinkHandler\(doc, openPreviewRef\)/u, 'iframe documents install the same path policy');
+  assert.match(source, /const previous = fileHist\.pop\(\);/u, 'Back restores a linked preview before the directory floor');
+  assert.match(source, /if \(view === 'preview'\) \{ backToList\(\); return true; \}/u, 'the browser back handler uses the same preview history');
+  assert.match(source, /handoff \|\| \(!!sourceRequest && !lastSourceDir\)/u, 'the first cwd response records the baseline without overriding a path handoff');
+  const listPanel = source.slice(source.indexOf('{#snippet listPanel()}'), source.indexOf('{#snippet previewPanel()}'));
+  assert.ok(!listPanel.includes('{#if error}'), 'the error banner belongs to Files, not only its hidden list: missing preview refs must be visible');
   // A dead reference fails in WORDS, not errno (round four: "即使路径不对，
   // 应该友好的提示，不要弹出新的窗口" — the window half is path-link-net.ts).
   assert.match(source, /error = \/No such file\|os error 2\/iu\.test\(e\.message \?\? ''\) \? `\$\{t\('fileMissing'\)\}: \$\{entry\.path\}` : e\.message;/u,

@@ -49,3 +49,12 @@ test('the cwd follow moves at once when nothing is at stake', () => {
   assert.deepEqual(cwdFollowStep('', '/x', { view: 'list', edited: false }), { lastSourceDir: '/x', move: 'none' }, 'an empty report is not a move');
   assert.deepEqual(cwdFollowStep('/x', '/x', { view: 'edit', edited: true }), { lastSourceDir: '/x', move: 'none' }, 'unchanged cwd never asks');
 });
+
+test('an explicit path handoff records cwd without replacing the requested preview (#106)', () => {
+  assert.deepEqual(cwdFollowStep('/project', '', { view: 'preview', edited: false }, true),
+    { lastSourceDir: '/project', move: 'none' });
+  assert.deepEqual(cwdFollowStep('/project', '/old', { view: 'list', edited: false }, true),
+    { lastSourceDir: '/project', move: 'none' });
+  assert.equal(cwdFollowStep('/later', '/project', { view: 'preview', edited: false }).move, 'go',
+    'a later real cwd change still follows');
+});

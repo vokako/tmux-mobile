@@ -1027,14 +1027,15 @@ test('a path reference in a bubble opens the file preview, not the void (board #
   // The bubble's click handler routes an anchor whose href is a PATH through
   // openPathRef; real URLs keep the browser's own behaviour.
   assert.match(source, /function openPathRef/u, 'the opener exists');
-  assert.match(source, /pathRef\(/u, 'recognition is the tested pure function, not an inline regex');
+  assert.match(source, /handlePathLinkClick\(e, routePathRef\)/u, 'chat and preview use the tested shared path handler');
+  assert.match(source, /onauxclick=\{openPathRef\}/u, 'middle clicks navigate instead of merely being swallowed');
   // Desktop: the RIGHT DRAWER's embedded Files gets an imperative file request
   // (the drawerIssueReq pattern); compact jumps to the Files PAGE like every
   // other drawer feature does.
   assert.match(source, /drawerFilesReq = \{ file, n: \(drawerFilesReq\?\.n \?\? 0\) \+ 1 \}/u,
     'the drawer request carries the file and a bumped n');
   assert.match(source, /drawerView = 'files'; openDrawer\(\);/u, 'and the files drawer opens');
-  assert.match(source, /openFilesTab\?\.\(selected, [^)]*file[^)]*\)/u, 'compact hands off to the Files page');
+  assert.match(source, /openFilesTab\?\.\(target, [^)]*file[^)]*\)/u, 'compact hands off using the project captured at the click');
   assert.match(source, /navRequest=\{drawerFilesReq\}/u, 'the drawer embed is wired to receive it');
   // A relative path resolves against the project's cwd before it travels.
   assert.match(source, /fsCwd\(/u, 'relative refs resolve against the project cwd');
