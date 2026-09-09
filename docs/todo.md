@@ -158,8 +158,16 @@
 - [ ] Test gaps: all three `bin/tmm.rs` tests parse flags; `connection.rs`,
   `fs.rs` and `server/mod.rs` lack tests, as do `AgentsPage`, `Projects`,
   `Settings`, `GitPanel` and `ui/Select`. Some source tests pin implementation text.
-- [ ] `list_panes` runs a full `ps -axo` every time; a `hub_post` triggers
-  at least two calls. Treat `child_cmd` as a detection clue and measure first.
+- [x] `list_panes` runs a full `ps -axo` every time (board #145, measured
+  2026-09-09 on a 521-process host: `ps` 29 ms of `list_panes`' 41 ms; tmux
+  itself 3 ms). The capture tick was the consumer that mattered — `observe`
+  + `recovery::check_once` = 2 × live projects `ps` per 20 s (14 here, ≈0.4 s)
+  — and it now runs under `tmux::with_process_snapshot`, one `ps` per tick,
+  every later listing 6 ms; the readings were already treated as one moment
+  in time, so no verdict changes. A `hub_post`'s two calls are two dispatches
+  (server `deliver_mentions` + the client's `hub_agents` refresh), left as
+  they are: a time-based cache would give a freshly launched CLI a window of
+  reading as a plain shell. `child_cmd` stays a detection clue everywhere.
 - [ ] Structural clippy findings (deferred 2026-07-22; fixing them changes
   signatures, which the mechanical-move discipline forbade in that pass):
   `handle_connection`(9) / `handle_connection_ws`(11) want a `ConnContext`

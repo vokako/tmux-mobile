@@ -1470,17 +1470,22 @@ pub async fn capture_loop() {
     seed_builtin_skills();
     loop {
         tokio::time::sleep(CAPTURE_INTERVAL).await;
+        // One process-table snapshot for the whole tick (board #145): observe
+        // and the recovery scan list the same sessions back to back, and each
+        // `list_panes` used to run its own `ps` — 2 × live projects per tick.
         let tick = tokio::task::spawn_blocking(|| {
-            if let Err(e) = auto_adopt_once() {
-                eprintln!("projects: auto-track failed: {e}");
-            }
-            if let Err(e) = capture_once() {
-                eprintln!("projects: capture failed: {e}");
-            }
-            // Piggybacks on the capture cadence: a transient model error is
-            // noticed within one tick, and the backoff ladder is measured in tens
-            // of seconds, so 20s granularity costs nothing.
-            recovery::check_once();
+            tmux::with_process_snapshot(|| {
+                if let Err(e) = auto_adopt_once() {
+                    eprintln!("projects: auto-track failed: {e}");
+                }
+                if let Err(e) = capture_once() {
+                    eprintln!("projects: capture failed: {e}");
+                }
+                // Piggybacks on the capture cadence: a transient model error is
+                // noticed within one tick, and the backoff ladder is measured in
+                // tens of seconds, so 20s granularity costs nothing.
+                recovery::check_once();
+            })
         })
         .await;
         if let Err(e) = tick {

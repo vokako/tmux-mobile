@@ -257,10 +257,58 @@ pub fn list_panes(session: &str) -> Result<Vec<TmuxPane>, String> {
 
 const PANE_FORMAT: &str = "#{session_name}<TMM_SEP>#{window_index}<TMM_SEP>#{pane_index}<TMM_SEP>#{pane_width}<TMM_SEP>#{pane_height}<TMM_SEP>#{pane_current_command}<TMM_SEP>#{window_name}<TMM_SEP>#{pane_title}<TMM_SEP>#{pane_current_path}<TMM_SEP>#{pane_active}<TMM_SEP>#{pane_pid}";
 
+type ProcessTable = std::collections::HashMap<u32, (u32, String)>;
+
+#[cfg(test)]
+static PS_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+thread_local! {
+    // A dispatch-scoped snapshot (board #145): `Some` while inside
+    // `with_process_snapshot`, holding the table once it has been read.
+    static SNAPSHOT: std::cell::RefCell<Option<Option<std::rc::Rc<ProcessTable>>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Run `f` with ONE process-table snapshot shared by every `list_panes`
+/// inside it (board #145). Measured on this host (521 processes, 7 live
+/// projects): `ps -axo` is 29 ms of `list_panes`' 41 ms, and one capture tick
+/// called it 2 × N times — `observe` and `recovery::check_once` walk the same
+/// sessions milliseconds apart and already treat their readings as one moment
+/// in time, so sharing the snapshot changes no verdict; it only stops asking
+/// the kernel fourteen times for an answer that cannot have changed.
+/// Thread-local by design: a scope covers exactly the synchronous work of one
+/// dispatch (the tick runs whole on one blocking thread) and never leaks into
+/// the next request, so there is no TTL and no staleness window to reason
+/// about — the failure mode a time-based cache would have introduced (a CLI
+/// launched inside the window reads as a plain shell until it expires).
+pub fn with_process_snapshot<T>(f: impl FnOnce() -> T) -> T {
+    let outer = SNAPSHOT.with(|s| s.replace(Some(None)));
+    let out = f();
+    SNAPSHOT.with(|s| *s.borrow_mut() = outer);
+    out
+}
+
 /// Snapshot of the process table: pid -> (ppid, args). One `ps` subprocess
 /// per pane-listing call, shared across all panes — far cheaper than a
-/// per-pane lookup and portable across macOS / Linux.
-fn process_table() -> std::collections::HashMap<u32, (u32, String)> {
+/// per-pane lookup and portable across macOS / Linux. Inside
+/// `with_process_snapshot` the first call's table serves the whole scope.
+fn process_table() -> std::rc::Rc<ProcessTable> {
+    let cached = SNAPSHOT.with(|s| s.borrow().as_ref().and_then(|inner| inner.clone()));
+    if let Some(t) = cached {
+        return t;
+    }
+    let table = std::rc::Rc::new(read_process_table());
+    SNAPSHOT.with(|s| {
+        if let Some(inner) = s.borrow_mut().as_mut() {
+            *inner = Some(table.clone());
+        }
+    });
+    table
+}
+
+fn read_process_table() -> ProcessTable {
+    #[cfg(test)]
+    PS_CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let mut map = std::collections::HashMap::new();
     let Ok(out) = Command::new("ps").args(["-axo", "pid=,ppid=,args="]).output() else {
         return map;
@@ -291,7 +339,7 @@ fn process_table() -> std::collections::HashMap<u32, (u32, String)> {
 /// argv, not just the deepest, and let the caller's substring matching
 /// find the agent's name anywhere in the chain. Each level is capped so a
 /// pathological argv doesn't bloat every pane listing.
-fn descendant_cmd(table: &std::collections::HashMap<u32, (u32, String)>, root: u32) -> String {
+fn descendant_cmd(table: &ProcessTable, root: u32) -> String {
     const MAX_ARGS_PER_LEVEL: usize = 160;
     let mut children: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
     for (&pid, &(ppid, _)) in table.iter() {
@@ -1236,4 +1284,31 @@ mod tests {
         }
     }
 
+
+    /// The snapshot scope is the whole saving (board #145): two listings
+    /// inside one scope read `ps` once; outside a scope each reads its own.
+    /// (Pane lines are synthetic — the pid is this test's own, so the table
+    /// lookup exercises the real `ps`.) Counts are deltas on a process-wide
+    /// counter, which is why the Rust suite runs sequentially (testing.md).
+    #[test]
+    fn a_snapshot_scope_reads_ps_once_for_every_listing_inside_it() {
+        let line = format!(
+            "s<TMM_SEP>0<TMM_SEP>0<TMM_SEP>80<TMM_SEP>24<TMM_SEP>bash<TMM_SEP>w<TMM_SEP>t<TMM_SEP>/<TMM_SEP>1<TMM_SEP>{}",
+            std::process::id()
+        );
+        let before = PS_CALLS.load(std::sync::atomic::Ordering::SeqCst);
+        let _ = parse_pane_lines(&line);
+        let _ = parse_pane_lines(&line);
+        assert_eq!(PS_CALLS.load(std::sync::atomic::Ordering::SeqCst) - before, 2, "no scope: one ps per listing");
+
+        let before = PS_CALLS.load(std::sync::atomic::Ordering::SeqCst);
+        let (a, b) = with_process_snapshot(|| (parse_pane_lines(&line), parse_pane_lines(&line)));
+        assert_eq!(PS_CALLS.load(std::sync::atomic::Ordering::SeqCst) - before, 1, "one scope: one ps");
+        assert_eq!(a[0].child_cmd, b[0].child_cmd, "both listings saw the same snapshot");
+
+        // The scope does not leak: the next listing reads afresh.
+        let before = PS_CALLS.load(std::sync::atomic::Ordering::SeqCst);
+        let _ = parse_pane_lines(&line);
+        assert_eq!(PS_CALLS.load(std::sync::atomic::Ordering::SeqCst) - before, 1);
+    }
 }
