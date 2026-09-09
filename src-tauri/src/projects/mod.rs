@@ -34,11 +34,6 @@ use store::{Project, Slot, Store};
 /// How often the capturer folds live tmux state back into the declaration.
 const CAPTURE_INTERVAL: Duration = Duration::from_secs(20);
 
-/// Sessions we never adopt: Team creates and kills its own
-/// (`tmm-team-<team-id>`) sessions, so a project declaration would fight it.
-/// See `docs/design-docs/features/team.md`.
-const TEAM_SESSION_PREFIX: &str = "tmm-team-";
-
 /// How long a tmux session must have existed before it becomes a project on its
 /// own. Same reasoning as `capture::SETTLE_SECS` one level up: a workspace is
 /// something you come back to, a two-minute shell is not.
@@ -348,8 +343,7 @@ fn auto_adopt_with(created: &[(String, u64)], ts: u64) -> Result<Vec<String>, St
             .collect();
         let mut adopted = Vec::new();
         for (session, created_at) in created {
-            if session.starts_with(TEAM_SESSION_PREFIX)
-                || known.contains(session)
+            if known.contains(session)
                 || ts.saturating_sub(*created_at) < SESSION_SETTLE_SECS
             {
                 continue;
@@ -2096,21 +2090,21 @@ pub(crate) mod tests {
         let path = root.canonicalize().unwrap().to_string_lossy().to_string();
         let old = "tmm-test-auto-old";
         let fresh = "tmm-test-auto-fresh";
-        let team = "tmm-team-test-auto";
-        for s in [old, fresh, team] {
+        for s in [old, fresh] {
             let _ = tmux::kill_session(s);
             tmux::ensure_session(s, &path).unwrap();
         }
 
-        // Pretend `old` has been around long enough; the others were just made.
+        // Pretend `old` has been around long enough; the other was just made.
+        // (The tmm-team-* exclusion died with the Team system, board #100 —
+        // a leftover session with that name is an ordinary session now.)
         let ts = now();
         let ages: Vec<(String, u64)> = vec![
             (old.to_string(), ts - SESSION_SETTLE_SECS - 1),
             (fresh.to_string(), ts),
-            (team.to_string(), ts - SESSION_SETTLE_SECS - 1),
         ];
         let adopted = auto_adopt_with(&ages, ts).unwrap();
-        assert_eq!(adopted, vec![old.to_string()], "only the settled non-team session");
+        assert_eq!(adopted, vec![old.to_string()], "only the settled session");
 
         // Running again must not duplicate it.
         assert!(auto_adopt_with(&ages, ts).unwrap().is_empty());
@@ -2123,7 +2117,7 @@ pub(crate) mod tests {
             "an archived project must not come back on the next tick"
         );
 
-        for s in [old, fresh, team] {
+        for s in [old, fresh] {
             let _ = tmux::kill_session(s);
         }
         let _ = std::fs::remove_dir_all(&root);

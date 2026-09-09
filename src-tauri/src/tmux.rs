@@ -861,22 +861,8 @@ pub fn rename_session(from: &str, to: &str) -> Result<(), String> {
     run_tmux(&["rename-session", "-t", &exact_session(from), to]).map(|_| ())
 }
 
-/// All tmux session names beginning with `prefix` (e.g. "tmm-team-"). Used on
-/// startup to recover teams that survived a server restart.
-pub fn list_team_sessions(prefix: &str) -> Vec<String> {
-    match run_tmux(&["list-sessions", "-F", "#{session_name}"]) {
-        Ok(out) => out
-            .lines()
-            .map(|l| l.trim())
-            .filter(|l| l.starts_with(prefix))
-            .map(|l| l.to_string())
-            .collect(),
-        Err(_) => Vec::new(), // no server / no sessions
-    }
-}
-
-/// Ensure `session` exists (detached), creating it at `cwd` if missing. Used by
-/// the in-process team supervisor before it spawns agent windows.
+/// Ensure `session` exists (detached), creating it at `cwd` if missing. Used
+/// before spawning agent windows into a session that may not exist yet.
 pub fn ensure_session(session: &str, cwd: &str) -> Result<(), String> {
     if session_exists(session) {
         return Ok(());

@@ -35,7 +35,7 @@ only (no process table, no network counters, no multithread refresh).
 - **Why exact-pinned**: the crate renamed its reading APIs across recent
   minors (0.30→0.31→0.33); a caret would let an unrelated `cargo update`
   break the build.
-- **Why desktop-gated** (same `cfg` as `projects`/agora): a phone is a client
+- **Why desktop-gated** (same `cfg` as `projects`): a phone is a client
   of a desktop server and never answers `system_status`; the sampler would be
   dead weight in the mobile shell.
 

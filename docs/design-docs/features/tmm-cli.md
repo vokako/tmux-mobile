@@ -12,8 +12,8 @@ two channels are joined at read time.
 
 There is deliberately no MCP tool surface for this. MCP requires per-backend
 config materialization and three different schema dialects; `tmm` requires
-one line in a system prompt. The agora MCP daemon still exists for Team
-(legacy) and is not extended.
+one line in a system prompt. (The agora MCP daemon that once backed the Team
+feature was deleted with it, board #100.)
 
 One subtree breaks the client-of-the-hub shape on purpose: `tmm task` manages
 background tasks with local tmux only and never opens a socket. See
