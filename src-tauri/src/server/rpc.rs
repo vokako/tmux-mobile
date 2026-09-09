@@ -61,6 +61,44 @@ impl Response {
             error: Some(ErrorInfo { code, message }),
         }
     }
+    /// The one place an `RpcError` becomes wire bytes (board #146): the code
+    /// is the variant's, the message passes through untouched.
+    pub(super) fn from_error(id: Option<u64>, e: RpcError) -> Self {
+        match e {
+            RpcError::InvalidParams(m) => Self::err(id, ERR_INVALID_PARAMS, m),
+            RpcError::Internal(m) => Self::err(id, ERR_INTERNAL, m),
+            RpcError::MethodNotFound(m) => Self::err(id, ERR_METHOD_NOT_FOUND, m),
+        }
+    }
+    /// Fold a dispatcher's `Result` into a response.
+    pub(super) fn from_outcome(id: Option<u64>, r: Result<serde_json::Value, RpcError>) -> Self {
+        match r {
+            Ok(v) => Self::ok(id, v),
+            Err(e) => Self::from_error(id, e),
+        }
+    }
+}
+
+/// A dispatcher error that already knows its wire code (board #146). The
+/// dispatchers used to spell `match x { Ok(v) => v, Err(e) => return
+/// Response::err(id, CODE, e) }` at every site — ~40 times — with the code
+/// chosen per site; this carries that choice so the site can say `?`. It is
+/// an enum and not a string prefix on purpose: `handle_project_request`
+/// classifies by sniffing `starts_with("missing required param")`, and that
+/// rule would file the hub's `"id required"` under INTERNAL when every such
+/// site says INVALID_PARAMS. The codes are contracts (`tmm` exit classes,
+/// the client's old-server detection), so they stay explicit per site.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum RpcError {
+    InvalidParams(String),
+    Internal(String),
+    MethodNotFound(String),
+}
+
+/// `require_str` as a `?`-able INVALID_PARAMS — the missing-param message is
+/// byte-identical to what every `match require_str` site returned.
+pub(super) fn param<'a>(params: &'a serde_json::Value, key: &str) -> Result<&'a str, RpcError> {
+    require_str(params, key).map_err(RpcError::InvalidParams)
 }
 
 // Per-connection subscription state: target -> last captured content
@@ -677,6 +715,25 @@ pub(super) fn handle_unsubscribe(params: &serde_json::Value, subs: &mut HashMap<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The typed error reproduces the exact wire shape of the hand-written
+    /// sites it replaces (board #146).
+    #[test]
+    fn rpc_error_carries_its_code_and_passes_the_message_through() {
+        let r = Response::from_error(Some(7), RpcError::InvalidParams("missing required param: x".into()));
+        let e = r.error.unwrap();
+        assert_eq!((r.id, e.code, e.message.as_str()), (Some(7), ERR_INVALID_PARAMS, "missing required param: x"));
+        let e = Response::from_error(None, RpcError::Internal("boom".into())).error.unwrap();
+        assert_eq!((e.code, e.message.as_str()), (ERR_INTERNAL, "boom"));
+        let e = Response::from_error(None, RpcError::MethodNotFound("unknown method: z".into())).error.unwrap();
+        assert_eq!((e.code, e.message.as_str()), (ERR_METHOD_NOT_FOUND, "unknown method: z"));
+        assert_eq!(param(&serde_json::json!({}), "session"), Err(RpcError::InvalidParams("missing required param: session".into())));
+        assert_eq!(param(&serde_json::json!({"session": ""}), "session"), Err(RpcError::InvalidParams("missing required param: session".into())));
+        assert_eq!(param(&serde_json::json!({"session": "s"}), "session"), Ok("s"));
+        let ok = Response::from_outcome(Some(1), Ok(serde_json::json!({"a": 1})));
+        assert!(ok.error.is_none() && ok.result.is_some());
+    }
+
 
     #[test]
     fn git_arguments_allow_literal_log_separators() {
