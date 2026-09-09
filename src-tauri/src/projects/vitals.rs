@@ -127,13 +127,11 @@ pub fn sniff_remembered(
     agent: &str,
     backend: &str,
 ) -> Vitals {
-    let mut v = match backend {
-        "grok" => sniff_grok(pane),
-        "codex" => sniff_codex(pane),
-        "claude" => sniff_claude(pane),
-        "omp" => sniff_omp(pane),
-        _ => sniff_kiro(pane, agent),
-    };
+    // The dialect dispatch is the Backend's (board #127); an unknown or
+    // absent backend reads with kiro's grammar, exactly as before.
+    let mut v = super::backends::Backend::parse(backend)
+        .map(|b| b.sniff(pane, agent))
+        .unwrap_or_else(|| sniff_kiro(pane, agent));
     let now = now_secs();
     let key = (session.to_string(), window.to_string());
     let mut map = cache().lock().unwrap();
@@ -227,446 +225,34 @@ fn sniff_window_now(session: &str, window: &str) {
     sniff_remembered(session, window, &text, &p.window_name, agent.backend);
 }
 
+// The per-CLI dialects live on the backend files (board #127); these
+// re-exports keep the one import path (and the test module's `use super::*`)
+// stable. The SHARED parsing helpers (EFFORTS, PIE, context_pct, branch,
+// looks_like_model, the Vitals struct) stay here — more than one dialect
+// reads them.
+pub use super::backends::claude::{claude_status_line, sniff_claude};
+pub(crate) use super::backends::codex::sniff_codex;
+#[cfg(test)]
+pub(crate) use super::backends::codex::{codex_context_item, codex_context_left, codex_footer};
+pub(crate) use super::backends::grok::sniff_grok;
+#[cfg(test)]
+pub(crate) use super::backends::grok::{grok_context_ratio, grok_tokens};
+pub(crate) use super::backends::kiro::sniff_kiro;
+pub(crate) use super::backends::omp::sniff_omp;
+
 /// The effort words kiro accepts. A segment matching one of these IS the effort
 /// segment, wherever it sits — matching by position alone would mistake a model
 /// id for it whenever the effort segment is absent (it usually is).
-const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+pub(crate) const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 
 /// The pie glyphs kiro ramps through for context usage. They are the marker that
 /// a bare `N%` is the context segment and not, say, a percentage in a diff.
-const PIE: [char; 6] = ['○', '◔', '◑', '◕', '●', '◯'];
-
-/// Format Claude Code's official statusLine JSON into one compact, stable row.
-/// This is invoked by the local `tmm claude-statusline` command configured in
-/// Claude settings. The `[CC]` anchor is intentionally unique: `sniff_claude`
-/// can read the pane without guessing from ordinary conversation text.
-pub fn claude_status_line(input: &str) -> Option<String> {
-    let data: serde_json::Value = serde_json::from_str(input).ok()?;
-    let model = data
-        .pointer("/model/display_name")
-        .and_then(serde_json::Value::as_str)
-        .filter(|s| !s.trim().is_empty())
-        .or_else(|| data.pointer("/model/id").and_then(serde_json::Value::as_str))?
-        .trim();
-    let model = if model.ends_with("context)") {
-        model.rfind(" (").map(|i| &model[..i]).unwrap_or(model)
-    } else {
-        model
-    };
-    let context = data.get("context_window").and_then(serde_json::Value::as_object);
-    let pct = context
-        .and_then(|c| c.get("used_percentage"))
-        .and_then(serde_json::Value::as_f64)
-        .map(|pct| pct.round().clamp(0.0, 100.0) as u8);
-    let used = context
-        .and_then(|c| c.get("total_input_tokens"))
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-    let size = context
-        .and_then(|c| c.get("context_window_size"))
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-
-    let mut parts = vec!["[CC]".to_string(), model.to_string()];
-    if let Some(pct) = pct {
-        // Percentage comes BEFORE counts so a narrow pane still preserves the
-        // field the card needs; Claude may truncate the right side of the row.
-        parts.push(format!("{pct}% ctx"));
-        if size > 0 {
-            parts.push(format!("{}/{}", short_tokens(used), short_tokens(size)));
-        }
-    }
-    if let Some(effort) = data
-        .pointer("/effort/level")
-        .and_then(serde_json::Value::as_str)
-        .filter(|e| EFFORTS.contains(e))
-    {
-        parts.push(format!("effort {effort}"));
-    }
-    Some(parts.join(" · "))
-}
-
-fn short_tokens(tokens: u64) -> String {
-    fn scaled(tokens: u64, unit: u64, suffix: char) -> String {
-        if tokens % unit == 0 {
-            format!("{}{suffix}", tokens / unit)
-        } else {
-            let value = tokens as f64 / unit as f64;
-            format!("{value:.1}{suffix}")
-        }
-    }
-    if tokens >= 1_000_000 {
-        scaled(tokens, 1_000_000, 'M')
-    } else if tokens >= 1_000 {
-        scaled(tokens, 1_000, 'K')
-    } else {
-        tokens.to_string()
-    }
-}
-
-/// Read the canonical row produced by `tmm claude-statusline`.
-///
-/// Claude's built-in footer is not a stable machine format; statusLine is its
-/// official extension point and hands us exact model/context data. Parsing only
-/// our `[CC]` row makes ordinary output (including pasted examples) inert.
-pub fn sniff_claude(pane: &str) -> Vitals {
-    let mut v = Vitals::default();
-    for line in pane.lines().rev().take(24) {
-        let segs: Vec<&str> = line
-            .trim()
-            .split('·')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .collect();
-        if segs.first() != Some(&"[CC]") {
-            continue;
-        }
-        if let Some(model) = segs.get(1).filter(|s| !s.is_empty()) {
-            v.model = Some((*model).to_string());
-        }
-        for seg in &segs[2..] {
-            if v.context_pct.is_none() {
-                v.context_pct = context_pct(seg);
-            }
-            if v.effort.is_none() {
-                v.effort = seg
-                    .strip_prefix("effort ")
-                    .filter(|e| EFFORTS.contains(e))
-                    .map(str::to_string);
-            }
-        }
-        v.effort_definitive = v.context_pct.is_some();
-        break;
-    }
-    v
-}
-
-/// Read what the last lines of a pane say about the agent's current state.
-///
-/// `agent` is normally the first status segment (the managed window name).
-/// Resumed legacy conversations may retain the exact built-in `kiro_default`
-/// identity, which is accepted as the one narrow fallback. The anchor is not a
-/// filter: fields that identify themselves by shape (context and branch) are
-/// read even when it never appears, because narrow panes wrap later segments.
-pub fn sniff_kiro(pane: &str, agent: &str) -> Vitals {
-    let mut v = Vitals::default();
-    // Bottom-up: the newest paint of the status line is the last one.
-    for line in pane.lines().rev().take(12) {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        // A WIDE pane keeps `location · branch` right-aligned on the SAME line
-        // as the left segments, joined not by `·` but by the padding run of
-        // spaces — so the last left segment arrives glued to the location
-        // (`◔ 5%       /local/home/cfu/temp`) and its parser refuses it
-        // (owner, 2026-08-26: context missing on the chat project). A run of
-        // two or more spaces is that gap and never occurs INSIDE a segment
-        // (`◔ 5%` is single-spaced), so it is a segment boundary too. Narrow
-        // panes wrap the right side onto its own line and are unaffected.
-        let segs: Vec<&str> = line
-            .split('·')
-            .flat_map(|s| s.split("  "))
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        // The activity line ("Kiro is working · Type to queue · …") shares the
-        // dot separator with the status line, and its words are not segments.
-        if segs.iter().any(|s| s.starts_with("Kiro is ") || *s == "Type to queue") {
-            continue;
-        }
-
-        // Is this the status line proper? Usually kiro's left side starts with
-        // the managed window/registry name. A resumed conversation can retain
-        // Kiro's exact built-in identity `kiro_default` even though the app
-        // window was later named `chat`; that line is still the TUI's own
-        // status and therefore the runtime-model authority. Keep the exception
-        // exact — arbitrary first segments remain ordinary output.
-        // Effort has no identifying glyph, so it is read ONLY on this anchored
-        // line and only as the segment immediately before the context segment.
-        // Matching bare low/medium/high words elsewhere made ordinary output
-        // look like a runtime setting.
-        let anchored = segs.first().is_some_and(|s| *s == agent || *s == "kiro_default");
-        if anchored && v.effort.is_none() && !v.effort_definitive {
-            if let Some(ci) = segs.iter().position(|s| context_pct(s).is_some()) {
-                let word = segs[ci.saturating_sub(1)].to_ascii_lowercase();
-                if ci > 0 && EFFORTS.contains(&word.as_str()) {
-                    v.effort = Some(word);
-                }
-            }
-        }
-
-        for (i, seg) in segs.iter().enumerate() {
-            if v.context_pct.is_none() {
-                if let Some(pct) = context_pct(seg) {
-                    v.context_pct = Some(pct);
-                    continue;
-                }
-            }
-            if v.branch.is_none() {
-                if let Some(b) = branch(seg) {
-                    v.branch = Some(b.to_string());
-                    continue;
-                }
-            }
-            // The model is positional — it is whatever follows the agent name
-            // (and the optional `Autonomous` flag). Anchoring on the name the
-            // caller gave us is what keeps a cwd or a tangent from being read as
-            // a model id.
-            if v.model.is_none() && i == 0 && anchored {
-                let next = segs
-                    .iter()
-                    .skip(1)
-                    .find(|s| !s.eq_ignore_ascii_case("Autonomous"));
-                if let Some(m) = next.filter(|m| looks_like_model(m)) {
-                    v.model = Some((*m).to_string());
-                }
-            }
-        }
-        // The anchored line carrying its context segment is the FULL left side
-        // (`agent · [autonomous] · model · [effort] · context`): whatever it
-        // says about effort — including "nothing" — is the verdict. kiro omits
-        // the segment when the effort is the backend default, so absence here
-        // is a reading, not a miss, and backfill must not overwrite it.
-        if anchored && v.context_pct.is_some() {
-            v.effort_definitive = true;
-        }
-    }
-    v
-}
-
-/// Read what grok's screen says about its current state. grok 1.0.5 paints two
-/// fixtures (measured live, 2026-08-21/22):
-///
-/// - a header line, cwd left + context ratio right: `/w/reports   47K / 500K`
-///   ("上下文长度在右上角" — the owner's words for where to look). The ratio is
-///   used / total tokens, so the percentage is computed, not read.
-/// - the input box's bottom border carries the model (and the approval mode):
-///   `╰──────── Grok 4.6 (Bedrock) · always-approve ─╯`.
-///
-/// No agent-name anchor exists in either fixture, so both fields identify
-/// themselves BY SHAPE: the ratio must be `N[K|M] / N[K|M]` at the end of a
-/// line, the model must sit in a `╰…╯` border. Bottom-up, newest paint wins —
-/// the footer is redrawn at the bottom, and stale headers scroll upward.
-pub fn sniff_grok(pane: &str) -> Vitals {
-    let mut v = Vitals::default();
-    for line in pane.lines().rev() {
-        let line = line.trim_end();
-        if line.trim().is_empty() {
-            continue;
-        }
-        if v.model.is_none() {
-            if let Some(m) = grok_footer_model(line) {
-                v.model = Some(m);
-            }
-        }
-        if v.context_pct.is_none() {
-            if let Some(pct) = grok_context_ratio(line) {
-                v.context_pct = Some(pct);
-            }
-        }
-        if v.model.is_some() && v.context_pct.is_some() {
-            break;
-        }
-    }
-    v
-}
-
-/// The model out of grok's input-box bottom border: `╰─── <model> [· mode] ─╯`.
-/// The border glyphs are the marker — ordinary output does not draw box
-/// corners — and the FIRST `·`-segment inside is the model; what follows is
-/// the approval mode (`always-approve`), which changes per keypress and is not
-/// a vital.
-fn grok_footer_model(line: &str) -> Option<String> {
-    let s = line.trim();
-    if !(s.starts_with('╰') && s.ends_with('╯')) {
-        return None;
-    }
-    let inner = s.trim_matches(|c| matches!(c, '╰' | '╯' | '─')).trim();
-    let model = inner.split('·').next()?.trim();
-    // An empty border (`╰────╯`, no label) is the box with nothing to say.
-    if model.is_empty() || model.chars().all(|c| c == '─' || c.is_whitespace()) {
-        return None;
-    }
-    Some(model.to_string())
-}
-
-/// `47K / 500K` at the END of a line → percentage of the context used. Both
-/// sides must parse as token counts and the ratio must make sense (used ≤
-/// total); a `3 / 5` in ordinary output fails the K/M requirement on the
-/// total, which is what keeps arithmetic in a diff from becoming a reading.
-fn grok_context_ratio(line: &str) -> Option<u8> {
-    let s = line.trim_end();
-    let (head, total_txt) = s.rsplit_once('/')?;
-    let total_txt = total_txt.trim();
-    let used_txt = head.trim_end().rsplit(char::is_whitespace).next()?;
-    // The total is a model's context budget: it always carries a magnitude
-    // suffix (500K, 2M). Requiring it filters out fractions in ordinary text.
-    if !total_txt.ends_with(['K', 'M']) {
-        return None;
-    }
-    let used = grok_tokens(used_txt)?;
-    let total = grok_tokens(total_txt)?;
-    if total == 0.0 || used > total {
-        return None;
-    }
-    Some((used * 100.0 / total).round().clamp(0.0, 100.0) as u8)
-}
-
-/// `47K` → 47_000, `1.2M` → 1_200_000, `800` → 800.
-fn grok_tokens(s: &str) -> Option<f64> {
-    let s = s.trim();
-    let (num, mult) = match s.strip_suffix('M') {
-        Some(n) => (n, 1_000_000.0),
-        None => match s.strip_suffix('K') {
-            Some(n) => (n, 1_000.0),
-            None => (s, 1.0),
-        },
-    };
-    let n: f64 = num.trim().parse().ok()?;
-    (n >= 0.0).then_some(n * mult)
-}
-
-/// codex's status furniture, measured on codex-cli 0.148.0 (2026-08-22,
-/// re-measured 2026-09-03).
-///
-/// The persistent footer under the composer is the configurable
-/// `tui.status_line`: `·`-joined items in the order the config lists them.
-/// The inherited `~/.codex/config.toml` sets `["model", "context-used",
-/// "current-dir"]`, which paints
-/// `openai.gpt-5.6-sol · Context 5% used · /tmp/x` — and, at 44 columns,
-/// `openai.gpt-5.6-sol · Context 5% used · /t…` (codex TRUNCATES the line with
-/// `…`, it never wraps). The default footer (no `[tui]` section) is
-/// `<model> [<effort>] · <cwd>`, and `context-remaining` spells
-/// `Context 99% left`, so every item is found BY SHAPE, not by position:
-/// a `Context NN% used|left` segment is the context, a segment starting
-/// `/`/`~` is the cwd, and a 1–2-token segment whose first token carries a
-/// digit is `<model> [<effort>]`. A line counts as the footer only when it
-/// has a model segment AND (a cwd or a context segment) — prose with one
-/// mid-sentence `·` has neither anchor.
-///
-/// Context is also spelled `NN% context left` (codex's right-footer format
-/// string; `100% context left` is its zero-use rendering) and, in the
-/// `/status` card, `NN% left (21.5K used / 258K)` — both say LEFT where kiro
-/// says USED, so those readings are `100 - NN`.
-pub fn sniff_codex(pane: &str) -> Vitals {
-    let mut v = Vitals::default();
-    for line in pane.lines().rev() {
-        let line = line.trim_end();
-        if line.trim().is_empty() {
-            continue;
-        }
-        if let Some(f) = codex_footer(line) {
-            if v.model.is_none() {
-                v.model = Some(f.model);
-                v.effort = f.effort;
-            }
-            if v.context_pct.is_none() {
-                v.context_pct = f.context_pct;
-            }
-        }
-        if v.context_pct.is_none() {
-            if let Some(pct) = codex_context_left(line) {
-                v.context_pct = Some(pct);
-            }
-        }
-        if v.model.is_some() && v.context_pct.is_some() {
-            break;
-        }
-    }
-    v
-}
-
-struct CodexFooter {
-    model: String,
-    effort: Option<String>,
-    context_pct: Option<u8>,
-}
-
-/// One `tui.status_line` paint → its readings, or `None` when the line does
-/// not have the footer's anchors (see `sniff_codex`).
-fn codex_footer(line: &str) -> Option<CodexFooter> {
-    let mut model: Option<(String, Option<String>)> = None;
-    let mut context_pct = None;
-    let mut cwd = false;
-    for seg in line.trim().split('\u{b7}').map(str::trim) {
-        if seg.starts_with('/') || seg.starts_with('~') {
-            cwd = true;
-        } else if let Some(pct) = codex_context_item(seg) {
-            context_pct = Some(pct);
-        } else if model.is_none() {
-            model = codex_model_item(seg);
-        }
-    }
-    let (model, effort) = model?;
-    (cwd || context_pct.is_some()).then_some(CodexFooter { model, effort, context_pct })
-}
-
-/// `<model> [<effort>]` — the model token must contain a digit
-/// (`xai.grok-4.6`, `gpt-5.2-codex` — every model id does) and the effort,
-/// when present, is one plain lowercase word; a `…`-truncated word
-/// (`defa…`) is not an effort.
-fn codex_model_item(seg: &str) -> Option<(String, Option<String>)> {
-    let mut toks = seg.split_whitespace();
-    let model = toks.next()?;
-    if !looks_like_model(model) || !model.chars().any(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    let effort = toks.next();
-    if toks.next().is_some() {
-        return None;
-    }
-    let effort = match effort {
-        None => None,
-        Some(e) if !e.is_empty() && e.chars().all(|c| c.is_ascii_lowercase()) => Some(e.to_string()),
-        // A truncated word (`defa…`) is not an effort — the model still is.
-        Some(_) => None,
-    };
-    Some((model.to_string(), effort))
-}
-
-/// `Context 5% used` (`context-used`) → 5; `Context 99% left`
-/// (`context-remaining`) → 1. The literal `Context` word is the anchor: a
-/// bare `5%` is never accepted.
-fn codex_context_item(seg: &str) -> Option<u8> {
-    let rest = seg.strip_prefix("Context")?.trim_start();
-    let (num, tail) = rest.split_once('%')?;
-    let n = num.trim().parse::<u16>().ok().filter(|n| *n <= 100)?;
-    match tail.trim() {
-        "used" => Some(n as u8),
-        "left" => Some((100 - n) as u8),
-        _ => None,
-    }
-}
-
-/// `NN% context left` (right footer) or `NN% left (… used / …)` (/status
-/// card) → share of the context USED (`100 - NN`), matching kiro's own
-/// wording for `Vitals::context_pct`. The trailing words are the anchor: a
-/// bare `NN%` is never accepted (same rule as kiro's pie-glyph requirement).
-fn codex_context_left(line: &str) -> Option<u8> {
-    let s = line.trim().trim_matches('\u{2502}').trim();
-    let idx = s.find("% context left").or_else(|| {
-        let i = s.find("% left (")?;
-        // The /status shape must really be the context card, not prose.
-        s.contains("used /").then_some(i)
-    })?;
-    let digits: String = s[..idx]
-        .chars()
-        .rev()
-        .take_while(|c| c.is_ascii_digit())
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-    let left = digits.parse::<u16>().ok().filter(|n| *n <= 100)?;
-    Some((100 - left) as u8)
-}
+pub(crate) const PIE: [char; 6] = ['○', '◔', '◑', '◕', '●', '◯'];
 
 /// `◕ 69%` (TUI) or `69% ctx` (lite) — a percentage that is about the context.
 /// A bare `69%` is deliberately NOT accepted: percentages are everywhere in a
 /// terminal, and a wrong reading here is worse than a missing one.
-fn context_pct(seg: &str) -> Option<u8> {
+pub(crate) fn context_pct(seg: &str) -> Option<u8> {
     let s = seg.trim();
     let digits = if let Some(rest) = s.strip_prefix(|c| PIE.contains(&c)) {
         rest.trim_start()
@@ -681,7 +267,7 @@ fn context_pct(seg: &str) -> Option<u8> {
 
 /// `(feat/projects-and-tasks)` — kiro wraps the branch in parentheses, which is
 /// what tells it apart from the cwd segment next to it.
-fn branch(seg: &str) -> Option<&str> {
+pub(crate) fn branch(seg: &str) -> Option<&str> {
     let inner = seg.strip_prefix('(')?.strip_suffix(')')?.trim();
     // A branch name, not a sentence: no spaces, and something in it.
     if inner.is_empty() || inner.contains(' ') {
@@ -693,7 +279,7 @@ fn branch(seg: &str) -> Option<&str> {
 /// A model id is a lowercase slug: letters, digits, `-` and `.`, with at least
 /// one separator (`claude-opus-5`, `gpt-5.1`, `auto` is the exception we allow by
 /// name). Rejecting anything else is what keeps a path or a stray word out.
-fn looks_like_model(s: &str) -> bool {
+pub(crate) fn looks_like_model(s: &str) -> bool {
     if s == "auto" {
         return true;
     }
@@ -703,79 +289,6 @@ fn looks_like_model(s: &str) -> bool {
         && s.chars().all(ok)
         && s.contains('-')
         && s.starts_with(|c: char| c.is_ascii_lowercase())
-}
-
-/// omp's persistent footer is the TOP border of its input box — one line
-/// carrying the π mark and, width permitting, the model, thinking level,
-/// cwd, session cost and a context gauge (measured, omp 18.0.6):
-///
-/// `╭── π  > ⬢ Fable 5.1 (Bedrock, 1M) · ◒ high > 📁 /path > $0.45 ▶─3%─┃1M───╮`
-///
-/// The line is RESPONSIVE: a fresh session has no gauge yet
-/// (`… > 📁 /path ▶────────╮`), and a narrow pane drops the model/effort
-/// segments entirely (`╭── π  > 📁 …work ▶────13%───┃────1M───╮` was
-/// measured live) — so every field is independently optional and `backfill`
-/// carries an older wide reading across a narrow capture. The `>`-separated
-/// segments are read by MARK, not position: `⬢` heads the model (with the
-/// thinking level as its `·` sub-segment), `▶ … ┃` frames the used-context
-/// percentage. Cost and the window size have no Vitals field and are not
-/// read.
-pub fn sniff_omp(pane: &str) -> Vitals {
-    let mut v = Vitals::default();
-    for line in pane.lines().rev() {
-        let s = line.trim();
-        // The signature: an input-box top border that carries omp's π mark.
-        // Tool cards and plain output draw boxes too, but never with π.
-        if !(s.starts_with('╭') && s.ends_with('╮') && s.contains(" π ")) {
-            continue;
-        }
-        for segment in s.split(" > ") {
-            let segment = segment.trim();
-            if let Some(model_part) = segment.strip_prefix('⬢') {
-                // `⬢ <model> [· <glyph> <effort>]` — the glyph varies with
-                // the level, so the effort is read as the sub-segment's last
-                // word, gated on omp's own enum.
-                let mut parts = model_part.split(" · ");
-                let model = parts.next().unwrap_or("").trim();
-                if !model.is_empty() {
-                    v.model = Some(model.to_string());
-                    // The model segment is the one that carries the level:
-                    // seeing it without one is a verdict, not a truncation.
-                    v.effort_definitive = true;
-                }
-                for extra in parts {
-                    if let Some(word) = extra.split_whitespace().last() {
-                        if matches!(word, "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "auto") {
-                            v.effort = Some(word.to_string());
-                        }
-                    }
-                }
-            }
-        }
-        // `▶ … NN% … ┃` — the gauge frames the used share. The ┃ (or the
-        // closing ╮ on a gauge that has no limit mark yet) bounds the scan so
-        // a percentage in the cwd segment can never be read as context.
-        if let Some(bar) = s.find('▶').map(|i| &s[i..]) {
-            let bar = bar.split('┃').next().unwrap_or(bar);
-            if let Some(end) = bar.find('%') {
-                let digits: String = bar[..end]
-                    .chars()
-                    .rev()
-                    .take_while(char::is_ascii_digit)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect();
-                if let Ok(pct) = digits.parse::<u8>() {
-                    if pct <= 100 {
-                        v.context_pct = Some(pct);
-                    }
-                }
-            }
-        }
-        break; // the last π border is the live footer; older ones scrolled by
-    }
-    v
 }
 
 #[cfg(test)]

@@ -79,6 +79,21 @@ impl Backend {
         }
     }
 
+    /// Read the CLI's own status furniture from a pane capture — each
+    /// backend paints its own dialect, and reading one CLI's screen with
+    /// another's grammar yields confident nonsense (agent-status.md).
+    /// `agent` anchors kiro's positional status line; the other dialects
+    /// ignore it.
+    pub fn sniff(self, pane: &str, agent: &str) -> crate::projects::vitals::Vitals {
+        match self {
+            Backend::Kiro => kiro::sniff_kiro(pane, agent),
+            Backend::Claude => claude::sniff_claude(pane),
+            Backend::Codex => codex::sniff_codex(pane),
+            Backend::Grok => grok::sniff_grok(pane),
+            Backend::Omp => omp::sniff_omp(pane),
+        }
+    }
+
     /// Ask the backend's own CLI for its model ids. `None` = no authoritative
     /// list exists (claude/codex/omp aliases) or the CLI is unavailable —
     /// validation then degrades to accept-all (models.rs module doc).
