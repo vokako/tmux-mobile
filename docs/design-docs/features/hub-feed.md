@@ -61,7 +61,7 @@ Four costs grew with paged history and were paid on every 5–10 s tick or scrol
 
 ### Messages are NOT deletable in the UI; projects delete through a recycle bin
 
-the two-step message archive (2026-08-19) was retired on owner request (2026-08-21, "没有消息删除 不需要这个功能，彻底去掉吧") — a tapped message offers exactly Copy and Raw, and the room stays the record. The `hub_msg_archive/restore/purge` RPCs, the `msg_archive` snapshot table (state.db v10) and `hub_log`'s filter against `projects::archived_ids` all REMAIN as server API (an older client's hidden messages stay hidden; purge still reaches team.db only through the JSON-only `TeamBridge::delete_messages`, messages first, archive rows after).
+the two-step message archive (2026-08-19) was retired on owner request (2026-08-21, "没有消息删除 不需要这个功能，彻底去掉吧") — a tapped message offers exactly Copy and Raw, and the room stays the record. The `hub_msg_archive/restore/purge` RPCs, the `msg_archive` snapshot table (state.db v10) and `hub_log`'s filter against `projects::archived_ids` all REMAIN as server API (an older client's hidden messages stay hidden; purge deletes from the room's own store — state.db `hub_msgs` since board #107 — messages first, archive rows after).
 
 ### The sidebar is ordered by the CONVERSATION
 

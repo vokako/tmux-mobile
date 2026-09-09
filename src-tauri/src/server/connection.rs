@@ -253,6 +253,10 @@ where
     // enqueues Encrypted frames, which need the session cipher in place).
     // Aborted at teardown alongside the other per-connection tasks.
     let mut team_push_handle: Option<tokio::task::JoinHandle<()>> = None;
+    // hub message-push task (board #107): the project rooms' own channel,
+    // started with the team one and aborted with it on disconnect.
+    #[cfg_attr(any(target_os = "android", target_os = "ios"), allow(unused_mut))]
+    let mut hub_push_handle: Option<tokio::task::JoinHandle<()>> = None;
     // Receive-side cipher lives in this task and guards strict decrypt
     // ordering. Send-side cipher is handed off to the dedicated send task
     // (below) so business tasks can finish out of order without corrupting
@@ -514,6 +518,10 @@ where
                             if let Some(ref a) = team {
                                 team_push_handle = Some(tokio::spawn(team_push_loop(out_tx.clone(), a.clone())));
                             }
+                            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                            {
+                                hub_push_handle = Some(tokio::spawn(super::hub_rpc::hub_push_loop(out_tx.clone())));
+                            }
                             continue;
                         } else {
                             let mut tracker = auth_tracker.lock().await;
@@ -534,6 +542,10 @@ where
                         let _ = out_tx.send(Outbound::Plain(serde_json::to_string(&r).unwrap()));
                         if let Some(ref a) = team {
                             team_push_handle = Some(tokio::spawn(team_push_loop(out_tx.clone(), a.clone())));
+                        }
+                        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                        {
+                            hub_push_handle = Some(tokio::spawn(super::hub_rpc::hub_push_loop(out_tx.clone())));
                         }
                         continue;
                     } else {
@@ -583,7 +595,7 @@ where
                         m if m.starts_with("team_") => tokio::task::spawn_blocking(move || handle_team_request(&req, team_c.as_deref()))
                             .await
                             .unwrap_or_else(|e| Response::err(None, ERR_INTERNAL, format!("task panic: {}", e))),
-                        m if m.starts_with("hub_") => tokio::task::spawn_blocking(move || super::hub_rpc::handle_hub_request(&req, team_c.as_deref(), Some(&notifications_c)))
+                        m if m.starts_with("hub_") => tokio::task::spawn_blocking(move || super::hub_rpc::handle_hub_request(&req, Some(&notifications_c)))
                             .await
                             .unwrap_or_else(|e| Response::err(None, ERR_INTERNAL, format!("task panic: {}", e))),
                         m if m.starts_with("agent_notifications_") || m.starts_with("agent_hooks_") => tokio::task::spawn_blocking(move || handle_notification_request(&req, &notifications_c))
@@ -653,6 +665,9 @@ where
 
     sub_handle.abort();
     ping_handle.abort();
+    if let Some(h) = hub_push_handle.take() {
+        h.abort();
+    }
     if let Some(h) = team_push_handle.take() {
         h.abort();
     }

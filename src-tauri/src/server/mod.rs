@@ -173,22 +173,20 @@ pub type NotificationHub = Arc<AgentNotificationHub>;
 // ─── RoomPoster implementation ───────────────────────────────────────────────
 // The notification hub needs to post into project rooms from the hook consumer
 // (a background task without a per-request context). This adapter bridges the
-// `RoomPoster` trait to the `TeamBridge` without exposing bus types.
+// `RoomPoster` trait to the hub's own message store (projects::rooms, board
+// #107).
 //
 // A final reply is recorded once, then delivered only along the reply edge
 // captured when the turn opened. The delivered `[reply]` envelope does not
 // create a reverse edge, preventing ping-pong.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-struct TeamRoomPoster {
-    team: Arc<dyn TeamBridge>,
-}
+struct HubRoomPoster;
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-impl crate::agent_notifications::RoomPoster for TeamRoomPoster {
+impl crate::agent_notifications::RoomPoster for HubRoomPoster {
     fn post_final(&self, session: &str, agent: &str, body: &str, reply_to: &[String]) {
         let room = hub_rpc::project_room(session);
-        let _ = self.team.open_room(&room);
-        let _ = self.team.post_routed(&room, agent, body, reply_to, false);
+        let _ = crate::projects::rooms::post_routed(&room, agent, body, reply_to);
         for target in reply_to {
             let line = format!("[tmm chat {}] {agent}: [reply] {body}", hub_rpc::stamp_now());
             hub_rpc::deliver_chat_line(session, target, &line);
@@ -309,15 +307,15 @@ pub async fn start_with_socket(
     {
         crate::projects::set_agent_sessions(notifications.clone());
         tokio::spawn(crate::projects::capture_loop());
+        // Pull any pre-#107 chat history out of the legacy team.db, exactly
+        // once. Blocking SQLite work, so it runs before the listener loop.
+        crate::projects::rooms::import_legacy();
         // Inject the room poster so hook-sourced stop events can auto-post
-        // managed agents' final replies into the project chat room.
-        // Degrades silently to a no-op when team is None (server without the
-        // team bus, e.g. `npm run dev:server` without a team configured).
-        if let Some(ref team_arc) = team {
-            let poster: Arc<dyn crate::agent_notifications::RoomPoster> =
-                Arc::new(TeamRoomPoster { team: team_arc.clone() });
-            notifications.set_room_poster(poster);
-        }
+        // managed agents' final replies into the project chat room. The hub's
+        // message store is always there on desktop (state.db), so this no
+        // longer depends on a team bus being configured.
+        let poster: Arc<dyn crate::agent_notifications::RoomPoster> = Arc::new(HubRoomPoster);
+        notifications.set_room_poster(poster);
     }
 
     // Load TLS config if cert+key provided

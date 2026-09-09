@@ -401,8 +401,10 @@ can get wrong to save three characters.
   `#id`. One helper on each side of the wire, so the same issue never wears
   two names and no message ever renders an empty head or dangling separator.
 
-The room is `proj:<session>` on the same agora bus that Team uses —
-`TeamBridge::open_room` provisions it with **no tmux session, no roster, no
+The room is `proj:<session>` in state.db's `hub_msgs` table
+(`projects/rooms.rs`, board #107 — the agora bus that used to hold it was
+deleted whole with the Team system, board #100). A room is implicit — it
+exists exactly when it has messages — with **no tmux session, no roster, no
 supervisor, no workspace history mirror** (empty workspace skips the `.tmm/`
 mirror on purpose: a project dir should not grow dot-dirs because someone
 chatted). `teams()` filters `proj:*` rooms out so they never appear in the
@@ -1216,8 +1218,8 @@ What remains, deliberately:
   `hub_msg_purge` / `hub_archive`, the `msg_archive` table (state.db v10, with
   its message snapshot), and `hub_log`'s filter against
   `projects::archived_ids`. Hiding a message is still something the API can do;
-  this build's client just never calls it. Purge still reaches team.db only
-  through the JSON-only `TeamBridge::delete_messages`, deleting messages FIRST
+  this build's client just never calls it. Purge deletes from state.db's
+  `hub_msgs` (board #107), deleting messages FIRST
   and dropping archive rows after, so a failure stays retryable.
 - Anything archived by an older client stays hidden from `hub_log` — retiring
   the UI must not resurface what someone chose to hide.
@@ -1408,7 +1410,7 @@ number bounds both, which is what the old design did.
 
 | what | where | complete? |
 |---|---|---|
-| chat messages (human, agents, `[tmm]` lifecycle lines, status notes, done summaries) | `team.db` `messages`, indexed `(room, seq)` | **YES.** Nothing prunes it — 1483 messages / 18 rooms / 10 days at the time of the audit, 414 KB of bodies. The only removals are explicit: `hub_msg_purge` and the admin `clear_room` |
+| chat messages (human, agents, `[tmm]` lifecycle lines, status notes, done summaries) | `state.db` `hub_msgs`, indexed `(room, seq)` (board #107; pre-#107 history imported once from team.db) | **YES.** Nothing prunes it — 1483 messages / 18 rooms / 10 days at the time of the audit, 414 KB of bodies. The only removals are explicit: `hub_msg_purge` and the admin `clear_room` |
 | observed telemetry (tool calls, prompts + receipts, notifications, warns) | `state.db` `activity`, indexed `(session, ts)` | **NO, until this change** — 5309 rows, the busiest session 4046 of them, against a 2000-row-per-session prune |
 | outstanding deliveries | `state.db` `deliveries` | YES (board #5) |
 | derived agent state, vitals readings, the recovery tracker | process memory | By design — each is a CURRENT reading that the next hook re-establishes, not history |

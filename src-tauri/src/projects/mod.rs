@@ -15,6 +15,7 @@ pub mod global_prompt;
 pub mod models;
 pub mod reconcile;
 pub mod recovery;
+pub mod rooms;
 pub(crate) mod skills;
 pub mod spawn;
 pub mod store;

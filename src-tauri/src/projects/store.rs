@@ -14,7 +14,38 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 18;
+const SCHEMA_VERSION: i64 = 19;
+
+/// One stored hub message (board #107) — the row shape of `hub_msgs`, column
+/// names mirroring the agora `messages` table it replaced so the legacy
+/// import is a straight copy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HubMsg {
+    pub seq: i64,
+    pub id: String,
+    pub ts: i64,
+    pub room: String,
+    pub sender: String,
+    /// JSON array of recipient names (`[]` = broadcast).
+    pub to_json: String,
+    pub kind: String,
+    pub body: String,
+}
+
+/// Shared row mapper for every `SELECT seq, id, ts, room, sender, to_json,
+/// kind, body FROM …` read (hub_msgs and the legacy import alike).
+fn hub_msg_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<HubMsg> {
+    Ok(HubMsg {
+        seq: r.get(0)?,
+        id: r.get(1)?,
+        ts: r.get(2)?,
+        room: r.get(3)?,
+        sender: r.get(4)?,
+        to_json: r.get(5)?,
+        kind: r.get(6)?,
+        body: r.get(7)?,
+    })
+}
 
 /// The `omp` default's system text — shared by `reg_seed` (fresh installs)
 /// and the v18 backfill migration (existing installs), so the two cannot
@@ -213,7 +244,22 @@ impl Store {
                    ts      INTEGER NOT NULL,
                    UNIQUE (session, window, line)
                  );
-                 CREATE INDEX IF NOT EXISTS deliveries_session ON deliveries(session, window);",
+                 CREATE INDEX IF NOT EXISTS deliveries_session ON deliveries(session, window);
+                 CREATE TABLE IF NOT EXISTS hub_msgs (
+                   seq     INTEGER PRIMARY KEY AUTOINCREMENT,
+                   id      TEXT NOT NULL UNIQUE,
+                   ts      INTEGER NOT NULL,
+                   room    TEXT NOT NULL,
+                   sender  TEXT NOT NULL,
+                   to_json TEXT NOT NULL DEFAULT '[]',
+                   kind    TEXT NOT NULL DEFAULT 'msg',
+                   body    TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS hub_msgs_room_seq ON hub_msgs(room, seq);
+                 CREATE TABLE IF NOT EXISTS meta (
+                   key   TEXT PRIMARY KEY,
+                   value TEXT NOT NULL
+                 );",
             )
             .map_err(|e| format!("heal deliveries: {e}"))
     }
@@ -791,6 +837,38 @@ impl Store {
                 )
                 .map_err(|e| format!("migrate to 18: {e}"))?;
         }
+        if version < 19 {
+            // v19: the hub's OWN message store (board #107). Hub chat used to
+            // live on the vendored agora bus (team.db) behind TeamBridge; the
+            // owner deleted the Team system whole (2026-09-09, board #100), and
+            // tenet 7 names state.db as one of the only two truth stores — so
+            // the room's transcript moves here. Column names mirror the agora
+            // `messages` table so the one-off import (projects::rooms) is a
+            // straight copy: `seq` is the log-position cursor hub_log pages on
+            // (AUTOINCREMENT keeps imported seqs and new ones on one line),
+            // `to_json` is the durable recipient route team-context rebuilding
+            // reads, `kind` keeps imported join/leave/system rows faithful.
+            // `meta` is a tiny kv for one-shot flags (the import marker).
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS hub_msgs (
+                       seq     INTEGER PRIMARY KEY AUTOINCREMENT,
+                       id      TEXT NOT NULL UNIQUE,
+                       ts      INTEGER NOT NULL,
+                       room    TEXT NOT NULL,
+                       sender  TEXT NOT NULL,
+                       to_json TEXT NOT NULL DEFAULT '[]',
+                       kind    TEXT NOT NULL DEFAULT 'msg',
+                       body    TEXT NOT NULL
+                     );
+                     CREATE INDEX IF NOT EXISTS hub_msgs_room_seq ON hub_msgs(room, seq);
+                     CREATE TABLE IF NOT EXISTS meta (
+                       key   TEXT PRIMARY KEY,
+                       value TEXT NOT NULL
+                     );",
+                )
+                .map_err(|e| format!("migrate to 19: {e}"))?;
+        }
         Ok(())
     }
 
@@ -870,6 +948,230 @@ impl Store {
                 )
                 .map_err(|e| format!("unarchive message: {e}"))?;
         }
+        Ok(n)
+    }
+
+    // ---- hub messages (board #107) ---------------------------------------
+    //
+    // The project room's transcript. This is the store `server/hub_rpc.rs`
+    // reads and writes directly — the agora bus that used to hold it was
+    // deleted whole with the Team system (board #100). `seq` is the paging
+    // cursor: stable, gapless within a room, already on every message a
+    // client holds (a millisecond timestamp is not — two messages can share
+    // one). Nothing is ever pruned; hiding is `msg_archive`'s job, deletion
+    // is explicit.
+
+    /// Append one message and hand the stored row back (seq assigned here).
+    pub fn hub_append(
+        &self,
+        room: &str,
+        id: &str,
+        ts: i64,
+        sender: &str,
+        to_json: &str,
+        kind: &str,
+        body: &str,
+    ) -> Result<HubMsg, String> {
+        self.conn
+            .execute(
+                "INSERT INTO hub_msgs (id, ts, room, sender, to_json, kind, body)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![id, ts, room, sender, to_json, kind, body],
+            )
+            .map_err(|e| format!("append hub message: {e}"))?;
+        let seq = self.conn.last_insert_rowid();
+        Ok(HubMsg {
+            seq,
+            id: id.to_string(),
+            ts,
+            room: room.to_string(),
+            sender: sender.to_string(),
+            to_json: to_json.to_string(),
+            kind: kind.to_string(),
+            body: body.to_string(),
+        })
+    }
+
+    /// One page of `room`'s messages, oldest first, walking backwards.
+    /// `before_seq` is exclusive; `None` is the newest page. Returns
+    /// `(messages, has_more, head_seq)` — `head_seq` is the room's newest seq.
+    pub fn hub_page(
+        &self,
+        room: &str,
+        before_seq: Option<i64>,
+        limit: i64,
+    ) -> Result<(Vec<HubMsg>, bool, i64), String> {
+        let limit = limit.clamp(1, 1000);
+        let head_seq: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(seq), 0) FROM hub_msgs WHERE room = ?1",
+                rusqlite::params![room],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("hub head seq: {e}"))?;
+        // Fetch limit+1 newest-first to learn has_more, then flip to oldest-first.
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT seq, id, ts, room, sender, to_json, kind, body FROM hub_msgs
+                 WHERE room = ?1 AND (?2 IS NULL OR seq < ?2)
+                 ORDER BY seq DESC LIMIT ?3",
+            )
+            .map_err(|e| format!("prepare hub page: {e}"))?;
+        let mut rows: Vec<HubMsg> = stmt
+            .query_map(rusqlite::params![room, before_seq, limit + 1], hub_msg_row)
+            .map_err(|e| format!("query hub page: {e}"))?
+            .filter_map(Result::ok)
+            .collect();
+        let has_more = rows.len() as i64 > limit;
+        rows.truncate(limit as usize);
+        rows.reverse();
+        Ok((rows, has_more, head_seq))
+    }
+
+    /// ONE message by its id, however old it is.
+    pub fn hub_message_by_id(&self, room: &str, id: &str) -> Result<Option<HubMsg>, String> {
+        self.conn
+            .query_row(
+                "SELECT seq, id, ts, room, sender, to_json, kind, body FROM hub_msgs
+                 WHERE room = ?1 AND id = ?2",
+                rusqlite::params![room, id],
+                hub_msg_row,
+            )
+            .optional()
+            .map_err(|e| format!("hub message by id: {e}"))
+    }
+
+    /// The newest `limit` messages matching ANY of `terms` (substring,
+    /// ASCII-case-insensitive, body or sender), oldest first. `room = None`
+    /// searches every room.
+    pub fn hub_search(
+        &self,
+        room: Option<&str>,
+        terms: &[String],
+        limit: i64,
+    ) -> Result<Vec<HubMsg>, String> {
+        let limit = limit.clamp(1, 500) as usize;
+        let terms: Vec<String> = terms
+            .iter()
+            .map(|t| t.trim().to_ascii_lowercase())
+            .filter(|t| !t.is_empty())
+            .collect();
+        if terms.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT seq, id, ts, room, sender, to_json, kind, body FROM hub_msgs
+                 WHERE (?1 IS NULL OR room = ?1) ORDER BY seq DESC",
+            )
+            .map_err(|e| format!("prepare hub search: {e}"))?;
+        let mut hits: Vec<HubMsg> = Vec::new();
+        let rows = stmt
+            .query_map(rusqlite::params![room], hub_msg_row)
+            .map_err(|e| format!("query hub search: {e}"))?;
+        for row in rows.filter_map(Result::ok) {
+            let body = row.body.to_ascii_lowercase();
+            let from = row.sender.to_ascii_lowercase();
+            if terms.iter().any(|t| body.contains(t) || from.contains(t)) {
+                hits.push(row);
+                if hits.len() >= limit {
+                    break;
+                }
+            }
+        }
+        hits.reverse();
+        Ok(hits)
+    }
+
+    /// Newest message timestamp (ms) per room — what orders the project list.
+    pub fn hub_room_latest(&self) -> Result<Vec<(String, i64)>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT room, MAX(ts) FROM hub_msgs GROUP BY room")
+            .map_err(|e| format!("prepare room latest: {e}"))?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+            .map_err(|e| format!("query room latest: {e}"))?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    /// Forget messages by id, for good — the irreversible half of deleting
+    /// (`msg_archive` is the reversible half).
+    pub fn hub_delete(&self, room: &str, ids: &[String]) -> Result<usize, String> {
+        let mut n = 0;
+        for id in ids {
+            n += self
+                .conn
+                .execute(
+                    "DELETE FROM hub_msgs WHERE room = ?1 AND id = ?2",
+                    rusqlite::params![room, id],
+                )
+                .map_err(|e| format!("delete hub message: {e}"))?;
+        }
+        Ok(n)
+    }
+
+    /// One-shot flag store (v19 `meta`).
+    pub fn meta_get(&self, key: &str) -> Result<Option<String>, String> {
+        self.conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = ?1",
+                rusqlite::params![key],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| format!("meta get: {e}"))
+    }
+
+    pub fn meta_set(&self, key: &str, value: &str) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO meta (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = ?2",
+                rusqlite::params![key, value],
+            )
+            .map(|_| ())
+            .map_err(|e| format!("meta set: {e}"))
+    }
+
+    /// The one-off legacy import (board #107): copy every `proj:*` room out of
+    /// an agora `team.db` whose schema this mirrors. Seq/id/ts are preserved so
+    /// existing clients' cursors stay valid; INSERT OR IGNORE makes a retried
+    /// partial import safe. Team rooms (`tmm-team-*` sessions' slugs) are the
+    /// deleted feature's data and stay behind.
+    pub fn hub_import_from(&mut self, legacy_db: &Path) -> Result<usize, String> {
+        let src = Connection::open_with_flags(
+            legacy_db,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .map_err(|e| format!("open legacy team.db: {e}"))?;
+        let mut stmt = src
+            .prepare(
+                "SELECT seq, id, ts, room, sender, to_json, kind, body FROM messages
+                 WHERE room LIKE 'proj:%' ORDER BY seq",
+            )
+            .map_err(|e| format!("prepare legacy read: {e}"))?;
+        let rows: Vec<HubMsg> = stmt
+            .query_map([], hub_msg_row)
+            .map_err(|e| format!("read legacy messages: {e}"))?
+            .filter_map(Result::ok)
+            .collect();
+        drop(stmt);
+        let tx = self.conn.transaction().map_err(|e| format!("import tx: {e}"))?;
+        let mut n = 0;
+        for m in &rows {
+            n += tx
+                .execute(
+                    "INSERT OR IGNORE INTO hub_msgs (seq, id, ts, room, sender, to_json, kind, body)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    rusqlite::params![m.seq, m.id, m.ts, m.room, m.sender, m.to_json, m.kind, m.body],
+                )
+                .map_err(|e| format!("import hub message: {e}"))?;
+        }
+        tx.commit().map_err(|e| format!("commit import: {e}"))?;
         Ok(n)
     }
 

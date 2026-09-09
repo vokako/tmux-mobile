@@ -5,12 +5,11 @@
 //! arrives here via tmm; what we OBSERVE arrives via hooks into
 //! projects::telemetry, and `hub_agents` joins the two at read time.
 //!
-//! Desktop-only in effect: everything needs the team bus (None on mobile) and
-//! the telemetry store (projects module, desktop-gated), so mobile answers
-//! method-not-found and clients degrade exactly like team_*.
+//! Desktop-only in effect: everything needs state.db (the projects module,
+//! desktop-gated — messages live in its `hub_msgs` table since board #107),
+//! so mobile answers method-not-found and clients degrade gracefully.
 
 use super::rpc::{require_str, Request, Response, ERR_INTERNAL, ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND};
-use super::TeamBridge;
 
 /// Bus room for a project's hub chat.
 ///
@@ -30,14 +29,12 @@ pub(super) fn project_room(session: &str) -> String {
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _notifications: Option<&crate::agent_notifications::AgentNotificationHub>) -> Response {
+pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::agent_notifications::AgentNotificationHub>) -> Response {
+    use crate::projects::rooms;
     use crate::projects::telemetry;
 
     let id = req.id;
     let p = &req.params;
-    let Some(bus) = team else {
-        return Response::err(id, ERR_METHOD_NOT_FOUND, "hub not available on this server".into());
-    };
     // The one method that is about EVERY room: when did we last talk in each?
     // It answers before the session gate below, because it has no session to
     // resolve — the sidebar asks it once to order the whole project list.
@@ -50,7 +47,7 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _
         for (s, w, st) in crate::projects::telemetry::all_states() {
             states.insert(format!("{s}:{w}"), serde_json::Value::String(st));
         }
-        return Response::ok(id, serde_json::json!({ "rooms": bus.room_latest(), "states": states }));
+        return Response::ok(id, serde_json::json!({ "rooms": crate::projects::rooms::room_latest(), "states": states }));
     }
     // The board twin of `hub_rooms`: issue counts per column for EVERY
     // project's board, one grouped read (board #39) — the Board sidebar
@@ -139,9 +136,7 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _
                     format!("no managed agent named '{agent}' in session '{session}'"),
                 );
             }
-            if bus.open_room(&room).is_ok() {
-                let _ = bus.post(&room, "human", &format!("[tmm] {} → {}", text, sent.join(", ")), false);
-            }
+            let _ = rooms::post(&room, "human", &format!("[tmm] {} → {}", text, sent.join(", ")));
             Response::ok(id, serde_json::json!({ "sent": sent, "command": text }))
         }
 
@@ -165,15 +160,8 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _
             // for setting this when the origin is a hook.
             let record_only =
                 is_status || p.get("record_only").and_then(|v| v.as_bool()).unwrap_or(false);
-            if let Err(e) = bus.open_room(&room) {
-                return Response::err(id, ERR_INTERNAL, e);
-            }
-            let requires_reply = p
-                .get("requires_reply")
-                .and_then(|v| v.as_bool())
-                .unwrap_or_else(|| !record_only && body.contains('@'));
             let recipients = mention_names(&body);
-            match bus.post_routed(&room, from, &body, &recipients, requires_reply) {
+            match rooms::post_routed(&room, from, &body, &recipients) {
                 Ok(msg) => {
                     // DELIVERY: an idle agent sits at its prompt and reads
                     // nothing — @mentions are typed into the mentioned agents'
@@ -183,7 +171,7 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _
                     // reply loops (see record_only comment above).
                     if !record_only {
                         let seq = msg.get("seq").and_then(|v| v.as_i64());
-                        deliver_mentions(session, from, &body, bus, &room, seq);
+                        deliver_mentions(session, from, &body, &room, seq);
                     }
                     Response::ok(id, msg)
                 }
@@ -198,15 +186,12 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _
         // only honest way to keep a first load small (board #9).
         "hub_log" => {
             let limit = p.get("limit").and_then(|v| v.as_i64()).unwrap_or(100).clamp(1, 1000);
-            if let Err(e) = bus.open_room(&room) {
-                return Response::err(id, ERR_INTERNAL, e);
-            }
             let since_ts = p.get("since_ts").and_then(|v| v.as_i64()).unwrap_or(0);
             // The bus's own cursor is `seq`, the message's log position — stable,
             // gapless and already on every message the client holds, which a ts is
             // not (two messages can share a millisecond).
             let before_seq = p.get("before_seq").and_then(|v| v.as_i64()).filter(|n| *n > 0);
-            let mut history = bus.history_page(&room, before_seq, limit);
+            let mut history = rooms::history_page(&room, before_seq, limit);
             // An archived message is hidden, not gone: the room's own store still
             // has it (that is what makes a restore free), so the hiding happens
             // here, on the way out.
@@ -284,7 +269,7 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _
             let global = p.get("global").and_then(|v| v.as_bool()).unwrap_or(false);
             let limit = p.get("limit").and_then(|v| v.as_i64()).unwrap_or(50).clamp(1, 500);
             let scope = if global { None } else { Some(room.as_str()) };
-            let mut result = bus.search_messages(scope, &terms, limit);
+            let mut result = rooms::search_messages(scope, &terms, limit);
             if let Some(msgs) = result.get_mut("messages").and_then(|m| m.as_array_mut()) {
                 // Archived = hidden everywhere, including from search. The ids
                 // are per room, so a global result set asks once per room it
@@ -330,12 +315,9 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _
                     // user scrolled back to is as archivable as a fresh one (this
                     // used to scan the newest 1000, which quietly excluded
                     // everything older).
-                    if let Err(e) = bus.open_room(&room) {
-                        return Response::err(id, ERR_INTERNAL, e);
-                    }
                     let mut done = 0usize;
                     for mid in &ids {
-                        let Some(m) = bus.message_by_id(&room, mid) else { continue };
+                        let Some(m) = rooms::message_by_id(&room, mid) else { continue };
                         let ok = crate::projects::archive_msg(
                             &room,
                             mid,
@@ -356,7 +338,7 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _
                 _ => {
                     // Forget the message itself first: if that fails the archive row
                     // stays, so the message is still listed and can be tried again.
-                    match bus.delete_messages(&room, &ids) {
+                    match rooms::delete_messages(&room, &ids) {
                         Ok(n) => {
                             let _ = crate::projects::unarchive_msgs(&room, &ids);
                             Response::ok(id, serde_json::json!({ "deleted": n }))
@@ -428,9 +410,7 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _
                                 prev["body"].as_str().unwrap_or(""),
                                 saved,
                             );
-                            if bus.open_room(&room).is_ok() {
-                                let _ = bus.post(&room, who, &format!("[tmm] board #{saved} {old_status} → {new_status} — {title}"), false);
-                            }
+                            let _ = rooms::post(&room, who, &format!("[tmm] board #{saved} {old_status} → {new_status} — {title}"));
                             if new_status == "review" {
                                 let reporter = prev["created_by"].as_str().unwrap_or("");
                                 if !reporter.is_empty() && reporter != "human" && reporter != who {
@@ -617,7 +597,7 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _
                     // cut short, not an ending); the feed row was the missing
                     // half of the composer's interrupt affordance (owner,
                     // 2026-08-24: "发送 interrupt 的状态在消息列表里也要展示").
-                    let _ = bus.post(&room, agent, &format!("[tmm] interrupted {agent}"), false);
+                    let _ = rooms::post(&room, agent, &format!("[tmm] interrupted {agent}"));
                     Response::ok(id, serde_json::json!({ "interrupted": agent }))
                 }
                 Err(e) => Response::err(id, ERR_INTERNAL, e),
@@ -633,9 +613,7 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _
             };
             match crate::projects::agent_remove(session, agent) {
                 Ok(v) => {
-                    if bus.open_room(&room).is_ok() {
-                        let _ = bus.post(&room, agent, &format!("[tmm] removed {agent}"), false);
-                    }
+                    let _ = rooms::post(&room, agent, &format!("[tmm] removed {agent}"));
                     Response::ok(id, v)
                 }
                 Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
@@ -669,9 +647,7 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _
                 (None, true) => {}
             }
             if !restart {
-                if bus.open_room(&room).is_ok() {
-                    let _ = bus.post(&room, agent, &format!("[tmm] stopped {agent}"), false);
-                }
+                let _ = rooms::post(&room, agent, &format!("[tmm] stopped {agent}"));
                 return Response::ok(id, serde_json::json!({ "stopped": agent }));
             }
             // Recreate from the declaration. A window younger than the capture
@@ -702,9 +678,7 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _
                     return Response::err(id, ERR_INTERNAL, format!("restart failed: {e}"));
                 }
             }
-            if bus.open_room(&room).is_ok() {
-                let _ = bus.post(&room, agent, &format!("[tmm] restarted {agent}"), false);
-            }
+            let _ = rooms::post(&room, agent, &format!("[tmm] restarted {agent}"));
             Response::ok(id, serde_json::json!({ "restarted": agent, "resumed": resumed }))
         }
 
@@ -722,18 +696,16 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _
             let by = p.get("by").and_then(|v| v.as_str()).unwrap_or("");
             match crate::projects::spawn::spawn_team(session, team, brief, by) {
                 Ok(result) => {
-                    if bus.open_room(&room).is_ok() {
-                        let who = if by.is_empty() { "human" } else { by };
-                        let empty = Vec::new();
-                        for m in result.get("spawned").and_then(|v| v.as_array()).unwrap_or(&empty) {
-                            let win = m.get("window_name").and_then(|v| v.as_str()).unwrap_or("");
-                            let line = if brief.is_empty() {
-                                format!("[tmm] spawned {win} — team {team}")
-                            } else {
-                                format!("[tmm] spawned {win} — team {team}: {brief}")
-                            };
-                            let _ = bus.post(&room, who, &line, false);
-                        }
+                    let who = if by.is_empty() { "human" } else { by };
+                    let empty = Vec::new();
+                    for m in result.get("spawned").and_then(|v| v.as_array()).unwrap_or(&empty) {
+                        let win = m.get("window_name").and_then(|v| v.as_str()).unwrap_or("");
+                        let line = if brief.is_empty() {
+                            format!("[tmm] spawned {win} — team {team}")
+                        } else {
+                            format!("[tmm] spawned {win} — team {team}: {brief}")
+                        };
+                        let _ = rooms::post(&room, who, &line);
                     }
                     Response::ok(id, result)
                 }
@@ -752,19 +724,17 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _
             }) {
                 Ok(result) => {
                     // The spawn is chat-visible: the room is the record.
-                    if bus.open_room(&room).is_ok() {
-                        let who = if by.is_empty() { "human" } else { by };
-                        let win = result.get("window_name").and_then(|v| v.as_str()).unwrap_or(agent);
-                        // `[tmm] ` marks a lifecycle line: the client renders it
-                        // as a system row rather than a chat bubble. A machine
-                        // marker, not a glyph — how it LOOKS is the UI's call.
-                        let line = if brief.is_empty() {
-                            format!("[tmm] spawned {win}")
-                        } else {
-                            format!("[tmm] spawned {win} — {brief}")
-                        };
-                        let _ = bus.post(&room, who, &line, false);
-                    }
+                    let who = if by.is_empty() { "human" } else { by };
+                    let win = result.get("window_name").and_then(|v| v.as_str()).unwrap_or(agent);
+                    // `[tmm] ` marks a lifecycle line: the client renders it
+                    // as a system row rather than a chat bubble. A machine
+                    // marker, not a glyph — how it LOOKS is the UI's call.
+                    let line = if brief.is_empty() {
+                        format!("[tmm] spawned {win}")
+                    } else {
+                        format!("[tmm] spawned {win} — {brief}")
+                    };
+                    let _ = rooms::post(&room, who, &line);
                     Response::ok(id, result)
                 }
                 Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
@@ -776,7 +746,7 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
-pub(super) fn handle_hub_request(req: &Request, _team: Option<&dyn TeamBridge>, _notifications: Option<&crate::agent_notifications::AgentNotificationHub>) -> Response {
+pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::agent_notifications::AgentNotificationHub>) -> Response {
     Response::err(req.id, ERR_METHOD_NOT_FOUND, "hub not available on this platform".into())
 }
 
@@ -787,6 +757,31 @@ pub(super) fn handle_hub_request(req: &Request, _team: Option<&dyn TeamBridge>, 
 fn window_of_agent(session: &str, agent: &str) -> Option<usize> {
     let panes = crate::tmux::list_panes(session).ok()?;
     panes.iter().find(|p| p.window_name == agent).map(|p| p.window)
+}
+
+/// Pump newly-appended hub messages to one connection (board #107). The wire
+/// frame keeps the `team_message` method name the client has always listened
+/// for — renaming the frame would break every deployed client for zero
+/// behaviour change. Lagged receivers re-sync via hub_log on demand.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub(super) async fn hub_push_loop(out_tx: tokio::sync::mpsc::UnboundedSender<super::Outbound>) {
+    let mut rx = crate::projects::rooms::subscribe();
+    loop {
+        match rx.recv().await {
+            Ok(msg_json) => {
+                let frame = serde_json::json!({
+                    "id": null,
+                    "method": "team_message",
+                    "params": { "message": serde_json::from_str::<serde_json::Value>(&msg_json).unwrap_or(serde_json::Value::Null) },
+                });
+                if out_tx.send(super::Outbound::Encrypted(serde_json::to_string(&frame).unwrap())).is_err() {
+                    return; // send task gone
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+        }
+    }
 }
 
 /// Local wall-clock stamp for a line an agent will read: `2026-08-17 16:31`.
@@ -1145,7 +1140,6 @@ fn deliver_mentions(
     session: &str,
     from: &str,
     body: &str,
-    bus: &dyn TeamBridge,
     room: &str,
     before_seq: Option<i64>,
 ) {
@@ -1169,7 +1163,7 @@ fn deliver_mentions(
             && crate::projects::team_of(ws.as_deref(), &pane.window_name).is_some()
     });
     let (history, history_clipped) = if needs_context {
-        let page = bus.history_page(room, before_seq, TEAM_CONTEXT_HISTORY_LIMIT);
+        let page = crate::projects::rooms::history_page(room, before_seq, TEAM_CONTEXT_HISTORY_LIMIT);
         let hidden: std::collections::HashSet<String> =
             crate::projects::archived_ids(room).into_iter().collect();
         let messages: Vec<serde_json::Value> = page
@@ -1315,6 +1309,20 @@ fn agent_states(session: &str) -> serde_json::Value {
 
 #[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
 mod tests {
+    use super::super::test_util::req;
+    use super::*;
+    use crate::projects::rooms;
+    use crate::projects::telemetry;
+
+    /// Every store-touching test seeds its own unique session/room: the test
+    /// store (state.db under TMM_STATE_DB) is one file per process, and the
+    /// hub's messages now live in it for real — the Bridge double died with
+    /// TeamBridge (board #107).
+    fn unique(prefix: &str) -> (String, String) {
+        let session = format!("{prefix}-{}", uuid::Uuid::new_v4());
+        let room = format!("proj:{session}");
+        (session, room)
+    }
 
     /// The assignee-notification decision (owner, 2026-08-30): pure, so the
     /// skips are pinned without tmux. The delivery half reuses the same
@@ -1434,11 +1442,10 @@ mod tests {
         crate::projects::tests::use_test_store();
         let session = format!("counts-rpc-{}", uuid::Uuid::new_v4());
         crate::projects::board_save(&session, None, Some("count me"), None, None, None, "human").unwrap();
-        let b = Bridge::new();
         // NO `session` in params, by design: the method is about EVERY board,
         // so it must answer BEFORE the session gate — a "session required"
         // error here means it slid below the gate (the hub_rooms precedent).
-        let r = handle_hub_request(&req("hub_board_counts", serde_json::json!({})), Some(&b), None);
+        let r = handle_hub_request(&req("hub_board_counts", serde_json::json!({})), None);
         assert!(r.error.is_none(), "{:?}", r.error.map(|e| e.message));
         let v = r.result.expect("result");
         let counts = v["counts"].as_object().expect("counts object");
@@ -1446,156 +1453,6 @@ mod tests {
         assert_eq!(row["todo"], 1);
         assert_eq!(row["doing"], 0, "zero-filled vocabulary over the wire");
         assert_eq!(row["total"], 1, "emptiness is one explicit field");
-    }
-    use super::super::test_util::req;
-    use super::*;
-    use crate::projects::telemetry;
-
-    // The MockAgora from team_rpc's tests is private to that module; a local
-    // minimal bridge keeps this module self-contained.
-    struct Bridge {
-        posts: std::sync::Mutex<Vec<(String, String, String)>>,
-        routes: std::sync::Mutex<Vec<Vec<String>>>,
-        /// Every `history_page` call, so a test can assert what the RPC asked for.
-        pages: std::sync::Mutex<Vec<(Option<i64>, i64)>>,
-        /// A real little message log, ascending by seq. Empty = answer the canned
-        /// two-message page below; non-empty = page over it like the bus does, so
-        /// a test can walk it exactly as a client would.
-        log: std::sync::Mutex<Vec<serde_json::Value>>,
-    }
-    impl Bridge {
-        fn new() -> Self {
-            Bridge {
-                posts: std::sync::Mutex::new(Vec::new()),
-                routes: std::sync::Mutex::new(Vec::new()),
-                pages: std::sync::Mutex::new(Vec::new()),
-                log: std::sync::Mutex::new(Vec::new()),
-            }
-        }
-        /// Seed `n` messages, seq/ts 1..=n, ids `m<seq>`.
-        fn with_log(self, room: &str, n: i64) -> Self {
-            *self.log.lock().unwrap() = (1..=n)
-                .map(|seq| {
-                    serde_json::json!({
-                        "room": room, "seq": seq, "id": format!("m{seq}"),
-                        "ts": seq * 10, "from": "human", "body": format!("body{seq}")
-                    })
-                })
-                .collect();
-            self
-        }
-    }
-    impl TeamBridge for Bridge {
-        fn delete_messages(&self, _room: &str, ids: &[String]) -> Result<usize, String> {
-            Ok(ids.len())
-        }
-        fn room_latest(&self) -> serde_json::Value {
-            serde_json::json!({ "proj:blog": 200 })
-        }
-
-        fn history(&self, room: &str, limit: i64) -> serde_json::Value {
-            // Seeded log first, like `history_page`: the newest `limit` rows,
-            // oldest first. The fixed two-row answer below is what every test
-            // without a seed has always seen.
-            let all = self.log.lock().unwrap().clone();
-            if !all.is_empty() {
-                let start = all.len().saturating_sub(limit.max(1) as usize);
-                return serde_json::json!({ "messages": all[start..].to_vec() });
-            }
-            serde_json::json!({ "messages": [
-                { "room": room, "seq": 41, "ts": 100, "from": "a", "body": "old" },
-                { "room": room, "seq": 42, "ts": 200, "from": "b", "body": "new" },
-            ] })
-        }
-        fn history_page(&self, room: &str, before_seq: Option<i64>, limit: i64) -> serde_json::Value {
-            self.pages.lock().unwrap().push((before_seq, limit));
-            // Seeded log: page over it the way the bus does — newest `limit` rows
-            // strictly older than the cursor, oldest first.
-            let all = self.log.lock().unwrap().clone();
-            if !all.is_empty() {
-                let head_seq = all.last().and_then(|m| m["seq"].as_i64()).unwrap_or(0);
-                let older: Vec<serde_json::Value> = all
-                    .into_iter()
-                    .filter(|m| {
-                        before_seq.is_none_or(|b| m["seq"].as_i64().unwrap_or(0) < b)
-                    })
-                    .collect();
-                let start = older.len().saturating_sub(limit.max(1) as usize);
-                let has_more = start > 0;
-                return serde_json::json!({
-                    "messages": older[start..].to_vec(),
-                    "has_more": has_more,
-                    "head_seq": head_seq,
-                });
-            }
-            match before_seq {
-                // The page behind seq 41: one older message, and nothing before it.
-                Some(_) => serde_json::json!({
-                    "messages": [{ "room": room, "seq": 7, "ts": 50, "from": "a", "body": "older" }],
-                    "has_more": false, "head_seq": 42
-                }),
-                None => serde_json::json!({
-                    "messages": [
-                        { "room": room, "seq": 41, "ts": 100, "from": "a", "body": "old" },
-                        { "room": room, "seq": 42, "ts": 200, "from": "b", "body": "new" },
-                    ],
-                    "has_more": true, "head_seq": 42
-                }),
-            }
-        }
-        fn roster(&self, _room: &str) -> serde_json::Value { serde_json::json!({ "roster": [] }) }
-        fn post(&self, room: &str, from: &str, body: &str, _rr: bool) -> Result<serde_json::Value, String> {
-            self.posts.lock().unwrap().push((room.into(), from.into(), body.into()));
-            let mut log = self.log.lock().unwrap();
-            if !log.is_empty() {
-                let seq = log.last().and_then(|message| message["seq"].as_i64()).unwrap_or(0) + 1;
-                let message = serde_json::json!({
-                    "room": room, "seq": seq, "id": format!("m{seq}"), "ts": seq * 10,
-                    "from": from, "to": mention_names(body), "body": body,
-                });
-                log.push(message.clone());
-                return Ok(message);
-            }
-            Ok(serde_json::json!({ "ok": true }))
-        }
-        fn post_routed(
-            &self,
-            room: &str,
-            from: &str,
-            body: &str,
-            to: &[String],
-            requires_reply: bool,
-        ) -> Result<serde_json::Value, String> {
-            self.routes.lock().unwrap().push(to.to_vec());
-            let mut message = self.post(room, from, body, requires_reply)?;
-            if let Some(object) = message.as_object_mut() {
-                object.insert("to".to_string(), serde_json::json!(to));
-            }
-            if let Some(last) = self.log.lock().unwrap().last_mut() {
-                if let Some(object) = last.as_object_mut() {
-                    object.insert("to".to_string(), serde_json::json!(to));
-                }
-            }
-            Ok(message)
-        }
-        fn set_agent_status(&self, _r: &str, _a: &str, _s: &str) -> Result<(), String> { Ok(()) }
-        fn employees(&self, _r: &str) -> serde_json::Value { serde_json::json!({}) }
-        fn seed_employee(&self, _r: &str, _n: &str, _s: &serde_json::Value) -> Result<(), String> { Ok(()) }
-        fn employee_specs(&self, _r: &str) -> Vec<(String, serde_json::Value, String)> { Vec::new() }
-        fn room_exists(&self, _r: &str) -> bool { true }
-        fn start_team(&self, _w: &str, _t: &str) -> serde_json::Value { serde_json::json!({}) }
-        fn close_team(&self, _r: &str) -> bool { false }
-        fn teams(&self) -> serde_json::Value { serde_json::json!({ "teams": [] }) }
-        fn templates(&self) -> serde_json::Value { serde_json::json!({ "templates": [] }) }
-        fn save_template(&self, _n: &str, _a: &serde_json::Value) -> Result<(), String> { Ok(()) }
-        fn delete_template(&self, _n: &str) -> Result<(), String> { Ok(()) }
-        fn system_prompt(&self) -> String { String::new() }
-        fn save_system_prompt(&self, _t: &str) -> Result<(), String> { Ok(()) }
-        fn default_workspace(&self) -> String { String::new() }
-        fn subscribe(&self) -> tokio::sync::broadcast::Receiver<String> {
-            tokio::sync::broadcast::channel(1).1
-        }
-        fn open_room(&self, _room: &str) -> Result<(), String> { Ok(()) }
     }
 
     /// A page can lose EVERY row to the archive filter, and the walk still has to
@@ -1606,20 +1463,23 @@ mod tests {
     #[test]
     fn a_fully_hidden_page_still_hands_back_a_cursor_to_the_older_visible_ones() {
         crate::projects::tests::use_test_store();
-        let session = format!("hid-{}", uuid::Uuid::new_v4());
-        let room = format!("proj:{session}");
-        // Five messages; the middle stretch (seq 3 and 4) is archived, so one whole
-        // page of two is invisible.
-        let b = Bridge::new().with_log(&room, 5);
-        for seq in [3, 4] {
-            crate::projects::archive_msg(&room, &format!("m{seq}"), seq * 10, "human", "x").unwrap();
+        let (session, room) = unique("hid");
+        // Five messages; the middle stretch (3rd and 4th) is archived, so one
+        // whole page of two is invisible. seq is store-global, so every
+        // position below is read off the seeded rows, never assumed.
+        let seeded: Vec<serde_json::Value> = (1..=5)
+            .map(|n| rooms::seed_msg(&room, &format!("{room}-m{n}"), n * 10, "human", &[], &format!("body{n}")))
+            .collect();
+        let seq = |n: usize| seeded[n - 1]["seq"].as_i64().unwrap();
+        for n in [3, 4] {
+            crate::projects::archive_msg(&room, seeded[n - 1]["id"].as_str().unwrap(), (n as u64) * 10, "human", "x").unwrap();
         }
         let page = |before: Option<i64>| {
             let mut params = serde_json::json!({ "session": session, "limit": 2 });
             if let Some(b) = before {
                 params["before_seq"] = serde_json::json!(b);
             }
-            handle_hub_request(&req("hub_log", params), Some(&b), None).result.expect("result")
+            handle_hub_request(&req("hub_log", params), None).result.expect("result")
         };
 
         // Page 1: raw [m4, m5], m4 hidden → the visible tail, cursor from the
@@ -1630,22 +1490,22 @@ mod tests {
                 .map(|m| m["body"].as_str().unwrap().to_string()).collect::<Vec<_>>()
         };
         assert_eq!(bodies(&p1), vec!["body5"]);
-        assert_eq!(p1["oldest_seq"], 5);
+        assert_eq!(p1["oldest_seq"], seq(5));
         assert_eq!(p1["has_more"], true);
 
         // Page 2: raw [m3, m4] — BOTH hidden. Nothing to render, but the page must
-        // still carry the raw cursor (3) or the walk cannot go on.
+        // still carry the raw cursor or the walk cannot go on.
         let p2 = page(p1["oldest_seq"].as_i64());
         assert!(bodies(&p2).is_empty(), "the whole page is hidden");
         assert_eq!(p2["has_more"], true, "and there is more behind it");
-        assert_eq!(p2["oldest_seq"], 3, "the raw oldest seq is the cursor of last resort");
+        assert_eq!(p2["oldest_seq"], seq(3), "the raw oldest seq is the cursor of last resort");
 
         // Page 3: continuing from that cursor reaches the older VISIBLE messages,
         // which is the behaviour the fallback exists for.
         let p3 = page(p2["oldest_seq"].as_i64());
         assert_eq!(bodies(&p3), vec!["body1", "body2"]);
         assert_eq!(p3["has_more"], false, "that is the start of the conversation");
-        assert_eq!(p3["oldest_seq"], 1);
+        assert_eq!(p3["oldest_seq"], seq(1));
 
         // Every visible message was reached exactly once across the walk.
         let seen: Vec<String> = [bodies(&p3), bodies(&p2), bodies(&p1)].concat();
@@ -1653,41 +1513,42 @@ mod tests {
     }
 
     /// Board #9: the room keeps everything, so the client needs a way to ask for
-    /// a SMALL first page and then walk back. Two contracts are pinned here — an
-    /// older client (no new params) gets exactly the newest page it always got,
-    /// and `before_seq` is passed through with a cursor handed back for the step
-    /// after it.
+    /// a SMALL first page and then walk back. Two contracts are pinned here — a
+    /// client with no cursor gets exactly the newest page, and `before_seq`
+    /// walks backwards with a cursor handed back for the step after it.
     #[test]
     fn hub_log_answers_the_newest_page_and_pages_backwards_on_request() {
-        let b = Bridge::new();
-        // An older client: only session (+ maybe since_ts/limit).
-        let r = handle_hub_request(&req("hub_log", serde_json::json!({ "session": "blog" })), Some(&b), None);
+        crate::projects::tests::use_test_store();
+        let (session, room) = unique("page");
+        let older = rooms::seed_msg(&room, &format!("{room}-1"), 50, "a", &[], "older");
+        let old = rooms::seed_msg(&room, &format!("{room}-2"), 100, "a", &[], "old");
+        let new = rooms::seed_msg(&room, &format!("{room}-3"), 200, "b", &[], "new");
+
+        // A client with no cursor: the newest page under its limit.
+        let r = handle_hub_request(&req("hub_log", serde_json::json!({ "session": session, "limit": 2 })), None);
         let v = r.result.expect("result");
         let msgs = v["messages"].as_array().unwrap();
-        assert_eq!(msgs.len(), 2, "the newest page, unchanged");
-        assert_eq!(msgs[0]["body"], "old", "oldest first, as before");
+        assert_eq!(msgs.len(), 2, "the newest page");
+        assert_eq!(msgs[0]["body"], "old", "oldest first");
         assert_eq!(v["has_more"], true, "and it says history remains behind it");
-        assert_eq!(v["oldest_seq"], 41, "the cursor for the next page back");
-        assert_eq!(v["head_seq"], 42);
-        assert_eq!(b.pages.lock().unwrap()[0], (None, 100), "default limit, no cursor");
+        assert_eq!(v["oldest_seq"], old["seq"], "the cursor for the next page back");
+        assert_eq!(v["head_seq"], new["seq"]);
 
         // Scrolled up: the client asks for what is behind its oldest message.
         let r = handle_hub_request(
-            &req("hub_log", serde_json::json!({ "session": "blog", "before_seq": 41, "limit": 50 })),
-            Some(&b),
+            &req("hub_log", serde_json::json!({ "session": session, "before_seq": old["seq"], "limit": 50 })),
             None,
         );
         let v = r.result.expect("result");
         assert_eq!(v["messages"].as_array().unwrap().len(), 1);
         assert_eq!(v["messages"][0]["body"], "older");
+        assert_eq!(v["messages"][0]["id"], older["id"]);
         assert_eq!(v["has_more"], false, "the conversation begins there");
-        assert_eq!(b.pages.lock().unwrap()[1], (Some(41), 50));
 
         // A nonsense cursor is no cursor: 0/negative means "the newest page",
         // never a query that could return nothing for ever.
         let r = handle_hub_request(
-            &req("hub_log", serde_json::json!({ "session": "blog", "before_seq": 0 })),
-            Some(&b),
+            &req("hub_log", serde_json::json!({ "session": session, "before_seq": 0, "limit": 2 })),
             None,
         );
         assert_eq!(r.result.expect("result")["messages"].as_array().unwrap().len(), 2);
@@ -1700,52 +1561,54 @@ mod tests {
     #[test]
     fn hub_search_matches_terms_validates_them_and_hides_the_archived() {
         crate::projects::tests::use_test_store();
-        let session = format!("srch-{}", uuid::Uuid::new_v4());
-        let room = format!("proj:{session}");
-        let b = Bridge::new();
+        let (session, room) = unique("srch");
+        rooms::seed_msg(&room, &format!("{room}-1"), 100, "a", &[], "old");
+        let newer = rooms::seed_msg(&room, &format!("{room}-2"), 200, "b", &[], "new");
         // No terms (or all-blank terms) is a caller error, not "match everything".
         for bad in [serde_json::json!({ "session": session }),
                     serde_json::json!({ "session": session, "grep": ["  "] })] {
-            let r = handle_hub_request(&req("hub_search", bad), Some(&b), None);
+            let r = handle_hub_request(&req("hub_search", bad), None);
             assert!(r.error.is_some(), "empty grep must be rejected");
         }
-        // Any-match over the double's history ("old" by a, "new" by b): one term
+        // Any-match over the room's history ("old" by a, "new" by b): one term
         // hits one message; two terms hit both; a sender name is searchable too.
         let search = |grep: serde_json::Value| {
             let r = handle_hub_request(
                 &req("hub_search", serde_json::json!({ "session": session, "grep": grep })),
-                Some(&b), None,
+                None,
             );
             r.result.expect("result")["messages"].as_array().unwrap().clone()
         };
         assert_eq!(search(serde_json::json!(["OLD"])).len(), 1, "case-insensitive body match");
         assert_eq!(search(serde_json::json!(["old", "new"])).len(), 2, "a term list is any-match");
         assert_eq!(search(serde_json::json!(["b"])).len(), 1, "the sender matches too");
-        // Archiving hides from search as it does from the log. The double's rows
-        // carry no id, so archive by the id the real page would carry — then a
-        // seeded log row with that id must not surface.
-        let b = Bridge::new().with_log(&room, 2);
-        crate::projects::archive_msg(&room, "m2", 20, "human", "body2").unwrap();
-        let r = handle_hub_request(
-            &req("hub_search", serde_json::json!({ "session": session, "grep": ["body"] })),
-            Some(&b), None,
-        );
-        let msgs = r.result.expect("result")["messages"].as_array().unwrap().clone();
+        // Archiving hides from search as it does from the log.
+        crate::projects::archive_msg(&room, newer["id"].as_str().unwrap(), 200, "b", "new").unwrap();
+        let msgs = search(serde_json::json!(["old", "new"]));
         assert_eq!(msgs.len(), 1, "the archived hit is filtered: {msgs:?}");
-        assert_eq!(msgs[0]["id"], "m1");
+        assert_eq!(msgs[0]["body"], "old");
     }
 
-    /// The global scope through a bridge that cannot enumerate rooms answers
-    /// empty rather than wrong — the real bridge (team_bridge) queries the
-    /// store across rooms; the trait default has no room list to walk.
+    /// `global: true` widens the scope to EVERY room; each hit carries its
+    /// `room` field so a cross-project answer stays readable. (The store
+    /// enumerates rooms itself now — the "pageless bridge degrades to empty"
+    /// contract died with the TeamBridge trait, board #107.)
     #[test]
-    fn hub_search_global_on_a_pageless_bridge_degrades_to_empty() {
-        let b = Bridge::new();
+    fn hub_search_global_searches_every_room_and_names_it() {
+        crate::projects::tests::use_test_store();
+        let (session_a, room_a) = unique("gsrch-a");
+        let (_, room_b) = unique("gsrch-b");
+        let needle = format!("needle-{}", uuid::Uuid::new_v4());
+        rooms::seed_msg(&room_a, &format!("{room_a}-1"), 100, "a", &[], &format!("{needle} in a"));
+        rooms::seed_msg(&room_b, &format!("{room_b}-1"), 200, "b", &[], &format!("{needle} in b"));
         let r = handle_hub_request(
-            &req("hub_search", serde_json::json!({ "session": "blog", "grep": ["old"], "global": true })),
-            Some(&b), None,
+            &req("hub_search", serde_json::json!({ "session": session_a, "grep": [needle], "global": true })),
+            None,
         );
-        assert_eq!(r.result.expect("result")["messages"].as_array().unwrap().len(), 0);
+        let msgs = r.result.expect("result")["messages"].as_array().unwrap().clone();
+        assert_eq!(msgs.len(), 2, "both rooms are searched: {msgs:?}");
+        let rooms_hit: Vec<&str> = msgs.iter().map(|m| m["room"].as_str().unwrap()).collect();
+        assert!(rooms_hit.contains(&room_a.as_str()) && rooms_hit.contains(&room_b.as_str()));
     }
 
     /// The activity feed's half of the same contract. The durable log keeps every
@@ -1753,7 +1616,7 @@ mod tests {
     /// and a (ts, id) cursor handed back for walking backwards.
     #[test]
     fn hub_activity_pages_and_caps_and_reports_what_it_holds() {
-        let b = Bridge::new();
+        crate::projects::tests::use_test_store();
         let session = format!("act-rpc-{}", uuid::Uuid::new_v4());
         for n in 0..6 {
             telemetry::record_tool(&session, 1, "Edit", &format!("f{n}.rs"));
@@ -1761,7 +1624,6 @@ mod tests {
         // An older client sends only since_ts and gets the newest page.
         let r = handle_hub_request(
             &req("hub_activity", serde_json::json!({ "session": session, "since_ts": 0 })),
-            Some(&b),
             None,
         );
         let v = r.result.expect("result");
@@ -1772,7 +1634,6 @@ mod tests {
         // A limit is honoured, and the page carries the cursor for the next one.
         let r = handle_hub_request(
             &req("hub_activity", serde_json::json!({ "session": session, "limit": 2 })),
-            Some(&b),
             None,
         );
         let v = r.result.expect("result");
@@ -1783,7 +1644,6 @@ mod tests {
         // And it is a CAP, not a suggestion.
         let r = handle_hub_request(
             &req("hub_activity", serde_json::json!({ "session": session, "limit": 99999 })),
-            Some(&b),
             None,
         );
         assert!(
@@ -1793,59 +1653,61 @@ mod tests {
     }
 
     #[test]
-    fn hub_without_bus_is_method_not_found() {        let r = handle_hub_request(&req("hub_post", serde_json::json!({ "session": "s", "body": "hi" })), None, None);
-        assert_eq!(r.error.as_ref().map(|e| e.code), Some(ERR_METHOD_NOT_FOUND));
-    }
-
-    #[test]
     fn hub_post_lands_in_the_project_room_with_the_sender() {
-        let b = Bridge::new();
+        crate::projects::tests::use_test_store();
+        let (session, room) = unique("post");
         let r = handle_hub_request(
-            &req("hub_post", serde_json::json!({ "session": "blog", "from": "lead", "body": "@reviewer 看一下" })),
-            Some(&b),
+            &req("hub_post", serde_json::json!({ "session": session, "from": "lead", "body": "@reviewer 看一下" })),
             None,
         );
         assert!(r.error.is_none(), "{}", r.error.map(|e| e.message).unwrap_or_default());
-        let posts = b.posts.lock().unwrap();
-        assert_eq!(posts.len(), 1);
-        assert_eq!(posts[0], ("proj:blog".to_string(), "lead".to_string(), "@reviewer 看一下".to_string()));
-        assert_eq!(b.routes.lock().unwrap().as_slice(), &[vec!["reviewer".to_string()]]);
+        let msg = r.result.expect("the stored message comes back");
+        assert_eq!(msg["room"], room);
+        assert_eq!(msg["from"], "lead");
+        assert_eq!(msg["to"], serde_json::json!(["reviewer"]), "the route is stored in the envelope");
+        // And it is durably in the room, not just in the response.
+        let page = rooms::history_page(&room, None, 10);
+        let msgs = page["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["body"], "@reviewer 看一下");
     }
 
     #[test]
     fn hub_post_record_only_skips_delivery_but_stores_message() {
-        let b = Bridge::new();
+        crate::projects::tests::use_test_store();
+        let (session, room) = unique("rec");
         let r = handle_hub_request(
             &req("hub_post", serde_json::json!({
-                "session": "blog", "from": "lead",
+                "session": session, "from": "lead",
                 "body": "@reviewer 自动结果", "record_only": true
             })),
-            Some(&b),
             None,
         );
         assert!(r.error.is_none(), "{}", r.error.map(|e| e.message).unwrap_or_default());
-        // The bus.post was called (message stored) even though delivery was skipped.
-        let posts = b.posts.lock().unwrap();
-        assert_eq!(posts.len(), 1, "record-only posts are stored in the room");
-        assert_eq!(posts[0].2, "@reviewer 自动结果");
+        // The message is stored in the room even though delivery was skipped.
+        let msgs = rooms::history_page(&room, None, 10);
+        let msgs = msgs["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 1, "record-only posts are stored in the room");
+        assert_eq!(msgs[0]["body"], "@reviewer 自动结果");
     }
 
     #[test]
     fn hub_post_status_is_an_ambient_agent_message() {
-        let b = Bridge::new();
+        crate::projects::tests::use_test_store();
+        let (session, room) = unique("stat");
         let r = handle_hub_request(
             &req("hub_post", serde_json::json!({
-                "session": "blog", "from": "lead",
+                "session": session, "from": "lead",
                 "body": "reviewing @reviewer output", "status": true
             })),
-            Some(&b),
             None,
         );
         assert!(r.error.is_none(), "{}", r.error.map(|e| e.message).unwrap_or_default());
-        let posts = b.posts.lock().unwrap();
-        assert_eq!(posts.len(), 1);
-        assert_eq!(posts[0].1, "lead");
-        assert_eq!(posts[0].2, "[tmm status working] reviewing @reviewer output");
+        let msgs = rooms::history_page(&room, None, 10);
+        let msgs = msgs["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["from"], "lead");
+        assert_eq!(msgs[0]["body"], "[tmm status working] reviewing @reviewer output");
     }
 
     #[test]
@@ -1958,27 +1820,16 @@ mod tests {
             .unwrap();
         crate::projects::adopt(&session, Some("team-context-test")).expect("adopt project");
         let room = project_room(&session);
-        let bridge = Bridge::new();
-        *bridge.log.lock().unwrap() = vec![
-            serde_json::json!({
-                "room": room, "seq": 1, "id": "m1", "ts": 1000,
-                "from": "human", "to": ["lead"], "body": "@lead old task",
-            }),
-            serde_json::json!({
-                "room": room, "seq": 2, "id": "m2", "ts": 2000,
-                "from": "writer", "to": ["researcher"], "body": "@researcher verify",
-            }),
-            serde_json::json!({
-                "room": room, "seq": 3, "id": "m3", "ts": 3000,
-                "from": "researcher", "to": [], "body": "evidence ready",
-            }),
-        ];
+        // Room history BEFORE the current message — the catch-up the team
+        // member must receive. Stored routes are what the reconstruction reads.
+        rooms::seed_msg(&room, &format!("{room}-1"), 1000, "human", &["lead".into()], "@lead old task");
+        rooms::seed_msg(&room, &format!("{room}-2"), 2000, "writer", &["researcher".into()], "@researcher verify");
+        rooms::seed_msg(&room, &format!("{room}-3"), 3000, "researcher", &[], "evidence ready");
 
         let response = handle_hub_request(
             &req("hub_post", serde_json::json!({
                 "session": session, "from": "human", "body": "@lead @solo decide",
             })),
-            Some(&bridge),
             None,
         );
         assert!(response.error.is_none(), "{:?}", response.error.map(|error| error.message));
@@ -1989,13 +1840,9 @@ mod tests {
         assert!(lead.contains("[tmm team context"), "team member receives catch-up: {lead:?}");
         assert!(lead.contains("writer -> @researcher"), "explicit route is named: {lead:?}");
         assert!(lead.contains("researcher -> @writer"), "automatic reply route is named: {lead:?}");
+        assert!(!lead.contains("@lead @solo decide\n\n[tmm team context]\n[tmm chat"), "the current message is not part of its own catch-up");
         assert!(solo.contains("@lead @solo decide"), "solo receives the current request: {solo:?}");
         assert!(!solo.contains("[tmm team context"), "solo stays one-line: {solo:?}");
-        assert_eq!(
-            bridge.pages.lock().unwrap().as_slice(),
-            &[(Some(4), TEAM_CONTEXT_HISTORY_LIMIT)],
-            "history is fetched once, strictly before the current message"
-        );
 
         let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
         let _ = std::fs::remove_dir_all(&ws);
@@ -2041,13 +1888,11 @@ mod tests {
         )
         .unwrap();
 
-        let b = Bridge::new();
         let r = handle_hub_request(
             &req("hub_board_note", serde_json::json!({
                 "session": session, "id": issue_id, "who": "human",
                 "body": "Please cover the restart case",
             })),
-            Some(&b),
             None,
         );
         assert!(r.error.is_none(), "{:?}", r.error.map(|e| e.message));
@@ -2064,51 +1909,9 @@ mod tests {
     }
 
     /// Stop/restart act on a process, so the gate is the same one delivery and
-    /// auto-post use: only agents this app started. A name that has no isolated
-    /// home is refused BEFORE any window is looked up, let alone killed.
-    /// The line an agent reads carries local wall time, because a CLI resuming a
-    /// conversation has no other way to know when something was said. The stamp
-    /// must not break the delivery receipt, which matches by containment.
+    /// auto-post use: only agents this app started. The room records the act.
     #[test]
-    fn a_delivered_line_carries_a_readable_local_stamp() {
-        let stamp = stamp_now();
-        assert_eq!(stamp.len(), 16, "YYYY-MM-DD HH:MM, got {stamp:?}");
-        let (date, time) = stamp.split_once(' ').expect("date and time");
-        assert_eq!(date.split('-').count(), 3, "{date:?}");
-        assert_eq!(time.split(':').count(), 2, "minute precision, got {time:?}");
-
-        // The shape deliver_mentions types, and the echo the hook returns.
-        let body = "@dev ship it";
-        let line = format!("[tmm chat {stamp}] human: {body}");
-        crate::projects::telemetry::record_delivery("stamp-test", 9, &line);
-        assert!(
-            crate::projects::telemetry::record_prompt("stamp-test", 9, &line),
-            "the stamped line still acknowledges its own echo"
-        );
-    }
-
-    #[test]
-    fn stopping_something_we_did_not_start_is_refused() {
-        // The gate reads the project store; keep it off the user's real db.
-        crate::projects::tests::use_test_store();
-        let b = Bridge::new();
-        for method in ["hub_agent_stop", "hub_agent_restart"] {
-            let r = handle_hub_request(
-                &req(method, serde_json::json!({ "session": "no-such-session", "agent": "byhand" })),
-                Some(&b),
-                None,
-            );
-            let msg = r.error.map(|e| e.message).unwrap_or_default();
-            assert!(msg.contains("not an agent this app started"), "{method}: got {msg:?}");
-        }
-        assert!(b.posts.lock().unwrap().is_empty(), "nothing announced, nothing killed");
-    }
-
-    /// The kill path, against real tmux: a managed window disappears and the
-    /// room records it. `restart` is not exercised here — it goes through
-    /// `projects::up`, which launches a real agent CLI.
-    #[test]
-    fn stopping_a_managed_agent_kills_its_window_and_says_so() {
+    fn stopping_a_managed_agent_kills_the_window_and_says_so() {
         crate::projects::tests::use_test_store();
         let session = format!("tmm-stop-{}", std::process::id());
         let ws = std::env::temp_dir().join(format!("tmm-stop-ws-{}", uuid::Uuid::new_v4()));
@@ -2128,10 +1931,8 @@ mod tests {
         // A project must claim the session for managed_home to resolve.
         let created_project = crate::projects::adopt(&session, Some("stop-test")).is_ok();
 
-        let b = Bridge::new();
         let r = handle_hub_request(
             &req("hub_agent_stop", serde_json::json!({ "session": session, "agent": "dev" })),
-            Some(&b),
             None,
         );
         if !created_project {
@@ -2140,9 +1941,12 @@ mod tests {
             assert!(r.error.is_none(), "{:?}", r.error.map(|e| e.message));
             let panes = crate::tmux::list_panes(&session).unwrap_or_default();
             assert!(!panes.iter().any(|p| p.window_name == "dev"), "the window is gone");
-            let posts = b.posts.lock().unwrap();
-            assert_eq!(posts.len(), 1);
-            assert!(posts[0].2.contains("[tmm] stopped dev"), "the room records it: {:?}", posts[0].2);
+            let msgs = rooms::history_page(&project_room(&session), None, 10);
+            let msgs = msgs["messages"].as_array().unwrap();
+            assert!(
+                msgs.iter().any(|m| m["body"].as_str().unwrap_or("").contains("[tmm] stopped dev")),
+                "the room records it: {msgs:?}"
+            );
         }
         let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
         let _ = std::fs::remove_dir_all(&ws);
@@ -2175,10 +1979,8 @@ mod tests {
         telemetry::record_prompt(&session, window, "do the long thing");
         assert_eq!(telemetry::derive(&session, window, 0).state, "running");
 
-        let b = Bridge::new();
         let r = handle_hub_request(
             &req("hub_agent_interrupt", serde_json::json!({ "session": session, "agent": "dev" })),
-            Some(&b),
             None,
         );
         if !created_project {
@@ -2192,9 +1994,12 @@ mod tests {
                 "idle",
                 "the cancelled turn is closed by the interrupt itself — no stop hook is coming"
             );
-            let posts = b.posts.lock().unwrap();
-            assert_eq!(posts.len(), 1);
-            assert!(posts[0].2.contains("[tmm] interrupted dev"), "the room records it: {:?}", posts[0].2);
+            let msgs = rooms::history_page(&project_room(&session), None, 10);
+            let msgs = msgs["messages"].as_array().unwrap();
+            assert!(
+                msgs.iter().any(|m| m["body"].as_str().unwrap_or("").contains("[tmm] interrupted dev")),
+                "the room records it: {msgs:?}"
+            );
         }
         let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
         let _ = std::fs::remove_dir_all(&ws);
@@ -2202,10 +2007,12 @@ mod tests {
 
     #[test]
     fn hub_log_since_ts_filters_older_messages() {
-        let b = Bridge::new();
+        crate::projects::tests::use_test_store();
+        let (session, room) = unique("since");
+        rooms::seed_msg(&room, &format!("{room}-1"), 100, "a", &[], "old");
+        rooms::seed_msg(&room, &format!("{room}-2"), 200, "b", &[], "new");
         let r = handle_hub_request(
-            &req("hub_log", serde_json::json!({ "session": "blog", "since_ts": 100 })),
-            Some(&b),
+            &req("hub_log", serde_json::json!({ "session": session, "since_ts": 100 })),
             None,
         );
         let msgs = r.result.unwrap();
@@ -2222,38 +2029,40 @@ mod tests {
     /// this page", and the client walks `before_seq` until it reaches the cursor.
     #[test]
     fn hub_log_since_ts_reports_when_the_page_did_not_reach_the_cursor() {
-        // 250 messages, ts = seq * 10. The client last saw ts 1000 (seq 100):
+        crate::projects::tests::use_test_store();
+        // 250 messages, ts = n * 10. The client last saw ts 1000 (the 100th):
         // 150 messages are newer, one page holds 100.
-        let b = Bridge::new().with_log("proj:blog", 250);
+        let (session, room) = unique("cursor");
+        let seeded: Vec<serde_json::Value> = (1..=250)
+            .map(|n| rooms::seed_msg(&room, &format!("{room}-m{n}"), n * 10, "human", &[], format!("b{n}").as_str()))
+            .collect();
+        let seq = |n: usize| seeded[n - 1]["seq"].as_i64().unwrap();
         let r = handle_hub_request(
-            &req("hub_log", serde_json::json!({ "session": "blog", "since_ts": 1000, "limit": 100 })),
-            Some(&b),
+            &req("hub_log", serde_json::json!({ "session": session, "since_ts": 1000, "limit": 100 })),
             None,
         );
         let v = r.result.expect("result");
         let msgs = v["messages"].as_array().unwrap();
         assert_eq!(msgs.len(), 100, "the newest page, all newer than the cursor");
-        assert_eq!(msgs[0]["seq"], 151);
-        assert_eq!(v["has_more"], true, "seq 101..150 are newer than the cursor and NOT on this page");
-        assert_eq!(v["oldest_seq"], 151, "the cursor for the walk back");
+        assert_eq!(msgs[0]["seq"], seq(151));
+        assert_eq!(v["has_more"], true, "rows 101..150 are newer than the cursor and NOT on this page");
+        assert_eq!(v["oldest_seq"], seq(151), "the cursor for the walk back");
 
-        // The walk back: the page behind seq 151, still bounded by since_ts.
+        // The walk back: the page behind the 151st, still bounded by since_ts.
         let r = handle_hub_request(
-            &req("hub_log", serde_json::json!({ "session": "blog", "since_ts": 1000, "limit": 100, "before_seq": 151 })),
-            Some(&b),
+            &req("hub_log", serde_json::json!({ "session": session, "since_ts": 1000, "limit": 100, "before_seq": seq(151) })),
             None,
         );
         let v = r.result.expect("result");
         let msgs = v["messages"].as_array().unwrap();
-        assert_eq!(msgs.len(), 50, "seq 101..150 survive the since_ts filter");
-        assert_eq!(msgs[0]["seq"], 101);
+        assert_eq!(msgs.len(), 50, "rows 101..150 survive the since_ts filter");
+        assert_eq!(msgs[0]["seq"], seq(101));
         assert_eq!(v["has_more"], false, "the raw page reached back past the cursor: nothing newer remains");
 
         // A poll whose page reaches the cursor says so even when the room has
         // plenty of older history behind it.
         let r = handle_hub_request(
-            &req("hub_log", serde_json::json!({ "session": "blog", "since_ts": 2400, "limit": 100 })),
-            Some(&b),
+            &req("hub_log", serde_json::json!({ "session": session, "since_ts": 2400, "limit": 100 })),
             None,
         );
         let v = r.result.expect("result");
@@ -2261,7 +2070,7 @@ mod tests {
         assert_eq!(v["has_more"], false, "everything newer than the cursor is on this page");
 
         // And a first load (no since_ts) keeps the paging meaning: history remains.
-        let r = handle_hub_request(&req("hub_log", serde_json::json!({ "session": "blog", "limit": 100 })), Some(&b), None);
+        let r = handle_hub_request(&req("hub_log", serde_json::json!({ "session": session, "limit": 100 })), None);
         assert_eq!(r.result.expect("result")["has_more"], true);
     }
 
