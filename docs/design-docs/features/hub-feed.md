@@ -40,6 +40,28 @@ Unit boundary vectors exercise these decisions; the source contract pins
 their wiring. This separates testable arithmetic from layout without changing
 the reading behavior or claiming simulated geometry proves browser layout.
 
+**Feed extraction characterization** (board #134, 2026-09-09): before moving
+the view, the mounted Hub exercises actual Copy/Raw handlers, selection and
+compatibility-click suppression, the existing shared capture dismissal,
+copy timing, per-room resets, persistent tool disclosure and path/Board
+intents. Earlier mount characterizations remain unchanged. Its canvas
+measurement is unavailable rather than simulated: geometry belongs to the
+real Chromium fixture, with fonts and the referenced image decoded before
+the comparison starts.
+The Chromium 152.0.7977.64 baseline captures 60 states across desktop/compact,
+light/dark and reduced-motion variants, including one real pinned bubble,
+expand/refold, prepend, drawer transactions, hidden/show tail intent, news
+and read markers, native tool-list wheel chaining and rendered path links.
+
+The baseline also distinguishes a native viewport resize from a mutation
+inside the reading transaction: Chromium reflows before the `resize` listener
+can capture a reference. On 152.0.7977.64, the fixed compact fixture at
+390 -> 370px displaced its pre-resize row by 519.1875px on the original code;
+drawer open/close stayed within 1.25px. The extraction compares the existing
+resize displacement rather than claiming it is zero. Preserving a reference
+from before a native resize is a separate behavior change, tracked by #135
+after #134 lands.
+
 ### A layout mutation goes through `withReadingAnchor`
 
 the terminal drawer regrids the columns and every message rewraps, so the same scrollTop points at different content and the reader's message drifts (owner, 2026-08-20). Scroll anchoring is OFF on purpose (`overflow-anchor: none` ended the held-ask blink), so the helper re-anchors by hand — topmost visible block, same element back at the same offset after `tick()`, sticky variants skipped as references (a pinned rect does not move with the flow), tail stays tail. All drawer toggles route through `openDrawer`/`closeDrawer`; `Hub.source.test.ts` counts bare `termOpen =` writes.

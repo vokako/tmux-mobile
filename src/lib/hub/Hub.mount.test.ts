@@ -638,3 +638,111 @@ test('Composer post and command failures never restore into the next room', { ti
     await app.close();
   }
 });
+
+test('Feed keeps native selection, Copy/Raw dismissal, path intents and room-local choices', { timeout: 60000 }, async (context) => {
+  const fixture = await compiledHub();
+  const { rpc, pushed } = roomFixture();
+  const copied: string[] = [];
+  const routes: unknown[][] = [];
+  const boards: unknown[][] = [];
+  const body = 'Reply with **formatting** and [source](/fixture/source.txt).';
+  const app = await fixture.mount(context, {
+    props: { visible: true, mobile: true,
+      openFilesTab: (...args: unknown[]) => { routes.push(args); },
+      openBoardTab: (...args: unknown[]) => { boards.push(args); },
+    },
+    setup(window) {
+      window.Element.prototype.getAnimations = () => [];
+      // jsdom has no canvas renderer. Do not invent glyph widths here:
+      // native Chromium owns the actual measurement/anchor characterization.
+      window.HTMLCanvasElement.prototype.getContext = () => null;
+      Object.defineProperty(window.navigator, 'clipboard', { value: {
+        writeText: async (text: string) => { copied.push(text); },
+      } });
+    },
+    modules: [{
+      ...rpc,
+      projectList: async () => ({ projects: ['fixture', 'other'].map((session) => ({
+        project: { id: session, name: session, session, path: `/${session}` }, live: true, slots: [],
+      })) }),
+      hubLog: async () => ({ messages: [
+        { id: 'question', seq: 1, ts: 100, from: 'human', body: '@alice Review this.' },
+        { id: 'reply', seq: 2, ts: 200, from: 'alice', body },
+        { id: 'board', seq: 3, ts: 300, from: 'alice', body: '[tmm] board #7 todo → doing — Feed extraction' },
+      ], has_more: false }),
+      hubActivity: async () => ({ events: [
+        { id: 1, ts: 250, window: 'alice', kind: 'tool', tool: 'Read', text: 'source.ts' },
+        { id: 2, ts: 251, window: 'bob', kind: 'tool', tool: 'Bash', text: 'npm test' },
+      ], has_more: false }),
+    }],
+  });
+  try {
+    for (let i = 0; i < 12 && app.document.querySelectorAll('.msg').length !== 2; i++) await app.flush();
+    const reply = () => app.document.querySelector<HTMLElement>('.msg:not(.me)')!;
+    const bubble = () => reply().querySelector<HTMLElement>('.bubble')!;
+    const actions = () => reply().querySelector<HTMLElement>('.m-acts');
+    assert.ok(reply());
+    assert.equal(reply().parentElement?.classList.contains('feed'), true);
+    const selection = app.window.getSelection()!;
+    const range = app.document.createRange();
+    range.selectNodeContents(reply().querySelector('.m-body')!);
+    selection.addRange(range);
+    bubble().click();
+    await app.flush();
+    assert.equal(actions(), null, 'a real Selection object wins over the bubble click');
+    selection.removeAllRanges();
+    const hold = new app.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    Object.defineProperty(hold, 'pointerType', { value: 'touch' });
+    bubble().dispatchEvent(hold);
+    assert.equal(hold.defaultPrevented, false, 'contextmenu is a passive mark, not a replacement menu');
+    bubble().click();
+    await app.flush();
+    assert.equal(actions(), null, 'the compatibility click is consumed once');
+    bubble().click();
+    await app.flush();
+    assert.ok(actions());
+    actions()!.querySelector<HTMLElement>('button:last-child')!.click();
+    await app.flush();
+    assert.equal(reply().querySelector('.raw')?.textContent, body);
+    app.document.querySelector<HTMLElement>('.to-chip')!.click();
+    await app.flush();
+    app.window.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await app.flush();
+    assert.equal(actions(), null);
+    assert.equal(app.document.querySelector('.to-menu'), null, 'one capture callback closes both existing territories');
+    assert.ok(reply().querySelector('.raw'), 'Escape closes the actions, never the raw reading mode');
+    reply().querySelector<HTMLElement>('.m-meta')!.click();
+    await app.flush();
+    actions()!.querySelector<HTMLElement>('button:first-child')!.click();
+    await app.flush();
+    assert.deepEqual(copied, [body], 'copy uses exact source rather than rendered text');
+    await app.advance(1499);
+    assert.ok(actions());
+    await app.advance(1);
+    assert.equal(actions(), null);
+    const head = app.document.querySelector<HTMLElement>('.s-head')!;
+    head.click();
+    await app.flush();
+    assert.equal(head.getAttribute('aria-expanded'), 'false');
+    app.document.querySelector<HTMLElement>('[aria-label="other"] .proj-pick')!.click();
+    for (let i = 0; i < 12 && app.document.querySelector('.h1-text')?.textContent !== 'other'; i++) await app.flush();
+    assert.equal(reply().querySelector('.raw'), null, 'room reset clears raw without remounting the whole Feed');
+    assert.equal(app.document.querySelector('.s-head')?.getAttribute('aria-expanded'), 'false',
+      'the same tool group retains its explicit disclosure choice across rooms');
+    const link = reply().querySelector<HTMLAnchorElement>('a')!;
+    for (const [type, options] of [
+      ['click', {}], ['click', { metaKey: true }], ['auxclick', { button: 1 }],
+    ] as const) {
+      const event = new app.window.MouseEvent(type, { bubbles: true, cancelable: true, ...options });
+      link.dispatchEvent(event);
+      await app.flush();
+      assert.equal(event.defaultPrevented, true);
+      assert.equal(actions(), null, 'path routing wins over Copy/Raw toggling');
+    }
+    assert.deepEqual(routes, Array.from({ length: 3 }, () => ['other', '', '/fixture/source.txt']));
+    app.document.querySelector<HTMLElement>('.sys-jump')!.click();
+    await app.flush();
+    assert.deepEqual(boards, [['other', 7]], 'the feed board row carries the clicked issue id');
+  } finally { await app.close(); }
+  assert.equal(pushed.size, 0);
+});
