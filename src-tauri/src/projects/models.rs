@@ -51,23 +51,12 @@ pub fn list(backend: &str) -> Option<Vec<String>> {
 
 /// Reject a model the backend would silently ignore. An empty model means
 /// "backend default" and is always fine.
-/// The reasoning-effort levels each backend's CLI accepts — a FIXED enum per
-/// backend, measured (2026-08-22), never guessed:
-/// * kiro:   `kiro-cli chat --effort` — "e.g. low, medium, high, xhigh, max"
-/// * claude: its own warning text names them: "Valid values: low, medium,
-///           high, xhigh, max" (claude 2.1.239, measured)
-/// * grok:   `/effort` doc: low|medium|high|xhigh (grok 1.0.5)
-/// * codex:  `model_reasoning_effort` (ReasoningEffort enum): minimal..xhigh
+/// The reasoning-effort levels each backend's CLI accepts (provenance on the
+/// backend files, board #127).
 pub fn effort_values(backend: &str) -> &'static [&'static str] {
-    match backend {
-        "kiro" | "claude" => &["low", "medium", "high", "xhigh", "max"],
-        "grok" => &["low", "medium", "high", "xhigh"],
-        "codex" => &["minimal", "low", "medium", "high", "xhigh"],
-        // omp 18.0.6 `--thinking` (its own --help): "off, minimal, low,
-        // medium, high, xhigh, max, auto".
-        "omp" => &["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"],
-        _ => &[],
-    }
+    // The knowledge lives on the backend's own file (board #127); an unknown
+    // backend has no levels, exactly as before.
+    super::backends::Backend::parse(backend).map(|b| b.effort_values()).unwrap_or(&[])
 }
 
 /// Effort validation mirrors model validation: empty = the backend default and
@@ -104,52 +93,10 @@ pub fn validate(backend: &str, model: &str) -> Result<(), String> {
     ))
 }
 
-/// Ask the backend's own CLI. Kiro and grok can enumerate their models; claude
-/// and codex take aliases we have no authoritative list for, so they return
-/// `None` (= no validation) instead of a guess.
+/// Ask the backend's own CLI (the fetch lives on the backend files,
+/// board #127). `None` = no authoritative list, so no validation.
 fn fetch(backend: &str) -> Option<Vec<String>> {
-    match backend {
-        "kiro" => {
-            let out = std::process::Command::new("kiro-cli")
-                .args(["chat", "--list-models", "-f", "json"])
-                .output()
-                .ok()?;
-            if !out.status.success() {
-                return None;
-            }
-            let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
-            let models: Vec<String> = parsed
-                .get("models")?
-                .as_array()?
-                .iter()
-                .filter_map(|m| m.get("model_id")?.as_str().map(str::to_string))
-                .collect();
-            (!models.is_empty()).then_some(models)
-        }
-        // `grok models` (1.0.5) prints a plain list:
-        //   Available models:
-        //     - grok-4.6
-        //     * bedrock-grok46 (default)
-        // The `*` marks the default; a custom model may carry a "(default)"
-        // or description suffix — the id is the first token after the bullet.
-        "grok" => {
-            let out = std::process::Command::new("grok").arg("models").output().ok()?;
-            if !out.status.success() {
-                return None;
-            }
-            let text = String::from_utf8_lossy(&out.stdout);
-            let models: Vec<String> = text
-                .lines()
-                .filter_map(|l| {
-                    let l = l.trim();
-                    let rest = l.strip_prefix("- ").or_else(|| l.strip_prefix("* "))?;
-                    rest.split_whitespace().next().map(str::to_string)
-                })
-                .collect();
-            (!models.is_empty()).then_some(models)
-        }
-        _ => None,
-    }
+    super::backends::Backend::parse(backend)?.models_fetch()
 }
 
 #[cfg(test)]

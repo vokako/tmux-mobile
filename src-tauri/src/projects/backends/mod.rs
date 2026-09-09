@@ -6,6 +6,11 @@
 //! Moved here so the spawn path owns its dependencies and the desktop Team
 //! system can be deleted whole (docs/todo.md §A).
 
+pub(crate) mod claude;
+pub(crate) mod codex;
+pub(crate) mod grok;
+pub(crate) mod kiro;
+pub(crate) mod omp;
 pub(crate) mod shared;
 
 /// The closed set of agent CLIs this app can spawn (board #101/#127). An enum
@@ -58,6 +63,32 @@ impl Backend {
             Backend::Codex => "codex",
             Backend::Grok => "grok",
             Backend::Omp => "omp",
+        }
+    }
+
+    /// The reasoning-effort levels this backend's CLI accepts — a FIXED enum
+    /// per backend, measured per CLI, never guessed (each list's provenance
+    /// is on the backend file).
+    pub fn effort_values(self) -> &'static [&'static str] {
+        match self {
+            Backend::Kiro => kiro::effort_values(),
+            Backend::Claude => claude::effort_values(),
+            Backend::Codex => codex::effort_values(),
+            Backend::Grok => grok::effort_values(),
+            Backend::Omp => omp::effort_values(),
+        }
+    }
+
+    /// Ask the backend's own CLI for its model ids. `None` = no authoritative
+    /// list exists (claude/codex/omp aliases) or the CLI is unavailable —
+    /// validation then degrades to accept-all (models.rs module doc).
+    pub fn models_fetch(self) -> Option<Vec<String>> {
+        match self {
+            Backend::Kiro => kiro::models_fetch(),
+            Backend::Claude => claude::models_fetch(),
+            Backend::Codex => codex::models_fetch(),
+            Backend::Grok => grok::models_fetch(),
+            Backend::Omp => omp::models_fetch(),
         }
     }
 }
