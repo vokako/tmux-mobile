@@ -332,9 +332,13 @@ mod tests {
             leaks.is_empty(),
             "backend names spelled outside src/backends/ (move the knowledge, or fence a seed / mark a measured quirk): {leaks:#?}"
         );
-        // The fences must still be there for the exemption to mean anything.
-        let store = std::fs::read_to_string(root.join("projects/store.rs")).unwrap();
-        assert!(store.contains("backend-seeds:begin") && store.contains("backend-seeds:end"));
+        // The fences must still be there for the exemption to mean anything —
+        // in whichever store file holds the seeds (store/ split, board #147).
+        let fenced = files.iter().any(|p| {
+            let s = std::fs::read_to_string(p).unwrap();
+            s.contains("backend-seeds:begin") && s.contains("backend-seeds:end")
+        });
+        assert!(fenced, "no file carries the backend-seeds fence");
         let tmux = std::fs::read_to_string(root.join("tmux.rs")).unwrap();
         assert!(tmux.matches("backend-quirk(measured):").count() >= 2, "tmux.rs lost its quirk markers");
     }
