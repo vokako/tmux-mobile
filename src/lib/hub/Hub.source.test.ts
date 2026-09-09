@@ -871,6 +871,20 @@ test('a failed attachment is a chip that blocks send, never a console line', () 
   assert.ok(!/#[0-9a-f]{3,8}\b/iu.test(err), 'no literal colour');
 });
 
+test('composer calculations use the pure helpers without moving send or its gates (#117)', () => {
+  assert.match(source, /import \{ ALL_TARGET, attachmentBody, attachToken, paletteBackendFor \} from '\.\/hub-composer\.ts';/u);
+  assert.match(source, /const paletteBackend = \$derived\(paletteBackendFor\(composerText, recipient, agents\)\);/u,
+    'the helper receives the whole roster, including direct windows');
+  const send = source.slice(source.indexOf('async function send()'), source.indexOf('let mirrorEl'));
+  const interpolation = send.indexOf('const body = attachmentBody(raw, atts);');
+  assert.ok(interpolation > send.indexOf('if (attaching) return;'));
+  assert.ok(interpolation > send.indexOf('if (failed) return;'));
+  assert.match(send, /const body = attachmentBody\(raw, atts\);\s*const text = addressed\(body, recipient\);/u,
+    'the existing address parser still runs after token substitution');
+  assert.match(source, /const tok = attachToken\(a\);/u, 'removal uses the shared spelling');
+  assert.match(source, /const tok = attachToken\(item\);/u, 'staging uses that same spelling');
+});
+
 test('the title caret expands the NAME — left-aligned on its real rect (board #32)', () => {
   // The project-actions menu used to right-align on the caret and could clip
   // at the right edge. It now anchors on the name element's REAL rect

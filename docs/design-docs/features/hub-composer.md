@@ -26,6 +26,23 @@ a name (the default lead) types into ONE agent's input; `@all` types into EVERY 
 
 **The palette speaks the ADDRESSEE's dialect** (2026-08-22): `offeredCommands(backend)` picks the table by the explicit `@name`'s backend, else the recipient — `GROK_COMMANDS` (transcribed from grok 1.0.5's own docs; its `/model` completes inline since grok models enumerate) and `CODEX_COMMANDS` (transcribed live from codex 0.148.0's `/` popup; there `/model`/`/permissions`/`/review` are PICKERS = views, and `/delete` is flagged destructive, never offered); claude gets NO palette yet (its `/` popup is still untranscribed) and `@all` over a mixed roster none either. `commandPalette()` (pure + tested) decides stage/items/replace-slice: `/` → commands, `/model ` → its values (fetched via `models_list` PER BACKEND, the same call the agent editor uses), and only the LAST token + FIRST argument are completed because what follows one is a path or free text. Matching is FUZZY in three strict tiers — prefix, substring, subsequence (`fuzzyRank`, pure + tested; stable table order within a tier) — so `/mdl` finds `/model` and `son` finds `claude-sonnet-4.5` (owner, 2026-08-24: "不一定从第一个字符开始匹配"), while Enter stays safe because a looser match never outranks a tighter one (`/co` still means `/compact`). The palette owns ↑↓/Tab/Enter while open, Escape dismisses until the text changes, hover and the keyboard cursor share ONE highlight. The composer SPEAKS READLINE: Ctrl-A/E/U/K/W/Y/D/H/T/F/B via `readlineEdit()` (pure + tested) — one kill buffer, consecutive kills accumulate (backward prepends), any other key breaks the chain, A/E are line-scoped, Ctrl-K at line end joins, empty-buffer Ctrl-Y is a handled no-op (Chromium's default is REDO), Ctrl-C/V/X/Z fall through to the browser; the caret is set after Svelte writes the value back. A command-shaped draft STYLES the composer (accent-tinted capsule, tool-lane monospace) via `composerIsCmd`, which mirrors send()'s branch exactly; the measuring mirror flips font with the input in ONE rule, and `growComposer` re-measures on the flip (a font change rewraps).
 
+### Pure composer decisions (board #117, 2026-09-09)
+
+`hub-composer.ts` owns palette-backend selection, `ALL_TARGET`, attachment
+token spelling and body substitution. These were closure-local calculations;
+parameterizing them adds executing boundary tests without changing behavior.
+The selector still requires a managed target, keeps unknown targets empty,
+and offers a shared dialect only when the managed roster has exactly one.
+Substitution replaces the first matching token, appends missing-token
+references in attachment order, and retains `String.replace` semantics.
+The existing command/mention/readline parsers and command tables stay in
+`hub.ts`; Hub keeps `send()`, staging, state, effects, DOM and both send gates.
+
+The mounted Hub test holds a file upload unresolved, presses Enter and
+observes no post; after upload it observes the complete addressed body.
+Removing the actual `attaching` guard is the negative control. This proves
+the event-to-send path, not native clipboard behavior or layout.
+
 ### Words beside a picture of the words: the text is the paste (2026-09-08)
 
 The paste door's rule was "files win over co-riding text" (board #25) — right for a Finder/Explorer file copy, whose text is the file's own path, and for a screenshot, which has no text. It was wrong for the paste the owner met daily: PowerPoint (and Word, Excel, Keynote, Numbers, every browser) puts a **PNG rendering of the selection** on the clipboard beside `text/plain`/`text/html`, and the composer staged the picture and threw the words away ("从 ppt 上粘贴过来的文字，总是被粘贴为了一个图片"). `textIsThePaste(text, files)` (hub.ts, pure, tested) now decides before `preventDefault`: the text wins when it is non-empty AND every file is an image AND the text is not one token that is a URL, a path, or the name of one of the files. Every legitimate file paste fails that test — a screenshot carries no text, a file copy carries its own name/path, a web "Copy image" carries at most the image URL, and any non-image file (a pdf beside a caption) is a file paste whatever the text says. When the text wins the handler simply returns and the textarea's default insertion runs; the rendering is dropped, not staged — nobody wants a picture of a bullet list next to the bullet list. The HTML flavour is ignored on purpose: the composer is plain text and markdown, and Office HTML is a wall of styling.

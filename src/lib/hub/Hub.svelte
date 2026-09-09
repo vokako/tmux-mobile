@@ -36,6 +36,7 @@
   import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, stateNeedsYou, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, mentionedAgents, chipExtras, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, perLineOf, modelLabel } from './hub.ts';
   import { handlePathLinkClick, resolvePathRef } from '../core/path-links.ts';
   import { heldAnchor, readingDirection, refoldEligible } from './hub-reading.ts';
+  import { ALL_TARGET, attachmentBody, attachToken, paletteBackendFor } from './hub-composer.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, popOrigin, viewBox } from '../ui/placement.ts';
@@ -90,7 +91,6 @@
   //   ''        → recorded in the room and delivered to NOBODY. Agents read it
   //               when they next call `tmm log`, which is how you leave context
   //               without interrupting anyone mid-task.
-  const ALL_TARGET = 'all';
   let composerText = $state('');
   // Who the composer addresses. Defaults to the project's lead (pickLead), so
   // talking to your lead agent needs no @ ceremony.
@@ -886,15 +886,7 @@
     // gesture: addressed() prefixes @name unless the user @-addressed someone
     // by hand, and an empty recipient posts to the room.
     const atts = pending;
-    let body = raw;
-    const stragglers = [];
-    for (const a of atts) {
-      const ref = a.kind === 'image' ? `![](${a.path})` : a.path;
-      const tok = attachToken(a);
-      if (body.includes(tok)) body = body.replace(tok, ref); // position preserved
-      else stragglers.push(ref);
-    }
-    body = [body, ...stragglers].filter(Boolean).join('\n');
+    const body = attachmentBody(raw, atts);
     const text = addressed(body, recipient);
     // Room snapshot: everything after the await below must answer to the
     // room this message BELONGS to, never to whichever room is on screen
@@ -1053,7 +1045,6 @@
   // for a failed one (two failures of the same file are two chips).
   let pending = $state([]);
   let attachSeq = 1;
-  const attachToken = (a) => `[${a.kind === 'image' ? 'img' : 'file'}:${a.n}]`;
   const failedAttachment = (f, error) => ({
     key: `err-${imageId()}`, path: '', kind: f.type?.startsWith('image/') ? 'image' : 'file',
     name: f.name, n: 0, thumb: '', error,
@@ -1238,13 +1229,7 @@
   // picker), so the table follows the explicit @name, else the composer's
   // recipient. @all with a mixed roster gets no palette — one command line
   // cannot be right in two dialects at once (owner, 2026-08-22 对齐).
-  const paletteBackend = $derived.by(() => {
-    const m = /^\s*@([\w][\w.-]*)\s/u.exec(composerText ?? '');
-    const name = m ? m[1] : (recipient === ALL_TARGET ? null : recipient);
-    if (name) return agents.find((a) => a.managed && a.name === name)?.agent ?? '';
-    const backends = [...new Set(managedAgents.map((a) => a.agent ?? ''))];
-    return backends.length === 1 ? backends[0] : 'mixed';
-  });
+  const paletteBackend = $derived(paletteBackendFor(composerText, recipient, agents));
   const palette = $derived(paletteOff ? null : commandPalette(composerText, cmdModels[paletteBackend] ?? [], paletteBackend));
   // The open menu's agent, as its status line reads right now.
   // The menu header's reading DROPS the model: the model belongs to the
