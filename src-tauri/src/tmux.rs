@@ -675,8 +675,33 @@ pub fn send_keys(target: &str, keys: &str, literal: bool) -> Result<(), String> 
     Ok(())
 }
 
+/// One mutex per pane target, so concurrent deliveries cannot interleave.
+/// `send_command` is text → 200 ms beat → Enter: two unsynchronized callers
+/// weave A-text, B-text, A-Enter, B-Enter — A and B arrive GLUED as one
+/// submitted line and the second Enter submits nothing (measured 2026-09-09,
+/// board #122: four racing sends to a `cat` pane produced one concatenated
+/// row). The map is keyed by the caller's target string; every burst path
+/// (deliver_mentions, board notices, hub_command) addresses a pane as
+/// `session:window.pane`, so a burst serializes. Entries are tiny and pruned
+/// opportunistically past 256 (a dead pane's mutex is just a few bytes, but a
+/// map that only grows is a leak).
+fn pane_send_lock(target: &str) -> std::sync::Arc<std::sync::Mutex<()>> {
+    static LOCKS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<std::sync::Mutex<()>>>>> =
+        std::sync::OnceLock::new();
+    let map = LOCKS.get_or_init(Default::default);
+    let mut map = map.lock().unwrap();
+    if map.len() > 256 {
+        map.retain(|_, lock| std::sync::Arc::strong_count(lock) > 1);
+    }
+    map.entry(target.to_string()).or_default().clone()
+}
+
 /// 向 pane 发送文本 + Enter
 pub fn send_command(target: &str, command: &str) -> Result<(), String> {
+    // Serialize per pane (board #122): the text→Enter pair below must land
+    // whole before another caller's does.
+    let lock = pane_send_lock(target);
+    let _guard = lock.lock().unwrap();
     if command.contains('\n') {
         // A newline cannot ride send-keys: literal mode passes it as a raw C0
         // byte inside `-l`, and with `extended-keys on` tmux silently DROPS
@@ -1156,4 +1181,56 @@ mod tests {
         let wrap = "\x1b[31m中文宽字\x1b[0m\n\x1b[31m符\x1b[0m";
         assert_eq!(join_unflagged_wraps(wrap, 9), "\x1b[31m中文宽字\x1b[0m\x1b[31m符\x1b[0m");
     }
+    /// Board #122 (2): concurrent deliveries to ONE pane must not interleave.
+    /// `send_command` types the text, sleeps 200 ms, then sends Enter — two
+    /// unsynchronized callers could weave A-text, B-text, A-Enter, B-Enter,
+    /// gluing A and B into one submitted line and submitting an empty second
+    /// one. The per-target lock serializes the pair; this test races four
+    /// threads at a `cat` pane and requires every line to arrive whole, alone
+    /// on its own row.
+    #[test]
+    fn concurrent_sends_to_one_pane_never_interleave() {
+        let session = format!("tmm-burst-{}", std::process::id());
+        let _ = kill_session(&session);
+        if new_session(&session, None, Some("cat")).is_err() {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        // base-index is host config; ask tmux for the real pane target.
+        let target = String::from_utf8(
+            std::process::Command::new("tmux")
+                .args(["display-message", "-p", "-t", &format!("={session}:"), "#{session_name}:#{window_index}.#{pane_index}"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
+        let lines: Vec<String> = (0..4).map(|n| format!("burst-line-{n}-{}", "x".repeat(24))).collect();
+        let handles: Vec<_> = lines
+            .iter()
+            .map(|l| {
+                let (t, l) = (target.clone(), l.clone());
+                std::thread::spawn(move || send_command(&t, &l))
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap().expect("send ok");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let text = capture_pane_plain(&target, Some(60)).unwrap_or_default();
+        let _ = kill_session(&session);
+        for l in &lines {
+            // Each line must appear WHOLE on a row of its own (cat echoes the
+            // submitted line): a glued "burst-line-0-…burst-line-1-…" row or a
+            // missing line is the interleave this pins against.
+            assert!(
+                text.lines().any(|row| row.trim() == l),
+                "line arrived whole and alone: {l}\n--- pane ---\n{text}"
+            );
+        }
+    }
+
 }

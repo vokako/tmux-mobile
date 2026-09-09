@@ -82,9 +82,11 @@
   (turn edges, deliveries, activity, vitals, recovery) now keys on the window
   NAME, resolved once at ingest (`resolve_pane_id` returns `#{window_name}`);
   state.db v20 migrates readable; the rename-between-hook-and-consume post
-  loss went with the index → name round-trip. Still open from the same
-  cluster: identical bodies confuse receipts; delivery lacks backpressure;
-  `SPAWN_CAP` includes windows we do not own.
+  loss went with the index → name round-trip. Identical-body receipts and
+  delivery backpressure followed (board #122, 2026-09-09: duplicates are
+  distinct promises settled count-wise per echo, v21; one mutex per pane
+  target inside `send_command` serializes bursts). Still open from the
+  cluster: `SPAWN_CAP` includes windows we do not own.
 - [ ] Backend parity, blocked on measurement rather than effort: claude's
   `/` palette is not transcribed (mechanical once captured — transcribe the
   popup with pinned captures like codex's); claude/codex/grok have no

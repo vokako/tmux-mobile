@@ -396,12 +396,14 @@ fn remember_delivery(session: &str, window: &str, line: &str, ts: u64) {
     let _ = super::with_store(|s| s.insert_delivery(session, window, line, ts));
 }
 
-/// A line is settled — acked by its echo, or reported by the sweep.
+/// A line is settled — acked by its echo, or reported by the sweep. One ROW
+/// per call (board #122): duplicates are separate promises, and settling one
+/// must not erase its sibling.
 fn forget_delivery(session: &str, window: &str, line: &str) {
     if !durable() {
         return;
     }
-    let _ = super::with_store(|s| s.delete_delivery(session, window, line));
+    let _ = super::with_store(|s| s.delete_one_delivery(session, window, line));
 }
 
 fn forget_window_deliveries(session: &str, window: &str) {
@@ -468,12 +470,22 @@ fn hydrate(session: &str, window: Option<&str>) {
             continue;
         }
         with_rec(session, &w, |r| {
+            // Memory wins COUNT-WISE (board #122): a line typed by THIS
+            // process keeps its own clock, and duplicates are distinct
+            // promises — recover only the rows beyond what memory holds.
+            let mut have: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+            for (l, _) in &r.pending {
+                *have.entry(l.clone()).or_insert(0) += 1;
+            }
+            let mut owed: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
             for line in lines {
-                // Memory wins: a line typed by THIS process keeps its own clock.
-                if r.pending.iter().any(|(l, _)| l == &line) {
-                    continue;
+                *owed.entry(line).or_insert(0) += 1;
+            }
+            for (line, n) in owed {
+                let already = have.get(&line).copied().unwrap_or(0);
+                for _ in already..n {
+                    r.pending.push((line.clone(), ts));
                 }
-                r.pending.push((line, ts));
             }
             while r.pending.len() > MAX_PENDING {
                 r.pending.remove(0);
@@ -556,9 +568,11 @@ pub fn record_tool(session: &str, window: &str, tool: &str, detail: &str) {
 pub fn record_delivery(session: &str, window: &str, line: &str) {
     let (line, ts) = (line.to_string(), now());
     with_rec(session, window, |r| {
-        // Re-typing the same line replaces its entry rather than queueing a
-        // duplicate that could never be acked twice.
-        r.pending.retain(|(l, _)| l != &line);
+        // Two deliveries of the SAME body are two promises (board #122): the
+        // pane really was typed into twice, the CLI will submit twice, and
+        // each echo settles exactly one entry. The old replace-on-retype
+        // collapsed them, so the second echo found nothing and was filed as
+        // local keyboard input.
         r.pending.push((line.clone(), ts));
         // A queue that only grows is a leak; nobody types this many lines at one
         // agent without the sweep having something to say about it.
@@ -603,16 +617,42 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
     with_rec(session, window, |r| {
         // Any outstanding line may be the one this prompt carries — a queue is
         // submitted in order, but an agent can also be steered, so match on
-        // CONTENT and remove exactly what was found. One submitted prompt can
-        // carry several queued lines at once, so this keeps going.
+        // CONTENT. One submitted prompt can carry several queued lines at
+        // once, so this keeps going — but a line the prompt carries ONCE
+        // settles only ONE of its duplicates (board #122): each occurrence in
+        // the echo is one receipt, spent oldest-first, so the next echo can
+        // still settle the sibling promise.
         let before = r.pending.len();
+        let mut spent: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut reverse_spent = false;
         r.pending.retain(|(line, _)| {
             let canon_line = strip_ws(line);
-            let hit = canon_prompt.contains(&canon_line) || canon_line.contains(&canon_prompt);
-            if hit {
+            if canon_line.is_empty() {
+                // An all-whitespace line has no shape to match; settle it as
+                // containment always did rather than pin it forever.
                 settled.push(line.clone());
+                return false;
             }
-            !hit
+            let budget = canon_prompt.matches(canon_line.as_str()).count();
+            let used = spent.entry(canon_line.clone()).or_insert(0);
+            if *used < budget {
+                *used += 1;
+                settled.push(line.clone());
+                return false;
+            }
+            // The truncation-aware side: the stored echo may be cut while the
+            // full line is longer (canon_line strictly longer, containing the
+            // whole prompt). One such settle per echo — it is one submission.
+            // Equal-length lines already spent the forward budget above.
+            if !reverse_spent
+                && canon_line.len() > canon_prompt.len()
+                && canon_line.contains(&canon_prompt)
+            {
+                reverse_spent = true;
+                settled.push(line.clone());
+                return false;
+            }
+            true
         });
         acked = r.pending.len() < before;
         // A turn just opened. This is the ONE honest "it started working"
@@ -1486,6 +1526,38 @@ mod tests {
         assert_eq!(derive(&s1, "newcomer", 0).state, "idle", "no facts, honestly idle");
 
         run(&["kill-session", "-t", &format!("={session}")]);
+    }
+
+    /// Board #122 (1): two deliveries with the SAME body are two promises, and
+    /// each echo settles exactly ONE of them, oldest first. The old upsert
+    /// collapsed them into one entry, so the second echo found nothing and was
+    /// filed as local keyboard input — the same hollow-ring symptom as the
+    /// single-slot bug, from a third cause.
+    #[test]
+    fn identical_bodies_are_two_receipts_settled_one_per_echo() {
+        let session = format!("dup-{}", uuid::Uuid::new_v4());
+        let line = "[tmm chat 2026-09-09 06:30] human: @dev continue";
+        record_delivery(&session, "dev", line);
+        record_delivery(&session, "dev", line);
+        let held = || {
+            store().lock().unwrap().get(&(session.clone(), "dev".to_string()))
+                .map(|r| r.pending.len()).unwrap_or(0)
+        };
+        assert_eq!(held(), 2, "two deliveries of one body are two promises");
+
+        // The CLI submits the queued lines one prompt at a time: each echo
+        // settles exactly one entry, and both read as OUR delivery.
+        assert!(record_prompt(&session, "dev", line), "first echo acks");
+        assert_eq!(held(), 1, "one promise left");
+        assert!(record_prompt(&session, "dev", line), "second echo acks the second, not via local");
+        assert_eq!(held(), 0);
+
+        // And ONE submission carrying the line TWICE settles both at once.
+        record_delivery(&session, "dev", line);
+        record_delivery(&session, "dev", line);
+        let both = format!("{line}\n{line}");
+        assert!(record_prompt(&session, "dev", &both));
+        assert_eq!(held(), 0, "a double-carrying echo settles both");
     }
 
 }

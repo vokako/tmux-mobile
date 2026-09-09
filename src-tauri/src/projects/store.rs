@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 20;
+const SCHEMA_VERSION: i64 = 21;
 
 /// One stored hub message (board #107) — the row shape of `hub_msgs`, column
 /// names mirroring the agora `messages` table it replaced so the legacy
@@ -267,7 +267,8 @@ impl Store {
         // Board #120: a binary built between the v20 stamp and its migration
         // block must still get the name columns (the v13 lesson, same floor).
         self.ensure_activity_names()?;
-        self.ensure_delivery_names()
+        self.ensure_delivery_names()?;
+        self.ensure_delivery_duplicates()
     }
 
     /// Ensure the durable half of Board editability exists, then
@@ -891,7 +892,45 @@ impl Store {
             self.ensure_activity_names()?;
             self.ensure_delivery_names()?;
         }
+        if version < 21 {
+            // v21 (board #122): duplicates of one line are DISTINCT promises,
+            // so the (session, win, line) unique key goes — each delivery is
+            // its own row, settled one at a time by its own echo.
+            self.ensure_delivery_duplicates()?;
+        }
         Ok(())
+    }
+
+    /// The v21 deliveries shape (also a heal floor): no unique key — the
+    /// presence of the `sqlite_autoindex` unique index is the marker.
+    fn ensure_delivery_duplicates(&self) -> Result<(), String> {
+        let unique: bool = self
+            .conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_index_list('deliveries') WHERE \"unique\" = 1)",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("inspect deliveries uniqueness: {e}"))?;
+        if !unique {
+            return Ok(());
+        }
+        self.conn
+            .execute_batch(
+                "CREATE TABLE deliveries_v21 (
+                   id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                   session TEXT NOT NULL,
+                   win     TEXT NOT NULL,
+                   line    TEXT NOT NULL,
+                   ts      INTEGER NOT NULL
+                 );
+                 INSERT INTO deliveries_v21 (session, win, line, ts)
+                   SELECT session, win, line, ts FROM deliveries;
+                 DROP TABLE deliveries;
+                 ALTER TABLE deliveries_v21 RENAME TO deliveries;
+                 CREATE INDEX IF NOT EXISTS deliveries_session ON deliveries(session, win);",
+            )
+            .map_err(|e| format!("rebuild deliveries for duplicates: {e}"))
     }
 
     /// The v20 activity shape (also a heal floor — see `heal`): a `win` TEXT
@@ -1416,10 +1455,11 @@ impl Store {
         line: &str,
         ts: u64,
     ) -> Result<(), String> {
+        // A plain INSERT (board #122): the same line delivered again is a new
+        // promise with its own row and its own echo.
         self.conn
             .execute(
-                "INSERT INTO deliveries (session, win, line, ts) VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(session, win, line) DO UPDATE SET ts = ?4",
+                "INSERT INTO deliveries (session, win, line, ts) VALUES (?1, ?2, ?3, ?4)",
                 rusqlite::params![session, window, line, ts as i64],
             )
             .map(|_| ())
@@ -1458,6 +1498,21 @@ impl Store {
 
     /// A line is settled — acknowledged by its echo, or reported as unconfirmed.
     /// Either way it stops being outstanding.
+    /// Settle ONE row of a possibly-duplicated line, oldest first (board #122).
+    pub fn delete_one_delivery(&self, session: &str, window: &str, line: &str) -> Result<bool, String> {
+        self.conn
+            .execute(
+                "DELETE FROM deliveries WHERE id = (
+                   SELECT id FROM deliveries
+                   WHERE session = ?1 AND win = ?2 AND line = ?3
+                   ORDER BY id LIMIT 1
+                 )",
+                rusqlite::params![session, window, line],
+            )
+            .map(|n| n > 0)
+            .map_err(|e| format!("delete one delivery: {e}"))
+    }
+
     pub fn delete_delivery(&self, session: &str, window: &str, line: &str) -> Result<bool, String> {
         self.conn
             .execute(
@@ -2419,20 +2474,28 @@ mod tests {
     fn outstanding_deliveries_are_kept_per_window_and_settle_once() {
         let store = Store::open_memory().unwrap();
         store.insert_delivery("s", "w1", "hello", 100).unwrap();
-        // Re-typing the same line is the same outstanding line with a new clock,
-        // never a second row that could never be acked twice.
+        // Delivering the same body again is a SECOND promise with its own row
+        // (board #122): the pane was typed into twice, two echoes are coming,
+        // and each settles one row, oldest first.
         store.insert_delivery("s", "w1", "hello", 150).unwrap();
         store.insert_delivery("s", "w2", "other", 120).unwrap();
         store.insert_delivery("t", "w1", "elsewhere", 130).unwrap();
 
         let all = store.pending_deliveries("s", None).unwrap();
-        assert_eq!(all, vec![("w1".to_string(), "hello".to_string(), 150), ("w2".to_string(), "other".to_string(), 120)]);
+        assert_eq!(all, vec![
+            ("w1".to_string(), "hello".to_string(), 100),
+            ("w1".to_string(), "hello".to_string(), 150),
+            ("w2".to_string(), "other".to_string(), 120),
+        ]);
         assert_eq!(store.pending_deliveries("s", Some("w2")).unwrap().len(), 1);
         assert_eq!(store.pending_deliveries("t", None).unwrap().len(), 1, "sessions never cross");
 
-        // Acked or reported, a line leaves — and leaving twice is not an error.
-        assert!(store.delete_delivery("s", "w1", "hello").unwrap());
-        assert!(!store.delete_delivery("s", "w1", "hello").unwrap());
+        // Each echo settles ONE row, oldest first; leaving past the last is
+        // not an error.
+        assert!(store.delete_one_delivery("s", "w1", "hello").unwrap());
+        assert_eq!(store.pending_deliveries("s", Some("w1")).unwrap(), vec![("w1".to_string(), "hello".to_string(), 150)], "the older row went first");
+        assert!(store.delete_one_delivery("s", "w1", "hello").unwrap());
+        assert!(!store.delete_one_delivery("s", "w1", "hello").unwrap());
         // A window that no longer exists can never echo: drop its whole queue.
         assert_eq!(store.clear_deliveries("s", Some("w2")).unwrap(), 1);
         assert!(store.pending_deliveries("s", None).unwrap().is_empty());
