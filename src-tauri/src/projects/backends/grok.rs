@@ -287,3 +287,17 @@ pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
         None => format!("{cmd} --continue"),
     }
 }
+
+/// This backend's detection/relaunch row (board #129). grok 1.0.5 --help:
+/// `-c/--continue` — "Continue the most recent session for the current
+/// working directory" (cwd-scoped, so safe, unlike codex's machine-wide
+/// --last); `--resume <id>` exact. Recipe dialect: `resume_command` above.
+pub(crate) fn known() -> crate::projects::agents::KnownAgent {
+    crate::projects::agents::KnownAgent {
+        backend: "grok",
+        needle: "grok",
+        launch: "grok",
+        resume_recent: Some("grok --continue"),
+        resume_id: Some("grok --resume {id}"),
+    }
+}

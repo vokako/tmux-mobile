@@ -260,3 +260,19 @@ pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
         None => cmd.to_string(),
     }
 }
+
+/// This backend's detection/relaunch row (board #129). `codex resume <id>`
+/// exact only: `--last` is machine-wide for a SHARED ~/.codex, so restoring
+/// project A could reopen project B's conversation — deliberately None here.
+/// The managed-home dialect (`resume_command` above) DOES use `--last`:
+/// an isolated CODEX_HOME is this one agent's and codex cwd-filters it.
+/// One file, both halves of the same fact (todo §D2).
+pub(crate) fn known() -> crate::projects::agents::KnownAgent {
+    crate::projects::agents::KnownAgent {
+        backend: "codex",
+        needle: "codex",
+        launch: "codex",
+        resume_recent: None,
+        resume_id: Some("codex resume {id}"),
+    }
+}

@@ -79,6 +79,18 @@ impl Backend {
         }
     }
 
+    /// The backend's detection/relaunch row for the KNOWN table
+    /// (projects/agents.rs assembles it from ALL, board #129).
+    pub fn known(self) -> crate::projects::agents::KnownAgent {
+        match self {
+            Backend::Kiro => kiro::known(),
+            Backend::Claude => claude::known(),
+            Backend::Codex => codex::known(),
+            Backend::Grok => grok::known(),
+            Backend::Omp => omp::known(),
+        }
+    }
+
     /// Render an agent's isolated home from its definition — prompt, backend
     /// config, hooks, launch command (board #128). Each arm is the backend's
     /// own file; `workspace` is read by claude alone (trust pre-seeding).

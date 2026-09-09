@@ -323,3 +323,19 @@ pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
         None => format!("{cmd} --continue"),
     }
 }
+
+/// This backend's detection/relaunch row (board #129). oh-my-pi is one `omp`
+/// ELF binary, so pane_current_command says "omp" directly; the needle only
+/// fires on WORD matches (`find_word` — "omp" is a substring of
+/// docker-compose and half the words in a build log). `--continue` is
+/// cwd-scoped (sessions live under `~/.omp/agent/sessions/<encoded-cwd>/`),
+/// `--resume <id>` takes an id prefix. Recipe dialect: `resume_command`.
+pub(crate) fn known() -> crate::projects::agents::KnownAgent {
+    crate::projects::agents::KnownAgent {
+        backend: "omp",
+        needle: "omp",
+        launch: "omp",
+        resume_recent: Some("omp --continue"),
+        resume_id: Some("omp --resume {id}"),
+    }
+}

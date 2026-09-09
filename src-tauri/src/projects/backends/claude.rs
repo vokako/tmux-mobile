@@ -366,3 +366,16 @@ pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
         None => format!("{cmd} --continue"),
     }
 }
+
+/// This backend's detection/relaunch row (board #129). `claude --help`:
+/// `-c/--continue` — most recent conversation in this directory;
+/// `--resume <id>` exact. The recipe dialect is `resume_command` above.
+pub(crate) fn known() -> crate::projects::agents::KnownAgent {
+    crate::projects::agents::KnownAgent {
+        backend: "claude",
+        needle: "claude",
+        launch: "claude",
+        resume_recent: Some("claude --continue"),
+        resume_id: Some("claude --resume {id}"),
+    }
+}

@@ -24,87 +24,36 @@ pub struct KnownAgent {
 
 use crate::tmux::TmuxPane;
 
-/// Kimi must precede Kiro: a Kimi pane's process chain contains its
-/// `kiro-web-search` helper, so an array-order rule would paint it as Kiro.
-/// Earliest match in the text wins regardless (see `detect`), but keeping the
-/// order meaningful documents the trap.
-///
-/// Resume flags are taken from the installed CLIs' own `--help`, not guessed:
-///
-/// * `kiro-cli chat -r/--resume` — "Resume the most recent conversation from
-///   this directory"; `--resume-id <SESSION_ID>` for an exact one.
-/// * `claude -c/--continue` — most recent conversation in this directory;
-///   `--resume <id>` for an exact one.
-/// * `codex resume <SESSION_ID>` — exact only. `codex resume --last` is
-///   deliberately NOT used: it continues the most recent recorded session
-///   machine-wide, so restoring project A could reopen project B's
-///   conversation. Without a recorded id, codex starts fresh.
-/// * `omp --continue` — oh-my-pi's own session docs (`SessionManager.
-///   continueRecent(cwd, sessionDir)`): the breadcrumb/most-recent lookup is
-///   scoped to the current cwd's session directory (verified on disk: sessions
-///   live under `~/.omp/agent/sessions/<encoded-cwd>/`), so it cannot cross
-///   projects; `omp --resume <id>` resumes one exact session by id prefix.
-/// * kimi / openclaw — no resume wired up because their flags are unverified
-///   here; they relaunch clean rather than guess.
-const KNOWN: &[KnownAgent] = &[
-    KnownAgent {
-        backend: "kimi",
-        needle: "kimi",
-        launch: "kimi",
-        resume_recent: None,
-        resume_id: None,
-    },
-    KnownAgent {
-        backend: "kiro",
-        needle: "kiro",
-        launch: "kiro-cli chat",
-        resume_recent: Some("kiro-cli chat --resume"),
-        resume_id: Some("kiro-cli chat --resume-id {id}"),
-    },
-    KnownAgent {
-        backend: "claude",
-        needle: "claude",
-        launch: "claude",
-        resume_recent: Some("claude --continue"),
-        resume_id: Some("claude --resume {id}"),
-    },
-    KnownAgent {
-        backend: "codex",
-        needle: "codex",
-        launch: "codex",
-        resume_recent: None,
-        resume_id: Some("codex resume {id}"),
-    },
-    KnownAgent {
-        // grok 1.0.5, flags from its own --help: `-c/--continue` — "Continue
-        // the most recent session for the current working directory" (cwd-
-        // scoped, so safe, unlike codex's machine-wide --last); `--resume <id>`
-        // for an exact session (UUID-shaped values always mean ids).
-        backend: "grok",
-        needle: "grok",
-        launch: "grok",
-        resume_recent: Some("grok --continue"),
-        resume_id: Some("grok --resume {id}"),
-    },
-    KnownAgent {
-        backend: "openclaw",
-        needle: "openclaw",
-        launch: "openclaw",
-        resume_recent: None,
-        resume_id: None,
-    },
-    KnownAgent {
-        // oh-my-pi: one `omp` ELF binary, so pane_current_command says "omp"
-        // directly. The needle only fires on WORD matches (see `find_word`) —
-        // "omp" is a substring of docker-compose and half the words in a
-        // build log.
-        backend: "omp",
-        needle: "omp",
-        launch: "omp",
-        resume_recent: Some("omp --continue"),
-        resume_id: Some("omp --resume {id}"),
-    },
-];
+/// The detection/relaunch table, one row per recognisable CLI. The five
+/// SPAWNABLE backends contribute their rows from their own files
+/// (`Backend::known`, board #129 — resume strings and the recipe resume
+/// dialect are one file per backend now, closing todo §D2); kimi and
+/// openclaw are DETECTION-ONLY — recognised in panes, never spawnable, no
+/// resume wired up because their flags are unverified here (they relaunch
+/// clean rather than guess).
+fn known() -> &'static [KnownAgent] {
+    static KNOWN: std::sync::OnceLock<Vec<KnownAgent>> = std::sync::OnceLock::new();
+    KNOWN.get_or_init(|| {
+        let mut rows = vec![
+            KnownAgent {
+                backend: "kimi",
+                needle: "kimi",
+                launch: "kimi",
+                resume_recent: None,
+                resume_id: None,
+            },
+            KnownAgent {
+                backend: "openclaw",
+                needle: "openclaw",
+                launch: "openclaw",
+                resume_recent: None,
+                resume_id: None,
+            },
+        ];
+        rows.extend(super::backends::Backend::ALL.into_iter().map(|b| b.known()));
+        rows
+    })
+}
 
 /// The backends `spawn` can materialize an isolated home for — the ONE list
 /// `registry_save`, team validation and the CLI help read, so adding a
@@ -199,7 +148,7 @@ fn find_word(haystack: &str, needle: &str) -> Option<usize> {
 pub fn detect(text: &str) -> Option<&'static KnownAgent> {
     let lower = text.to_lowercase();
     let mut best: Option<(usize, &'static KnownAgent)> = None;
-    for agent in KNOWN {
+    for agent in known() {
         if let Some(idx) = find_word(&lower, agent.needle) {
             if best.is_none_or(|(prev, _)| idx < prev) {
                 best = Some((idx, agent));
@@ -230,7 +179,7 @@ pub fn detect_managed(
             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
             .and_then(|v| v.get("backend").and_then(|b| b.as_str().map(str::to_owned)))
         {
-            if let Some(agent) = KNOWN.iter().find(|a| a.backend == backend) {
+            if let Some(agent) = known().iter().find(|a| a.backend == backend) {
                 return Some(agent);
             }
         }
@@ -270,7 +219,7 @@ pub fn detect_pane(workspace: Option<&str>, pane: &TmuxPane) -> Option<&'static 
 /// directory-scoped resume is the next best thing, and a clean start is the
 /// last resort.
 pub fn launch_line(backend: &str, session_id: Option<&str>) -> Option<String> {
-    let agent = KNOWN.iter().find(|a| a.backend == backend)?;
+    let agent = known().iter().find(|a| a.backend == backend)?;
     if let (Some(id), Some(template)) = (session_id.filter(|s| !s.is_empty()), agent.resume_id) {
         return Some(template.replace("{id}", id));
     }
@@ -279,7 +228,7 @@ pub fn launch_line(backend: &str, session_id: Option<&str>) -> Option<String> {
 
 /// The plain launch line, ignoring any conversation history.
 pub fn launch_for(backend: &str) -> Option<&'static str> {
-    KNOWN.iter().find(|a| a.backend == backend).map(|a| a.launch)
+    known().iter().find(|a| a.backend == backend).map(|a| a.launch)
 }
 
 #[cfg(test)]
@@ -385,7 +334,7 @@ mod tests {
     #[test]
     fn every_spawnable_backend_is_known() {
         for b in SPAWNABLE_BACKENDS {
-            assert!(KNOWN.iter().any(|a| a.backend == *b), "{b} missing from KNOWN");
+            assert!(known().iter().any(|a| a.backend == *b), "{b} missing from KNOWN");
         }
     }
 

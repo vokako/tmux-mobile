@@ -380,3 +380,18 @@ pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
         None => format!("{cmd} --resume"),
     }
 }
+
+/// This backend's detection/relaunch row (board #129). Resume flags from
+/// `kiro-cli chat --help`: `-r/--resume` — "Resume the most recent
+/// conversation from this directory"; `--resume-id <SESSION_ID>` exact.
+/// The recipe-based resume dialect lives in `resume_command` above — same
+/// knowledge, the template form serves adopted/hand-started windows.
+pub(crate) fn known() -> crate::projects::agents::KnownAgent {
+    crate::projects::agents::KnownAgent {
+        backend: "kiro",
+        needle: "kiro",
+        launch: "kiro-cli chat",
+        resume_recent: Some("kiro-cli chat --resume"),
+        resume_id: Some("kiro-cli chat --resume-id {id}"),
+    }
+}
