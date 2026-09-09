@@ -147,6 +147,27 @@ retrofitting every page in one commit is churn without user value.
 5. Verify: drag in Hub → switch to Agents → same width; reload → persists;
    compact/mobile unaffected.
 
+## Hub Sidebar Ownership
+
+Board #121, 2026-09-09: `hub/Sidebar.svelte` now renders the existing Hub
+project sidebar. This is a component boundary, not another sidebar design:
+the same aside and scrim remain direct siblings in Hub's grid, private
+declarations move with the markup, and `app.css` still owns the shared
+row/sheet/status atoms. `SideHandle` remains the one resize control.
+The child requests selection, menus, restore and purge; Hub owns their
+stateful consequences and Back. The unrelated private `.st`, `.note-dot`,
+`.spacer` and `.empty` rules stay in Hub because this sidebar does not use them.
+
+Verified with Chromium 152.0.7977.64 against the same fixed-data Hub fixture
+before and after the move: 1440x900 and 390x844, light/dark, plus reduced-motion
+spots. All 36 captured states had identical text, rectangles and computed
+styles. Of 36 full-page PNGs, 23 were byte-identical; the others differed at
+5-29 rounded-edge pixels (maximum channel delta 6, under 0.009% of a frame).
+The eleven moved private CSS rules were byte-identical. Browser workflows
+covered non-selected-row Close, restore and confirmed purge; the mounted
+negative control routed Close to the selected row and failed on the wrong RPC
+target. This verifies the component/layout move, not native Back gestures.
+
 ## Page skeleton (added 2026-08-02, owner: "reuse the project page's format")
 
 Bar dialects found in the wild: Hub's header (`padding 10px 16px`, ~41px,

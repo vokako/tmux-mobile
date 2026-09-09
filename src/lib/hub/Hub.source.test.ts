@@ -79,7 +79,6 @@ test('hover reports facts with no gesture tutorial (board #87)', () => {
   assert.match(off, /use:hoverInfo=\{\(\) => offCardInfo\(name\)\}/u, 'the stopped card too');
   const cardFns = source.slice(source.indexOf('function cardInfo'), source.indexOf('function pillInfo'));
   assert.doesNotMatch(cardFns, /\bnote\s*:/u, 'agent cards carry facts, never a click/right-click footer');
-  assert.match(source, /class="side-row proj-row"[\s\S]{0,600}?use:hoverInfo=\{\(\) => rowInfo\(row\)\}/u, 'the sidebar row');
   assert.match(source, /class="win-pill state-ctl"[\s\S]{0,200}?use:hoverInfo=\{\(\) => pillInfo\(a\)\}/u, 'the drawer window pill');
   const chip = /<button class="to-chip"[\s\S]*?>/u.exec(source)?.[0] ?? '';
   assert.match(chip, /use:hoverInfo=\{toChipInfo\}/u, 'the recipient chip explains its destination');
@@ -87,28 +86,24 @@ test('hover reports facts with no gesture tutorial (board #87)', () => {
   // The tone of the state row is the SAME family the dot paints — no second
   // colour language (rule 6).
   assert.match(source, /function stateTone\(state\) \{\s*switch \(stateDotColor\(state\)\)/u, 'the hover tone derives from stateDotColor');
-  for (const fmt of ['modelLabel(a.vitals.model)', 'fmtElapsed(a.since, tick)', 'projectAgeLabel(row, talkMap, tick)']) {
+  for (const fmt of ['modelLabel(a.vitals.model)', 'fmtElapsed(a.since, tick)']) {
     assert.ok(source.includes(fmt), `the hover card reuses ${fmt} — no second formatter`);
   }
 });
 
-test('Chat project rows share Terminal time and expose one borderless project menu', () => {
-  assert.match(source, /import \{ projectAgeLabel, sortRows \} from '\.\.\/projects\/projects\.ts';/u,
-    'Chat imports the shared project update formatter');
-  const start = source.indexOf('{#each rows as row (row.project.id)}');
-  const row = source.slice(start, source.indexOf('<button class="side-row add"', start));
-  assert.match(row, /<div class="side-row proj-row"/u, 'the row can hold two sibling controls');
-  assert.match(row, /<button class="proj-pick"/u, 'the main area still opens the conversation');
-  assert.match(row, /projectAgeLabel\(row, talkMap, tick\)/u,
-    'the visible age uses the same source and formatter as Terminal');
-  assert.match(row, /<button class="icon-btn row-menu" aria-label=\{t\('hubProjectMenu'\)\}/u,
-    'the familiar dots affordance is the global borderless icon-button dialect');
-  assert.match(row, /<Icon name="dots" size=\{13\} \/>/u);
-  assert.match(row, /oncontextmenu=\{\(e\) => \{ e\.preventDefault\(\); openCtx\(pointOf\(e\), row\.project\.name, projectItems\(row\)\); \}\}/u,
-    'right-click uses the same projectItems source');
-  assert.match(row, /openCtx\(\{ anchor: anchorOf\(e\.currentTarget\), trigger: e\.currentTarget \}, row\.project\.name, projectItems\(row\)\)/u,
-    'the dots use the same source, trigger-anchored');
-  assert.doesNotMatch(rule('.row-menu'), /border/u, 'local CSS only places the already-borderless icon-btn');
+test('Hub keeps selection, Back and consequential actions around the extracted Sidebar (#121)', () => {
+  const start = source.indexOf('<Sidebar ');
+  const sidebar = source.slice(start, source.indexOf('/>', start));
+  assert.match(sidebar, /open=\{sideOpen\}/u);
+  assert.match(sidebar, /onselect=\{\(session\) => \{ selectProject\(session\); sideOpen = false; \}\}/u);
+  assert.match(sidebar, /onmenu=\{\(row, at\) => openCtx\(at, row\.project\.name, projectItems\(row\)\)\}/u,
+    'context actions use the clicked row, never selectedRow');
+  assert.match(sidebar, /onrestore=\{restoreProject\} onpurge=\{\(row\) => \{ trashAsk = row; \}\}/u);
+  assert.match(sidebar, /oncreate=\{\(\) => \{ createOpen = true; sideOpen = false; \}\}/u);
+  assert.match(sidebar, /onclose=\{\(\) => \{ sideOpen = false; \}\}/u);
+  assert.match(source, /backLayers\.register\('sidebar', \(\) => \{ if \(compact && !sideOpen\)/u);
+  assert.doesNotMatch(source, /<aside class="sidebar"|function rowInfo|let trashOpen/u,
+    'the old view and private fold state have one new owner');
 });
 
 test('the composer\u2019s two upward menus grow from the chip like every other popover (motion.md wave 6)', () => {
@@ -955,7 +950,7 @@ test('the title caret expands the NAME — left-aligned on its real rect (board 
   const opens = [...source.matchAll(/openCtx\((?!at, who)/g)].length; // call sites, not the definition
   const leftAligned = [...source.matchAll(/openCtx\(\{ anchor:[^}]*align: 'left'/g)].length;
   assert.equal(leftAligned, 1, 'ONE explicitly left-aligned entry');
-  assert.equal(opens - leftAligned, 7, 'the other seven entries carry no explicit align — the anchor kind decides (the message bubble\u2019s opener is retired, board #48)');
+  assert.equal(opens - leftAligned, 5, 'four card entries plus one Sidebar callback carry no explicit align (#121 moved its three doors)');
   assert.ok(!/getBoundingClientRect\(\)[^]{0,80}openCtx/u.test(source),
     'no raw client rect reaches openCtx — anchorOf owns the zoom correction');
   // The narrowed caret resets the BROWSER's button padding (Chromium: 1px 6px,

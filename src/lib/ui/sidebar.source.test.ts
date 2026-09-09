@@ -71,7 +71,7 @@ test('the sidebar project-row atoms live in app.css, not in a component', async 
   // same drift that split the two headers, so the same guard: a component may
   // POSITION the shared containers (.side-wins indent) but never restyle the
   // atoms themselves.
-  const FILES = ['lib/hub/Hub.svelte', 'lib/projects/Projects.svelte', 'lib/hub/Board.svelte'];
+  const FILES = ['lib/hub/Hub.svelte', 'lib/hub/Sidebar.svelte', 'lib/projects/Projects.svelte', 'lib/hub/Board.svelte'];
   for (const file of FILES) {
     const raw = await readFile(new URL(file, SRC), 'utf8');
     const style = /<style>([\s\S]*)<\/style>/.exec(raw)?.[1] ?? '';
@@ -97,7 +97,7 @@ test('the two-line project ROW is one shared skeleton — Chat and Board wear it
   // (0,2,0 vs the lifted rule's specificity), so the guard is the same as
   // the atoms': components may USE the classes, never restyle them.
   const ROW_ATOMS = /\.p-name(?![\w-])|\.p-main(?![\w-])|\.p-top(?![\w-])|\.proj-row(?![\w-])/;
-  for (const file of ['lib/hub/Hub.svelte', 'lib/hub/Board.svelte']) {
+  for (const file of ['lib/hub/Sidebar.svelte', 'lib/hub/Board.svelte']) {
     const raw = await readFile(new URL(file, SRC), 'utf8');
     const style = /<style>([\s\S]*)<\/style>/.exec(raw)?.[1] ?? '';
     const css = style.replace(/\/\*[\s\S]*?\*\//g, '');

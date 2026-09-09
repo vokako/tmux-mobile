@@ -18,8 +18,8 @@
   import Terminal from '../terminal/Terminal.svelte';
   import Files from '../files/Files.svelte';
   import Board from './Board.svelte';
+  import Sidebar from './Sidebar.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
-  import { scrollFade } from '../core/scrollFade.ts';
   import { copyText } from '../core/clipboard.ts';
   import ChatImage from './ChatImage.svelte';
   import Lightbox from '../ui/Lightbox.svelte';
@@ -32,14 +32,13 @@
     hubPost, hubCommand, modelsList, hubLog, hubRooms, hubAgents, fsMkdir, fsUpload, fsCwd, hubSpawn, hubSpawnTeam, teamsList, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
-  import { projectAgeLabel, sortRows } from '../projects/projects.ts';
+  import { sortRows } from '../projects/projects.ts';
   import { TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, stateNeedsYou, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, mentionedAgents, chipExtras, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, perLineOf, modelLabel } from './hub.ts';
   import { handlePathLinkClick, resolvePathRef } from '../core/path-links.ts';
   import { heldAnchor, readingDirection, refoldEligible } from './hub-reading.ts';
   import { ALL_TARGET, attachmentBody, attachToken, paletteBackendFor } from './hub-composer.ts';
   import { walkFeedGap } from './hub-history.ts';
   import { createHubBackRegistry } from './hub-back.ts';
-  import { rowAgents, rowAgentCounts } from './sidebar.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
   import { backendIcon } from '../core/agents.ts';
   import { anchorOf, menuPlacement, popOrigin, viewBox } from '../ui/placement.ts';
@@ -73,7 +72,6 @@
   let rowsBase = $state(null);
   // The recycle bin: archived projects, folded at the sidebar's bottom.
   let trash = $state([]);           // ProjectRow[] (archived)
-  let trashOpen = $state(false);
   let trashAsk = $state(null);      // row pending PERMANENT delete (the only irreversible step)
   let panes = $state([]);           // all tmux panes
   let talkMap = $state({});         // room -> newest message ts (ms) — sidebar row times
@@ -2190,17 +2188,6 @@
     if (selectedRow?.project.path) lines.push({ label: t('hubHoverPath'), value: selectedRow.project.path });
     return { title: name, lines };
   }
-  function rowInfo(row) {
-    const n = rowAgentCounts(row, panes);
-    const lines = [{ label: t('hubHoverPath'), value: row.project.path }];
-    if (n.live || n.stopped) {
-      lines.push({ label: t('hubHoverAgents'), value: t('hubHoverAgentsCount').replace('{live}', String(n.live)).replace('{stopped}', String(n.stopped)), tone: n.live ? 'accent' : undefined });
-    }
-    const age = projectAgeLabel(row, talkMap, tick);
-    if (age) lines.push({ label: t('hoverActivity'), value: age });
-    if (row.project.session === selected && unread.size) lines.push({ label: t('hubHoverUnread'), value: String(unread.size), tone: 'accent' });
-    return { title: row.project.name, lines };
-  }
   function pillInfo(a) {
     const lines = [{ label: t('hubHoverCommand'), value: a.command || '—' }];
     const n = panes.filter((p) => p.session === selected && p.window === a.window).length;
@@ -2298,94 +2285,13 @@
 
 <div class="hub-root" class:compact class:drawer-open={termOpen && !compact}>
   <div class="cols">
-    <!-- ── Projects. A column on the desktop; on the phone the SAME list slides
-         in from the left, because these are separate conversations you pick
-         between, not tabs you flick through. ─────────── -->
-    {#if compact && sideOpen}
-      <div class="side-scrim" onclick={() => sideOpen = false} role="presentation"></div>
-    {/if}
-    <!-- side-sheet is the SHARED drawer dialect (app.css): inert on desktop,
-         the parked-and-sliding sheet on the phone — one width, one shadow,
-         one motion for Chat, Terminal and Board (owner, 2026-08-30). -->
-    <aside class="sidebar" class:side-sheet={compact} class:sheet={compact} class:open={compact && sideOpen}>
-      {#if !compact}<SideHandle />{/if}
-      <div class="side-scroll subtle-scroll" use:scrollFade>
-        <div class="side-h">{t('hubProjects')}</div>
-        {#each rows as row (row.project.id)}
-          <!-- Right-click (desktop) and long press (phone) open the project's own
-               verbs where the pointer is. The row's normal job — open this
-               conversation — is unchanged. The list is ordered by the
-               CONVERSATION, so a row that moves MOVES (animate:flip on
-               moveMs(), motion.md wave 5); a project that joins fades in. -->
-          <div class="side-row proj-row" role="group" aria-label={row.project.name} class:open={row.project.session === selected}
-            class:appear={!!rowsBase && !rowsBase.has(row.project.id)}
-            animate:flip={{ duration: moveMs() }}
-            oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), row.project.name, projectItems(row)); }}
-            use:longpress={{ onlongpress: (pt) => openCtx(pt, row.project.name, projectItems(row)) }}
-            use:hoverInfo={() => rowInfo(row)}>
-            <button class="proj-pick"
-              onclick={() => { selectProject(row.project.session); sideOpen = false; }}>
-              <span class="dot" class:off={!row.live}></span>
-              <span class="p-main">
-                <span class="p-top">
-                  <span class="p-name">{row.project.name}</span>
-                  <span class="side-age">{projectAgeLabel(row, talkMap, tick)}</span>
-                </span>
-                {#if rowAgents(row, panes, agentStates).length}
-                  <span class="side-wins" class:dim={!row.live}>
-                    {#each rowAgents(row, panes, agentStates) as a (a.name)}
-                      <span class="side-win">
-                        {#if a.icon}<img src={a.icon} alt="" width="11" height="11" />{/if}
-                        <span class="side-win-name">{a.name}</span>
-                        {#if a.state}<span class="side-win-dot" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span>{/if}
-                      </span>
-                    {/each}
-                  </span>
-                {/if}
-              </span>
-            </button>
-            <button class="icon-btn row-menu" aria-label={t('hubProjectMenu')}
-              onclick={(e) => {
-                e.stopPropagation();
-                openCtx({ anchor: anchorOf(e.currentTarget), trigger: e.currentTarget }, row.project.name, projectItems(row));
-              }}>
-              <Icon name="dots" size={13} />
-            </button>
-          </div>
-        {/each}
-        <button class="side-row add" onclick={() => { createOpen = true; sideOpen = false; }}>
-          <Icon name="plus" size={13} />{t('projectNew')}
-        </button>
-        <!-- ── The recycle bin. "Delete" moves a project here (session closed,
-             declaration kept); this folded section is the way back — restore
-             is one tap and asks nothing — and the way OUT: permanent delete
-             lives only here, behind the one confirmation that means it
-             (owner, 2026-08-21: "相当于回收站的功能，在archive里可以彻底删除
-             project"). Hidden entirely while empty: an empty bin is not a
-             place to visit. -->
-        {#if trash.length}
-          <button class="side-row add trash-bar" onclick={() => trashOpen = !trashOpen}>
-            <Icon name={trashOpen ? 'chevron-down' : 'trash'} size={13} />
-            {t('hubTrashBar').replace('{n}', String(trash.length))}
-          </button>
-          {#if trashOpen}
-            {#each trash as r (r.project.id)}
-              <div class="side-row trash-row appear" title={r.project.path}>
-                <span class="p-name trash-name">{r.project.name}</span>
-                <button class="t-act" title={t('hubRestore')} aria-label={t('hubRestore')}
-                  onclick={() => restoreProject(r)}>
-                  <Icon name="refresh" size={12} />
-                </button>
-                <button class="t-act danger" title={t('hubPurge')} aria-label={t('hubPurge')}
-                  onclick={() => trashAsk = r}>
-                  <Icon name="trash" size={12} />
-                </button>
-              </div>
-            {/each}
-          {/if}
-        {/if}
-      </div>
-    </aside>
+    <Sidebar {compact} open={sideOpen} {rows} {trash} {rowsBase} {selected}
+      {panes} {agentStates} {talkMap} {tick} unreadCount={unread.size}
+      onselect={(session) => { selectProject(session); sideOpen = false; }}
+      oncreate={() => { createOpen = true; sideOpen = false; }}
+      onclose={() => { sideOpen = false; }}
+      onmenu={(row, at) => openCtx(at, row.project.name, projectItems(row))}
+      onrestore={restoreProject} onpurge={(row) => { trashAsk = row; }} />
 
     <!-- ── Main: the conversation ─────────── -->
     <main class="mid">
@@ -3565,39 +3471,6 @@
     padding: 2px 6px; box-sizing: border-box;
   }
   .h1-edit:focus { outline: none; }
-  /* The two-line project row (.proj-row/.dot/.p-*) is the SHARED skeleton in
-     app.css since board #39 — Board wears it too, so a scoped copy here would
-     be the silent-override drift the sidebar source test forbids. The row has
-     two controls now: its content opens the conversation, the borderless
-     icon-btn opens the SAME projectItems menu as right-click/long-press. */
-  .proj-pick {
-    display: flex; align-items: flex-start; gap: 8px; flex: 1; min-width: 0;
-    padding: 0; border: 0; background: none; color: inherit; text-align: left;
-    font: inherit; cursor: pointer;
-  }
-  .row-menu { width: 24px; height: 24px; padding: 0; flex: none; align-self: center; color: var(--text3); }
-
-  .sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
-  /* Phone: the project list slides over the conversation instead of taking a
-     column from it. */
-  /* The sheet geometry/motion is the SHARED .side-sheet dialect in app.css
-     (owner, 2026-08-30: one drawer for Chat/Terminal/Board); only the touch
-     row height is Hub's own. */
-  .sidebar.sheet .side-row { min-height: 44px; }
-  .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
-  /* The recycle bin's rows: quieter than a live project (they are parked, not
-     open-able), with the two verbs inline — restore free, purge confirmed. */
-  .trash-row { cursor: default; color: var(--text3); }
-  .trash-row:hover { background: var(--surface); }
-  .trash-name { font-weight: 450; }
-  .t-act {
-    display: grid; place-items: center; width: 24px; height: 24px; flex: none;
-    background: none; border: none; border-radius: var(--ui-radius-control);
-    color: var(--text3); cursor: pointer;
-  }
-  .t-act:hover { background: var(--surface2); color: var(--text); }
-  .t-act.danger:hover { color: var(--danger); }
-
   .mid { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   /* Fits → shows whole; doesn't fit → pans (wheelX action), NEVER an ellipsis.
      `flex: 0 1 auto` + min-width lets the header's buttons take their space

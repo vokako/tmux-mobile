@@ -115,6 +115,12 @@ The four-chip cap and full hover count retain their distinct existing rules;
 closed projects read declared slots, and live chip states use the window-name
 keys introduced by #120. Agent detection/icons and conversation-first time
 still use the shared helpers, not another formatter or backend table.
+`Sidebar.svelte` owns the unchanged aside/scrim/rows/trash markup and private
+styles. It stays mounted with Hub, so its private trash-fold state survives
+project switches as before. Hub retains selection/cache, the clock, sidebar
+Back floor, ContextMenu action construction, confirmations and RPCs; callbacks
+carry the clicked row identity. No wrapper, per-project key or copied shared
+style atom is introduced.
 
 ### An unsent line belongs to its project
 

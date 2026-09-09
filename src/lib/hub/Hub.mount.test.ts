@@ -217,3 +217,108 @@ test('the local Hub Back callback peels recipient before palette and stops at th
   assert.equal(back(), false, 'the disposed Hub has no registered layers');
   context.diagnostic(`Back scenario after shared compilation ${(performance.now() - started).toFixed(1)}ms`);
 });
+
+test('Hub Sidebar keeps row identity, free restore, confirmed purge and the compact floor', { timeout: 60000 }, async (context) => {
+  const fixture = await compiledHub();
+  const started = performance.now();
+  const { rpc } = roomFixture();
+  const row = (session: string, name: string, archived = false) => ({
+    project: { id: `p-${session}`, session, name, path: `/${session}`, archived },
+    live: !archived, slots: [],
+  });
+  const rows = [row('fixture', 'Fixture'), row('other', 'Other'), row('archived', 'Archived', true)];
+  const operations: Array<{ method: string; id: string; archived?: boolean }> = [];
+  let back: () => boolean = () => assert.fail('Back is not registered');
+  const app = await fixture.mount(context, {
+    props: { visible: true, mobile: true, onGoBack: (fn: () => boolean) => { back = fn; } },
+    setup(window) {
+      // Svelte's keyed-list bookkeeping queries animations; jsdom does not
+      // render any. Chromium separately verifies the actual flip motion.
+      window.Element.prototype.getAnimations = () => [];
+    },
+    modules: [{
+      ...rpc,
+      projectList: async () => ({ projects: rows }),
+      projectDown: async (id: string) => {
+        operations.push({ method: 'down', id });
+        rows.find((r) => r.project.id === id)!.live = false;
+        return {};
+      },
+      projectArchive: async (id: string, archived: boolean) => {
+        operations.push({ method: 'archive', id, archived });
+        rows.find((r) => r.project.id === id)!.project.archived = archived;
+        return {};
+      },
+      projectDelete: async (id: string) => {
+        operations.push({ method: 'purge', id });
+        rows.splice(rows.findIndex((r) => r.project.id === id), 1);
+        return {};
+      },
+    }],
+  });
+  const waitFor = async (predicate: () => boolean) => {
+    for (let i = 0; i < 12 && !predicate(); i++) await app.flush();
+    assert.ok(predicate(), 'the expected reactive state settled');
+  };
+  const click = async (selector: string) => {
+    const target = app.document.querySelector<HTMLElement>(selector);
+    assert.ok(target, selector);
+    target.click();
+    await app.flush();
+  };
+  const menuAction = async (label: string) => {
+    const target = [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')]
+      .find((button) => button.textContent?.trim() === label);
+    assert.ok(target, label);
+    target.click();
+    await app.flush();
+  };
+  try {
+    await waitFor(() => app.document.querySelectorAll('.proj-row').length === 2);
+    assert.equal(back(), true);
+    await app.flush();
+    assert.ok(app.document.querySelector('.sidebar.open'));
+    await click('[aria-label="Other"] .proj-pick');
+    await waitFor(() => app.document.querySelector('.h1-text')?.textContent === 'Other');
+    assert.equal(app.document.querySelector('.sidebar.open'), null, 'selection closes the compact sheet');
+    assert.equal(back(), true);
+    await app.flush();
+    await click('[aria-label="Fixture"] .proj-pick');
+    await waitFor(() => app.document.querySelector('.h1-text')?.textContent === 'Fixture');
+    assert.equal(back(), true);
+    await app.flush();
+    assert.equal(back(), false, 'the open list is still the floor');
+
+    await click('[aria-label="Other"] .row-menu');
+    assert.equal(app.document.querySelector('.ctx-who')?.textContent, 'Other');
+    assert.equal(app.document.querySelector('.h1-text')?.textContent, 'Fixture');
+    await menuAction('Close');
+    const closeTitle = app.document.querySelector('.dlg.confirm h2')?.textContent;
+    await click('.dlg.confirm .primary');
+    await waitFor(() => app.document.querySelector('.dlg.confirm') === null);
+    assert.deepEqual(operations, [{ method: 'down', id: 'p-other' }],
+      'the non-selected row action must not target the selected project');
+    assert.ok(closeTitle?.includes('Other'));
+    assert.equal(app.document.querySelector('.h1-text')?.textContent, 'Fixture');
+
+    await click('.trash-bar');
+    await click('.trash-row .t-act:not(.danger)');
+    await waitFor(() => app.document.querySelector('[aria-label="Archived"]') !== null);
+    assert.equal(app.document.querySelector('.dlg.confirm'), null, 'restore is not a destructive confirmation');
+    assert.deepEqual(operations.at(-1), { method: 'archive', id: 'p-archived', archived: false });
+    await click('[aria-label="Archived"] .row-menu');
+    await menuAction('Delete');
+    await click('.dlg.confirm .primary');
+    await waitFor(() => app.document.querySelector('.trash-row') !== null);
+    assert.deepEqual(operations.at(-1), { method: 'archive', id: 'p-archived', archived: true });
+    await click('.trash-row .t-act.danger');
+    assert.equal(operations.some((op) => op.method === 'purge'), false);
+    assert.ok(app.document.querySelector('.dlg.confirm h2')?.textContent?.includes('Archived'));
+    await click('.dlg.confirm .primary');
+    await waitFor(() => app.document.querySelector('.trash-row') === null);
+    assert.deepEqual(operations.at(-1), { method: 'purge', id: 'p-archived' });
+  } finally {
+    await app.close();
+  }
+  context.diagnostic(`Sidebar scenario after shared compilation ${(performance.now() - started).toFixed(1)}ms`);
+});
