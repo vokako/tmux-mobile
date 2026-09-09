@@ -13,7 +13,7 @@ use download::{looks_like_dl_request, handle_http_download};
 mod hub_rpc;
 mod rpc;
 mod connection;
-pub use connection::handle_connection;
+pub use connection::{handle_connection, ConnContext};
 use connection::{enable_tcp_keepalive, handle_connection_ws, ws_config};
 
 pub type NotificationHub = Arc<AgentNotificationHub>;
@@ -214,12 +214,14 @@ pub async fn start_with_socket(
         // adds latency to interactive keystrokes.
         let _ = stream.set_nodelay(true);
 
-        let token = token.clone();
-        let machine_id = machine_id.clone();
-        let auth_tracker = auth_tracker.clone();
-        let control_mgr = resize_tracker.clone();
-        let grace = disconnect_grace_secs;
-        let notifications_c = notifications.clone();
+        let ctx = ConnContext {
+            token: token.clone(),
+            machine_id: machine_id.clone(),
+            auth_tracker: auth_tracker.clone(),
+            resize_tracker: resize_tracker.clone(),
+            grace_secs: disconnect_grace_secs,
+            notifications: notifications.clone(),
+        };
         if let Some(ref acceptor) = tls_acceptor {
             let acceptor = acceptor.clone();
             tokio::spawn(async move {
@@ -242,7 +244,7 @@ pub async fn start_with_socket(
                             }
                         };
                         if is_http {
-                            handle_http_download(buf_stream, addr, token).await;
+                            handle_http_download(buf_stream, addr, ctx.token).await;
                             return;
                         }
                         let ws_stream = match tokio_tungstenite::accept_async_with_config(buf_stream, Some(ws_config())).await {
@@ -252,13 +254,13 @@ pub async fn start_with_socket(
                         let conn_id = CONN_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         let conn_started_at = std::time::Instant::now();
                         println!("📱 Client connected (TLS): {} (conn_id={})", addr, conn_id);
-                        handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, control_mgr, conn_id, conn_started_at, grace, notifications_c).await;
+                        handle_connection_ws(ws_stream, addr, ctx, conn_id, conn_started_at).await;
                     }
                     Err(e) => eprintln!("❌ TLS handshake failed for {}: {}", addr, e),
                 }
             });
         } else {
-            tokio::spawn(handle_connection(stream, addr, token, machine_id, auth_tracker, control_mgr, grace, notifications_c));
+            tokio::spawn(handle_connection(stream, addr, ctx));
         }
     }
 }

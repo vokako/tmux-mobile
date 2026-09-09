@@ -186,11 +186,12 @@
   they are: a time-based cache would give a freshly launched CLI a window of
   reading as a plain shell. `child_cmd` stays a detection clue everywhere.
 - [ ] Structural clippy findings (deferred 2026-07-22; fixing them changes
-  signatures, which the mechanical-move discipline forbade in that pass):
-  `handle_connection`(9) / `handle_connection_ws`(11) want a `ConnContext`
-  struct. `Outbound::InitCipher` is ~700 bytes vs 24 for `Plain`
-  (large_enum_variant) — boxing is trivial but touches the hot send funnel,
-  so do it with a connection-path regression run, not blind.
+  signatures, which the mechanical-move discipline forbade in that pass).
+  Done: `handle_connection`(9) / `handle_connection_ws`(11) take a
+  `ConnContext` built once at the accept site (board #151, 2026-09-09;
+  too_many_arguments 7 → 5). Open: `Outbound::InitCipher` is ~700 bytes vs
+  24 for `Plain` (large_enum_variant) — boxing is trivial but touches the hot
+  send funnel, so do it with a connection-path regression run, not blind.
 - [ ] Frontend backend lists: `AgentsPage.svelte` and `TeamTemplates.svelte`
   each define `BACKENDS`, with five implicit `?? 'kiro'` defaults.
   Source these from the server's `SPAWNABLE_BACKENDS` as part of section A.

@@ -31,7 +31,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 use tmux_mobile::agent_notifications::AgentNotificationHub;
 use tmux_mobile::server::{
-    decode_wire_payload, derive_session_keys, handle_connection, AuthTracker, ResizeTracker,
+    decode_wire_payload, derive_session_keys, handle_connection, ConnContext, AuthTracker, ResizeTracker,
     ResizeTrackerInner, E2E_VERSION,
 };
 
@@ -55,13 +55,16 @@ async fn spawn_server_once(token: &str) -> SocketAddr {
                 Ok(x) => x,
                 Err(_) => break,
             };
-            let t = token.clone();
-            let m = machine_id.clone();
-            let at = auth_tracker.clone();
-            let rt = resize_tracker.clone();
-            // grace=0 keeps test teardown synchronous (no lingering timer tasks).
-            let notifications = Arc::new(AgentNotificationHub::load());
-            tokio::spawn(handle_connection(stream, peer, t, m, at, rt, 0, notifications));
+            let ctx = ConnContext {
+                token: token.clone(),
+                machine_id: machine_id.clone(),
+                auth_tracker: auth_tracker.clone(),
+                resize_tracker: resize_tracker.clone(),
+                // grace=0 keeps test teardown synchronous (no lingering timer tasks).
+                grace_secs: 0,
+                notifications: Arc::new(AgentNotificationHub::load()),
+            };
+            tokio::spawn(handle_connection(stream, peer, ctx));
         }
     });
     addr

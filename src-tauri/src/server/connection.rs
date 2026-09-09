@@ -184,7 +184,22 @@ async fn subscription_loop(
     }
 }
 
-pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, grace_secs: u64, notifications: NotificationHub) {
+/// What every connection shares with the server (board #151): built once at
+/// the accept site and cloned per connection — every member is an `Arc` or a
+/// `Copy`, so the clone is six pointer bumps. Per-connection facts (`addr`,
+/// `conn_id`, the start instant) stay positional: they are minted at
+/// different points of the accept path, not shared.
+#[derive(Clone)]
+pub struct ConnContext {
+    pub token: Arc<String>,
+    pub machine_id: Arc<String>,
+    pub auth_tracker: AuthTracker,
+    pub resize_tracker: ResizeTracker,
+    pub grace_secs: u64,
+    pub notifications: NotificationHub,
+}
+
+pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, ctx: ConnContext) {
     // Peek at the request prelude to distinguish HTTP download from
     // WebSocket. 256 bytes covers the request line even with a reverse-proxy
     // path prefix; peek doesn't consume, so the WS handshake still sees the
@@ -195,7 +210,7 @@ pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<S
         Err(_) => return,
     };
     if looks_like_dl_request(&buf[..n]) {
-        handle_http_download(stream, addr, token).await;
+        handle_http_download(stream, addr, ctx.token).await;
         return;
     }
 
@@ -206,7 +221,7 @@ pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<S
     // Check if IP is locked out, and opportunistically GC old entries so
     // the tracker doesn't grow unbounded under a distributed scan.
     {
-        let mut tracker = auth_tracker.lock().await;
+        let mut tracker = ctx.auth_tracker.lock().await;
         tracker.retain(|_ip, (_fails, since)| {
             since.elapsed().as_secs() < AUTH_TRACKER_GC_AFTER_SECS
         });
@@ -226,13 +241,14 @@ pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<S
         }
     };
 
-    handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, resize_tracker, conn_id, conn_started_at, grace_secs, notifications).await;
+    handle_connection_ws(ws_stream, addr, ctx, conn_id, conn_started_at).await;
 }
 
-pub(super) async fn handle_connection_ws<S>(ws_stream: tokio_tungstenite::WebSocketStream<S>, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, conn_id: u64, conn_started_at: std::time::Instant, grace_secs: u64, notifications: NotificationHub)
+pub(super) async fn handle_connection_ws<S>(ws_stream: tokio_tungstenite::WebSocketStream<S>, addr: SocketAddr, ctx: ConnContext, conn_id: u64, conn_started_at: std::time::Instant)
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
+    let ConnContext { token, machine_id, auth_tracker, resize_tracker, grace_secs, notifications } = ctx;
     // Check if IP is locked out
     {
         let tracker = auth_tracker.lock().await;
