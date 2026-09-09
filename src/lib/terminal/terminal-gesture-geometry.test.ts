@@ -98,7 +98,7 @@ test('each offscreen endpoint hides independently and both hidden endpoints hide
   assert.equal(view(20, 24).endInView, true);
 });
 
-test('toolbar flip uses its existing strict anchor threshold and visible-row end cap', () => {
+test('an unmeasured toolbar has only a provisional anchor until its border-box size arrives', () => {
   const cell = { w: 10, h: 10 }, viewport = { top: 0, rows: 10, cols: 20, width: 200 };
   const atThreshold = selectionView({ anchor: { row: 3, col: 4 }, head: { row: 3, col: 6 } }, cell, viewport);
   assert.equal(atThreshold.toolbarY, 8);
@@ -108,11 +108,50 @@ test('toolbar flip uses its existing strict anchor threshold and visible-row end
   assert.equal(below.toolbarY, 122);
 });
 
-test('the known row-3 Copy clipping keeps its anchor unchanged until #143', () => {
+test('row-3 Copy flips using its rendered height, preserving the handle clearance (#143)', () => {
   const view = selectionView({ anchor: { row: 3, col: 10 }, head: { row: 3, col: 14 } },
-    { w: 8, h: 16 }, { top: 0, rows: 47, cols: 46, width: 390 });
-  assert.equal(view.toolbarY, 26);
+    { w: 8, h: 16 }, { top: 0, rows: 47, cols: 46, width: 390, height: 762 }, 42);
+  assert.equal(view.toolbarY, 86);
+  assert.equal(view.toolbarBelow, true);
+  assert.equal(view.toolbarY - view.endY, 22);
+});
+
+test('the rendered top, not the anchor, uses the strict eight-pixel flip boundary (#143)', () => {
+  const range = { anchor: { row: 5, col: 2 }, head: { row: 5, col: 5 } };
+  const viewport = { top: 0, rows: 10, cols: 20, width: 200, height: 200 };
+  const at = selectionView(range, { w: 8, h: 16 }, viewport, 50);
+  assert.equal(at.toolbarBelow, false);
+  assert.equal(at.toolbarY - 50, 8);
+  const over = selectionView(range, { w: 8, h: 16 }, viewport, 50.25);
+  assert.equal(over.toolbarBelow, true, 'font/locale size changes are measured, not fixed at 42px');
+});
+
+test('a long selection flips below its leading handle when there is no room after its end (#143)', () => {
+  const viewport = { top: 20, rows: 47, cols: 46, width: 390, height: 762 };
+  const view = selectionView({ anchor: { row: 23, col: 10 }, head: { row: 66, col: 14 } },
+    { w: 8, h: 16 }, viewport, 42);
+  assert.equal(view.toolbarBelow, true);
+  assert.equal(view.toolbarY, 86);
+  assert.ok(view.toolbarY + 42 < view.endY - 16 - 22, 'both handles remain clear');
+});
+
+test('with only the trailing handle visible, an overflowing below placement flips above it (#143)', () => {
+  const view = selectionView({ anchor: { row: 19, col: 10 }, head: { row: 66, col: 14 } },
+    { w: 8, h: 16 }, { top: 20, rows: 47, cols: 46, width: 390, height: 762 }, 42);
   assert.equal(view.toolbarBelow, false);
+  assert.equal(view.toolbarY, 714);
+  assert.equal(view.toolbarY + 22, view.endY - 16);
+});
+
+test('when neither clearance fits, the toolbar remains within a short viewport (#143)', () => {
+  for (const height of [64, 48]) {
+    const view = selectionView({ anchor: { row: 0, col: 2 }, head: { row: 3, col: 5 } },
+      { w: 8, h: 16 }, { top: 0, rows: 4, cols: 20, width: 200, height }, 42);
+    const top = view.toolbarY - (view.toolbarBelow ? 0 : 42);
+    const edge = height === 64 ? 8 : 3;
+    assert.ok(top >= edge);
+    assert.ok(top + 42 <= height - edge);
+  }
 });
 
 test('edge dots shift inward while stems and horizontal toolbar clamping stay unchanged', () => {

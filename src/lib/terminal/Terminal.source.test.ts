@@ -346,11 +346,21 @@ test('geometry adapters read the live rectangle and the single cellSize source (
   assert.match(drag, /const cell = touchToCell\(px, py\);\s*const col = snapHandleColumn\(x, cell\.col, rect\.width, cellW, term\.cols, SCROLLBAR_TOUCH_WIDTH\);/u);
   assert.match(drag, /const row = term\.buffer\.active\.viewportY \+ cell\.row;\s*moveHead\(row, col\);/u);
   const view = /function recomputeSelUI\(\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1] ?? '';
-  assert.match(view, /if \(!selection \|\| !term \|\| !termEl\) \{ selUI = null; return; \}/u);
-  assert.match(view, /const \{ w: cellW, h: cellH \} = cellSize\(term\);\s*if \(!cellW \|\| !cellH\) \{ selUI = null; return; \}/u);
-  assert.match(view, /const rect = termEl\.getBoundingClientRect\(\);\s*selUI = selectionView\(selection, \{ w: cellW, h: cellH \}, \{ top, rows, cols, width: rect\.width \}\);/u);
+  assert.match(view, /if \(!selection \|\| !term \|\| !termEl\) \{ selectionLayout = null; return; \}/u);
+  assert.match(view, /const \{ w: cellW, h: cellH \} = cellSize\(term\);\s*if \(!cellW \|\| !cellH\) \{ selectionLayout = null; return; \}/u);
+  assert.match(view, /const rect = termEl\.getBoundingClientRect\(\);\s*selectionLayout = \{\s*cell: \{ w: cellW, h: cellH \},\s*viewport: \{ top, rows, cols, width: rect\.width, height: termEl\.parentElement\.clientHeight \},/u);
   const hit = /function hitHandle\(clientX, clientY\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1] ?? '';
   assert.match(hit, /if \(!selection \|\| !selUI \|\| !termEl\) return null;\s*const rect = termEl\.getBoundingClientRect\(\);\s*return hitSelectionHandle/u);
+});
+
+test('Copy placement uses its measured border-box height and the actual clipping container (#143)', () => {
+  // offsetHeight includes the toolbar border and excludes CSS zoom/transforms.
+  // Binding updates rederive only geometry; no new resize or gesture callback.
+  assert.match(source, /bind:offsetHeight=\{selToolbarHeight\}/u);
+  assert.match(source, /style:visibility=\{selToolbarHeight > 0 \? 'visible' : 'hidden'\}/u,
+    'an unmeasured first frame must not paint at the old clipped anchor');
+  assert.match(source, /const selUI = \$derived\(selection && selectionLayout\s*\? selectionView\(selection, selectionLayout\.cell, selectionLayout\.viewport, selToolbarHeight\) : null\);/u);
+  assert.equal([...source.matchAll(/selectionView\(/gu)].length, 1, 'one owner for projection and flip/clamp');
 });
 
 test('one lifecycle factory receives six deferred environment operations (#148)', () => {

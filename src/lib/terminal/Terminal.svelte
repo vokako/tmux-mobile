@@ -456,7 +456,10 @@
   // them from anchor/head so a handle drag that crosses the other endpoint
   // just flips which one is "leading" without any swap bookkeeping.
   let selection = $state(null); // null | { anchor: {row, col}, head: {row, col} }
-  let selUI = $state(null);     // pixel-space UI: { startX, startY, endX, endY, toolbarX, toolbarY, toolbarBelow, startInView, endInView, toolbarVisible }
+  let selectionLayout = $state(null); // live cell/viewport measurements, refreshed at the existing geometry call sites
+  let selToolbarHeight = $state(0);
+  const selUI = $derived(selection && selectionLayout
+    ? selectionView(selection, selectionLayout.cell, selectionLayout.viewport, selToolbarHeight) : null);
   let isApplyingSelection = false; // guard onSelectionChange while we drive term.select ourselves
   // Toolbar button handlers — assigned inside the $effect that owns `term`,
   // `lastContent`, etc. The template guards on `selection != null`, which can
@@ -596,7 +599,7 @@
     touchScrolling = false; // reset on pane switch
     pendingCols = 0; pendingRows = 0; pendingResizeTs = 0;
     lockKeyboard(); // pane switch
-    selection = null; selUI = null;
+    selection = null; selectionLayout = null;
     keyQueue = []; // queued keys belong to the previous pane
     lastContent = ''; lastCursor = null; // frames belong to the previous pane
 
@@ -997,15 +1000,18 @@
     // and viewport. Called whenever selection, scroll, resize, or render
     // geometry changes.
     function recomputeSelUI() {
-      if (!selection || !term || !termEl) { selUI = null; return; }
+      if (!selection || !term || !termEl) { selectionLayout = null; return; }
       const { w: cellW, h: cellH } = cellSize(term);
-      if (!cellW || !cellH) { selUI = null; return; }
+      if (!cellW || !cellH) { selectionLayout = null; return; }
       const buf = term.buffer.active;
       const top = buf.viewportY;
       const rows = term.rows;
       const cols = term.cols;
       const rect = termEl.getBoundingClientRect();
-      selUI = selectionView(selection, { w: cellW, h: cellH }, { top, rows, cols, width: rect.width });
+      selectionLayout = {
+        cell: { w: cellW, h: cellH },
+        viewport: { top, rows, cols, width: rect.width, height: termEl.parentElement.clientHeight },
+      };
     }
 
     // Drive xterm.js native selection from our selection model. xterm.select
@@ -1027,7 +1033,7 @@
     clearSelection = () => {
       if (!selection) return;
       selection = null;
-      selUI = null;
+      selectionLayout = null;
       isApplyingSelection = true;
       try { term?.clearSelection(); } finally { isApplyingSelection = false; }
       // Resume content updates (selection had pinned them).
@@ -1150,7 +1156,7 @@
         // model too. clearSelection() guards against re-clearing xterm.
         if (selection) {
           selection = null;
-          selUI = null;
+          selectionLayout = null;
           if (gestures.isIdle()) {
             touchScrolling = false;
             if (lastContent && termAtBottom) writeToXterm(lastContent, lastCursor);
@@ -1849,7 +1855,8 @@
         <div class="sel-handle sel-handle-end appear" style="left: {selUI.endX}px; top: {selUI.endY}px; --cell-h: {selUI.cellH}px; --dot-shift-x: {selUI.endDotShiftX}px;" aria-hidden="true"></div>
       {/if}
       {#if selUI.toolbarVisible}
-        <div class="sel-toolbar appear" class:below={selUI.toolbarBelow} style="left: {selUI.toolbarX}px; top: {selUI.toolbarY}px;">
+        <div class="sel-toolbar appear" class:below={selUI.toolbarBelow} style="left: {selUI.toolbarX}px; top: {selUI.toolbarY}px;"
+          style:visibility={selToolbarHeight > 0 ? 'visible' : 'hidden'} bind:offsetHeight={selToolbarHeight}>
           <button class="sel-toolbar-btn" onpointerdown={(e) => { e.stopPropagation(); e.preventDefault(); copySelection(); }}>{t('copy')}</button>
         </div>
       {/if}

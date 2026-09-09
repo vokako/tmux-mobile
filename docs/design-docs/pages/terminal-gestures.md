@@ -171,8 +171,8 @@ unchanged.
 Projection/hit vectors cover independent offscreen endpoints, strict toolbar
 flip boundaries, horizontal clamping, fractional metrics, capsule edges,
 same-row midpoint ties and the handle occupying the scrollbar touch zone.
-The existing row-3 Copy anchor (26px, producing the measured -16px clipping)
-is pinned deliberately; #143 remains a separate behavior fix.
+At this step the row-3 Copy anchor (26px, producing the measured -16px clipping)
+was pinned deliberately; the separate #143 correction is recorded below.
 
 Chromium 152.0.7977.64 with real xterm 6.0.0 reproduces #140's 92
 state/geometry signatures and selection-call arguments. 88 PNGs are
@@ -187,9 +187,57 @@ physical-touch verification.
 ## Toolbar UI
 - Single "Copy" button (one job, one button).
 - Default: above the selection's first row, horizontally centered between start and end (or roughly above the start cell when the selection spans multiple rows).
-- If too close to the top (< 8px), flips to below the selection's last row.
+- If the rendered top would be above the 8px inset, flips below the
+  selection's last row. If that side cannot fit, uses the first visible
+  handle's other side, then clamps the rendered box to the viewport.
 - X is clamped to `[48, container_width - 48]` so the toolbar never escapes its container.
 - `pointerdown` handler stops propagation and calls `copySelection()` — the touchstart hit-test on the underlying `termEl` would otherwise treat it as a tap and try to cancel the selection.
+
+### Rules and Their Reasons (#143, 2026-09-09)
+
+Flip/clamp decisions use the **rendered toolbar rectangle**, not its CSS
+anchor. The above placement translates upward by 100% of its own height:
+on Chromium 152.0.7977.64 / xterm 6.0.0 at 390x844, viewport row 3 had
+anchor 26px and a 42px toolbar, so its top was -16px. The old `anchor < 8`
+test missed this; row 4 even placed the rendered top directly at 0px.
+
+Root binds the actual `offsetHeight`, including borders but excluding
+CSS zoom and animation transforms. The initial unmeasured toolbar is
+invisible until that size arrives. `selUI` is now derived from the canonical
+selection, measurements captured at the same existing selection/scroll/resize
+sites, and toolbar height. A size change re-runs only the existing
+`selectionView` decision; it does not add a gesture listener, timer or
+terminal resize trigger. Root supplies the clipping parent's CSS height,
+not a possibly taller keyboard-pinned xterm grid. No fixed 42px estimate,
+second placement function, selection store or controller port is introduced.
+
+Prefer above the first row when its whole rectangle fits with the existing
+8px inset. Otherwise preserve the 22px handle clearance below the final
+row. For a long selection reaching the bottom, prefer below the leading
+handle; when only the trailing handle is visible, use above it instead.
+If the viewport cannot accommodate those clearances, clamp the actual box
+inside it; reduce the outer inset only when necessary to fit. A viewport
+shorter than the toolbar itself cannot contain it without resizing the
+control, which is not part of this fix. Handle coordinates, hit zones,
+horizontal centering/clamp, selection, Copy and gesture behavior are unchanged.
+
+Regression vectors cover the original row-3 failure, fractional measured
+heights at the strict boundary, long and partially offscreen selections,
+and short clip boxes. The Root contract pins border-box binding, hidden
+first measurement and the one derived geometry call. These deliberately
+replace #141's provisional/unmeasured anchor assertion, not its handle
+geometry vectors.
+
+Verification: all five regressions failed before the fix. Chromium checks
+68 rectangles across portrait/landscape, DOM/WebGL, 1.25 UI zoom and a wide
+touch viewport; row 3 now occupies y=86..128 instead of -16..26. Single-row
+cases retain 22px handle clearance, Copy reaches the clipboard, and changing
+the measured toolbar from 42px to 73px repositions it without a new gesture.
+The terminal's existing counter-zoom keeps those dimensions unscaled.
+Ordinary 1440x900 desktop mouse selection and input-to-tail also pass.
+Replacing only the geometry module with its pre-fix version makes both the
+five unit regressions and the Chromium top-edge assertion fail again.
+These are off-device checks, not the owner Android pass pending on #148.
 
 ## Keyboard Control
 
@@ -349,8 +397,8 @@ hold, resetting the double-tap pair or requesting release.
 Teardown retains two slots: `cancelHold` at the old pre-keyboard-cleanup
 position, then `dispose` at the old coast/edge-cancellation position.
 Disposal cancels owned work only, never selection, pin, keyboard or replay.
-Current extra-finger/end-touch semantics and #143 toolbar clipping are
-preserved; correcting them is not part of this mechanical move.
+The controller move preserved extra-finger/end-touch semantics and #143
+toolbar clipping; the latter is corrected separately in the Rules above.
 
 `terminal-gestures.test.ts` executes transitions, live queries, call ordering,
 hold/coast/edge scheduling, disposal and independent instances with injected

@@ -43,9 +43,12 @@ export interface SelectionUI {
   startAtLeftEdge: boolean; endAtRightEdge: boolean;
 }
 
+// Sizes use untransformed CSS pixels. Zero toolbar height is an unmeasured,
+// hidden first frame; viewport height is the clip box, not a pinned xterm grid.
 export function selectionView(
   selection: Selection, cell: CellMetrics,
-  viewport: { top: number; rows: number; cols: number; width: number },
+  viewport: { top: number; rows: number; cols: number; width: number; height?: number },
+  toolbarHeight = 0,
 ): SelectionUI {
   const { w: cellW, h: cellH } = cell;
   const { top, rows, cols, width: innerW } = viewport;
@@ -66,14 +69,13 @@ export function selectionView(
   const endDotShiftX = endAtRightEdge ? -DOT_R : 0;
   const HANDLE_DOT_CLEARANCE = 22;
   let toolbarX, toolbarY, toolbarBelow = false, toolbarVisible = true;
-  // Preserve the anchor-only flip. Rendered-height clipping belongs to #143.
   if (startInView) {
     const cx = a.row === b.row
       ? ((a.col + b.col + 1) / 2) * cellW
       : (a.col * cellW + cellW * Math.min(8, cols - a.col) / 2);
     toolbarX = cx;
     toolbarY = aRowV * cellH - HANDLE_DOT_CLEARANCE;
-    if (toolbarY < 8) {
+    if (toolbarY - toolbarHeight < 8) {
       toolbarY = (Math.min(rows - 1, bRowV) + 1) * cellH + HANDLE_DOT_CLEARANCE;
       toolbarBelow = true;
     }
@@ -88,6 +90,21 @@ export function selectionView(
     toolbarY = 0;
   }
   toolbarX = Math.max(48, Math.min(innerW - 48, toolbarX));
+  if (toolbarVisible && toolbarHeight > 0) {
+    const height = viewport.height ?? rows * cellH;
+    if (toolbarBelow && toolbarY + toolbarHeight > height - 8) {
+      if (startInView && a.row !== b.row) {
+        // A long range may reach the bottom; leave room below its first handle.
+        toolbarY = (aRowV + 1) * cellH + HANDLE_DOT_CLEARANCE;
+      } else {
+        toolbarY = (endInView ? bRowV : aRowV) * cellH - HANDLE_DOT_CLEARANCE;
+        toolbarBelow = false;
+      }
+    }
+    const aboveHeight = toolbarBelow ? 0 : toolbarHeight;
+    const edge = Math.min(8, Math.max(0, (height - toolbarHeight) / 2));
+    toolbarY = Math.max(edge, Math.min(height - toolbarHeight - edge, toolbarY - aboveHeight)) + aboveHeight;
+  }
   return { startX, startY, endX, endY, toolbarX, toolbarY, toolbarBelow, startInView, endInView, toolbarVisible, cellH, startDotShiftX, endDotShiftX, startAtLeftEdge, endAtRightEdge };
 }
 
