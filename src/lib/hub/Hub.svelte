@@ -24,6 +24,7 @@
   import ChatImage from './ChatImage.svelte';
   import Lightbox from '../ui/Lightbox.svelte';
   import 'katex/dist/katex.min.css';
+  import './hub-atoms.css';
   import Icon from '../ui/Icon.svelte';
   import { tick as settled } from 'svelte';
   import { t, i18n, hanLang } from '../core/i18n.svelte.ts';
@@ -3556,7 +3557,6 @@
   .acard.busy { opacity: 0.35; pointer-events: none; }
   /* Identity layer: names wear the display face (--font-display), not mono. */
   .a-name { font-family: var(--font-display); font-weight: 600; max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .st { width: 6px; height: 6px; border-radius: 50%; flex: none; transition: background var(--t-fast); }
   .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--status-danger); flex: none; }
   .ava.dim { background: var(--surface2) !important; color: var(--text3); }
   /* The stopped card's ICON avatar: identity stays, colour goes (owner,

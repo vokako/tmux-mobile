@@ -127,6 +127,11 @@ existing team-tree construction. Solo agents and groups keep first-appearance
 order at each level; full team paths distinguish nested groups with the same
 leaf name. Agent objects retain identity. This is a mechanical extraction,
 not a new grouping or sorting policy.
+The physical `.st` box is now one declaration in `hub-atoms.css`, shared by
+the roster, composer, receipt and drawer. Its Hub/parent-scoped selector has
+the former rule's specificity; the 9px receipt override still wins, and
+embedded pages do not receive a generic `.st` style. `.live-dot` motion and
+state colors remain the existing app-wide mechanisms.
 
 ### An unsent line belongs to its project
 

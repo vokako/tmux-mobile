@@ -27,6 +27,17 @@ const source = await readFile(new URL('./Hub.svelte', import.meta.url), 'utf8');
 const rule = (selector: string) =>
   source.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
 
+test('Hub dot sizing has one shared declaration without restyling embedded pages (#132)', async () => {
+  const css = await readFile(new URL('./hub-atoms.css', import.meta.url), 'utf8');
+  assert.match(source, /import '\.\/hub-atoms\.css';/u);
+  assert.match(css, /\.hub-root :where\(\.ac-top, \.to-menu button, \.m-state, \.win-pill\) > \.st \{ width: 6px; height: 6px; border-radius: 50%; flex: none; transition: background var\(--t-fast\); \}/u,
+    ':where adds no specificity; the two classes match the former scoped rule');
+  assert.doesNotMatch(source, /^\s*\.st \{/mu, 'the former private definition is removed');
+  assert.match(source, /\.m-state\.note \.st \{ width: 9px; height: 9px; \}/u,
+    'the existing receipt override still outranks the shared base');
+  assert.doesNotMatch(css, /live-dot|@keyframes/u, 'status motion stays in app.css');
+});
+
 test('the composer stacks above every feed layer, so its popovers are never buried', () => {
   // Board #1: the recipient menu opened UNDER a pinned bubble — .to-wrap's own
   // z-index:2 capped it below .ask-top's 6. The rule is decided ONCE at the
@@ -1148,4 +1159,3 @@ test('feed-lane identity comparisons match the window NAME, never the pane index
   // The numeric index may not creep back into either lookup.
   assert.doesNotMatch(source, /a\.window === b\.window/u, 'no index-vs-name comparison in the feed lanes');
 });
-
