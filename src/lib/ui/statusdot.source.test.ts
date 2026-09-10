@@ -32,6 +32,11 @@ import { readdir, readFile } from 'node:fs/promises';
 const SRC = new URL('../../', import.meta.url);   // src/
 const appCss = await readFile(new URL('app.css', SRC), 'utf8');
 
+// Both checks must stop at this keyframe's outer brace. The old [^{]* copy
+// consumed later rules and backtracked catastrophically as app.css grew (#155).
+const dotKeyframes = (css: string) =>
+  /@keyframes\s+dot-breathe\s*\{(?:[^{}]*\{[^}]*\}\s*)+\}/u.exec(css)?.[0] ?? '';
+
 /** The declaration block of the first rule whose selector matches exactly.
     Comments are stripped first — a comment CLOSER right above a selector is
     otherwise indistinguishable from being mid-rule. */
@@ -97,7 +102,7 @@ test('the running cue is defined once in app.css: halo + breathe, and it stills'
 
   // `[^{}]*` between stops, not `[^{]*`: the old class ran past the block's own
   // closing brace into whatever keyframes followed it (motion.md's intro set).
-  const kf = /@keyframes\s+dot-breathe\s*\{(?:[^{}]*\{[^}]*\}\s*)+\}/u.exec(appCss)?.[0] ?? '';
+  const kf = dotKeyframes(appCss);
   assert.ok(kf, 'dot-breathe must be defined');
   assert.match(kf, /transform:\s*scale/u, 'breathe is a SCALE — presence, per design-language.md');
   assert.ok(!/opacity/u.test(kf), 'an opacity fade converges on the idle grey; that is the old bug');
@@ -152,12 +157,17 @@ test('the halo is FOCUSED: every layer blurred, none spread, extents capped', ()
 
   // transform scales the box-shadow with the dot, so the peak amplitude is
   // part of the footprint, not just of the tempo.
-  const scales = [...(/@keyframes\s+dot-breathe\s*\{(?:[^{]*\{[^}]*\}\s*)+\}/u.exec(appCss)?.[0] ?? '')
-    .matchAll(/scale\(([\d.]+)\)/gu)].map((m) => Number(m[1]));
+  const scales = [...dotKeyframes(appCss).matchAll(/scale\(([\d.]+)\)/gu)].map((m) => Number(m[1]));
   assert.ok(scales.length >= 2, 'the breathe has a rest and a peak');
   const peak = Math.max(...scales);
   assert.ok(peak > 1, 'the breathe must actually move — the dynamic is the half a reader notices first');
   assert.ok(peak <= 1.35, `the breathe peaks at ${peak}× and swells the halo with it`);
+});
+
+test('the keyframe reader ignores arbitrary later rules without walking past its boundary (#155)', () => {
+  const frames = '@keyframes dot-breathe { 0% { transform: scale(1); } 100% { transform: scale(1.2); } }';
+  const later = '\n.unrelated { color: red; }\n@keyframes other { to { transform: scale(4); } }'.repeat(1000);
+  assert.equal(dotKeyframes(frames + later), frames);
 });
 
 test('every dot painted with stateDotColor also wears class:live-dot — colour alone is not the cue', async () => {
