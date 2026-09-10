@@ -11,6 +11,8 @@
   import { createPreviewRenderers, defaultWrapForMime, highlightCode, isPreviewable, mimeCategory } from './file-preview.ts';
   import { isAndroid, isTauri, tauriReady } from '../core/platform.ts';
   import Icon from '../ui/Icon.svelte';
+  import CommandButton from '../ui/CommandButton.svelte';
+  import Segmented from '../ui/Segmented.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import GitPanel from './GitPanel.svelte';
@@ -58,6 +60,14 @@
   const { loadHljs, renderPdf, renderMermaidBlocks, resolveImages, attachHtmlPreviewLinks } = renderers;
 
   let { session = '', onGoBack = null, visible = false, fontSize = 14, singlePane = false, navRequest = null, jumped = false, currentDir = $bindable('') } = $props();
+  const panelId = $props.id();
+  const LIST_WIDTH = { min: 320, max: 520, default: 400 };
+  $effect(() => {
+    const saved = Number(localStorage.getItem('tmux_files_list_w'));
+    if (saved >= LIST_WIDTH.min && saved <= LIST_WIDTH.max) {
+      document.documentElement.style.setProperty('--files-list-w', `${saved}px`);
+    }
+  });
 
   /* The confirmation becomes a bottom sheet on a phone-sized viewport, the same
      rule the Hub's dialogs use. */
@@ -279,6 +289,8 @@
   let showBookmarks = $state(false);
   let recentFiles = $state([]);
   let showRecent = $state(false);
+  const bookmarksRead = $state({ ready: false, error: '' });
+  const recentsRead = $state({ ready: false, error: '' });
 
   // Both lists are server-persisted whole arrays with clobber/race guards
   // (single-flighted first load, generation-counter staleness checks) —
@@ -286,7 +298,7 @@
   const recentsList = createPersistedList({
     fetch: async () => (await getPrefs()).recentFiles || [],
     persist: (items) => setPref('recentFiles', items),
-    onChange: (items) => { recentFiles = items; },
+    onChange: (items) => { recentFiles = items; recentsRead.ready = true; recentsRead.error = ''; },
   });
 
   $effect(() => {
@@ -296,7 +308,7 @@
     // fire once at mount (often pre-connection), fail, and never retry, leaving
     // Recent empty forever.
     if (!visible) return;
-    recentsList.load().catch(() => {});
+    loadRecents();
   });
 
   function addRecent(path, name) {
@@ -325,15 +337,23 @@
   const bookmarksList = createPersistedList({
     fetch: async () => (await getBookmarks()).bookmarks || [],
     persist: (items) => saveBookmarks(items),
-    onChange: (items) => { bookmarks = items; },
+    onChange: (items) => { bookmarks = items; bookmarksRead.ready = true; bookmarksRead.error = ''; },
   });
 
   $effect(() => {
     // Same visible-gate rationale as the recents effect above.
     if (!visible) return;
-    bookmarksList.load().catch(() => {});
+    loadBookmarks();
   });
 
+  function loadBookmarks() {
+    bookmarksRead.error = '';
+    bookmarksList.load().catch(e => { bookmarksRead.error = String(e?.message ?? e); });
+  }
+  function loadRecents() {
+    recentsRead.error = '';
+    recentsList.load().catch(e => { recentsRead.error = String(e?.message ?? e); });
+  }
   function isBookmarked(path) { return bookmarks.includes(path); }
 
   function toggleBookmark(path) {
@@ -1395,32 +1415,28 @@
 <!-- View blocks live in snippets so both layouts (mobile single-pane + desktop
      two-pane) render the same markup. -->
 {#snippet listPanel()}
-    <!-- Toolbar: all buttons in one row -->
-    <div class="toolbar">
-      <button class="tool-btn" onclick={goSessionDir} title={t('filesSessionDir')} aria-label={t('filesSessionDir')}><Icon name="terminal" size={13} /></button>
-      <button class="tool-btn" onclick={() => loadDir(cwd)} aria-label="Refresh"><Icon name="refresh" size={13} /></button>
-      <button class="tool-btn" onclick={() => { newType = newType ? '' : 'file'; newName = ''; }}><Icon name="plus" size={13} /></button>
-      <button class="tool-btn" onclick={handleUpload}><Icon name="upload" size={13} /></button>
-      <button class="tool-btn" class:tool-active={showHidden} onclick={() => { showHidden = !showHidden; loadDir(cwd); }}>
-        <Icon name="eye" size={13} />
-      </button>
-      <button class="tool-btn" class:starred={isBookmarked(cwd)} onclick={() => toggleBookmark(cwd)} title="Bookmark">
-        {#key isBookmarked(cwd)}<span class="tool-glyph appear-pop"><Icon name={isBookmarked(cwd) ? 'star-filled' : 'star'} size={13} /></span>{/key}
-      </button>
-      <button class="tool-btn" class:tool-active={showBookmarks} onclick={() => { showBookmarks = !showBookmarks; showRecent = false; }} title="Bookmarks">
-        <Icon name="folder-star" size={13} />
-      </button>
-      <button class="tool-btn" class:tool-active={showRecent} onclick={() => { showRecent = !showRecent; showBookmarks = false; }} title="Recent">
-        <Icon name="clock" size={13} />
-      </button>
+    <div class="toolbar" role="group" aria-label={t('filesTools')}>
+      <CommandButton variant="icon" icon="terminal" label={t('filesSessionDir')} onclick={goSessionDir} />
+      <CommandButton variant="icon" icon="refresh" label={t('filesRefresh')} pending={loading} onclick={() => loadDir(cwd)} />
+      <CommandButton variant="icon" icon="plus" label={t('filesNew')} expanded={!!newType}
+        controls={newType ? `${panelId}-new` : undefined}
+        onclick={() => { newType = newType ? '' : 'file'; newName = ''; }} />
+      <CommandButton variant="icon" icon="upload" label={t('filesUpload')} onclick={handleUpload} />
+      <CommandButton variant="icon" icon={showHidden ? 'eye' : 'eye-off'} label={t('filesShowHidden')} pressed={showHidden}
+        onclick={() => { showHidden = !showHidden; loadDir(cwd); }} />
+      <CommandButton variant="icon" icon={isBookmarked(cwd) ? 'star-filled' : 'star'} label={t('filesBookmark')}
+        pressed={isBookmarked(cwd)} onclick={() => toggleBookmark(cwd)} />
+      <CommandButton variant="icon" icon="folder-star" label={t('filesBookmarks')} expanded={showBookmarks}
+        controls={showBookmarks ? `${panelId}-bookmarks` : undefined}
+        onclick={() => { showBookmarks = !showBookmarks; showRecent = false; }} />
+      <CommandButton variant="icon" icon="clock" label={t('filesRecent')} expanded={showRecent}
+        controls={showRecent ? `${panelId}-recent` : undefined}
+        onclick={() => { showRecent = !showRecent; showBookmarks = false; }} />
       {#if hasGit}
-        <button class="tool-btn" onclick={openGitView} title="Git">
-          <Icon name="git-branch" size={13} />
-        </button>
+        <CommandButton variant="icon" icon="git-branch" label="Git" onclick={openGitView} />
       {/if}
-      <div style="flex:1"></div>
       {#if isTauri}
-        <button class="tool-btn" onclick={openLocalFiles} title="Local files"><Icon name="download" size={13} /></button>
+        <CommandButton variant="icon" icon="download" label={t('downloads')} onclick={openLocalFiles} />
       {/if}
     </div>
 
@@ -1434,22 +1450,27 @@
       {/each}
     </div>
 
-    {#if showBookmarks && bookmarks.length}
-      <div class="bookmarks-panel appear-rise">
+    {#if showBookmarks}
+      <div class="bookmarks-panel appear-rise" id={`${panelId}-bookmarks`}>
         {#each bookmarks as bm}
           <div class="bm-row">
             <span class="bm-icon"><Icon name="star-filled" size={13} /></span>
             <button class="bm-path" onclick={() => { navTo(bm, 'fwd'); showBookmarks = false; }} use:scrollEnd use:hoverInfo={() => ({ text: bm })}>
               {bm}
             </button>
-            <button class="bm-del" onclick={() => toggleBookmark(bm)}><Icon name="x" size={12} /></button>
+            <CommandButton variant="icon" icon="x" label={`${t('filesRemoveBookmark')}: ${bm}`} onclick={() => toggleBookmark(bm)} />
           </div>
         {/each}
+        {#if bookmarksRead.error}
+          <div class="panel-status"><span class="config-error" role="alert">{bookmarksRead.error}</span>
+            <CommandButton variant="icon" icon="refresh" label={t('filesRefresh')} onclick={loadBookmarks} /></div>
+        {:else if !bookmarksRead.ready}<p class="panel-empty">{t('loading')}</p>
+        {:else if !bookmarks.length}<p class="panel-empty">{t('filesNoBookmarks')}</p>{/if}
       </div>
     {/if}
 
-    {#if showRecent && recentFiles.length}
-      <div class="bookmarks-panel appear-rise">
+    {#if showRecent}
+      <div class="bookmarks-panel appear-rise" id={`${panelId}-recent`}>
         {#each recentFiles as rf}
           <div class="bm-row">
             <span class="bm-icon"><Icon name="clock" size={13} /></span>
@@ -1457,28 +1478,38 @@
               use:hoverInfo={() => ({ title: rf.name, text: rf.path })}>
               <span style="color:var(--text3);font-size:var(--fs-meta)">{rf.path.replace(/\/[^/]+$/, '')}/</span>{rf.name}
             </button>
-            <button class="bm-del" onclick={() => { recentFiles = recentFiles.filter(f => f.path !== rf.path); setPref('recentFiles', recentFiles).catch(() => {}); }}><Icon name="x" size={12} /></button>
+            <CommandButton variant="icon" icon="x" label={`${t('filesRemoveRecent')}: ${rf.name}`}
+              onclick={() => { recentFiles = recentFiles.filter(f => f.path !== rf.path); setPref('recentFiles', recentFiles).catch(() => {}); }} />
           </div>
         {/each}
+        {#if recentsRead.error}
+          <div class="panel-status"><span class="config-error" role="alert">{recentsRead.error}</span>
+            <CommandButton variant="icon" icon="refresh" label={t('filesRefresh')} onclick={loadRecents} /></div>
+        {:else if !recentsRead.ready}<p class="panel-empty">{t('loading')}</p>
+        {:else if !recentFiles.length}<p class="panel-empty">{t('filesNoRecent')}</p>{/if}
       </div>
     {/if}
 
     <!-- New item input -->
     {#if newType}
-      <div class="new-item appear-rise">
-        <button class="new-type-btn" onclick={() => newType = newType === 'file' ? 'dir' : 'file'}>
-          <Icon name={newType === 'dir' ? 'folder' : 'file'} size={13} />
-        </button>
+      <div class="new-item appear-rise" id={`${panelId}-new`}>
+        <div class="new-kind">
+          <Segmented value={newType} ariaLabel={t('type')}
+            options={[{ value: 'file', label: t('filesFile') }, { value: 'dir', label: t('filesFolder') }]}
+            onchange={value => newType = value} />
+        </div>
         <input
+          class="config-input"
           type="text"
+          aria-label={newType === 'dir' ? t('folderName') : t('fileName')}
           bind:value={newName}
           placeholder={newType === 'dir' ? t('folderName') : t('fileName')}
           onkeydown={(e) => e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && handleNewItem()}
           autocapitalize="off"
           autocomplete="off"
         />
-        <button onclick={handleNewItem}><Icon name="plus" size={12} /></button>
-        <button onclick={() => newType = ''}><Icon name="x" size={12} /></button>
+        <CommandButton variant="icon" icon="plus" label={t('create')} disabled={!newName.trim()} onclick={handleNewItem} />
+        <CommandButton variant="icon" icon="x" label={t('cancel')} onclick={() => newType = ''} />
       </div>
     {/if}
 
@@ -1486,14 +1517,16 @@
     {#if renaming}
       <div class="new-item appear-rise">
         <input
+          class="config-input"
           type="text"
+          aria-label={t('newName')}
           bind:value={renameValue}
           placeholder={t('newName')}
           onkeydown={(e) => e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && handleRename()}
           autocapitalize="off"
         />
-        <button onclick={handleRename}><Icon name="edit" size={12} /></button>
-        <button onclick={() => renaming = null}><Icon name="x" size={12} /></button>
+        <CommandButton variant="icon" icon="edit" label={t('filesRename')} disabled={!renameValue.trim()} onclick={handleRename} />
+        <CommandButton variant="icon" icon="x" label={t('cancel')} onclick={() => renaming = null} />
       </div>
     {/if}
 
@@ -1520,23 +1553,23 @@
               <span class="file-icon" class:is-link={entry.is_symlink}>
                 <Icon name={fileIcon(entry)} size={16} />
               </span>
-              <span
+              <span class="file-label"><span
                 class="file-name"
                 class:dir-name={entry.type === 'dir'}
                 class:link-name={entry.is_symlink}
               >{entry.name}</span>
               {#if entry.type !== 'dir'}
                 <span class="file-size">{formatSize(entry.size)}</span>
-              {/if}
+              {/if}</span>
             </button>
             <div class="file-actions">
               {#if entry.type !== 'dir' && entry.type !== 'broken'}
-                <button class="act-btn" onclick={() => handleDownload(entry.path)} title="Download"><Icon name="download" size={12} /></button>
+                <CommandButton variant="icon" icon="download" label={`${t('filesDownload')}: ${entry.name}`} onclick={() => handleDownload(entry.path)} />
               {/if}
-              <button class="act-btn" onclick={() => { renaming = entry.path; renameValue = entry.name; }} title="Rename"><Icon name="edit" size={12} /></button>
-              <button class="act-btn del" onclick={() => (pendingAct = { kind: 'file', path: entry.path })} title="Delete">
-                <Icon name="trash" size={12} />
-              </button>
+              <CommandButton variant="icon" icon="edit" label={`${t('filesRename')}: ${entry.name}`}
+                onclick={() => { renaming = entry.path; renameValue = entry.name; }} />
+              <CommandButton variant="danger" iconOnly icon="trash" label={`${t('delete')}: ${entry.name}`}
+                onclick={() => (pendingAct = { kind: 'file', path: entry.path })} />
             </div>
           </div>
         {/each}
@@ -1550,18 +1583,19 @@
 {#snippet previewPanel()}
     <!-- File preview -->
     <div class="preview-header">
-      <button class="back-btn" onclick={backToList}><Icon name="chevron-left" size={16} /></button>
+      <CommandButton variant="icon" icon="arrow-left" label={t('back')} onclick={backToList} />
       <span class="preview-name">{currentFile.name}</span>
       <div class="preview-actions">
         {#if isLinedPreview}
-          <button class="act-btn" class:on={wrapLines} onclick={() => wrapLines = !wrapLines} title={wrapLines ? t('editorNoWrap') : t('editorWrap')}><Icon name={wrapLines ? 'wrap-text' : 'no-wrap'} size={14} /></button>
+          <CommandButton variant="icon" icon={wrapLines ? 'wrap-text' : 'no-wrap'} label={t('editorWrap')}
+            pressed={wrapLines} onclick={() => wrapLines = !wrapLines} />
         {/if}
         {#if currentFile.stat?.is_text && currentFile.stat?.writable}
-          <button class="act-btn" onclick={startEdit}><Icon name="edit" size={14} /></button>
+          <CommandButton variant="icon" icon="edit" label={t('edit')} onclick={startEdit} />
         {/if}
-        <button class="act-btn" onclick={() => handleDownload(currentFile.path)}><Icon name="download" size={14} /></button>
-        <button class="act-btn" onclick={reloadPreview}><Icon name="refresh" size={14} /></button>
-        <button class="act-btn" onclick={() => { view = 'info'; navPush(); }}><Icon name="info" size={14} /></button>
+        <CommandButton variant="icon" icon="download" label={t('filesDownload')} onclick={() => handleDownload(currentFile.path)} />
+        <CommandButton variant="icon" icon="refresh" label={t('filesRefresh')} onclick={reloadPreview} />
+        <CommandButton variant="icon" icon="info" label={t('filesInfo')} onclick={() => { view = 'info'; navPush(); }} />
       </div>
     </div>
     <FilePreview {currentFile} {fontSize} {wrapLines} {hljs}
@@ -1572,12 +1606,13 @@
 {#snippet editPanel()}
     <!-- File editor -->
     <div class="preview-header">
-      <button class="back-btn" onclick={backToPreview}><Icon name="chevron-left" size={16} /></button>
+      <CommandButton variant="icon" icon="arrow-left" label={t('back')} onclick={backToPreview} />
       <span class="preview-name">{currentFile.name}{isEdited ? ' *' : ''}</span>
       <div class="preview-actions">
-        <button class="act-btn" class:on={wrapLines} onclick={() => { wrapLines = !wrapLines; requestAnimationFrame(syncEditorScroll); }} title={wrapLines ? t('editorNoWrap') : t('editorWrap')}><Icon name={wrapLines ? 'wrap-text' : 'no-wrap'} size={14} /></button>
-        <button class="act-btn" onclick={undo} disabled={!undoStack.length && editContent === editOriginal}><Icon name="undo" size={14} /></button>
-        <button class="act-btn save" onclick={saveFile} disabled={!isEdited}><Icon name="save" size={14} /></button>
+        <CommandButton variant="icon" icon={wrapLines ? 'wrap-text' : 'no-wrap'} label={t('editorWrap')} pressed={wrapLines}
+          onclick={() => { wrapLines = !wrapLines; requestAnimationFrame(syncEditorScroll); }} />
+        <CommandButton variant="icon" icon="undo" label={t('filesUndo')} onclick={undo} disabled={!undoStack.length && editContent === editOriginal} />
+        <CommandButton variant="primary" iconOnly icon="check" label={t('save')} onclick={saveFile} disabled={!isEdited} />
       </div>
     </div>
     <div class="editor-wrap" class:wrap={wrapLines} style="--file-font-size:{fontSize}px">
@@ -1599,6 +1634,7 @@
         </div>
         <textarea
           class="editor"
+          aria-label={currentFile.name}
           bind:this={taEl}
           value={editContent}
           oninput={onEditInput}
@@ -1614,10 +1650,10 @@
 {#snippet localPanel()}
     <!-- Local downloaded files -->
     <div class="preview-header">
-      <button class="back-btn" onclick={() => { navAnim('back'); view = 'list'; }}><Icon name="chevron-left" size={16} /></button>
+      <CommandButton variant="icon" icon="arrow-left" label={t('back')} onclick={() => { navAnim('back'); view = 'list'; }} />
       <span class="preview-name">{t('downloads')}</span>
       <div class="preview-actions">
-        <button class="act-btn" onclick={openLocalFiles}><Icon name="refresh" size={14} /></button>
+        <CommandButton variant="icon" icon="refresh" label={t('filesRefresh')} onclick={openLocalFiles} />
       </div>
     </div>
     <div class="file-list">
@@ -1627,7 +1663,8 @@
             <Icon name="file" size={16} />
             <span class="file-name">{f.name}</span>
           </button>
-          <button class="act-btn del" onclick={() => (pendingAct = { kind: 'local', name: f.name })}><Icon name="trash" size={12} /></button>
+          <CommandButton variant="danger" iconOnly icon="trash" label={`${t('delete')}: ${f.name}`}
+            onclick={() => (pendingAct = { kind: 'local', name: f.name })} />
         </div>
       {/each}
       {#if !localFiles.length}
@@ -1639,14 +1676,14 @@
 {#snippet infoPanel()}
     <!-- File info -->
     <div class="preview-header">
-      <button class="back-btn" onclick={backFromInfo}><Icon name="chevron-left" size={16} /></button>
+      <CommandButton variant="icon" icon="arrow-left" label={t('back')} onclick={backFromInfo} />
       <span class="preview-name">{currentFile?.name}</span>
       <div class="preview-actions">
         {#if isPreviewable(currentFile?.stat, currentFile?.name)}
-          <button class="act-btn" onclick={() => loadPreviewContent(currentFile)} title={t('preview')}><Icon name="eye" size={14} /></button>
+          <CommandButton variant="icon" icon="eye" label={t('preview')} onclick={() => loadPreviewContent(currentFile)} />
         {/if}
-        <button class="act-btn" onclick={() => handleDownload(currentFile.path)}><Icon name="download" size={14} /></button>
-        <button class="act-btn" onclick={() => copyPath(currentFile.path)}><Icon name="copy" size={14} /></button>
+        <CommandButton variant="icon" icon="download" label={t('filesDownload')} onclick={() => handleDownload(currentFile.path)} />
+        <CommandButton variant="icon" icon="copy" label={t('filesCopyPath')} onclick={() => copyPath(currentFile.path)} />
       </div>
     </div>
     <div class="info-body">
@@ -1669,29 +1706,32 @@
 <div class="files" bind:this={filesEl}
   class:snap={swipeSnap} class:drill-fwd={navAnimClass === 'fwd'} class:drill-back={navAnimClass === 'back'}
   style:transform={swipeDX > 0 ? `translateX(${swipeDX}px)` : ''}
+  style:--files-list-default={`${LIST_WIDTH.default}px`}
   ontouchstart={onTouchStart} ontouchmove={onTouchMove} ontouchend={onTouchEnd} ontouchcancel={onTouchCancel}>
   {#if error}
     <div class="error appear">{error}</div>
   {/if}
   {#if splitEligible}
     <!-- Desktop: folder browser (left) | draggable splitter | preview (right). -->
-    <div class="files-split">
-      <!-- The directory browser lives in THE shared sidebar
-           (ui-unification.md): same width var, same handle as Hub/Agents. -->
+    <div class="files-split" class:preview-open={view !== 'list'}>
+      <!-- A content listing owns its width, independently of app navigation. -->
       <div class="files-left">
-        <SideHandle />
+        {#if view !== 'list'}
+          <SideHandle varName="--files-list-w" storeKey="tmux_files_list_w"
+            min={LIST_WIDTH.min} max={LIST_WIDTH.max} def={LIST_WIDTH.default} label={t('filesResizeList')} />
+        {/if}
         {@render listPanel()}
       </div>
+      {#if view !== 'list'}
       <div class="files-right">
         {#if view === 'preview'}{@render previewPanel()}
         {:else if view === 'edit'}{@render editPanel()}
         {:else if view === 'info'}{@render infoPanel()}
         {:else if view === 'git'}<GitPanel bind:this={gitPanelRef} {cwd} {fontSize} onOpenFile={(entry) => { fromGit = true; openEntry(entry); }} onClose={() => { view = 'list'; }} />
         {:else if view === 'local'}{@render localPanel()}
-        {:else}
-          <div class="files-placeholder"><Icon name="file" size={40} /><p>{t('selectFile')}</p></div>
         {/if}
       </div>
+      {/if}
     </div>
   {:else}
     <!-- Mobile / narrow / touch: single-pane view chain (unchanged). -->
@@ -1722,9 +1762,9 @@
     <div class="copy-toast download-toast appear-rise">
       {t('saved')} <span class="dl-path">{downloadToast}</span>
       {#if downloadedPath}
-        <button class="toast-open" onclick={openDownloaded}>{t('open')}</button>
+        <CommandButton label={t('open')} onclick={openDownloaded} />
       {/if}
-      <button class="toast-close" onclick={dismissDownload}><Icon name="x" size={12} /></button>
+      <CommandButton variant="icon" icon="x" label={t('close')} onclick={dismissDownload} />
     </div>
   {/if}
 </div>
@@ -1736,7 +1776,7 @@
   onconfirm={runPendingAct} oncancel={() => (pendingAct = null)} />
 
 <style>
-  .files { display: flex; flex-direction: column; flex: 1; min-height: 0; background: var(--bg); }
+  .files { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; background: var(--bg); }
   /* Interactive edge-swipe: the drag itself sets an inline translate (no
      transition — the finger is the animation); releasing under the commit
      threshold springs back on --t-fast; a committed back plays the shared
@@ -1755,43 +1795,23 @@
      flex-column themselves so each panel's sticky header (flex-shrink:0) +
      scrollable body (flex:1; overflow) constrain correctly — `.files` gave them
      that in single-pane mode; here the columns must. */
-  .files-split { display: flex; flex: 1; min-height: 0; width: 100%; }
+  .files-split { display: flex; flex: 1; min-width: 0; min-height: 0; width: 100%; }
   .files-left, .files-right {
     display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden;
   }
-  /* The directory browser is THE shared sidebar: same width var, same bg2,
-     same handle as Hub/Agents (ui-unification.md). The old per-page flex
-     fraction (tmux_files_frac) is gone with its private splitter. */
-  .files-left { position: relative; flex: none; width: var(--sidebar-w); background: var(--bg2); }
+  /* Listing width is a content budget, not the global navigation width. */
+  .files-left { position: relative; flex: 1; width: 100%; background: var(--bg2); }
+  .preview-open .files-left { flex: none; width: var(--files-list-w, var(--files-list-default)); }
   .files-right { flex: 1; border-left: 1px solid var(--border); }
-  .files-placeholder {
-    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 10px; color: var(--text3); font-size: var(--fs-body); padding: 24px; text-align: center;
+  @media (max-width: 899px) {
+    /* Forced desktop on a narrow screen retains the same Back/view chain. */
+    .preview-open .files-left { display: none; }
   }
 
-  /* Toolbar — same vertical rhythm as the Terminal window-switcher bar
-     and the Sessions top-row (24 px buttons + 3 px padding = ~31 px total). */
-  /* Page-skeleton alignment (ui-unification.md): same bar geometry and
-     border as the Hub page header; the dense controls inside stay. */
   .toolbar {
-    display: flex; align-items: center; gap: var(--ui-gap); min-height: 42px; padding: 6px 10px; box-sizing: border-box;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: var(--config-header-height); padding: 6px 10px; box-sizing: border-box;
     border-bottom: 1px solid var(--border); background: transparent; flex-shrink: 0;
   }
-  .tool-btn {
-    /* Borderless icon action — the .icon-btn/rail grammar (owner, 2026-08-28),
-       at this toolbar's touch size. */
-    width: var(--ui-control-height); height: var(--ui-control-height);
-    padding: 0; border: none; border-radius: var(--ui-radius-pill);
-    background: none; color: var(--text2); cursor: pointer;
-    font-size: var(--ui-font-control); display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-    -webkit-tap-highlight-color: transparent;
-    transition: background var(--t-fast), color var(--t-fast);
-  }
-  .tool-glyph { display: flex; }
-  .tool-btn:active { background: var(--accent-bg); color: var(--accent); }
-  .tool-btn.tool-active { background: var(--accent-bg); color: var(--accent); }
-  .tool-btn.starred { color: var(--accent); }
 
   /* Path row */
   .bc-path-row {
@@ -1801,6 +1821,7 @@
   }
   .bc-path-row::-webkit-scrollbar { display: none; }
   .bc-seg {
+    min-width: var(--control-height); min-height: var(--control-height);
     padding: 2px 4px; border: none; background: none; color: var(--text2);
     cursor: pointer; white-space: nowrap; font-size: var(--fs-ui); font-family: inherit;
     transition: color var(--t-fast);
@@ -1827,31 +1848,19 @@
     white-space: nowrap; scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
     transition: color var(--t-fast);
+    min-height: var(--control-height);
   }
   .bm-path::-webkit-scrollbar { display: none; }
   .bm-path:active { color: var(--accent); }
-  .bm-del {
-    padding: 4px; border: none; border-radius: var(--ui-radius-control); background: none;
-    color: var(--text3); cursor: pointer; display: flex;
-    transition: color var(--t-fast);
-  }
-  .bm-del:active { color: var(--danger); }
+  .panel-empty { margin: 0; padding: 12px; color: var(--text2); font-size: var(--fs-sub); }
+  .panel-status { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
 
   /* New item / rename */
   .new-item {
-    display: flex; gap: 6px; padding: 6px 10px;
+    display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; padding: 6px 10px;
     border-bottom: 1px solid var(--border2); min-width: 0;
   }
-  .new-item input {
-    flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--input-border); border-radius: var(--ui-radius-control);
-    background: var(--input-bg); color: var(--text); font-size: var(--fs-body);
-    font-family: var(--font-mono);
-  }
-  .new-item button {
-    padding: 6px 10px; border: 1px solid var(--input-border); border-radius: var(--ui-radius-control);
-    background: var(--surface2); color: var(--text2); cursor: pointer;
-  }
-  .new-type-btn { display: flex; align-items: center; color: var(--accent); }
+  .new-kind { grid-column: 1 / -1; }
 
   .error {
     padding: 8px 12px; background: var(--bg2); color: var(--danger);
@@ -1885,11 +1894,12 @@
     display: flex; align-items: center; border-bottom: 1px solid var(--border2);
   }
   .file-main {
-    flex: 1; display: flex; align-items: center; gap: 10px; padding: 14px 12px;
+    flex: 1; display: flex; align-items: center; gap: 10px; padding: 10px 12px;
     border: none; background: none; color: var(--text); cursor: pointer; text-align: left;
     font-size: var(--fs-body); min-width: 0; -webkit-tap-highlight-color: transparent;
     font-family: var(--font-ui); /* file names are data, not chrome */
     transition: background var(--t-fast);
+    min-height: var(--control-height);
   }
   .file-main:active { background: var(--input-bg); }
   /* Symlink badge — small ↗ arrow overlaid on the bottom-right of the
@@ -1920,43 +1930,23 @@
   .file-row.broken { opacity: 0.55; }
   .file-row.broken .file-icon.is-link::after { color: var(--danger, #f87171); }
   .link-name { font-style: italic; }
-  .file-name {
-    flex: 1; min-width: 0; white-space: nowrap;
-    overflow-x: auto; overflow-y: hidden;
-    scrollbar-width: none; -ms-overflow-style: none;
-    overscroll-behavior-x: contain;
-  }
-  .file-name::-webkit-scrollbar { display: none; }
-  .dir-name { color: var(--accent); }
-  .file-size { color: var(--text3); font-size: var(--fs-sub); font-family: var(--font-mono); white-space: nowrap; }
-  .file-actions { display: flex; gap: 2px; padding-right: 8px; }
-  .act-btn {
-    padding: 6px; border: none; border-radius: var(--ui-radius-control); background: none;
-    color: var(--text3); cursor: pointer; display: flex; -webkit-tap-highlight-color: transparent;
-    transition: opacity var(--t-fast), color var(--t-fast);
-  }
-  .act-btn:active { color: var(--accent); }
-  .act-btn.on { color: var(--accent); }
-  .act-btn.save { color: var(--accent); }
-  .act-btn.save:disabled { color: var(--text3); opacity: 0.5; }
-  .act-btn:disabled { color: var(--text3); opacity: 0.5; }
+  .file-label { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .file-name { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .dir-name { color: var(--accent-ink); }
+  .file-size { color: var(--text2); font-size: var(--fs-sub); font-family: var(--font-mono); white-space: nowrap; }
+  .file-actions { display: flex; flex: none; gap: 4px; padding-right: 8px; }
   .empty, .loading { padding: 40px; text-align: center; color: var(--text3); font-size: var(--fs-body); }
 
   /* Preview header */
   .preview-header {
-    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px;
     border-bottom: 1px solid var(--border); flex-shrink: 0;
   }
-  .back-btn {
-    padding: 6px; border: none; border-radius: var(--ui-radius-control); background: var(--surface2);
-    color: var(--text2); cursor: pointer; display: flex; -webkit-tap-highlight-color: transparent;
-    transition: color var(--t-fast), background var(--t-fast);
-  }
   .preview-name {
-    flex: 1; font-size: var(--fs-body); font-weight: 500; overflow: hidden;
-    text-overflow: ellipsis; white-space: nowrap;
+    flex: 1 1 160px; min-width: 0; font-size: var(--fs-body); font-weight: 500;
+    white-space: pre-wrap; overflow-wrap: anywhere;
   }
-  .preview-actions { display: flex; gap: 4px; }
+  .preview-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; max-width: 100%; }
 
   /* Editor */
   .editor-wrap {
@@ -2009,6 +1999,7 @@
   .info-val { flex: 1; font-size: var(--fs-body); word-break: break-all; }
   .info-val.mono { font-family: var(--font-mono); }
   .info-path {
+    min-height: var(--control-height);
     flex: 1; font-size: var(--fs-body); word-break: break-all; text-align: left;
     background: none; border: none; color: var(--text); cursor: pointer; padding: 0;
     display: flex; align-items: center; gap: 4px; -webkit-tap-highlight-color: transparent;
@@ -2051,16 +2042,6 @@
   }
   .dl-name {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
-  }
-  .toast-open {
-    padding: 4px 12px; border: 1px solid var(--accent); border-radius: var(--ui-radius-control);
-    background: var(--accent-bg); color: var(--accent); font-size: var(--fs-ui);
-    font-weight: 600; cursor: pointer; -webkit-tap-highlight-color: transparent;
-    flex-shrink: 0;
-  }
-  .toast-close {
-    padding: 2px; border: none; background: none; color: var(--text3);
-    cursor: pointer; display: flex; flex-shrink: 0;
   }
   @keyframes toast-fade {
     0% { opacity: 0; }

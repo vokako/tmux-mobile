@@ -7,12 +7,17 @@ The starting directory follows the active terminal/team session's working
 directory, or the server's home directory when no session is open yet.
 
 ## Components
-- Unified toolbar: all actions in one compact icon row. Its first control
+- Unified toolbar: named shared icon controls, 32px for pointer input and
+  44px for touch; rows wrap when the available width cannot fit the tools.
+  Its first control
   (terminal glyph, "Session directory") returns to the active session's
   working directory; it is NOT a home button — the house icon means the
   user's home (`~`) wherever it appears (the directory picker)
 - Breadcrumb path row (separate from toolbar)
 - File/directory list with icons, size, modified date
+- The desktop list uses the available width until a preview is open. Beside a
+  preview its independent, resizable width defaults to 400px (320-520px), not
+  the global navigation sidebar width. File sizes sit below complete names.
 - Bookmark panel (star current dir, scrollable saved paths)
 - Recent files panel (last 20 opened files, scrollable, capped to 40vh)
 - File preview: Markdown (rendered through the shared safe renderer, `core/markdown.ts`, + mermaid + KaTeX), CSV (table), code (syntax highlighted; the lined view shows the first 3000 lines with a "Show all N lines" button), HTML (sandboxed iframe), PDF (pdf.js), images. pdf.js, mermaid and highlight.js load on first use, not at startup.
@@ -34,7 +39,8 @@ directory, or the server's home directory when no session is open yet.
   policy: paths stay inside Files; real web URLs open externally.
 - Background/resume and WebSocket reconnect refresh directory data without closing the active preview or editor
 - From info page → tap preview (eye) button to load preview on demand
-- Long file names in the list scroll horizontally on touch drag
+- Long file names wrap, preserving whitespace, rather than hiding behind a
+  horizontal scroller. Preview titles also wrap without displacing Back/tools.
 - Tap edit → open text editor
 - Leaving an editor with unsaved changes asks "Discard unsaved changes?" on
   EVERY exit — the back button/gesture, a session or pane switch, the
@@ -43,6 +49,10 @@ directory, or the server's home directory when no session is open yet.
   event, not replayed later
 - Long-press / info button → file info panel
 - Star button → bookmark current directory
+- Hidden-file and bookmark tools expose pressed state; bookmark/recent panels
+  expose expanded state and an associated panel ID. An opened empty panel
+  distinguishes loading, read failure/retry and a confirmed empty collection.
+- New item opens a name field and the shared File/Folder segmented choice.
 - Refresh button in the toolbar → re-list current directory
 - Swipe right from left edge → go back
 - The back gesture retraces the user's own directory path first (a history,

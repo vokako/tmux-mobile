@@ -293,6 +293,11 @@ sizes (owner declined).
 
 ## Rules and their reasons
 
+- **File tools update state inside stable boxes** (2026-09-10, #157): Files
+  uses the shared CommandButton paint and loading rotation. The bookmark star
+  changes glyph and pressed state without its former private pop animation.
+  Toolbar wrapping and list/preview width changes are layout, not animated
+  geometry. The existing file-view drill and transfer feedback remain unchanged.
 - **Share rotation geometry and tokenize feedback paint** (2026-09-10, #155
   review, #156): CommandButton and Composer reference the one `spin` keyframe
   in `app.css`, retaining their semantic 0.6s loading / 2.2s open-turn tempos

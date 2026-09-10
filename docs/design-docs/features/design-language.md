@@ -11,7 +11,7 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
 
 **Configuration rollout (2026-09-10, owner-approved #154).** The concrete
 control contract below ships in #155; Settings and Agent-family adoption
-and draft workflows ship in #156, Files tools follow in #157. Approval does not
+and draft workflows ship in #156, Files tools in #157. Approval does not
 mean every legacy consumer has already migrated. Keep existing mechanisms
 and replace their consumers explicitly; do not retune Terminal geometry
 through the legacy `--ui-control-height` token.
@@ -319,6 +319,15 @@ work and freezes its target before awaiting. Skill file and file-list requests
 have their own sequence so a pre-refresh reply for the same path cannot
 overwrite the refreshed preview. Select and modal key handling precede the
 editor's Escape guard.
+
+### File tools (#157, 2026-09-10)
+
+Files tools adopt the shared command metrics and state contract too.
+Their bars wrap within the available width; the listing is a
+content surface, not a navigation sidebar. It fills an unused preview area,
+then uses its own SideHandle width beside an open preview. Names wrap in full,
+with size on a secondary line. See [file-handling.md](file-handling.md) for
+the measured cause, width bounds and unchanged routing/Back contract.
 
 ### Legacy consumers during migration
 

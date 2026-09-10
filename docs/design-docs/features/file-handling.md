@@ -8,6 +8,48 @@ Base64 encoding for small file transfer (previews), streaming HTTP for large-fil
 
 ## Key Decisions
 
+### File tools and name space (#157, 2026-09-10)
+
+The #154 audit measured a 24x24px touch toolbar with three unnamed actions,
+and an AGENTS.md name squeezed to 47.53px inside a 240px list while an unused
+preview held 1154px. The fault was in the private tool dialect and layout,
+not file routing or the preview renderer.
+
+Files uses `CommandButton` for tools, actions and Back: localized names and
+shared hover information, 32px pointer / 44px touch boxes, proper pressed or
+expanded state for icon tools, and wrapping toolbar/header groups. File/folder
+creation uses the existing Segmented control. Breadcrumbs and path rows keep
+their textual navigation form and meet the same hit-height floor.
+
+Before a preview is open the desktop listing fills the available width.
+Beside a preview it uses the existing SideHandle with `--files-list-w` and
+`tmux_files_list_w`, default 400px and bounds 320-520px. This is a content-list
+preference, independent of `tmux_sidebar_w`; do not migrate the unrelated
+navigation width into it or restore the retired fraction/splitter. Forced
+desktop on a narrow viewport shows the active view without squeezing both
+columns. Existing single-pane embeds and Back history remain unchanged.
+Both flex containers have `min-width: 0`: Chromium 152 measured a long code
+preview expanding the outer Files item to 1126.6px inside an 854px allocation
+without it. Content scrolls inside its preview, never by pushing tools offscreen.
+
+File names preserve their whitespace and wrap in full. Size metadata occupies
+the next line, not another competing column. This deliberately retires the
+hidden horizontal-name scroller and the shared-navigation-width prescription
+for this listing. The path breadcrumb and saved full-path rows may still scroll
+horizontally; they are paths, not shortened file names.
+
+Expanded bookmark/recent panels distinguish loading, failure with retry and
+confirmed emptiness. They retain `persisted-list.ts` as the sole read/mutation
+owner; no new persistence or navigation mechanism is introduced. Routing,
+transfer, editor and Back function bodies are unchanged by this UI adoption.
+Verification uses real Files mounts and Chromium 152.0.7977.64 on pointer,
+390px touch, wide touch, forced narrow desktop and a single-pane embed, in
+both themes with reduced-motion/Chinese spots. In the controlled fixture,
+AGENTS.md's name budget grows from 54.45px to 238px in a 400px listing beside
+the preview; the initial listing uses all 1394px available. Every touch toolbar
+button measures 44px, not the former 24px. Native pickers/downloads and a full
+App/browser-history workflow remain owner/device acceptance, not fixture claims.
+
 ### Two Download Paths
 | Path | Used for | Size limit | Transport |
 |------|----------|-----------|-----------|
@@ -207,8 +249,9 @@ error banners and the push-result banner `.appear`; the download toasts rise
 in, and the "Copied" flash is one local in+out keyframe (`toast-fade`, fade in
 over 10%, hold, fade out) because it is a one-shot, not an intro atom. The
 toasts centre with auto margins rather than `translateX(-50%)` so the intro
-owns `transform`. The bookmark star swaps glyphs (`{#key}` + `.appear-pop`)
-because no rotation reads star → star-filled. Breadcrumbs are keyed by path
+owns `transform`. The bookmark star changes its glyph and shared pressed-state
+paint without the former private pop animation (#157); its box never changes.
+Breadcrumbs are keyed by path
 and only the tip fades in. Git status rows are keyed by file and flip on
 `moveMs()`; the git diff drills in from the right and the list back from the
 left under 760px with the app.css `drill-in-*` keyframe pair (one copy: a
