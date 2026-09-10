@@ -31,9 +31,9 @@ to the terminal and take over. Full text with reasons and evidence:
 **How we build**
 7. **Declaration is truth; the running state is a disposable projection.** state.db and `<ws>/.tmm/` are the only stores; everything else can be killed and rebuilt idempotently. → [architecture](docs/guidance/architecture.md)
 8. **Derive, never declare.** Status comes from turn edges, not pane activity or an agent's own words; one definition function per concept; inputs validated once, at the door. → [architecture](docs/guidance/architecture.md) · [security](docs/guidance/security.md)
-9. **One mechanism per job.** A second implementation drifts silently; a new visual species is a regression. Delete before you add. → [code-quality](docs/guidance/code-quality.md)
-10. **Two screens, one standard.** Phone and desktop each get a complete form of one design language; beauty, usability and guiding motion are function, not polish. → [ui-design](docs/guidance/ui-design.md)
-11. **Restraint.** Fewer words, fewer buttons, fewer rules; a replaced mechanism is removed whole. → [ui-design](docs/guidance/ui-design.md) · [code-quality](docs/guidance/code-quality.md)
+9. **One mechanism per job.** A second implementation drifts silently; a new visual species is a regression. Delete before you add. The shared unit is the interaction, state and accessibility contract. → [code-quality](docs/guidance/code-quality.md)
+10. **Two screens, one standard.** Phone and desktop each get a complete form of one design language; beauty, usability and guiding motion are function, not polish. Use existing tokens and atoms only; a raw px value, literal color or second sliding tempo is a regression. Make the object, state, available actions and return destination clear. Adapt layout to available space and controls to input capability. → [ui-design](docs/guidance/ui-design.md)
+11. **Restraint.** Fewer words, fewer buttons, fewer rules; a replaced mechanism is removed whole. Delete rather than retain; do not overdesign. Do not remove what a person needs to identify, act or return. → [ui-design](docs/guidance/ui-design.md) · [code-quality](docs/guidance/code-quality.md)
 
 **How we work**
 12. **Rules live with their design, with the reason and the incident.** Measure on the real version, write the version down; a rule that can be a test is a test. → [process](docs/guidance/process.md)

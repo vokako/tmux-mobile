@@ -54,12 +54,14 @@ What a human can do, an agent can do; add nothing an agent does not need.
 Declaration is truth; running state is disposable.
 Derive status from observation, never self-report.
 One definition per concept; a second copy is a bug.
-One mechanism per job; share interaction, state and accessibility contracts.
+One mechanism per job; a new visual species is a regression.
+The shared unit is the interaction, state and accessibility contract.
 Adding a backend touches one file.
 Look for a native integration point first; build your own only with a recorded reason.
 Measure, do not guess; record the version.
 Keep rules beside their design, with reasons and incidents.
-Exercise restraint: remove noise, not information needed to understand or act.
+Exercise restraint: delete rather than retain, use fewer words, do not overdesign.
+Do not remove what a person needs to identify, act or return.
 Phone and desktop must both be complete; compromising one fails both.
 Make the object, state, available actions and return destination clear.
 Beauty is function: make it obvious who is running and who needs me.
@@ -381,8 +383,10 @@ semantics: a command, a choice and navigation are not interchangeable buttons.
 **Implications.**
 1. Search for an existing mechanism before writing another. Use it, or
    **change it** if it does not fit; do not create a parallel implementation.
+   A new visual species is a regression. Shared reuse includes the interaction,
+   state and accessibility contract, not just appearance.
 2. Shared atoms live once in `app.css` / `ui/`. Component-scoped CSS must
-   not redeclare them: scoped specificity silently beats the shared rule.
+   not redeclare them: specificity (0,2,0) silently beats (0,1,0).
    Reuse includes enabled, selected, pending, error, focus, keyboard and touch
    behavior. Pages supply their data and persistence mode, not another dialect.
 3. A failing source-contract test means a change must be deliberate.
@@ -431,9 +435,14 @@ incomplete. Owner: "注意当前我整体比较满意，不要大变样".
 **Implications.**
 1. Every feature needs a complete, appropriate form on both screens.
    Deferring either screen does not count as completion. Review both.
-2. Adapt layout to available space and controls to input capability.
+2. Use existing tokens and atoms only. A raw px value, literal color or
+   second sliding tempo is a regression. Values live in
+   [design-language.md](design-docs/features/design-language.md), not these
+   tenets; [tokens.source.test.ts](../src/lib/ui/tokens.source.test.ts) and
+   [motion.source.test.ts](../src/lib/ui/motion.source.test.ts) pin the type
+   and motion vocabulary. Adapt layout to available space and controls to input capability.
    Keep names, reading space and actions reachable; a wide touch device still
-   needs touch controls. The design document owns metrics, not these tenets.
+   needs touch controls.
 3. Motion must communicate direction, state or entry/exit. Add none without
    an answer to what it guides. Page switches must not flash into place.
    Where the navigation slide applies, content arrives with the new page;
