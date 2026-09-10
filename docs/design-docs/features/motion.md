@@ -293,6 +293,14 @@ sizes (owner declined).
 
 ## Rules and their reasons
 
+- **Share rotation geometry and tokenize feedback paint** (2026-09-10, #155
+  review, #156): CommandButton and Composer reference the one `spin` keyframe
+  in `app.css`, retaining their semantic 0.6s loading / 2.2s open-turn tempos
+  and local reduced-motion guards. Their identical private keyframes drifted
+  from the shared-atom rule. CommandButton overlays use `color-mix(in srgb, ...)`
+  over `--control-overlay-light` / `--control-overlay-dark`, preserving the
+  original 4% white hover / 6% black press composites and contrast. Other
+  legacy rotation consumers are outside this scoped migration.
 - **One vocabulary in app.css, components add a class** — five components had
   five private spinners, Hub had a private caret transition, and the compact
   drill pair was declared in five components; a second copy is a second tempo

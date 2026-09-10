@@ -52,3 +52,28 @@ test('command and supporting-text tokens meet the accepted contrast floors in bo
     assert.ok(contrast(color(body, '--control-border'), color(body, '--bg')) >= 3, `${theme} control boundary`);
   }
 });
+
+test('tokenized command overlays preserve the original sRGB composites and contrast (#156)', () => {
+  const root = /html \{([\s\S]*?)\n\}/u.exec(css)?.[1];
+  assert.ok(root);
+  const light = color(root, '--control-overlay-light');
+  const dark = color(root, '--control-overlay-dark');
+  assert.deepEqual(light, [255, 255, 255]);
+  assert.deepEqual(dark, [0, 0, 0]);
+  for (const theme of ['light', 'dark']) {
+    const body = new RegExp(`html\\[data-theme="${theme}"\\] \\{([\\s\\S]*?)\\n\\}`, 'u').exec(css)?.[1];
+    assert.ok(body);
+    assert.doesNotMatch(body, /--control-overlay-(?:light|dark):/u, 'overlay endpoints do not vary by theme');
+    const ink = color(body, '--accent-fill-ink');
+    for (const name of ['--accent-fill', '--danger-fill']) {
+      const fill = color(body, name);
+      for (const [endpoint, alpha, original] of [[light, 0.04, 255], [dark, 0.06, 0]] as const) {
+        const mixed = fill.map((c, i) => c * (1 - alpha) + endpoint[i]! * alpha);
+        const before = fill.map(c => c * (1 - alpha) + original * alpha);
+        assert.deepEqual(mixed, before, `${theme} ${name} alpha ${alpha}: unchanged composite`);
+        assert.equal(contrast(mixed, ink), contrast(before, ink), 'unchanged contrast');
+        assert.ok(contrast(mixed, ink) >= 4.5, `${theme} ${name} alpha ${alpha}: readable text`);
+      }
+    }
+  }
+});

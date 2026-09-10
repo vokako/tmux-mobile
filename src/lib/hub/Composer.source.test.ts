@@ -6,6 +6,12 @@ const source = await readFile(new URL('./Composer.svelte', import.meta.url), 'ut
 const rule = (selector: string) =>
   source.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
 
+test('the open-turn arc uses the shared spin without adopting the faster loading tempo (#156)', () => {
+  assert.match(rule('.ss-ring'), /transform-origin: 50% 50%; animation: spin 2\.2s linear infinite;/u);
+  assert.doesNotMatch(source, /@keyframes\s+(?:stop-spin|spin)\b/u);
+  assert.match(source, /@media \(prefers-reduced-motion: reduce\) \{ \.ss-ring \{ animation: none; \} \}/u);
+});
+
 test('Composer retains its stacking context and orders its menus inside it (#133)', () => {
   const composer = /\n  \.composer \{([^}]*)\}/u.exec(source)?.[1] ?? '';
   assert.match(composer, /position:\s*relative/u);

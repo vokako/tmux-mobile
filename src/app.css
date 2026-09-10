@@ -74,6 +74,8 @@ html {
   --control-icon-size: 16px;
   --control-line-height: 18px;
   --control-disabled-opacity: 0.4;
+  --control-overlay-light: #ffffff;
+  --control-overlay-dark: #000000;
   --config-width: 860px;
   --config-padding: 24px;
   --config-header-height: 48px;
@@ -688,6 +690,8 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 @keyframes rise-in { from { opacity: 0; transform: translateY(6px); } }
 @keyframes pop-in { from { opacity: 0; transform: scale(0.6); } }
 @keyframes sheet-up { from { transform: translateY(100%); } }
+/* Rotation geometry only; consumers own semantic duration and reduced motion. */
+@keyframes spin { to { transform: rotate(360deg); } }
 /* The navigation slide's compact drill pair (design-language §1) — one copy;
    Preferences, Agents, Board, Files and GitPanel reference it by name. */
 @keyframes drill-in-right { from { transform: translateX(40%); } to { transform: none; } }

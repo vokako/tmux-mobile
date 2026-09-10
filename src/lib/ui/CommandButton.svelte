@@ -52,12 +52,12 @@
   .solid.danger { background: var(--danger-fill); }
   .command-button:hover:not(:disabled) { background: var(--surface2); }
   .command-button.solid:hover:not(:disabled) {
-    background: var(--accent-fill); box-shadow: inset 0 0 0 100px rgb(255 255 255 / 4%);
+    background: var(--accent-fill); box-shadow: inset 0 0 0 100px color-mix(in srgb, var(--control-overlay-light) 4%, transparent);
   }
   .command-button.solid.danger:hover:not(:disabled) { background: var(--danger-fill); }
   .command-button:active:not(:disabled) { background: var(--accent-bg); }
   .command-button.solid:active:not(:disabled) {
-    background: var(--accent-fill); box-shadow: inset 0 0 0 100px rgb(0 0 0 / 6%);
+    background: var(--accent-fill); box-shadow: inset 0 0 0 100px color-mix(in srgb, var(--control-overlay-dark) 6%, transparent);
   }
   .command-button.solid.danger:active:not(:disabled) { background: var(--danger-fill); }
   .command-button:disabled:not(.pending) { opacity: var(--control-disabled-opacity); cursor: default; }
@@ -66,8 +66,7 @@
   .command-icon { display: inline-flex; width: var(--control-icon-size); height: var(--control-icon-size); flex: none; }
   .command-icon :global(svg) { width: 100%; height: 100%; }
   .command-label { white-space: nowrap; }
-  .spinning { animation: command-spin 0.6s linear infinite; }
-  @keyframes command-spin { to { transform: rotate(360deg); } }
+  .spinning { animation: spin 0.6s linear infinite; }
   @media (prefers-reduced-motion: reduce) {
     .command-button { transition: none; }
     .spinning { animation: none; }

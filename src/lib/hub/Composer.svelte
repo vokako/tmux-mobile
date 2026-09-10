@@ -724,8 +724,7 @@
   /* Deliberately unhurried (owner: "动画不用很快"): a fast spin says
      "loading", this says "a turn is open". The square stays put; only the
      arc travels. */
-  .ss-ring { transform-origin: 50% 50%; animation: stop-spin 2.2s linear infinite; }
-  @keyframes stop-spin { to { transform: rotate(360deg); } }
+  .ss-ring { transform-origin: 50% 50%; animation: spin 2.2s linear infinite; }
   @media (prefers-reduced-motion: reduce) { .ss-ring { animation: none; } }
   /* What the armed button will do, in words, above it — a phone has no hover
      for the title. pointer-events off: it is a caption, not a control. */

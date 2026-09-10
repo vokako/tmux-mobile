@@ -20,6 +20,12 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 const components = walk(join(root, 'src'));
 
+test('app.css owns one complete-turn spin atom; consumers keep their own semantic duration (#156)', () => {
+  const spins = [...appCss.matchAll(/@keyframes\s+spin\s*\{/gu)];
+  assert.equal(spins.length, 1, 'the shared rotation has one definition in app.css');
+  assert.match(appCss, /@keyframes spin \{ to \{ transform: rotate\(360deg\); \} \}/u);
+});
+
 test('the tempo tokens and the JS mirror agree', () => {
   const tokens = /--t-fast:\s*(\d+)ms;\s*--t-move:\s*(\d+)ms;/u.exec(appCss);
   assert.ok(tokens, 'app.css declares --t-fast and --t-move together');
