@@ -17,14 +17,16 @@ test('the pill is the atom and the action places it', () => {
   assert.match(source, /<span class="slide-pill" aria-hidden="true"><\/span>/u, 'the pill is the first child');
   assert.match(source, /class="state-ctl" class:active=\{o\.value === value\} aria-pressed=\{o\.value === value\}/u,
     'each option is a .state-ctl (ink cross-fades) and announces its state');
-  assert.match(style, /\.segmented \{ position: relative;/u, 'the container is the pill’s containing block');
+  assert.match(style, /\.segmented \{\s*position: relative;/u, 'the container is the pill’s containing block');
   assert.match(style, /\.segmented button \{\s*position: relative; z-index: 1;/u, 'the buttons sit above the pill');
 });
 
 test('the chosen option keeps only its ink — the wash and the ring are the pill’s', () => {
   const active = style.match(/\.segmented button\.active \{([^}]*)\}/u)?.[1] ?? '';
-  assert.match(active, /color: var\(--accent\)/u);
-  assert.match(active, /border-color: transparent/u, 'its own border yields to the pill’s ring');
+  // #155 deliberately replaces low-contrast ink and individually framed pills.
+  assert.match(active, /color: var\(--accent-ink\)/u);
+  assert.match(style, /box-shadow: inset 0 0 0 1px var\(--control-border\)/u, 'one group outline');
+  assert.match(style, /\.segmented button \{[^}]*border: 0/u, 'no separate option frames');
   assert.doesNotMatch(active, /background/u, 'no background of its own — that would be a second highlight');
   // The atom's look (wash, ring, glide) lives in app.css, not here.
   assert.doesNotMatch(style, /\.slide-pill/u);

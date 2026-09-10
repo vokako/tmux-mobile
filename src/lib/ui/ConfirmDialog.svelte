@@ -16,6 +16,8 @@
   //    the destructive verb on the right and focus parked on Cancel so a stray
   //    Enter cannot delete anything.
   import { t } from '../core/i18n.svelte.ts';
+  import CommandButton from './CommandButton.svelte';
+  import { activeModal } from './modal.ts';
 
   let {
     open = false,
@@ -33,32 +35,50 @@
   } = $props();
 
   let cancelEl: HTMLButtonElement | null = $state(null);
+  let dialogEl: HTMLDivElement | null = $state(null);
   // Focus lands on Cancel, never on the destructive verb: the dialog appears
   // under the pointer/keyboard of someone who was just clicking things.
-  $effect(() => { if (open && cancelEl) cancelEl.focus(); });
-
   $effect(() => {
-    if (!open) return;
+    if (!open || !cancelEl || !dialogEl) return;
+    const dialog = dialogEl;
+    const previousFocus = document.activeElement;
+    if (cancelEl.disabled) dialogEl.focus();
+    else cancelEl.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); oncancel(); }
+      if (activeModal(document) !== dialog) return;
+      if (e.key === 'Escape') {
+        e.stopPropagation(); e.preventDefault();
+        if (!busy) oncancel();
+      } else if (e.key === 'Tab') {
+        const buttons = [...dialog.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+        if (!buttons.length) { e.preventDefault(); dialog.focus(); return; }
+        const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        const next = e.shiftKey ? (index <= 0 ? buttons.length - 1 : index - 1) : (index + 1) % buttons.length;
+        e.preventDefault(); buttons[next]!.focus();
+      }
     };
     window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      const owner = activeModal(document);
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected
+        && (!owner || owner === dialog || owner.contains(previousFocus))) previousFocus.focus();
+    };
   });
 </script>
 
 {#if open}
-  <div class="dlg-backdrop" onclick={() => oncancel()} role="presentation"></div>
-  <div class="dlg confirm" class:sheet={compact} role="alertdialog" aria-modal="true" aria-label={title}>
+  <div class="dlg-backdrop" onclick={() => { if (!busy) oncancel(); }} role="presentation"></div>
+  <div class="dlg confirm" class:sheet={compact} role="alertdialog" aria-modal="true" aria-label={title}
+    aria-busy={busy || undefined} tabindex="-1" bind:this={dialogEl}>
     <h2>{title}</h2>
     {#if note}<p class="dlg-note">{note}</p>{/if}
     <div class="dlg-actions">
-      <button class="chip-btn" bind:this={cancelEl} onclick={() => oncancel()}>
-        {cancelLabel || t('cancel')}
-      </button>
-      <button class="chip-btn primary" class:danger disabled={busy} onclick={() => onconfirm()}>
-        {busy ? '…' : (confirmLabel || t('delete'))}
-      </button>
+      <CommandButton label={cancelLabel || t('cancel')} disabled={busy}
+        bind:element={cancelEl} onclick={() => { if (!busy) oncancel(); }} />
+      <CommandButton label={confirmLabel || t('delete')} variant={danger ? 'danger' : 'primary'}
+        icon={danger ? 'trash' : 'check'} destructiveConfirm={danger} pending={busy}
+        onclick={() => { if (!busy) onconfirm(); }} />
     </div>
   </div>
 {/if}
@@ -81,7 +101,6 @@
   .dlg h2 { margin: 0; font-size: var(--fs-title); }
   .dlg-note { margin: 0; color: var(--text2); font-size: var(--fs-ui); line-height: 1.55; }
   .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
-  .dlg-actions button { min-height: 34px; }
   /* Phone: a bottom sheet — reachable with a thumb, and it never fights the
      on-screen keyboard for the middle of the screen. It RISES from the bottom
      edge (sheet-up, app.css) because its resting transform is none; the
@@ -97,6 +116,6 @@
     animation: sheet-up var(--t-move) ease-out;
     will-change: opacity;
   }
-  .dlg.sheet .dlg-actions button { min-height: 44px; flex: 1; justify-content: center; }
+  .dlg.sheet .dlg-actions :global(.command-button) { min-height: 44px; flex: 1; justify-content: center; }
   @media (prefers-reduced-motion: reduce) { .dlg-backdrop, .dlg, .dlg.sheet { animation: none; } }
 </style>

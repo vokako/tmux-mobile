@@ -8,6 +8,13 @@ import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('./App.svelte', import.meta.url), 'utf8');
 
+test('desktop shortcuts yield to inputs and the active modal without changing browser history (#155)', async () => {
+  assert.match(source, /import \{ activeModal \} from '\.\/lib\/ui\/modal\.ts';/u);
+  assert.match(source, /const onShortcut = \(event\) => \{\s*if \(isShortcutInputTarget\(event\.target\)\) return;\s*if \(activeModal\(document\)\) return;/u);
+  const shortcuts = await readFile(new URL('./lib/app/shortcuts.svelte.ts', import.meta.url), 'utf8');
+  assert.match(shortcuts, /\[role="combobox"\], \[role="listbox"\]/u, 'select-only comboboxes are inputs too');
+});
+
 test('desktop browser context menus are globally suppressed while touch selection stays native', () => {
   assert.match(source, /import \{ installNativeContextMenuGuard \} from '\.\/lib\/ui\/native-context-menu\.ts';/u);
   assert.match(source, /\$effect\(\(\) => installNativeContextMenuGuard\(window\)\);/u,

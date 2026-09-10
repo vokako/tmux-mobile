@@ -9,12 +9,20 @@ matches it instead of inventing. Deep rationale lives with each feature
 this file is the contract. `src/lib/ui/tokens.source.test.ts` and
 `src/lib/ui/sidebar.source.test.ts` enforce the mechanizable parts.
 
+**Configuration rollout (2026-09-10, owner-approved #154).** The concrete
+control contract below ships in #155; Settings and Agent-family adoption
+and draft workflows follow in #156, Files tools in #157. Approval does not
+mean every legacy consumer has already migrated. Keep existing mechanisms
+and replace their consumers explicitly; do not retune Terminal geometry
+through the legacy `--ui-control-height` token.
+
 ## 1 · Tokens (app.css `:root` — never restate a value)
 
 - **Type scale, six chrome steps**: `--fs-micro 9 · --fs-meta 10.5 · --fs-sub
   11.5 · --fs-ui 12.5 · --fs-body 13.5 · --fs-title 15`. Connect card only:
-  `--fs-hero/--fs-display`. `--ui-font-control: var(--fs-sub)` for menu rows,
-  steppers, segments. A raw px font-size anywhere is a regression (guarded).
+  `--fs-hero/--fs-display`. `--ui-font-control: var(--fs-sub)` remains the
+  legacy alias; configuration values use `--fs-body`, command labels use
+  `--fs-ui`, and help uses `--fs-sub`. A raw px font-size anywhere is a regression (guarded).
   `--fs-input-touch: 16px` is a BEHAVIOUR (iOS focus auto-zoom), not a step,
   and is gated `@supports (-webkit-touch-callout: none)`.
 - **Three font roles** (`fonts.md`, all three user-overridable per device):
@@ -34,11 +42,13 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
 - **Radius scale**: `--ui-radius-control 10` (buttons, inputs, selects) ·
   `--ui-radius-row 12` (cards, rows) · `--ui-radius-panel 14` (menus, panels)
   · specials: bubbles 18/6, composer 16/15, dialogs 18 · true pills
-  (`--ui-radius-pill`) ONLY for micro tags ≤ `--fs-micro` and stadium chips
-  (`.pick`, day pill). Controls are never pills.
+  (`--ui-radius-pill`) only for micro tags, the switch track and historical
+  non-configuration chips. Configuration boolean/multiple choices no longer
+  use the `.pick` pill dialect; they use Switch/CheckboxGroup. Commands are never pills.
 - **Colour**: theme tokens only — `--bg*`, `--surface*`, `--text*`, `--border*`,
-  `--accent*` (`--accent-fill/-ink` for solid CTAs, `--accent-line` for
-  selection borders, `--accent-bg` for washes), `--danger/-bg`. ONE progressive
+  `--accent*` (`--accent-fill`/`--accent-fill-ink` for solid CTAs, `--accent-ink`
+  for readable selected text, `--accent-line` for selection borders,
+  `--accent-bg` for washes), `--danger/-bg`. ONE progressive
   status language everywhere a state shows: accent = in motion, `--status-ok`
   = ended well, `--status-warn` = needs a person / a turn cut short,
   `--status-danger` = failed/destructive, grey = at rest. A literal colour is
@@ -148,6 +158,95 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
 
 ## 3 · Control dialects (reuse, never invent)
 
+### Configuration controls (#155, 2026-09-10)
+
+The audit found 24px Settings commands, 28x26px editor commands, 29px fields,
+38px member commands and 26px pill choices. Shared CSS names alone did not
+establish common states or touch reach. The replacement is one component
+per job, using the following shared CSS tokens; the legacy 24px token is
+unchanged until its consumers migrate.
+
+| Metric | Pointer | Touch input |
+|---|---:|---:|
+| `--control-height`, single-line controls | 32px | 44px |
+| Icon command box | 32x32px | 44x44px |
+| `--control-icon-size` | 16px | 18px |
+| `--config-header-height` | 48px | 56px |
+| `--config-padding` | 24px | 16px on compact |
+| Popover option minimum | 36px | 44px |
+| Label / field / section gaps | 8 / 16 / 24px | same |
+
+Input capability, not a narrow viewport alone, selects touch sizes.
+Single-line controls are border-box sized with an 18px line box. Layout,
+hover, pending icons and disabled states cannot resize them. Command
+labels use display/ui-step 500; values/options use the content face;
+code/numeric readouts use mono. Configuration letter spacing is zero.
+Control radius remains 10px, repeated objects 12px, popovers 14px, dialogs
+18px. Checkbox marks are 16px with 4px corners, inside full labelled targets.
+Rectangular controls join the existing app-wide continuous-corner list;
+the switch track stays fully round. Equal radii alone do not produce equal
+outlines when only some controls inherit `corner-shape`.
+
+| Component | Contract |
+|---|---|
+| `CommandButton` | Required accessible label; primary, secondary, icon or danger variant. Icon-only commands use the shared hover card, not another native title. Pending requires a reserved icon slot, blocks activation and retains its label, box and contrast. |
+| `Switch` | A boolean, with native button activation, switch role and checked state; controlled by its caller. Thumb position communicates state without relying on colour. |
+| `CheckboxGroup` | Labelled native checkbox inputs for independent membership choices. Changing one choice preserves unlisted values. Provisional native state resets to the caller value until that caller commits the intent. |
+| `Stepper` | Named minus/plus commands, mono value, clamped limits and disabled end stops. |
+| `Slider` | Native range keyboard/input semantics, visible value and a named reset command. Provisional native values reset until the caller commits. Set min/max/step before value: Chromium otherwise rounds a fractional initial value against its default integer step. |
+| `Select` | One fixed measured popover, shared 32/44px trigger height; unique combobox/list relationships, active-descendant cursor and focus return. IME keys do not select/commit; disabling closes its menu and blocks queued choices. Uses its full border-box height, 6px trigger gap and 8px viewport inset. `dense` only retains the legacy text-size role, never another height. |
+| `Segmented` | One group outline, equal option tracks and one travelling selection marker; no independently framed pill buttons or unused tail inside the group. |
+| `ConfirmDialog` | Same confirmation mechanism, shared command buttons; starts on Cancel, traps Tab inside, restores connected trigger focus, and does not cancel or resubmit while busy. Only the active modal handles keys. |
+
+Modal ownership comes from the visible modal DOM through `activeModal`, not
+listener registration order or copied open flags. The Hub drawer's earlier
+Escape listener and desktop shell shortcuts yield before acting; stopping
+propagation in a later dialog listener cannot undo an earlier action. Hidden
+retained pages do not own keys; a modal still entering at opacity zero does.
+This does not install a new global Back/history handler.
+
+No control owns persistence or a second copy of committed application state.
+Callers set pending synchronously before an asynchronous operation and enforce
+its request/identity guard; the entity-level rules and tests belong to #156.
+Do not use an always-enabled Save as the primary-colour demonstration.
+
+Primary is solid fill; secondary has a neutral surface/control border;
+icon commands are borderless; danger is quiet red until a destructive
+confirmation uses solid red. Selected is a wash/marker, never a primary CTA.
+Enabled uses readable ink; unavailable uses native disabled semantics at
+0.4 opacity. Pending blocks input but retains normal contrast. The shared
+disabled-opacity token can keep submitted form values readable while locked.
+Focus-visible is a 2px ring with 2px offset. Hover/press change paint only:
+solid controls use 4% white / 6% black overlays, never press scaling.
+Status and action are distinct roles.
+
+| Role token | Light | Dark |
+|---|---|---|
+| `--accent-fill` / `--accent-fill-ink` | `#0074ad` / white | `#056f87` / white |
+| `--accent-ink` | `#006699` | `#00d4ff` |
+| `--text2` | `#5f636b` | `#a7abb3` |
+| `--control-border` | `#7a808a` | `#727884` |
+| `--danger-fill` | `#c33535` | `#c33535` |
+| `--danger-ink` | `#c33535` | `#ff5050` |
+
+Brand accents and canvas colours remain unchanged. Control boundaries differ
+from decorative dividers: normal text pairs need 4.5:1 and essential boundary
+marks 3:1. The fill/white-ink pairs remain above 4.5:1 even on hover.
+Do not put necessary labels in the faint decorative `--text3` role.
+
+The shared `config-*` atoms establish an 860px left-aligned canvas, aligned
+header/body leading edges, field roles and 8/16/24px rhythm for #156 consumers.
+Preference rows wrap from a 160px label + 24px gap + 240px control budget;
+entity rows fit up to two 280px columns with 16px gap. Flex/auto-fit wrapping
+does not create a containment ancestor for fixed Select popovers.
+Terminal cells, cursor metrics and gesture coordinates are outside this scope.
+
+### Legacy consumers during migration
+
+The following records explain existing non-migrated atoms and historical
+owner decisions. Their 24px/28x26px/pill configuration variants are replaced
+by the contract above, not extended by new page-local overrides.
+
 - `.chip-btn` — bordered text chip; `.primary` accent wash; lone `.danger`
   quiet until hover. `.chip-btn.primary.danger` = SOLID red with white ink,
   reserved for the confirming button of a destructive dialog.
@@ -204,6 +303,9 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   list itself does not animate beyond the "invisible until measured" guard.
 
 ## 4 · Hover / active (desktop), two families only
+
+Configuration commands use the scoped state matrix in §3; the legacy
+press-scale/brightness details below do not override it.
 
 - CONTROLS (text chips, inputs, select triggers — anything wearing a drawn
   border): border → `--accent`, text → `--accent` (danger controls red
@@ -294,6 +396,20 @@ an exception.
 ## Rules and their reasons
 
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
+
+### Configuration controls share behavior, not just paint (2026-09-10, #155)
+
+Owner-approved #154 replaces the inconsistent configuration dialects with
+the §3 contracts. Node mount tests execute keyboard, IME, controlled values,
+pending guards and modal ownership; source tests enforce tokens and contrast.
+Chromium 152.0.7977.64 measures 32px pointer / 44px touch controls in six
+desktop/390px/wide-touch light/dark/reduced-motion variants. The fixture mounts
+real Settings and Agent views plus a shared-control specimen; it does not
+prove their still-unmigrated form workflow or every global-token consumer.
+Those forms follow in #156, and the owner's actual browser/APK acceptance
+remains a separate gate. Restoring old pending, IME, native-value and modal
+handling fails the corresponding tests; restoring the range attribute order
+reproduces Chromium's fractional-value rounding.
 
 ### The design language is a CONTRACT
 

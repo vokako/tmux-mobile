@@ -45,6 +45,7 @@
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import CreateProjectDialog from '../projects/CreateProjectDialog.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
+  import { activeModal } from '../ui/modal.ts';
 
   let { visible = false, fontSize = 14, mobile = false, openTerminal = () => {}, onSelectSession = (_s) => {}, onGoBack = null, openAgentConfig = null, openFilesTab = null, openBoardTab = null } = $props();
 
@@ -1131,6 +1132,7 @@
     if (!termOpen || !visible) return;
     const onKey = (e) => {
       if (e.key !== 'Escape') return;
+      if (activeModal(document)) return;
       if (e.target?.closest?.('.xterm')) return; // focused terminal: the pane gets it
       // Same territory rule for the files partition: an Esc from inside it
       // (editor, rename field, preview) is the browser's own — closing the

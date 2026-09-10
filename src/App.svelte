@@ -1,4 +1,5 @@
 <script>
+  import { activeModal } from './lib/ui/modal.ts';
   import Settings from './lib/app/Settings.svelte';
   import Sessions from './lib/sessions/Sessions.svelte';
   import Terminal from './lib/terminal/Terminal.svelte';
@@ -1423,6 +1424,7 @@
     if (!isTauriDesktop) return;
     const onShortcut = (event) => {
       if (isShortcutInputTarget(event.target)) return;
+      if (activeModal(document)) return;
       const action = shortcuts.action(shortcutFromEvent(event));
       if (!action) return;
 

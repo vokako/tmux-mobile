@@ -68,6 +68,26 @@ html {
   --ui-radius-row: 12px;      /* list rows, roster cards, toasts, small bars */
   --ui-radius-panel: 14px;    /* cards, menus, tool lanes, big panels */
   --ui-font-control: var(--fs-sub);
+  /* Configuration controls migrate explicitly; the legacy 24px metric above
+     still belongs to unmigrated chrome, including terminal tools. */
+  --control-height: 32px;
+  --control-icon-size: 16px;
+  --control-line-height: 18px;
+  --control-disabled-opacity: 0.4;
+  --config-width: 860px;
+  --config-padding: 24px;
+  --config-header-height: 48px;
+  --config-label-gap: 8px;
+  --config-field-gap: 16px;
+  --config-section-gap: 24px;
+  --config-editor-min: 160px;
+}
+
+@media (any-pointer: coarse) {
+  :root { --control-height: 44px; --control-icon-size: 18px; --config-header-height: 56px; --config-editor-min: 176px; }
+}
+@media (max-width: 760px) {
+  :root { --config-padding: 16px; }
 }
 
 /* ─── Theme tokens ─────────────────────────────────────────────────────── */
@@ -80,16 +100,19 @@ html[data-theme="dark"] {
      corners, accent-driven tints, surface elevation — not from repainting
      the palette. */
   --bg: #0a0a0f; --bg2: #0f0f18; --bg3: #12121a;
-  --text: #e2e8f0; --text2: rgba(226,232,240,0.5); --text3: rgba(226,232,240,0.45);
+  --text: #e2e8f0; --text2: #a7abb3; --text3: rgba(226,232,240,0.45);
   --border: rgba(255,255,255,0.06); --border2: rgba(255,255,255,0.04);
   --surface: rgba(255,255,255,0.03); --surface2: rgba(255,255,255,0.06);
   --accent: #00d4ff; --accent-bg: rgba(0,212,255,0.12); --accent-glow: rgba(0,212,255,0.1);
-  /* Solid accent CTAs: the electric cyan at full strength reads as a light
-     source on the dark canvas (owner report, send button 2026-08-18), so
-     every solid fill tones to a 60% mix and strong selection lines to 70%.
-     Light theme keeps full accent — its deep blue never glowed. */
-  --accent-fill: color-mix(in srgb, var(--accent) 60%, var(--bg));
-  --accent-fill-ink: color-mix(in srgb, white 90%, var(--accent));
+  /* #155: tone solid commands for readable white ink in both themes.
+     The brand accent stays unchanged; selected text has its own ink role.
+     Strong selection lines retain their previous 70% mix. */
+  --accent-fill: #056f87;
+  --accent-fill-ink: #ffffff;
+  --accent-ink: #00d4ff;
+  --control-border: #727884;
+  --danger-fill: #c33535;
+  --danger-ink: #ff5050;
   --accent-line: color-mix(in srgb, var(--accent) 70%, var(--bg));
   --danger: #ff5050; --danger-bg: rgba(255,80,80,0.08);
   /* --status-sleep is what the status language PROMISES: grey = at rest.
@@ -121,7 +144,7 @@ html[data-theme="dark"] {
 }
 html[data-theme="light"] {
   --bg: #f5f5f7; --bg2: #eeeef0; --bg3: #e8e8ec;
-  --text: #1a1a2e; --text2: rgba(26,26,46,0.55); --text3: rgba(26,26,46,0.35);
+  --text: #1a1a2e; --text2: #5f636b; --text3: rgba(26,26,46,0.35);
   --border: rgba(0,0,0,0.08); --border2: rgba(0,0,0,0.05);
   /* TRIM, not palette: elevation goes UP in light mode, the Apple
      grouped-list direction — a card/bar is a translucent WHITE lift on the
@@ -131,8 +154,12 @@ html[data-theme="light"] {
      was reverted — "就用原来品牌色为主"). */
   --surface: rgba(255,255,255,0.72); --surface2: rgba(0,0,0,0.04);
   --accent: #0088cc; --accent-bg: rgba(0,136,204,0.08); --accent-glow: rgba(0,136,204,0.06);
-  --accent-fill: var(--accent);
-  --accent-fill-ink: color-mix(in srgb, var(--bg) 30%, white);
+  --accent-fill: #0074ad;
+  --accent-fill-ink: #ffffff;
+  --accent-ink: #006699;
+  --control-border: #7a808a;
+  --danger-fill: #c33535;
+  --danger-ink: #c33535;
   --accent-line: var(--accent);
   --danger: #e53e3e; --danger-bg: rgba(229,62,62,0.06);
   /* Same rule as dark: at-rest is a neutral grey, never an accent neighbour —
@@ -788,6 +815,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
   .agents-root input, .agents-root textarea, .agents-root .member,
   .agents-root .member-ava, .md-doc,
   /* shared ui components */
+  .command-button, .config-input, .segmented, .segmented button, .segmented .slide-pill, .check-box,
   .sel-trigger, .sel-menu, .sel-opt, .ctx, .ctx button, .dlg, .dlg input,
   .picker, .picker-add, .pk-list, .install-banner, .install-icon
 ) {
@@ -824,3 +852,60 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 .md th, .md td { border: 1px solid var(--border); padding: 3px 8px; }
 .md hr { border: none; border-top: 1px solid var(--border); margin: 0.6em 0; }
 .md img { max-width: 100%; }
+
+/* Configuration atoms. Flex/auto-fit wrapping avoids introducing a size
+   containment ancestor that could re-anchor a Select's fixed popover. */
+.config-page-head { padding: 0; min-height: var(--config-header-height); }
+.config-head-inner {
+  display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%;
+  max-width: var(--config-width); min-height: var(--config-header-height);
+  padding: calc((var(--config-header-height) - var(--control-height)) / 2) var(--config-padding);
+}
+.config-head-inner h1 { letter-spacing: 0; }
+.config-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
+.config-form {
+  display: flex; flex-direction: column; gap: var(--config-field-gap);
+  width: 100%; max-width: var(--config-width); min-width: 0;
+  margin: 0; padding: 16px var(--config-padding) 24px;
+}
+.config-fields {
+  display: flex; flex-direction: column; gap: var(--config-field-gap);
+  min-width: 0; margin: 0; padding: 0; border: 0;
+}
+.config-fields[aria-busy="true"] { --control-disabled-opacity: 1; }
+.config-field { display: flex; flex-direction: column; gap: var(--config-label-gap); min-width: 0; }
+.config-field-label { color: var(--text); font: 600 var(--fs-ui)/1.4 var(--font-ui); }
+.config-input {
+  box-sizing: border-box; width: 100%; min-width: 0; height: var(--control-height); padding: 0 12px;
+  border: 1px solid var(--control-border); border-radius: var(--ui-radius-control);
+  background: var(--input-bg); color: var(--text);
+  font: 400 var(--fs-body)/var(--control-line-height) var(--font-ui); letter-spacing: 0;
+}
+.config-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.config-input::placeholder { color: var(--text2); }
+.config-input:disabled { opacity: var(--control-disabled-opacity); }
+textarea.config-input {
+  height: auto; min-height: var(--config-editor-min);
+  max-height: max(var(--config-editor-min), min(360px, 45vh));
+  padding: 12px; resize: vertical; line-height: 1.5;
+}
+.config-input.mono { font-family: var(--font-mono); }
+.config-row {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: var(--config-field-gap); min-width: 0;
+}
+.preference-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px;
+  min-height: 56px; padding-block: 8px;
+}
+.preference-row > .pref-label { flex: 0 1 160px; min-width: 0; }
+.preference-row > .pref-control { flex: 1 1 240px; min-width: min(100%, 240px); max-width: 360px; }
+.config-section + .config-section { margin-top: var(--config-section-gap); }
+.config-note, .config-error { font: var(--fs-sub)/1.5 var(--font-ui); }
+.config-note { color: var(--text2); }
+.config-error { color: var(--danger-ink); }
+@supports (-webkit-touch-callout: none) {
+  @media (any-pointer: coarse) {
+    .config-input { font-size: var(--fs-input-touch); }
+  }
+}

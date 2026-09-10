@@ -113,6 +113,26 @@ vocabulary.
     `title` beside it. Touch has no hover: there the long-press menu is the
     "more" gesture, and the card is not shown.
 
+## Configuration Command States (#155, parent #154, 2026-09-10)
+
+Configuration buttons use the existing feedback tempo but do not scale on
+press: their label/icon boxes remain fixed at every state. Primary hover
+and press are paint overlays, not geometry changes. Pending replaces an
+already reserved icon with a shared spinning refresh glyph; the visible
+label and width stay unchanged, activation is blocked, and pending is not
+dimmed like an unavailable command. Reduced motion stops that rotation.
+Switch motion only moves its thumb; Segmented retains the existing travelling
+marker, with one outline around the group instead of a frame per option.
+
+`ConfirmDialog` retains its existing desktop fade and touch sheet entry,
+now with shared command buttons. Its pending label is the operation's name,
+not an ellipsis that resizes the action. No exit animation delays completion,
+focus restoration, Escape handling or draft state.
+
+These rules supersede press-scaling/independent-pill descriptions for the
+configuration controls as they migrate; navigation slides, reading anchors
+and terminal ancestor restrictions remain unchanged.
+
 ## 2 · Vocabulary (app.css, one copy)
 
 | atom | meaning | tempo |

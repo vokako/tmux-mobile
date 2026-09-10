@@ -1,4 +1,6 @@
 <script lang="ts">
+  const listId = $props.id();
+  import { activeModal } from './modal.ts';
   // The app's ONE dropdown. A native <select> pops the OS menu — a different
   // font, a different palette, a different animation, and on desktop WKWebView
   // a separate window entirely — which is exactly the seam the owner asked to
@@ -83,7 +85,7 @@
   // was long enough to scroll: right-aligned as `anchor.right - w`, the menu
   // overshot the field's right edge by exactly that much (owner, 2026-08-25:
   // "桌面端…下拉框…左右位置偏了"). Overlay-scrollbar platforms never showed it.
-  const pos = $derived(anchor ? menuPlacement(anchor, { w: fieldW, h: menuH }, viewBox(), 4) : { x: 0, y: 0 });
+  const pos = $derived(anchor ? menuPlacement(anchor, { w: fieldW, h: menuH }, viewBox(), 6) : { x: 0, y: 0 });
 
   function show() {
     if (disabled || !(triggerEl ?? inputEl)) return;
@@ -92,23 +94,32 @@
     cursor = shown.findIndex((o) => o.value === value);
     open = true;
   }
-  function hide() { open = false; }
-  function pick(v: string) {
+  let composing = $state(false);
+  const imeKey = (event: KeyboardEvent) => composing || event.isComposing || event.keyCode === 229;
+  function focusTrigger() { if (!disabled) (editable ? inputEl : triggerEl)?.focus(); }
+  function hide(restoreFocus = false) {
     open = false;
-    if (v === value) { committed = v; return; }
+    if (restoreFocus) focusTrigger();
+  }
+  function pick(v: string) {
+    if (disabled || composing) return;
+    open = false;
+    if (v === value) { committed = v; focusTrigger(); return; }
     value = v;
     committed = v;
     onchange(v);
+    focusTrigger();
   }
   /** Editable mode: free-typed text commits on Enter/blur (a pick commits via
    * pick()). `committed` remembers the last reported value so a blur after a
    * pick, or an untouched field, stays silent. */
   let committed = $state(value);
   function commitTyped() {
-    if (!editable || value === committed) return;
+    if (disabled || composing || !editable || value === committed) return;
     committed = value;
     onchange(value);
   }
+  $effect(() => { if (disabled) hide(); });
 
   // Dismissal, on everything that means "I moved on": a click elsewhere,
   // Escape, a scroll under the anchor, a resize. The scroll listener is a
@@ -129,12 +140,19 @@
       hide();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { hide(); e.stopPropagation(); (editable ? inputEl : triggerEl)?.focus(); return; }
+      if (disabled || imeKey(e)) return;
+      const modal = activeModal(document);
+      if (modal && !modal.contains(editable ? inputEl : triggerEl)) return;
+      if (e.key === 'Escape') { hide(true); e.preventDefault(); e.stopPropagation(); return; }
+      if (e.key === 'Tab') { hide(); return; }
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
         const step = e.key === 'ArrowDown' ? 1 : -1;
         cursor = shown.length ? (cursor + step + shown.length) % shown.length : -1;
         return;
+      }
+      if (!editable && (e.key === 'Home' || e.key === 'End')) {
+        e.preventDefault(); cursor = e.key === 'Home' ? 0 : shown.length - 1; return;
       }
       // Space stays typeable in a text field; it only picks for the button.
       if (e.key === 'Enter' || (e.key === ' ' && !editable)) {
@@ -148,12 +166,13 @@
     };
     window.addEventListener('pointerdown', onDown, true);
     window.addEventListener('keydown', onKey, true);
-    window.addEventListener('resize', hide);
+    const onResize = () => hide();
+    window.addEventListener('resize', onResize);
     window.addEventListener('scroll', onScroll, true);   // capture: any ancestor
     return () => {
       window.removeEventListener('pointerdown', onDown, true);
       window.removeEventListener('keydown', onKey, true);
-      window.removeEventListener('resize', hide);
+      window.removeEventListener('resize', onResize);
       window.removeEventListener('scroll', onScroll, true);
     };
   });
@@ -167,21 +186,29 @@
     <input class="sel-trigger combo" class:open class:dense bind:this={inputEl}
       {disabled} {placeholder} bind:value
       style:font-family={fontPreview && value.trim() ? `'${value.trim().replace(/['"]/g, '')}'` : undefined}
-      role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-controls="sel-combo-list"
+      role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? listId : undefined}
+      aria-activedescendant={open && cursor >= 0 ? `${listId}-${cursor}` : undefined}
       aria-label={ariaLabel || undefined}
       autocomplete="off" autocapitalize="off" spellcheck="false"
       oninput={() => { if (!open) show(); cursor = -1; }}
       onclick={() => { if (!open) show(); }}
       onblur={commitTyped}
+      oncompositionstart={() => composing = true}
+      oncompositionend={() => composing = false}
       onkeydown={(e) => {
+        if (imeKey(e)) return;
         if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); show(); }
         if (!open && e.key === 'Enter') commitTyped();
       }} />
     <span class="combo-chev"><span class="flip" class:on={open}><Icon name="chevron-down" size={11} /></span></span>
   </span>
 {:else}
-<button class="sel-trigger" class:open class:dense bind:this={triggerEl} type="button"
-  {disabled} aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel || undefined}
+<button class="sel-trigger" class:open class:dense bind:this={triggerEl} type="button" role="combobox"
+  {disabled} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? listId : undefined} aria-label={ariaLabel || undefined}
+  aria-activedescendant={open && cursor >= 0 ? `${listId}-${cursor}` : undefined}
+  onkeydown={(e) => {
+    if (!imeKey(e) && !open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); show(); }
+  }}
   onclick={() => (open ? hide() : show())}>
   {#if current?.icon}<img class="so-ico" src={current.icon} alt="" />{/if}
   <span class="sel-value" class:ph={!label}>{label || placeholder}</span>
@@ -190,13 +217,13 @@
 {/if}
 
 {#if open && shown.length}
-  <div class="sel-menu pop-layer" class:ready={menuH > 0} role="listbox" tabindex="-1" id="sel-combo-list"
+  <div class="sel-menu pop-layer" class:ready={menuH > 0} role="listbox" tabindex="-1" id={listId}
     style:left="{pos.x}px" style:top="{pos.y}px" style:width="{fieldW}px"
     style:--pop-origin={anchor ? popOrigin(anchor, pos) : undefined}
-    bind:this={menuEl} bind:clientHeight={menuH}>
+    bind:this={menuEl} bind:offsetHeight={menuH}>
     {#each shown as o, i (o.value)}
       <button class="sel-opt" class:sel={o.value === value} class:cur={i === cursor}
-        role="option" aria-selected={o.value === value} type="button"
+        role="option" aria-selected={o.value === value} type="button" tabindex="-1" id={`${listId}-${i}`}
         onclick={() => pick(o.value)} onpointerenter={() => (cursor = i)}>
         {#if o.icon}<img class="so-ico" src={o.icon} alt="" />{/if}
         <span class="so-label" style:font-family={fontPreview && o.value ? `'${o.value.replace(/['"]/g, '')}'` : undefined}>{o.label ?? o.value}</span>
@@ -214,38 +241,37 @@
      step and line box — so a dropdown in a form row lines up with the field
      beside it on every edge. */
   .sel-trigger {
-    display: flex; align-items: center; gap: 6px; width: 100%;
-    background: var(--input-bg); border: 1px solid var(--input-border);
-    border-radius: var(--ui-radius-control); padding: 8px 12px; color: var(--text);
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    height: var(--control-height); box-sizing: border-box;
+    background: var(--input-bg); border: 1px solid var(--control-border);
+    border-radius: var(--ui-radius-control); padding: 0 12px; color: var(--text);
     /* The trigger shows a VALUE, so it keeps the content font — the input
        dialect, not the button/chrome one. */
     font-size: var(--fs-body); font-family: var(--font-ui);
-    /* `normal`, not a ratio: an <input> computes its line box from `normal`,
-       so matching the keyword is what makes the two boxes the same height.
-       Inheriting the page's 1.5 made the trigger ~4px taller than the field
-       next to it, which is the misalignment the owner saw. */
-    line-height: normal;
+    line-height: var(--control-line-height);
     cursor: pointer; text-align: left;
     transition: border-color var(--t-fast) ease;
     -webkit-tap-highlight-color: transparent;
   }
-  /* The other field dialect in the app (Team's template editor). */
-  .sel-trigger.dense { padding: 6px 9px; border-radius: var(--ui-radius-control); font-size: var(--fs-ui); }
+  /* Dense remains a text-role option for existing non-form consumers, not
+     another control height. Configuration forms use the normal value role. */
+  .sel-trigger.dense { font-size: var(--fs-ui); }
   .sel-trigger:hover:not(:disabled), .sel-trigger.open { border-color: var(--accent); }
-  .sel-trigger:disabled { opacity: 0.5; cursor: default; }
+  .sel-trigger:disabled { opacity: var(--control-disabled-opacity); cursor: default; }
   .sel-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sel-value.ph { color: var(--text3); }
-  .sel-trigger :global(svg) { flex: none; color: var(--text3); }
+  .sel-value.ph { color: var(--text2); }
+  .sel-trigger :global(svg) { flex: none; color: var(--text2); }
   /* Combobox clothes: the input IS the trigger, the chevron rides inside its
      right padding so the box still promises a list. The chevron's 180° turn
      (.flip, motion.md) sits on an INNER wrapper in both modes: here because
      .combo-chev is centred by its own translateY, which must stay put. */
   .sel-combo { position: relative; display: block; width: 100%; }
-  .sel-trigger.combo { display: block; outline: none; padding-right: 26px; cursor: text; }
-  .sel-trigger.combo::placeholder { color: var(--text3); }
+  .sel-trigger.combo { display: block; padding-right: 26px; cursor: text; }
+  .sel-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .sel-trigger.combo::placeholder { color: var(--text2); }
   .combo-chev {
     position: absolute; right: 9px; top: 50%; transform: translateY(-50%);
-    display: grid; place-items: center; pointer-events: none; color: var(--text3);
+    display: grid; place-items: center; pointer-events: none; color: var(--text2);
   }
 
   /* Same popover dialect as the Hub's menus: one menu language app-wide. */
@@ -260,20 +286,20 @@
     display: flex; align-items: center; gap: 8px; min-height: 36px; width: 100%; text-align: left;
     background: none; border: none; border-radius: var(--ui-radius-control); color: var(--text2);
     padding: 6px 10px; font-size: var(--ui-font-control); cursor: pointer;
-    font-family: var(--font-mono);
+    font-family: var(--font-ui);
   }
   /* Hover and the keyboard cursor are the SAME highlight — two different ones
      read as two selections. */
   .sel-opt:hover, .sel-opt.cur { background: var(--surface2); color: var(--text); }
-  .sel-opt.sel { color: var(--accent); }
-  .sel-opt :global(svg) { margin-left: auto; flex: none; color: var(--accent); }
+  .sel-opt.sel { color: var(--accent-ink); }
+  .sel-opt :global(svg) { margin-left: auto; flex: none; color: var(--accent-ink); }
   .so-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .so-hint { font-size: var(--fs-meta); color: var(--text3); font-family: inherit; }
   /* An option's icon (a backend logo): sized to the text line, never stretched. */
   .so-ico { flex: none; width: 15px; height: 15px; border-radius: 3px; object-fit: contain; }
 
   /* Touch contract: a menu row is a tap target. */
-  @media (max-width: 760px) {
+  @media (any-pointer: coarse) {
     .sel-opt { min-height: 44px; }
   }
   /* iOS (only) zooms a focused control below 16px. On Android this bump made
@@ -282,7 +308,7 @@
      (owner, 2026-08-24: "字号还是偏大不一致"). Gate on the iOS family and
      include dense, so where the zoom exists everything bumps TOGETHER. */
   @supports (-webkit-touch-callout: none) {
-    @media (max-width: 760px) {
+    @media (any-pointer: coarse) {
       .sel-trigger, .sel-trigger.dense { font-size: var(--fs-input-touch); }
     }
   }

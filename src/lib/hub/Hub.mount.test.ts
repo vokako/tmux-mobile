@@ -323,6 +323,44 @@ test('Hub Sidebar keeps row identity, free restore, confirmed purge and the comp
   context.diagnostic(`Sidebar scenario after shared compilation ${(performance.now() - started).toFixed(1)}ms`);
 });
 
+test('a confirmation consumes Escape without also closing the earlier-mounted Hub drawer (#155)', { timeout: 60000 }, async context => {
+  const { rpc } = roomFixture();
+  const app = await (await compiledHub()).mount(context, {
+    props: { visible: true },
+    modules: [{
+      ...rpc,
+      fsCwd: async () => ({ path: '/fixture' }),
+      fsList: async () => ({ entries: [] }),
+      getPrefs: async () => ({}),
+      getBookmarks: async () => ({ bookmarks: [] }),
+      gitCmd: async () => ({ code: 1 }),
+    }],
+  });
+  try {
+    for (let i = 0; i < 12 && !app.document.querySelector('.h1-text'); i++) await app.flush();
+    const files = [...app.document.querySelectorAll<HTMLButtonElement>('.page-head button')]
+      .find(button => button.getAttribute('aria-label') === 'Files');
+    assert.ok(files);
+    files.click();
+    for (let i = 0; i < 12 && !app.document.querySelector('.drawer .file-list'); i++) await app.flush();
+    assert.ok(app.document.querySelector('.drawer'));
+    app.document.querySelector<HTMLButtonElement>('.row-menu')!.click();
+    await app.flush();
+    const close = [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')]
+      .find(button => button.textContent?.trim() === 'Close');
+    assert.ok(close);
+    close.click();
+    await app.flush();
+    assert.ok(app.document.querySelector('[aria-modal="true"]'));
+    app.document.activeElement!.dispatchEvent(new app.window.KeyboardEvent('keydown', {
+      key: 'Escape', bubbles: true, cancelable: true,
+    }));
+    await app.flush();
+    assert.equal(app.document.querySelector('[aria-modal="true"]'), null);
+    assert.ok(app.document.querySelector('.drawer'), 'the underlying capture handler yields to the modal');
+  } finally { await app.close(); }
+});
+
 test('Roster double-click filters without a menu and a stopped surface never resumes', { timeout: 60000 }, async (context) => {
   const fixture = await compiledHub();
   const started = performance.now();

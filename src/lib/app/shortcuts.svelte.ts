@@ -24,7 +24,7 @@ export function isShortcutInputTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   if (target.closest('[data-shortcut-recorder]')) return true;
   if (target.closest('.xterm')) return false;
-  return !!target.closest('input, textarea, select, [contenteditable="true"]');
+  return !!target.closest('input, textarea, select, [role="combobox"], [role="listbox"], [contenteditable="true"]');
 }
 
 export const shortcuts = {
