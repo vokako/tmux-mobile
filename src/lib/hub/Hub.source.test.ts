@@ -7,6 +7,21 @@ const source = await readFile(new URL('./Hub.svelte', import.meta.url), 'utf8');
 const rule = (selector: string) =>
   source.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
 
+test('open drawer tracks yield to the container without overwriting requested widths (#158, #154)', () => {
+  // Fixed tracks overflowed a 1000px desktop: 46 rail + 240 sidebar +
+  // 280 chat + 520 drawer = 1086, hiding maximize/close. Both side tracks
+  // must yield: shrinking only the drawer fails with a wide saved sidebar.
+  // CSS owns this geometry; a unit helper would duplicate the grid algorithm.
+  assert.match(rule('.hub-root.drawer-open .cols'),
+    /grid-template-columns:\s*minmax\(0,\s*var\(--sidebar-w\)\)\s+minmax\(280px,\s*1fr\)\s+minmax\(0,\s*var\(--hub-drawer-w,\s*520px\)\)/u);
+  assert.match(rule('.hub-root.compact .cols'), /grid-template-columns:\s*minmax\(0,\s*1fr\)/u,
+    'compact keeps its existing single column');
+  assert.equal([...source.matchAll(/style\.setProperty\('--hub-drawer-w'/g)].length, 1,
+    'Hub restores the requested width once; layout does not write a clamped preference');
+  assert.doesNotMatch(source, /localStorage\.setItem\('tmux_hub_drawer_w'/u,
+    'SideHandle remains the only preference writer');
+});
+
 test('Hub keeps the Drawer mount gate, durable state and navigation authority (#136)', () => {
   assert.match(source, /\{#if termOpen && !compact\}\s*<!--[^]*?-->\s*<Drawer/u);
   assert.match(source, /bind:drawerFilesDir onpick=\{pickWindow\} onclose=\{closeDrawer\}/u);

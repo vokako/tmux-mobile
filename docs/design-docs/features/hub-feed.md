@@ -177,6 +177,38 @@ the terminal drawer regrids the columns and every message rewraps, so the same s
 
 **The drawer has TWO partitions** (owner, 2026-08-28: "右侧边栏，可以展开文件浏览器的分区，类似展示 terminal 面板一样的逻辑"): `drawerView = 'term' | 'files'`, one width handle, a header toggle per partition (on the phone the files toggle JUMPS to the Files tab instead — the same translation the terminal toggle makes to the Terminal tab). The files partition embeds the REAL `Files` component (`session={selected}`, per-project cwd via its module-scoped parked map) in `singlePane` mode — the drawer is 320–900px of a WIDE window, so Files' window-width split heuristic lies there (owner, 2026-08-28: "类似手机的单页模式，不用做成左右分屏") — and its head carries a maximize button that hands the drawer's cwd to the Files PAGE (`openFilesTab` → App sets `filesSession` + a `{path, n}` `navRequest` the page instance consumes; `loadDir` got a `seq` guard so the newest navigation always wins); the terminal body hides under `visibility: hidden`, never `display: none` — a re-laid-out terminal would resize the pane and make the agent repaint (the `.keep-rows` lesson) — and an Esc originating inside `.files-body` passes through (closing would unmount an open editor mid-edit), the same territory rule as `.xterm`.
 
+### Drawer widths are bounded requests (#158, parent #154, 2026-09-10)
+
+The open-drawer grid treated both side widths as fixed tracks. At 1000x800,
+46px rail + 240px sidebar + 280px chat floor + 520px drawer reached 1086px;
+maximize and close were outside the viewport. Both side tracks now use
+`minmax(0, requested width)`. Chat keeps its 280px floor and takes the
+remaining space. CSS allocates the available container width, without a
+second sizing controller, breakpoint change or resize-triggered navigation.
+
+The existing SideHandle still writes the requested 320-900px drawer width
+(default 520); the actual track can be smaller. Neither saved preference
+is clamped by layout, so widening restores it. Both side tracks must yield:
+at 761px with a 420px sidebar, yielding only the drawer leaves it 15px wide
+and still loses its actions. The bounded grid gives each side 217.5px.
+Explicit toggles retain `withReadingAnchor`; native track changes use Feed's
+existing resize snapshot. Drawer mounts, terminal gates and Back are unchanged.
+
+Chromium 152.0.7977.64, Node 22.23.2, Svelte 5.53.5 and Vite 6.4.1:
+the actual worktree bundle at 1000x800 measures a 434px drawer ending at
+1000px, with maximize at 926-954px and close at 962-990px. Desktop
+761/800/1000/1440px, container-only resizing and SideHandle drag/key/reset
+retain width preferences; 19 history-anchor checks stay within 0.5px and
+live tail stays at tail. The source contract and real geometry fail first.
+Restoring only the fixed sidebar fails the contract and puts close at
+809-837px in the 761px browser case; restoring the bound passes both.
+Twelve further light/dark desktop/compact states exercise the real three
+partitions: xterm retains its instance on switching/resizing, suppresses
+hidden writes, replays on return and disposes on close. Compact still routes
+only on an explicit click. The browser fixtures use fixed RPC responses;
+751 frontend tests, svelte-check and the production build pass. No Android
+or native desktop build was exercised.
+
 ### An image is a reference, never bytes
 
 `tmm send --image <path|url>` (repeatable) resolves the reference for a reader who is elsewhere (URL passes through, `~` expands, relative → absolute against the agent's cwd) and appends `![](src)` to the body. The room stays a log — no base64 in a message. The HUMAN's half is the composer's `+` (owner, 2026-08-26; a low-presence transparent dashed circle, same day): ANY file type attaches. An image is downscaled client-side to ≤1568px long edge (Claude's optimal, under GPT's 2048 cap), encoded webp (jpeg where WebKit can't encode webp — the blob's type decides the extension) and lands as `<ws>/.tmm/uploads/<id>.<ext>`, referenced `![](path)`; every OTHER file (PDF…) lands BYTE-IDENTICAL as `<id>-<its_own_sanitized_name>` (`uploadFilePath` — de-spaced, separator-stripped; 32 MB cap per RPC). The composer NEVER shows the path (owner, 2026-08-26: "消息框内部不展示完整的上传图片的 markdown 格式路径，就用一个 Image 的 placeholder 代替"): attachments stage as THUMBNAILS under the textarea (44px, the picked file via object URL, numbered; a file keeps a name chip), ✕ unstages, a project switch clears the staging. POSITION is carried by a visible token: attaching inserts `[img:n]`/`[file:n]` at the CARET (owner, 2026-08-26: "要让我能够看到图片插入的相对位置在哪里" — a textarea cannot style spans, so the token IS the marker, matching the thumbnail's number badge), and send() swaps each token for `![](path)`/path IN PLACE so the prompt keeps the image exactly where the words put it; a token the user deleted falls back to appending its ref (an attachment never silently vanishes), removal strips the token, and a failed post restores chips and text. In the feed, images render INSIDE the bubble (`.shots` in `.m-body`, before the floated meta trailer) and the HELD anchor shows text only (`.msg.held .shots` hidden — a pinned landmark is for re-reading your words, not a tall image). Self-gitignored dir; `imageId()` = time36 + uuid slice; send() delivers the PATH into the agent's pane like any other line. `splitImages` also extracts BARE image refs (http(s) URL or absolute/`~` path ending in an image extension, start-boundary-guarded so `/tmp/a b/shot.png` never yields a bogus `/shot.png`): alone-on-a-line folds into the image strip, mid-sentence keeps the prose AND renders, markdown+bare duplicates render once. The client pulls those refs out of the markdown (`splitImages`) rather than letting the renderer emit `<img>`, because a filesystem path is not a URL a webview can load: `http(s)`/`data:`/`blob:` go straight in, everything else streams through the signed `/dl` endpoint the file browser already uses, and an unresolvable ref renders as the ref itself. Tapping a chat image opens the in-app `ui/Lightbox` (owner, 2026-08-26: "看图片的支持" — a new browser tab is not viewing): pinch-zoom/pan/double-tap/wheel, dismissed by backdrop tap (unzoomed only), Escape, ✕, the back gesture (topmost entry in Hub's onGoBack chain), or an unzoomed SWIPE — the drag carries the image, shrinks it and thins the backdrop with distance, releases past ~80px close it, short ones spring back (owner, 2026-08-27: "再一划这个图片，它就自动缩小了"). Feed images render as small THUMBNAILS (`.ci` ≤300×180 — the Lightbox is where an image gets big), composer attachment thumbs open the same viewer, and when a viewer is provided ChatImage renders a BUTTON, never an `<a>` — an anchor to a /dl URL is a tap away from a download ("不是说我点击图片去下载了一个图片"). Chat markdown renders LaTeX (same owner request): `core/markdown.ts` holes out code, feeds RAW TeX to KaTeX (all four delimiter families `$…$`/`$$…$$`/`\(…\)`/`\[…\]`), and splices the rendered HTML back AFTER marked so the escape can't touch it; dollar-inline follows the pandoc money guards so "costs $5, earns $10" stays prose, and no formula body may cross the `\x00` byte that marks a holed-out code span — `cost $5 and \`code\` is 3$` used to hand KaTeX the placeholder and lose the code (2026-09-03). KaTeX CSS is imported by Feed.svelte, never by markdown.ts (which runs under node --test). Link and image targets pass the scheme guard in `core/markedSafeUrl.ts` (see `conventions/frontend.md`, rule 13): text escaping alone does not protect an `href` attribute.

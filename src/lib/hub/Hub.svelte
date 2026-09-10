@@ -1748,11 +1748,10 @@
   .hub-root.compact .h1-edit { font-size: var(--fs-title); }
   .hub-root.compact .chip-btn { min-height: 34px; }
 
-  /* Drawer open: the conversation yields but stays present. */
-  /* The terminal column is a DRAGGED width (SideHandle on its left edge), not a
-     fraction: the owner reached for that divider and nothing moved. The chat
-     column takes the rest and keeps a floor so it can never be squeezed away. */
-  .hub-root.drawer-open .cols { grid-template-columns: var(--sidebar-w) minmax(280px, 1fr) var(--hub-drawer-w, 520px); }
+  /* SideHandle widths are requested maxima: both side tracks yield when the
+     container cannot fit them, without rewriting the saved preferences.
+     Chat keeps its reading floor and takes any remaining space. */
+  .hub-root.drawer-open .cols { grid-template-columns: minmax(0, var(--sidebar-w)) minmax(280px, 1fr) minmax(0, var(--hub-drawer-w, 520px)); }
   /* The project title, in its two states. The idle one carries a visible pencil
      and only underlines on hover — a permanent box would make the header look
      like a form, but relying on hover ALONE hid the feature (no hover on a
