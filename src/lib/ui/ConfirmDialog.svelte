@@ -94,7 +94,7 @@
     animation: fade-in var(--t-fast) ease-out;
     width: min(420px, calc(100vw / var(--ui-zoom, 1) - 32px));
     max-height: calc(100vh / var(--ui-zoom, 1) - 48px); overflow-y: auto;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 18px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--control-dialog-radius);
     box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5); padding: 18px;
     display: flex; flex-direction: column; gap: 10px;
   }
@@ -110,7 +110,7 @@
      and opacity promotes a layer without becoming a containing block. */
   .dlg.sheet {
     left: 0; top: auto; bottom: 0; transform: none;
-    width: 100%; max-width: none; border-radius: 18px 18px 0 0;
+    width: 100%; max-width: none; border-radius: var(--control-dialog-radius) var(--control-dialog-radius) 0 0;
     border-left: none; border-right: none; border-bottom: none;
     padding: 16px 14px calc(16px + var(--sab, 0px)); /* var(--sab): env() is 0 in the APK */
     animation: sheet-up var(--t-move) ease-out;

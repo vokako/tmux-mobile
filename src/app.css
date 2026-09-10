@@ -70,7 +70,12 @@ html {
   --ui-font-control: var(--fs-sub);
   /* Configuration controls migrate explicitly; the legacy 24px metric above
      still belongs to unmigrated chrome, including terminal tools. */
-  --control-height: 32px;
+  --control-height: 28px;
+  --control-paint-inset: 2px;
+  --control-field-inset: 2px;
+  --control-radius: 12px;
+  --control-menu-radius: 16px;
+  --control-dialog-radius: 22px;
   --control-icon-size: 16px;
   --control-line-height: 18px;
   --control-disabled-opacity: 0.4;
@@ -88,7 +93,11 @@ html {
 }
 
 @media (any-pointer: coarse) {
-  :root { --control-height: 44px; --control-icon-size: 18px; --config-header-height: 56px; --config-nav-height: 44px; --config-editor-min: 176px; }
+  :root {
+    --control-height: 44px; --control-icon-size: 17px;
+    --control-paint-inset: 6px; --control-field-inset: 8px;
+    --config-header-height: 56px; --config-nav-height: 44px; --config-editor-min: 176px;
+  }
 }
 @media (max-width: 760px) {
   :root { --config-padding: 16px; }
@@ -115,6 +124,11 @@ html[data-theme="dark"] {
   --accent-fill-ink: #ffffff;
   --accent-ink: #00d4ff;
   --control-border: #727884;
+  --control-surface: #2a2a30;
+  --control-hover: #393940;
+  --control-selected: #494950;
+  --control-field-bg: #28282e;
+  --control-shadow: color-mix(in srgb, var(--control-overlay-dark) 22%, transparent);
   --danger-fill: #c33535;
   --danger-ink: #ff5050;
   --accent-line: color-mix(in srgb, var(--accent) 70%, var(--bg));
@@ -162,6 +176,11 @@ html[data-theme="light"] {
   --accent-fill-ink: #ffffff;
   --accent-ink: #006699;
   --control-border: #7a808a;
+  --control-surface: #ededf2;
+  --control-hover: #e4e5eb;
+  --control-selected: #ffffff;
+  --control-field-bg: #f0f0f5;
+  --control-shadow: color-mix(in srgb, var(--control-overlay-dark) 10%, transparent);
   --danger-fill: #c33535;
   --danger-ink: #c33535;
   --accent-line: var(--accent);
@@ -739,6 +758,13 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
   transform: translate(var(--ind-x, 0px), var(--ind-y, 0px)); z-index: 0;
 }
 .slide-pill.soft { box-shadow: none; }
+/* Compact Segmented paint; the existing indicator still owns all geometry. */
+.slide-pill.control { background: none; box-shadow: none; border-radius: var(--ui-radius-pill); }
+.slide-pill.control::before {
+  content: ''; position: absolute; inset: calc(var(--control-paint-inset) + 2px) 2px;
+  border-radius: inherit; background: var(--control-selected);
+  box-shadow: 0 1px 3px var(--control-shadow);
+}
 .slide-pill.ready { transition: transform var(--t-move) ease-out, width var(--t-move) ease-out, height var(--t-move) ease-out; }
 .reveal > *, .reveal-tail > * { animation: rise-in var(--t-move) ease-out backwards; }
 .reveal > :nth-child(2), .reveal-tail > :nth-last-child(2) { animation-delay: 30ms; }
@@ -792,7 +818,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
    - A name collision across components is harmless BY POLICY: the treatment
      is app-wide, so the worst case is a rounded box getting exactly what
      everything else has. Only a pill/circle variant must be reset. */
-:is(
+:where(
   /* shared vocabulary (this file) */
   .chip-btn, .icon-btn, .side-row, .ava,
   /* rendered markdown (chat bubbles, file preview, skill docs) */
@@ -830,6 +856,12 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 /* Pill variants of listed classes go back to the circular arc: a superellipse
    flattens a stadium's caps. */
 .sessions .icon-btn { corner-shape: round; }
+/* #161: compact controls use circular arcs; squircle would flatten their caps.
+   The legacy list is zero-specificity so context selectors cannot defeat it. */
+:is(.command-button, .control-field, .config-input, .segmented, .segmented button,
+  .slide-pill.control, .sel-menu, .sel-opt, .dlg.confirm) {
+  corner-shape: round;
+}
 
 /* Rendered-markdown bodies (chat bubbles, skill previews). Compact rhythm —
    these live inside small containers, not documents. */
@@ -887,11 +919,18 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 .config-field-label { color: var(--text); font: 600 var(--fs-ui)/1.4 var(--font-ui); }
 .config-input {
   box-sizing: border-box; width: 100%; min-width: 0; height: var(--control-height); padding: 0 12px;
-  border: 1px solid var(--control-border); border-radius: var(--ui-radius-control);
-  background: var(--input-bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--control-radius);
+  background: var(--control-field-bg); color: var(--text);
   font: 400 var(--fs-body)/var(--control-line-height) var(--font-ui); letter-spacing: 0;
 }
-.config-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input.config-input, .control-field {
+  height: var(--control-height); box-sizing: border-box;
+  border: solid transparent; border-width: var(--control-field-inset) 0;
+  border-radius: var(--control-radius) / calc(var(--control-radius) + var(--control-field-inset));
+  background: var(--field-paint, var(--control-field-bg)); background-clip: padding-box;
+}
+.config-input[readonly] { --field-paint: transparent; padding-inline: 0; }
+.config-input:focus-visible, .control-field:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
 .config-input::placeholder { color: var(--text2); }
 .config-input:disabled { opacity: var(--control-disabled-opacity); }
 textarea.config-input {

@@ -122,7 +122,8 @@ already reserved icon with a shared spinning refresh glyph; the visible
 label and width stay unchanged, activation is blocked, and pending is not
 dimmed like an unavailable command. Reduced motion stops that rotation.
 Switch motion only moves its thumb; Segmented retains the existing travelling
-marker, with one outline around the group instead of a frame per option.
+marker. #161 replaces its outlined group with an inset neutral track and a
+single compact selected surface; the same action and geometry still move it.
 
 `ConfirmDialog` retains its existing desktop fade and touch sheet entry,
 now with shared command buttons. Its pending label is the operation's name,
@@ -293,6 +294,15 @@ sizes (owner declined).
 
 ## Rules and their reasons
 
+- **Compact controls change paint, not motion or hit geometry** (2026-09-10,
+  #160/#161): the owner's 14:19/14:58 words are recorded verbatim in
+  [design-language.md](design-language.md#compact-paint-does-not-shrink-the-input-target-2026-09-10-160161).
+  Commands paint inside their stable native target with the same `--t-fast`
+  feedback and unchanged solid hover/press composites; the pseudo-element
+  never intercepts input. Reduced motion stills its paint transition.
+  Segmented uses the existing `.slide-pill` and `slideIndicator`, with one
+  compact paint modifier in `app.css`, not another marker/action or an
+  independently animated option. No control resize animation, timer or listener.
 - **File tools update state inside stable boxes** (2026-09-10, #157): Files
   uses the shared CommandButton paint and loading rotation. The bookmark star
   changes glyph and pressed state without its former private pop animation.

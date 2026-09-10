@@ -14,21 +14,22 @@ const style = source.match(/<style>[\s\S]*<\/style>/u)?.[0] ?? '';
 test('the pill is the atom and the action places it', () => {
   assert.match(source, /<div class="segmented" role="group"[^>]*use:slideIndicator=\{\{ key: value, active: '\.active' \}\}>/u,
     'the container carries the action keyed on the value');
-  assert.match(source, /<span class="slide-pill" aria-hidden="true"><\/span>/u, 'the pill is the first child');
+  assert.match(source, /<span class="slide-pill control" aria-hidden="true"><\/span>/u, 'the shared compact paint variant is the first child');
   assert.match(source, /class="state-ctl" class:active=\{o\.value === value\} aria-pressed=\{o\.value === value\}/u,
     'each option is a .state-ctl (ink cross-fades) and announces its state');
   assert.match(style, /\.segmented \{\s*position: relative;/u, 'the container is the pill’s containing block');
   assert.match(style, /\.segmented button \{\s*position: relative; z-index: 1;/u, 'the buttons sit above the pill');
 });
 
-test('the chosen option keeps only its ink — the wash and the ring are the pill’s', () => {
+test('compact selection uses one neutral marker, not outlined boxes per choice (#161)', () => {
   const active = style.match(/\.segmented button\.active \{([^}]*)\}/u)?.[1] ?? '';
-  // #155 deliberately replaces low-contrast ink and individually framed pills.
-  assert.match(active, /color: var\(--accent-ink\)/u);
-  assert.match(style, /box-shadow: inset 0 0 0 1px var\(--control-border\)/u, 'one group outline');
+  // Owner-selected #160 replaces #155's group outline; action/geometry stay shared.
+  assert.match(active, /font-weight: 600/u, 'a text-weight cue survives loss of color');
+  assert.match(style, /\.segmented::before \{[^}]*background: var\(--control-surface\)/u, 'one quiet inset track');
+  assert.doesNotMatch(style, /var\(--control-border\)/u);
   assert.match(style, /\.segmented button \{[^}]*border: 0/u, 'no separate option frames');
   assert.doesNotMatch(active, /background/u, 'no background of its own — that would be a second highlight');
-  // The atom's look (wash, ring, glide) lives in app.css, not here.
+  // The atom's look (compact surface and glide) lives in app.css, not here.
   assert.doesNotMatch(style, /\.slide-pill/u);
 });
 

@@ -179,11 +179,10 @@
 </script>
 
 {#if editable}
-  <!-- COMBOBOX: a real input wearing the trigger's exact clothes, so the two
-       modes are indistinguishable at rest. The chevron rides inside the same
-       box (pointer-events: none) and still says "there is a list here". -->
+  <!-- COMBOBOX: the native input keeps its hit box and editable field paint.
+       The inert chevron still says "there is a list here". -->
   <span class="sel-combo">
-    <input class="sel-trigger combo" class:open class:dense bind:this={inputEl}
+    <input class="sel-trigger control-field combo" class:open class:dense bind:this={inputEl}
       {disabled} {placeholder} bind:value
       style:font-family={fontPreview && value.trim() ? `'${value.trim().replace(/['"]/g, '')}'` : undefined}
       role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? listId : undefined}
@@ -203,7 +202,7 @@
     <span class="combo-chev"><span class="flip" class:on={open}><Icon name="chevron-down" size={11} /></span></span>
   </span>
 {:else}
-<button class="sel-trigger" class:open class:dense bind:this={triggerEl} type="button" role="combobox"
+<button class="sel-trigger control-field" class:open class:dense bind:this={triggerEl} type="button" role="combobox"
   {disabled} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? listId : undefined} aria-label={ariaLabel || undefined}
   aria-activedescendant={open && cursor >= 0 ? `${listId}-${cursor}` : undefined}
   onkeydown={(e) => {
@@ -211,7 +210,7 @@
   }}
   onclick={() => (open ? hide() : show())}>
   {#if current?.icon}<img class="so-ico" src={current.icon} alt="" />{/if}
-  <span class="sel-value" class:ph={!label}>{label || placeholder}</span>
+  <span class="sel-value">{label || placeholder}</span>
   <span class="flip" class:on={open}><Icon name="chevron-down" size={11} /></span>
 </button>
 {/if}
@@ -235,31 +234,24 @@
 {/if}
 
 <style>
-  /* The trigger wears the app's INPUT dialect, so a dropdown sits in a form
-     next to text fields without announcing itself as a different species. */
-  /* Metrically IDENTICAL to the app's text inputs — same padding, radius, type
-     step and line box — so a dropdown in a form row lines up with the field
-     beside it on every edge. */
+  /* The shared control-field owns inset paint without shrinking the native
+     input/button or changing the popover's measured anchor. */
   .sel-trigger {
     display: flex; align-items: center; gap: 8px; width: 100%;
-    height: var(--control-height); box-sizing: border-box;
-    background: var(--input-bg); border: 1px solid var(--control-border);
-    border-radius: var(--ui-radius-control); padding: 0 12px; color: var(--text);
+    padding: 0 12px; color: var(--text);
     /* The trigger shows a VALUE, so it keeps the content font — the input
        dialect, not the button/chrome one. */
     font-size: var(--fs-body); font-family: var(--font-ui);
     line-height: var(--control-line-height);
     cursor: pointer; text-align: left;
-    transition: border-color var(--t-fast) ease;
     -webkit-tap-highlight-color: transparent;
   }
   /* Dense remains a text-role option for existing non-form consumers, not
      another control height. Configuration forms use the normal value role. */
   .sel-trigger.dense { font-size: var(--fs-ui); }
-  .sel-trigger:hover:not(:disabled), .sel-trigger.open { border-color: var(--accent); }
+  button.sel-trigger { --field-paint: transparent; padding-inline: 0; }
   .sel-trigger:disabled { opacity: var(--control-disabled-opacity); cursor: default; }
-  .sel-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sel-value.ph { color: var(--text2); }
+  .sel-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text2); }
   .sel-trigger :global(svg) { flex: none; color: var(--text2); }
   /* Combobox clothes: the input IS the trigger, the chevron rides inside its
      right padding so the box still promises a list. The chevron's 180° turn
@@ -267,7 +259,6 @@
      .combo-chev is centred by its own translateY, which must stay put. */
   .sel-combo { position: relative; display: block; width: 100%; }
   .sel-trigger.combo { display: block; padding-right: 26px; cursor: text; }
-  .sel-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .sel-trigger.combo::placeholder { color: var(--text2); }
   .combo-chev {
     position: absolute; right: 9px; top: 50%; transform: translateY(-50%);
@@ -277,14 +268,14 @@
   /* Same popover dialect as the Hub's menus: one menu language app-wide. */
   .sel-menu {
     position: fixed; z-index: 40; max-height: calc(46vh / var(--ui-zoom, 1)); overflow-y: auto;
-    background: var(--bg); border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--control-menu-radius);
     box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45); padding: 5px;
     display: flex; flex-direction: column; gap: 2px;
     /* Visibility and the intro are the shared .pop-layer atom (app.css). */
   }
   .sel-opt {
     display: flex; align-items: center; gap: 8px; min-height: 36px; width: 100%; text-align: left;
-    background: none; border: none; border-radius: var(--ui-radius-control); color: var(--text2);
+    background: none; border: none; border-radius: var(--control-radius); color: var(--text2);
     padding: 6px 10px; font-size: var(--ui-font-control); cursor: pointer;
     font-family: var(--font-ui);
   }
