@@ -202,11 +202,15 @@ retain width preferences; 19 history-anchor checks stay within 0.5px and
 live tail stays at tail. The source contract and real geometry fail first.
 Restoring only the fixed sidebar fails the contract and puts close at
 809-837px in the 761px browser case; restoring the bound passes both.
-Twelve further light/dark desktop/compact states exercise the real three
-partitions: xterm retains its instance on switching/resizing, suppresses
-hidden writes, replays on return and disposes on close. Compact still routes
-only on an explicit click. The browser fixtures use fixed RPC responses;
-751 frontend tests, svelte-check and the production build pass. No Android
+Twelve further light/dark desktop/compact fixture states mount Hub directly
+from the `5d847127`-based worktree. Desktop header clicks exercise Terminal
+and Files, then the Board button's `drawerView = 'board'` branch
+(`.board-body`, with an empty route recorder). This checks that component
+branch, not the full App's Board-tab handoff; the compact cases check only
+Files handoff. Xterm retains its instance on switching/resizing, suppresses
+hidden writes, replays on return and disposes on close. The browser fixtures
+use fixed RPC responses. All 751 frontend tests, svelte-check and the
+production build pass. No Android
 or native desktop build was exercised.
 
 ### An image is a reference, never bytes
