@@ -280,6 +280,8 @@ test('category exits use the embedded guard, with Back still delegated first', a
   try {
     await app.click('Appearance');
     assert.equal(app.window.localStorage.getItem('tmux_settings_tab'), 'agents');
+    assert.equal(app.document.querySelector('.preferences')?.classList.contains('config-compact'), false,
+      '#162: a pending category exit cannot apply compact metrics to the still-mounted Agent editor');
     assert.ok(apply, 'Preferences sends the intent to the child');
     assert.equal(back(), true);
     assert.equal(backs, 1);
@@ -287,6 +289,8 @@ test('category exits use the embedded guard, with Back still delegated first', a
     apply();
     await app.flush();
     assert.equal(app.window.localStorage.getItem('tmux_settings_tab'), 'appearance');
+    assert.equal(app.document.querySelector('.preferences')?.classList.contains('config-compact'), true,
+      '#162: the accepted Settings category opts in without remounting its host');
   } finally { await app.close(); }
 });
 

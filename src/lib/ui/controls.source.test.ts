@@ -28,6 +28,26 @@ test('configuration navigation rows have the approved pointer/touch floor (#156)
   assert.match(css, /\.config-navigation \.side-row \{ min-height: var\(--config-nav-height\); \}/u);
 });
 
+test('compact page rhythm is opt-in, while preference rows share one inline layout (#162)', () => {
+  const compact = css.match(/\.config-compact \{([^}]+)\}/u)?.[1] ?? '';
+  for (const [name, value] of [
+    ['header-height', '44px'], ['nav-height', '36px'], ['label-gap', '6px'],
+    ['field-gap', '12px'], ['section-gap', '20px'], ['form-inset', '12px'],
+  ]) assert.ok(compact.includes(`--config-${name}: ${value};`), `${name} is explicit opt-in`);
+  assert.match(css, /@media \(any-pointer: coarse\) \{\s*\.config-compact \{ --config-header-height: 56px; --config-nav-height: 44px;/u);
+  const row = css.match(/\.preference-row \{([^}]+)\}/u)?.[1] ?? '';
+  assert.match(row, /display: grid/u);
+  assert.match(row, /grid-template-columns: minmax\(var\(--config-pref-label\), 1fr\) minmax\(0, var\(--config-pref-value\)\)/u);
+  assert.doesNotMatch(row, /flex-wrap/u, 'a 240px field floor must not force 390px rows into two lines');
+  const control = css.match(/\.preference-row > \.pref-control \{([^}]+)\}/u)?.[1] ?? '';
+  assert.match(control, /min-width: 0/u);
+  assert.doesNotMatch(control, /240px/u);
+  // The compact row wraps from intrinsic content, not the old arbitrary 240px
+  // floor. Fixed columns clipped English/custom-font commands at 360px.
+  assert.match(css, /@media \(max-width: 760px\) \{\s*\.preference-row \{ display: flex; flex-wrap: wrap;/u);
+  assert.match(css, /\.preference-row > \.pref-control \{ flex: 1 1 max-content; width: auto; \}/u);
+});
+
 test('compact control shapes have one explicit round policy, not flattened capsule caps (#161)', () => {
   assert.match(css, /--control-radius:\s*12px/u);
   assert.match(css, /--control-menu-radius:\s*16px/u);

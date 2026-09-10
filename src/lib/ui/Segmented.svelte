@@ -36,7 +36,7 @@
 <style>
   /* position: relative — the pill's containing block; the buttons sit above it. */
   .segmented {
-    position: relative; display: flex; gap: 0; flex-shrink: 0;
+    position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 0; flex-shrink: 0;
     height: var(--control-height); border-radius: var(--ui-radius-pill);
   }
   .segmented::before {
@@ -45,7 +45,6 @@
   }
   .segmented button {
     position: relative; z-index: 1;
-    flex: 1 1 0;
     height: var(--control-height); min-width: var(--control-height); padding: 0 8px;
     border: 0; border-radius: var(--ui-radius-pill);
     background: transparent; color: var(--text);

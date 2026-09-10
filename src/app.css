@@ -90,6 +90,13 @@ html {
   --config-field-gap: 16px;
   --config-section-gap: 24px;
   --config-editor-min: 160px;
+  --config-pref-label: 110px;
+  --config-pref-value: 260px;
+  --config-pref-label-compact: 108px;
+  --config-pref-height: 48px;
+  --config-pref-inset: 5px;
+  --config-pref-gap: 16px;
+  --config-pref-gap-compact: 12px;
 }
 
 @media (any-pointer: coarse) {
@@ -893,6 +900,15 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 
 /* Configuration atoms. Flex/auto-fit wrapping avoids introducing a size
    containment ancestor that could re-anchor a Select's fixed popover. */
+.config-compact {
+  --config-header-height: 44px; --config-nav-height: 36px;
+  --config-label-gap: 6px; --config-field-gap: 12px; --config-section-gap: 20px;
+  --config-form-inset: 12px; --config-label-weight: 500;
+}
+@media (any-pointer: coarse) {
+  .config-compact { --config-header-height: 56px; --config-nav-height: 44px; }
+}
+.config-compact .config-navigation .side-row.open { background: var(--control-surface); }
 .config-page-head { padding: 0; min-height: var(--config-header-height); }
 .config-navigation .side-row { min-height: var(--config-nav-height); }
 .config-head-inner {
@@ -908,7 +924,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 .config-form {
   display: flex; flex-direction: column; gap: var(--config-field-gap);
   width: 100%; max-width: var(--config-width); min-width: 0;
-  margin: 0; padding: 16px var(--config-padding) 24px;
+  margin: 0; padding: var(--config-form-inset, 16px) var(--config-padding) var(--config-section-gap);
 }
 .config-fields {
   display: flex; flex-direction: column; gap: var(--config-field-gap);
@@ -916,7 +932,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 }
 .config-fields[aria-busy="true"] { --control-disabled-opacity: 1; }
 .config-field { display: flex; flex-direction: column; gap: var(--config-label-gap); min-width: 0; }
-.config-field-label { color: var(--text); font: 600 var(--fs-ui)/1.4 var(--font-ui); }
+.config-field-label { color: var(--text); font: var(--config-label-weight, 600) var(--fs-ui)/1.4 var(--font-ui); }
 .config-input {
   box-sizing: border-box; width: 100%; min-width: 0; height: var(--control-height); padding: 0 12px;
   border: 1px solid var(--border); border-radius: var(--control-radius);
@@ -944,11 +960,22 @@ textarea.config-input {
   gap: var(--config-field-gap); min-width: 0;
 }
 .preference-row {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px;
-  min-height: 56px; padding-block: 8px;
+  display: grid; align-items: center;
+  grid-template-columns: minmax(var(--config-pref-label), 1fr) minmax(0, var(--config-pref-value));
+  gap: var(--config-pref-gap);
+  min-height: var(--config-pref-height); padding-block: var(--config-pref-inset);
+  border-bottom: 1px solid var(--border);
+  --field-paint: transparent;
 }
-.preference-row > .pref-label { flex: 0 1 160px; min-width: 0; }
-.preference-row > .pref-control { flex: 1 1 240px; min-width: min(100%, 240px); max-width: 360px; }
+.preference-row:last-child { border-bottom: none; }
+.preference-row > .pref-label { min-width: 0; overflow-wrap: anywhere; }
+.preference-row > .pref-control { width: 100%; min-width: 0; max-width: 100%; }
+.preference-row > .pref-control > .switch { display: flex; width: fit-content; margin-left: auto; }
+@media (max-width: 760px) {
+  .preference-row { display: flex; flex-wrap: wrap; gap: var(--config-pref-gap-compact); }
+  .preference-row > .pref-label { flex: 0 1 var(--config-pref-label-compact); }
+  .preference-row > .pref-control { flex: 1 1 max-content; width: auto; }
+}
 .config-section + .config-section { margin-top: var(--config-section-gap); }
 .config-note, .config-error { font: var(--fs-sub)/1.5 var(--font-ui); }
 .config-note { color: var(--text2); }

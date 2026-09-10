@@ -294,6 +294,15 @@ sizes (owner declined).
 
 ## Rules and their reasons
 
+- **Compact Settings keeps the same accepted-category motion** (2026-09-10,
+  #162): the row budget and spacing change in the shared CSS owner. The
+  existing accepted category, drill slide and answer-time reveal remain
+  untouched; compact metrics do not introduce a resize animation. A pending
+  Agent exit retains the Agent view's metrics until its existing guard
+  commits the category change. This implements the owner's compact choice
+  recorded in design-language.md, not another navigation or font mechanism.
+  Segmented's equal grid tracks supply intrinsic sizing for the narrow-row
+  fallback; the same indicator action still owns the moving selection.
 - **Compact controls change paint, not motion or hit geometry** (2026-09-10,
   #160/#161): the owner's 14:19/14:58 words are recorded verbatim in
   [design-language.md](design-language.md#compact-paint-does-not-shrink-the-input-target-2026-09-10-160161).

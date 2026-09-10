@@ -33,6 +33,15 @@ test('compact selection uses one neutral marker, not outlined boxes per choice (
   assert.doesNotMatch(style, /\.slide-pill/u);
 });
 
+test('equal segments expose their actual max-content width to compact row wrapping (#162)', () => {
+  // A flex group's sum of unequal label widths underestimates the equal
+  // rendered tracks. Native grid sizing accounts for the longest option.
+  const group = style.match(/\.segmented \{([^}]+)\}/u)?.[1] ?? '';
+  assert.match(group, /display: grid/u);
+  assert.match(group, /grid-auto-flow: column/u);
+  assert.match(group, /grid-auto-columns: 1fr/u);
+});
+
 test('Preferences spells every segmented row through the component', async () => {
   const prefs = await readFile(new URL('app/Preferences.svelte', SRC), 'utf8');
   const markup = prefs.replace(/<style>[\s\S]*<\/style>/u, '');

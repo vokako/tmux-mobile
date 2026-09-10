@@ -21,6 +21,9 @@ comparison, not the large boxed appearance of #155. #161 replaces shared
 control paint and pointer geometry; Settings, Agent editors and Files
 composition follow separately in #162-#164. The functional contracts of
 #155-#157 remain. The dated owner quotes and reason are in Rules below.
+Settings adopts the compact composition in #162. Its three font roles and
+brand/canvas defaults remain: the prototype's `font-display=font-ui` was a
+comparison shortcut, not a decision to replace user font preferences.
 
 ## 1 · Tokens (app.css `:root` — never restate a value)
 
@@ -188,9 +191,11 @@ unchanged until its consumers migrate.
 | `--control-icon-size` | 16px | 17px |
 | `--config-header-height` (minimum) | 48px | 56px |
 | `--config-nav-height` (minimum row) | 40px | 44px |
+| `config-compact` header / navigation minimum (#162) | 44 / 36px | 56 / 44px |
 | `--config-padding` | 24px | 16px on compact |
 | Popover option minimum | 36px | 44px |
 | Label / field / section gaps | 8 / 16 / 24px | same |
+| `config-compact` label / field / section gaps (#162) | 6 / 12 / 20px | same |
 
 Input capability, not a narrow viewport alone, selects touch sizes.
 Single-line controls are border-box sized with an 18px line box. Layout,
@@ -279,9 +284,27 @@ Do not put necessary labels in the faint decorative `--text3` role.
 
 The shared `config-*` atoms establish an 860px left-aligned canvas, aligned
 header/body leading edges, field roles and 8/16/24px rhythm for #156 consumers.
-Preference rows wrap from a 160px label + 24px gap + 240px control budget;
-entity rows fit up to two 280px columns with 16px gap. Flex/auto-fit wrapping
-does not create a containment ancestor for fixed Select popovers.
+`config-compact` explicitly opts a surface into the tighter rhythm above,
+12px form leading inset and weight-500 field labels. The type roles and
+user-overridable font stacks are unchanged. Other surfaces adopt it through
+their own reviewed migration; it is not a global legacy-token change.
+
+Preference rows use one shared owner: above 760px a grid with a minimum-110px
+flexible label and a maximum-260px value, with 16px between. Compact rows use
+a 108px label basis and the remaining width for the value, separated by 12px.
+The value's intrinsic `max-content` width decides whether it fits beside the
+label; unusually wide content wraps to the next line, without the former
+arbitrary 240px floor. Segmented uses equal native grid columns, so its
+intrinsic width budgets for the longest option in every equal track, not
+the sum of unequal label widths.
+The row minimum is 48px with 5px vertical insets; a 44px touch control
+naturally makes it 55px including the divider. Labels and error/status text
+wrap rather than clipping; the control column has no inherited 240px floor.
+Font values use quiet unfilled Selects and standalone switches align right.
+The last row drops its separator. Entity rows retain the existing two
+280px-column budget until their own surface migration.
+Neither the grid nor the compact tokens create a containment ancestor for
+fixed Select popovers.
 Terminal cells, cursor metrics and gesture coordinates are outside this scope.
 
 ### Configuration forms and persistence (#156, 2026-09-10)
@@ -567,6 +590,35 @@ Token tests check actual neutral-surface text and focus-ring pairs; the retained
 not the deliberately borderless compact field. These measurements are not a
 full accessibility certification. Native WebView/IME rendering, other legacy
 consumers and owner-build acceptance remain separate from this fixture.
+
+### Compact Settings fixes the row budget, not the touch target (2026-09-10, #162)
+
+The owner's 14:19 rejection and 14:58 compact selection are quoted verbatim
+in the preceding #160/#161 rule. The 160px label + 24px gap + 240px minimum
+control budget forced every ordinary 390px Settings row to stack. Smaller
+button paint alone could not fix that structural waste.
+
+Replace the row budget in its existing `app.css` owner; Preferences only opts
+into `config-compact` when its accepted category is not an embedded Agent
+page. A pending/rejected Agent exit cannot change the editor's metrics;
+the existing mount scenario checks this before and after the guard applies.
+No handler, persistence, font preference or history mechanism changes.
+The prototype's temporary font-role collapse and canvas overrides are an
+intentional comparison difference, confirmed by lead review at 15:20; three
+font roles and the existing palette remain visible in the candidate screenshots.
+
+Chromium 152.0.7977.64 measures ordinary 390px Appearance rows at 55px
+(last row 54px without its divider), down from 85.5px. The last row ends at
+508px instead of 757px, matching the chosen compact reference. Restoring
+the old row budget makes the narrow-screen geometry check fail. Check all
+Settings categories, menu/focus alignment, recorder and error states, not
+only the initial Appearance view; actual device acceptance remains open.
+Independent review caught a second boundary: 360px English/custom-font
+content could exceed the fixed 208px value track. Shrinking that grid track
+did not fix equal-segment text overflow. Content-aware wrapping plus the
+Segmented grid's honest intrinsic width preserves the ordinary 390px reference
+and lets wide labels/commands fall back without clipping. Its existing
+indicator, state callbacks and native touch targets are unchanged.
 
 ### Configuration adoption is measured per state (2026-09-10, #156)
 

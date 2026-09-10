@@ -182,6 +182,14 @@ test('Settings adopts shared configuration geometry and semantic controls (#156)
   assert.doesNotMatch(style, /container-type/u, 'fixed Select popovers retain the viewport');
 });
 
+test('Settings opts into compact rhythm without styling shared atoms or changing embedded Agent geometry (#162)', () => {
+  assert.match(source, /<section class="preferences" class:config-compact=\{!AGENT_TABS\.includes\(tab\)\}/u);
+  assert.doesNotMatch(style, /\.preference-row|\.config-form|\.config-field-label|\.segmented|\.sel-trigger|\.command-button/u,
+    'the shared row/control owners implement the compact look');
+  assert.doesNotMatch(style, /--(?:font-(?:ui|display|mono)|bg|text)\s*:/u,
+    'the prototype font/canvas overrides must not replace user font roles or recolor unrelated content');
+});
+
 test('the three font pickers demonstrate themselves and name their scope (board #97)', async () => {
   // "我其实没看懂设置的到底是哪里的字体，最好选择的字体本身就有样式": every
   // font Select renders its options IN the family each names (fontPreview),

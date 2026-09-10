@@ -448,7 +448,7 @@
 <!-- Settings is a PAGE in the unified skeleton (ui-unification.md "Settings
      as a page"): shared sidebar with category rows, main column with a
      page-head. No backdrop, no X — the rail/tab bar is the way out. -->
-<section class="preferences" use:measureLayout class:stacked class:cat-open={catOpen} class:drill-fwd={drillAnim === 'fwd'} class:drill-back={drillAnim === 'back'} aria-label={t('settings')}>
+<section class="preferences" class:config-compact={!AGENT_TABS.includes(tab)} use:measureLayout class:stacked class:cat-open={catOpen} class:drill-fwd={drillAnim === 'fwd'} class:drill-back={drillAnim === 'back'} aria-label={t('settings')}>
   <aside class="sidebar config-navigation">
     <SideHandle />
     <!-- The category list unfolds on first paint (motion.md §1.15, .reveal:
