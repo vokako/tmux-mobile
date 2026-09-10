@@ -1,5 +1,21 @@
 # UI Unification — one sidebar, one vocabulary
 
+## Current authority (2026-09-10, board #159 / #154)
+
+[Design language](design-language.md) owns current tokens, controls, form
+geometry and interaction states; [motion](motion.md) owns motion. This file
+records how shared ownership was established. Its dated measurements and
+implementation descriptions below are historical, not alternate token values.
+
+Keep shared sidebar atoms and `SideHandle`, not private copies. Sidebar/page
+identity headings use `--font-display`, not the old mono heading; rows use
+`--ui-radius-row` (12px), feedback `--t-fast` (120ms), not 9px/160ms.
+Configuration field labels are not identity headings. Exact configuration
+canvases, headers and column budgets belong in [design-language.md](design-language.md)
+with the #155/#156 implementation, not in this historical inventory.
+Reuse means shared interaction, state and accessibility behavior, not forcing
+every kind of content column to the same width.
+
 ## Context (the mess, inventoried 2026-08-01)
 
 The desktop shell grew page by page and each page rolled its own left column:
@@ -23,6 +39,13 @@ geometry, manually adjustable — and the UI vocabulary must stop forking.
 ## Decisions
 
 ### 1. Sidebar geometry is owned by the shell, not the page
+
+**Scope clarification, 2026-09-10:** this established a shared resizable
+navigation region, not a universal content-column width. The approved
+configuration direction uses column budgets and folds before editor actions
+become unreachable; the implementation must verify that behavior.
+The original inventory below predates Files' sidebar adoption later in this
+record; it is not a current page inventory.
 
 One CSS variable, set on `:root` by App and persisted:
 
@@ -71,6 +94,11 @@ dialect; `CreateProjectDialog` and `Team` both use it.
 
 ## Every sidebar speaks the same language
 
+**Historical appearance:** the mono heading, tracking and 9px radius below
+were the measured dialect at the time. They are retired token assertions;
+current font/radius/feedback roles are linked above. Shared class ownership
+and the reason scoped overrides drift remain applicable.
+
 The Chat sidebar set the house style and the others follow it (owner,
 2026-08-19: "所有的侧边栏风格尽量保持一致"): `--bg2` surface with a right
 border, ONE uppercase mono section header per group (`.side-h`, `--fs-meta`,
@@ -115,6 +143,9 @@ The handle is the only writer of `--sidebar-w` besides the App init read.
 
 ### 3. Shared primitives move to `app.css`
 
+This is the original extraction table, not today's control/font specification.
+The configuration command variants supersede its old button skin descriptions.
+
 The copy-pasted classes become global utilities, deleted from components:
 
 | class | role |
@@ -129,6 +160,10 @@ Svelte scoped styles keep page-specific *layout* (grids, spacing); shared
 inventing buttons.
 
 ### 4. Rhythm rules (documentation, not framework)
+
+**Retired values:** these original mono/160ms assertions do not apply to new
+work. Use the current design-language roles and motion tokens, and its
+configuration header contract as it lands rather than copying this historical recipe.
 
 - Page headers: `padding: 10px 16px`, one `<h1>` at 15px mono for
   project-ish titles, borders with `var(--border)`.
@@ -169,6 +204,11 @@ negative control routed Close to the selected row and failed on the wrong RPC
 target. This verifies the component/layout move, not native Back gestures.
 
 ## Page skeleton (added 2026-08-02, owner: "reuse the project page's format")
+
+**Historical rollout and measurements:** the mono headings, tracking, 9px
+rows and 42px header below describe that rollout, not current configuration
+requirements. The shared-class ownership lesson survives; the current
+configuration work updates its contract with implementation (2026-09-10, #154).
 
 Bar dialects found in the wild: Hub's header (`padding 10px 16px`, ~41px,
 `border` color, mono h1) vs the compact `--ui-bar-*` dialect shared by the
@@ -247,6 +287,10 @@ Adoption:
 
 ## Settings as a page (added 2026-08-02, owner: "not a floating window")
 
+The category inventory below is historical. The decision to use a page rather
+than a floating modal remains; the exact Settings/editor form contract belongs
+in `design-language.md` with implementation, not in this category inventory.
+
 The centered modal lasted one day: settings deserve the same skeleton as
 every other page. `Preferences` becomes the `prefs` page — shared sidebar
 with category rows, main column with a `.page-head` per category. The
@@ -276,6 +320,8 @@ ref, and an mcp array STRING entry to its reg_mcp def — inline objects keep
 working, so nothing migrates.
 
 ## Out of scope (recorded, not forgotten)
+
+Historical exclusions at the original rollout, not a restriction on #154:
 
 - Sessions/Files as sidebar+detail pages (a deeper IA change; Sessions may
   eventually fold into the Hub sidebar entirely).

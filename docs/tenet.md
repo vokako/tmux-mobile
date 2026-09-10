@@ -9,6 +9,8 @@
 > 93 board issues and room history) -> implications**. Evidence establishes where
 > a tenet came from, not that the code already meets it. These tenets exist to
 > improve code quality.
+> Tenets 9-11 clarified on 2026-09-10 by board #159, under owner-approved #154:
+> shared interaction contracts, explicit context and usable restraint.
 
 ---
 
@@ -52,13 +54,14 @@ What a human can do, an agent can do; add nothing an agent does not need.
 Declaration is truth; running state is disposable.
 Derive status from observation, never self-report.
 One definition per concept; a second copy is a bug.
-One mechanism per job; a new visual species is a regression.
+One mechanism per job; share interaction, state and accessibility contracts.
 Adding a backend touches one file.
 Look for a native integration point first; build your own only with a recorded reason.
 Measure, do not guess; record the version.
 Keep rules beside their design, with reasons and incidents.
-Exercise restraint: delete rather than retain, use fewer words, do not overdesign.
+Exercise restraint: remove noise, not information needed to understand or act.
 Phone and desktop must both be complete; compromising one fails both.
+Make the object, state, available actions and return destination clear.
 Beauty is function: make it obvious who is running and who needs me.
 Motion guides attention; it does not decorate.
 Commit verified work; one idea per commit.
@@ -356,6 +359,9 @@ This is the repository's most common regression pattern: sidebar titles
 drifted three times, to-tail buttons had two forms, DirPicker had two copies,
 platform detection had five, and 39 components declared their own mono stack.
 The same applies to decision logic, renderers and popover positioning.
+For UI, the shared unit is the interaction, state and accessibility contract,
+not merely matching colours or rounded corners. Different jobs need distinct
+semantics: a command, a choice and navigation are not interchangeable buttons.
 **Duplicate implementations are the leading source of quality debt.**
 
 **Evidence.**
@@ -367,15 +373,23 @@ The same applies to decision logic, renderers and popover positioning.
   allowing README `<img onerror>` content to execute in the token-bearing origin.
 - New projects use only `CreateProjectDialog`, removing 120 lines from Sessions.
 - `*.source.test.ts` deliberately makes a new visual species fail tests.
+- Board #154 (2026-09-10) found Settings and Agent configuration using
+  different control geometry, membership pills for boolean and multi-choice
+  values, an enabled pristine Save and unguarded draft exits. Shared styling
+  alone would not correct the interaction.
 
 **Implications.**
 1. Search for an existing mechanism before writing another. Use it, or
    **change it** if it does not fit; do not create a parallel implementation.
 2. Shared atoms live once in `app.css` / `ui/`. Component-scoped CSS must
-   not redeclare them: specificity (0,2,0) silently beats (0,1,0).
+   not redeclare them: scoped specificity silently beats the shared rule.
+   Reuse includes enabled, selected, pending, error, focus, keyboard and touch
+   behavior. Pages supply their data and persistence mode, not another dialect.
 3. A failing source-contract test means a change must be deliberate.
    Read the test before fixing it.
 4. Prefer deleting code to adding it. Making a file shorter is a benefit.
+5. Test shared behavior through its consumers. A token/source check cannot
+   establish draft safety, target reachability or accessible control semantics.
 
 ## Tenet 10: Two Screens, One Standard
 
@@ -384,44 +398,54 @@ from the workstation, then compare agents, browse files and read long
 conversations on a desktop. A phone is not a reduced desktop; a desktop is
 not an enlarged phone. Each needs its own complete form of **one** design
 language. Aesthetics, usability and guiding motion are part of function,
-not finishing work. A UI that cannot distinguish a running agent from one
-waiting for the user is incomplete. Owner: "注意当前我整体比较满意，不要大变样".
+not finishing work. In every view a person must know the current object,
+its state, the available actions and where returning will take them. A UI
+that cannot distinguish a running agent from one waiting for the user is
+incomplete. Owner: "注意当前我整体比较满意，不要大变样".
 
 **Evidence.**
-- Both layouts share six type steps, three font roles, one radius scale,
-  two hover families and two timing constants. At 760px the form changes,
-  not the standard: desktop has a rail, splits and draggable `--sidebar-w`;
-  mobile has 44px touch targets, drawers, edge-back gestures and sheets.
+- Both layouts share typography, control, state and motion contracts.
+  Desktop has a rail, splits and resizable navigation; mobile has reachable
+  touch targets, drawers, edge-back gestures and sheets. These are different
+  forms of the same interaction, not permission to reduce either experience.
 - Appearance conveys function: resting states are achromatic; running
   states use a `.live-dot` halo. Status dots never animate opacity. Colors
   form a vocabulary: green means only "ended well", brand colors stay fixed,
-  and a hue cannot have two meanings within a 5px mark.
+  and a hue cannot have two meanings within the same status mark.
 - Motion conveys direction: enter deeper views from the right, return
-  from the left, using one sliding grammar. State changes move instead of
-  swapping: rotate an arrow 90 degrees, not 180. Owner feedback:
-  "180 度相当于没有变化". Exits are cuts; layout never animates.
+  from the left, using one sliding grammar. Historical feedback on the
+  symmetric server-switch glyph, "180 度相当于没有变化", explains why that
+  glyph needs a visible turn; it is not a rule for every arrow. Exact motion
+  and its exceptions belong in the motion design.
 - Usability has concrete rules: confirm destructive actions, put confirmation
-  on the far right, leave on confirmation, dismiss and top-left-anchor popovers,
-  preserve native text selection, fill the screen width and fold content
-  rather than crop it.
-- Restrained appearance uses no fine-line borders, prefers icons, reveals
-  text on hover and avoids excessive color or explanatory copy:
+  on the far right, leave only after success, keep popovers reachable,
+  preserve native text selection and return context, and fold content
+  rather than crop it. The approved configuration direction distinguishes
+  immediate preferences from explicitly saved drafts (board #154, 2026-09-10);
+  implementation and verification belong to its controls/form changes.
+- Historical icon-action feedback favoured removing decorative frames and
+  excessive colour or explanatory copy:
   "像一个系统状态的监控一样，不要过度占用人的注意力".
+  This does not prohibit field boundaries, visible focus or necessary labels.
 
 **Implications.**
 1. Every feature needs a complete, appropriate form on both screens.
    Deferring either screen does not count as completion. Review both.
-2. Use existing tokens and atoms only. A raw px value, literal color or
-   second sliding tempo is a regression.
+2. Adapt layout to available space and controls to input capability.
+   Keep names, reading space and actions reachable; a wide touch device still
+   needs touch controls. The design document owns metrics, not these tenets.
 3. Motion must communicate direction, state or entry/exit. Add none without
-   an answer to what it guides. Page switches must not flash into place:
-   the old page slides out, the new one slides in and content appears with it.
+   an answer to what it guides. Page switches must not flash into place.
+   Where the navigation slide applies, content arrives with the new page;
+   a desktop rail switch does not inherit touch navigation motion.
    All looping animations stop under reduced-motion.
-4. Ask how an interaction can remove a decision: a default recipient,
-   one-tap return to tail, or a long-press menu.
-5. Follow mature mobile conventions instead of inventing them: iOS-style
-   radii, WeChat-style selection highlighting, a checkmark on the right
-   and Back returning to the origin.
+4. Use one meaning per state across views. Selection is not a command,
+   pending is not disabled, failure is not empty, and colour is not the only
+   signal. Keyboard, touch, focus and reduced-motion states are part of the
+   same contract.
+5. Follow familiar interaction patterns with explicit scope, not blanket
+   appearance rules. Back returns to the origin; all exits protect drafts
+   and reading position. Hover and shortcuts supplement a discoverable path.
 
 ## Tenet 11: Restraint
 
@@ -431,6 +455,8 @@ agent context, extra buttons consume attention, and speculative features
 create maintenance debt. None of the mechanisms removed outright has been
 requested back: message deletion, notification UI, `status waiting|blocked`,
 the agora bus, snapshots, pull-to-refresh or bubble long-press menus.
+Restraint removes noise, not information needed to identify an object,
+understand its state, choose an action or return safely.
 
 **Evidence.**
 - CLAUDE.md shrank from 117KB to an 11KB map. Source directories have no
@@ -448,7 +474,8 @@ the agora bus, snapshots, pull-to-refresh or bubble long-press menus.
 2. Inject process instructions only: no value speeches or duplication of
    the tools' own documentation.
 3. Every UI word, button and background color must explain what the user
-   would get wrong without it.
+   would get wrong without it. Keep necessary labels, errors, consequences
+   and accessible names; icon-only design must not sacrifice discoverability.
 4. Lead human-facing explanations with the conclusion. Use fewer words
    and do not repeat yourself.
 

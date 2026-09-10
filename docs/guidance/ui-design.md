@@ -9,37 +9,57 @@
 > existing design language? What does the motion guide? Could a person
 > misclick, misread or need another unnecessary decision?**
 > Draft · 2026-09-09.
+> Governance clarified 2026-09-10, board #159 under owner-approved #154.
+> Concrete control/form rules land with implementation in #155/#156;
+> this clarification does not establish runtime compliance.
 
 ## 1. Principles
 
 1. **Both screens are equally complete:** phone and desktop have distinct
-   optimal forms of one language. At 760px the form changes, not the standard.
+   optimal forms of one language. Available space chooses layout; input
+   capability chooses target size. Every view makes its object, state,
+   available actions and return destination clear.
 2. **Consistency comes first:** headers, drawers, sidebars, buttons,
    confirmations, to-tail controls, status dots, popovers and vocabulary
-   stay consistent across the app (`@all` is called all). Use app controls,
-   not native dropdowns or browser context menus.
-3. **Restraint:** no fine-line borders; prefer icons, reveal text on hover,
-   avoid excessive explanation/color, remove repetition and fold secondary
-   content. Owner: "像一个系统状态的监控一样，不要过度占用人的注意力".
-4. **Color is vocabulary:** accent means activity, `--status-ok` means a
+   stay consistent across the app (`@all` is called all). Share interaction,
+   state and accessibility behavior, not just CSS. Commands, navigation,
+   single/multiple choices and booleans use their own semantic controls.
+3. **Restraint:** remove decorative frames, repetition and excessive copy,
+   not the boundaries, focus indicators, labels or errors needed to act.
+   Icon-only commands retain accessible names and the shared hover card;
+   hover is never the only way to discover a necessary action.
+   Owner: "像一个系统状态的监控一样，不要过度占用人的注意力".
+4. **Color is vocabulary:** in status marks, accent means activity, `--status-ok` means a
    successful ending, `--status-warn` means human attention,
    `--status-danger` means failure/destruction, and gray means achromatic rest.
    Brand colors stay fixed; a hue has one meaning within a 5px mark.
+   Controls use the selected/command roles in `design-language.md`.
 5. **Motion guides:** direction conveys depth, return or horizontal travel.
-   State changes move through 90-degree rotation, fading or flip reordering,
-   instead of replacement. Exits are cuts; layout never animates.
+   A glyph turns according to what it means: disclosure, up/down and a
+   symmetric swap have different rotations (see `motion.md`). Fading and
+   flip reordering preserve identity. Intro-only elements exit with a cut;
+   navigation/sheets follow their scoped motion contract. Layout never animates.
    Avoid flashes, hurried motion and decoration.
 6. **Usability has concrete rules:** confirm destructive actions, put
    confirmation at the far right, leave after success and remain after
-   failure. Dismiss popovers on outside interaction and align their top-left
-   edge with the trigger's left edge. Use native text selection. Back returns
+   failure. Dismiss popovers on outside interaction, preserve trigger alignment
+   and flip/clamp to the viewport. Use native text selection. Back returns
    to the drawer, parent or jump source, never Terminal. Primary actions
    belong at the upper right.
-7. **Use the available space:** fill the width, fold instead of crop,
+7. **Use the available space:** fit the task, fold instead of crop,
    prioritize complete names, compress paths dynamically, use 1/2/4 columns
-   rather than a 3+1 remainder, and align columns.
-8. **Follow established app conventions:** iOS-style radii and WeChat/Alipay
-   selection highlighting, using foreground color rather than a gray background.
+   for object grids rather than a 3+1 remainder, and align columns.
+   Configuration forms need a bounded canvas and container-width budgets;
+   exact geometry belongs in
+   [design-language.md](../design-docs/features/design-language.md), with implementation.
+   Shared navigation width does not require every content column to be identical.
+8. **Scope visual conventions:** the shared radius scale applies by role.
+   The phone tab bar uses foreground-only selection; rail and segmented
+   controls retain their travelling wash. Neither is a blanket rule for all UI.
+9. **Declare persistence:** independently valid, reversible preferences apply
+   immediately; entities use a working copy and guarded Save/exit. All exit
+   paths protect the same draft and return context. A stale completion cannot
+   replace a newer editor or navigate away from it.
 
 ## 2. Required and Forbidden
 
@@ -63,10 +83,16 @@
   use `withReadingAnchor`. Preserve tail-following and return positions,
   fold by characters rather than lines, and keep complete backend records
   with lazy frontend loading.
-- During page changes, the old page slides out, the new page slides in and
-  content appears with it. Avoid "切过去后闪出来".
+- Where navigation slides apply, the old page slides out, the new page slides
+  in and content appears with it. Desktop rail switches do not inherit touch
+  motion. Avoid "切过去后闪出来".
 - Keep Chinese copy short and tutorials out of the interface. Configuration
   options show their own result, such as font names rendered in that font.
+- Keep concrete configuration metrics, command states and persistence rules
+  in `design-language.md`, updated with their implementation/tests. Pages own
+  data and composition; shared `ui/` owns controls. Preserve readable pending
+  values and retryable failed drafts. Enabled/unselected is not disabled;
+  states need shape/text as well as hue.
 
 **Forbidden**
 - Raw px font sizes, literal colors, a second sliding tempo or `svelte/transition`.
@@ -79,6 +105,8 @@
 - Speculative three-dot buttons, redundant Bedrock/1M/stop suffixes, or
   secondary information expanded by default.
 - Calling a UI change complete after checking only desktop or only mobile.
+- Treating commands, choices and navigation as interchangeable skins, silently
+  discarding a dirty draft, or disabling a field to mean read-only.
 
 ## 3. Review Checklist
 
@@ -86,6 +114,14 @@
   checked with screenshots or a real device?
 - [ ] Does this match existing controls, rather than adding a third button
   style or second drawer mechanism?
+- [ ] Do Settings and Agent/Team/Skill/MCP editors share same-role computed
+  metrics and semantics, including wide-touch targets and nonoverlapping hit boxes?
+- [ ] Are pristine/invalid Save, pending, error/retry, IME and rapid repeated
+  activation tested through the actual form?
+- [ ] Do Cancel, Back, category/object changes and global tabs preserve or
+  guard the same draft? Can a stale completion affect a newer object?
+- [ ] Is the header hierarchy clear, and do the form's width budgets keep
+  Save, Cancel and Back visible with long names?
 - [ ] Are colors tokens with the right meaning, including green only for successful endings?
 - [ ] Does every animation guide something, in the right direction, and stop
   under reduced-motion?
@@ -96,6 +132,9 @@
 - [ ] Which word, button or background color could be removed without causing user errors?
 - [ ] Do `tokens.source.test`, `motion.source.test`, `statusdot.source.test`
   and `sidebar.source.test` pass? Were changed assertions deliberate?
+- [ ] Are light/dark contrast, focus, accessible names, keyboard behavior and
+  touch reachable actions verified beyond token/source tests? State the build,
+  browser/device and untested paths; approval is not runtime acceptance.
 
 ## 4. Lessons
 
@@ -119,7 +158,9 @@
 - 2026-09-08: six rounds of unusual Chinese glyphs traced to Inter
   `cv05/cv08` leaking into PingFang SC and selecting traditional forms.
   Owner: "这可是一个深藏的 bug，你一定记好".
-- 2026-09-04: a 180-degree rotation was "相当于没有变化", so use 90 degrees.
+- 2026-09-04: a 180-degree rotation was "相当于没有变化" on the symmetric
+  server-switch glyph, so that glyph uses a quarter-turn. The former blanket
+  90-degree wording is retired (board #154, 2026-09-10); up/down arrows still flip.
   Another report was "切换过去然后看到东西闪出来" (#86/#93).
 - Four rounds of mobile bubble selection menus on 2026-09-01/04/07 ended
   with native text selection and tap-only Copy/Raw.
@@ -132,3 +173,8 @@
 - 2026-08-25: "注意当前我整体比较满意，不要大变样".
   2026-09-03: "按钮尺寸我觉得还好，不用
   调整太大". Standardize; do not redesign.
+- 2026-09-10, board #154: owner approved the concrete configuration contract
+  after the audit found divergent Settings/Agent controls, pristine Save and
+  unguarded Cancel. The earlier no-size-change scope above is historical, not
+  a veto of the approved shared metrics. Decorative-border restraint never
+  removes field affordance, focus visibility or necessary error text.

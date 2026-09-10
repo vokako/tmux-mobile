@@ -1,5 +1,12 @@
 # App Shell — one chrome per context
 
+**Reading this record (2026-09-10, board #159 / #154):** the original shell decision
+and its verification below describe the rollout, including retired tab/bus
+names; they are not a current navigation inventory or new runtime acceptance.
+Later dated rules supersede that history. Configuration layout/control rules
+belong in [design-language.md](design-language.md), with #155/#156 implementation;
+motion in [motion.md](motion.md). This update does not reorganize global tabs.
+
 ## Context
 
 Until agents-v2 the app had ONE shell on every platform: a top bar with four
@@ -14,6 +21,8 @@ five, and the top bar started working against both platforms at once:
   every added page shrank the tap targets.
 
 ## Decision
+
+Historical rollout; later scoped decisions below supersede its inventory.
 
 Three shell shapes, chosen by context, never mixed:
 
@@ -80,6 +89,8 @@ whose content does not follow the thumb.
 
 ## Verified
 
+Original rollout observations only, not current configuration acceptance:
+
 Desktop 1440x900: rail with Hub/Sessions/Terminal/Team/Files/Settings, no
 top bar, `main` padding 46px, Hub as the fresh-state default, Files
 switching, Preferences opening at `left: 46px`. Mobile 390x844 (touch
@@ -90,6 +101,9 @@ a rendering terminal with the bar visible, `keyboard-open` computes
 ## Rules and their reasons
 
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
+
+Later scoped decisions supersede explicitly retired descriptions; a historical
+measurement is not evidence that a new configuration implementation was tested.
 
 ### Tab swipe priority
 
@@ -157,6 +171,13 @@ on `moveMs()` instead of jumping back and sliding. `transform` is deliberately
 absent from `.rail-btn`'s transition list for the same reason.
 
 ### The chosen tab is marked by ONE highlight that travels (2026-09-04, #86)
+
+**Current scope:** the desktop rail retains its travelling wash. The phone
+tab bar's wash described below was retired on 2026-09-05; phone tabs select
+by foreground ink alone, with no background or marker (motion principle 14).
+The original 2026-09-04 description and owner quote remain historical evidence,
+not permission to restore the phone wash. Configuration Segmented controls
+still use a travelling marker; the phone-tab exception is not a global rule.
 
 The tab bar and the rail each hold a single `.slide-pill` (motion.md §1.14,
 `ui/indicator.ts`): the accent WASH behind the active phone tab (inset so it
