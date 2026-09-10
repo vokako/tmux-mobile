@@ -18,6 +18,8 @@ test('commands keep their name and reject activation while disabled or pending',
       assert.equal(button.textContent?.trim(), 'Save');
       assert.equal(button.getAttribute('type'), 'button');
       assert.equal(button.getAttribute('aria-busy'), state.pending ? 'true' : null);
+      for (const name of ['pressed', 'expanded', 'controls']) assert.equal(button.getAttribute(`aria-${name}`), null);
+      assert.equal(button.classList.contains('engaged'), false);
       button.click();
       button.dispatchEvent(new app.window.MouseEvent('click', { bubbles: true }));
       assert.equal(calls, state.disabled || state.pending ? 0 : 2);
@@ -37,4 +39,77 @@ test('icon commands expose a name without a competing native title', async conte
     assert.equal(button.textContent?.trim(), '');
     assert.ok(button.querySelector('svg'));
   } finally { await app.close(); }
+});
+
+test('tool ARIA distinguishes explicit false from absent state (#157)', async context => {
+  const states = [
+    {}, { pressed: false }, { pressed: true },
+    { expanded: false, controls: 'bookmarks' }, { expanded: true, controls: 'recent' },
+    { pressed: true, expanded: false }, { pressed: false, expanded: true },
+  ];
+  for (const state of states) {
+    const app = await (await compiled).mount(context, {
+      props: { label: 'Tool', icon: 'refresh', variant: 'icon', ...state }, modules: [],
+    });
+    try {
+      const button = app.document.querySelector('button')!;
+      assert.equal(button.getAttribute('aria-pressed'), state.pressed === undefined ? null : String(state.pressed));
+      assert.equal(button.getAttribute('aria-expanded'), state.expanded === undefined ? null : String(state.expanded));
+      assert.equal(button.getAttribute('aria-controls'), state.controls ?? null);
+      assert.equal(button.classList.contains('engaged'), state.pressed === true || state.expanded === true);
+    } finally { await app.close(); }
+  }
+});
+
+test('tool clicks emit intent; only parent updates change state, including while disabled or pending (#157)', async context => {
+  const fixture = await compileMount(new URL('./CommandButton.test.svelte', import.meta.url), []);
+  let update!: (next: { pressed?: boolean; expanded?: boolean; controls?: string; disabled?: boolean; pending?: boolean }) => void;
+  let calls = 0;
+  const app = await fixture.mount(context, {
+    props: { ready: (set: typeof update) => update = set, onintent: () => { calls++; } }, modules: [],
+  });
+  try {
+    const button = app.document.querySelector('button')!;
+    update({ pressed: false, expanded: false, controls: 'bookmarks' }); await app.flush();
+    button.click(); await app.flush();
+    assert.equal(calls, 1);
+    assert.equal(button.getAttribute('aria-pressed'), 'false', 'click cannot commit its own toggle');
+    assert.equal(button.getAttribute('aria-expanded'), 'false', 'click cannot open its own disclosure');
+    assert.equal(button.classList.contains('engaged'), false);
+    update({ pressed: true }); await app.flush();
+    button.click(); await app.flush();
+    assert.equal(calls, 2);
+    assert.equal(button.getAttribute('aria-pressed'), 'true');
+    assert.equal(button.classList.contains('engaged'), true);
+    update({ pressed: false, expanded: true, controls: 'recent' }); await app.flush();
+    assert.equal(button.getAttribute('aria-pressed'), 'false');
+    assert.equal(button.getAttribute('aria-expanded'), 'true');
+    assert.equal(button.getAttribute('aria-controls'), 'recent');
+    assert.equal(button.classList.contains('engaged'), true);
+    for (const locked of [{ disabled: true, pending: false }, { disabled: false, pending: true }]) {
+      update(locked); await app.flush();
+      button.click();
+      button.dispatchEvent(new app.window.MouseEvent('click', { bubbles: true }));
+      assert.equal(calls, 2, 'disabled/pending tools cannot emit intent');
+      assert.equal(button.getAttribute('aria-expanded'), 'true');
+      assert.equal(button.classList.contains('engaged'), true);
+    }
+    update({ disabled: false, pending: false, pressed: undefined, expanded: undefined, controls: undefined });
+    await app.flush();
+    for (const name of ['pressed', 'expanded', 'controls']) assert.equal(button.getAttribute(`aria-${name}`), null);
+    assert.equal(button.classList.contains('engaged'), false);
+  } finally { await app.close(); }
+});
+
+test('tool metadata does not replace ordinary command variant styling (#157)', async context => {
+  for (const variant of ['primary', 'secondary', 'danger']) {
+    const app = await (await compiled).mount(context, {
+      props: { label: 'Command', icon: 'refresh', variant, pressed: true, expanded: true }, modules: [],
+    });
+    try {
+      const button = app.document.querySelector('button')!;
+      assert.equal(button.classList.contains('engaged'), false);
+      assert.equal(button.textContent?.trim(), 'Command');
+    } finally { await app.close(); }
+  }
 });

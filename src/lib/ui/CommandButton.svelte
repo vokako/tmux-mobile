@@ -6,6 +6,9 @@
     label: string;
     variant?: 'primary' | 'secondary' | 'icon' | 'danger';
     iconOnly?: boolean;
+    pressed?: boolean;
+    expanded?: boolean;
+    controls?: string;
     disabled?: boolean;
     destructiveConfirm?: boolean;
     onclick?: (event: MouseEvent) => void;
@@ -13,17 +16,20 @@
   } & ({ pending?: false; icon?: string } | { pending: boolean; icon: string });
   let {
     label, icon = '', variant = 'secondary', iconOnly = false,
+    pressed, expanded, controls,
     disabled = false, pending = false, destructiveConfirm = false,
     onclick = () => {}, element = $bindable(null),
   }: Props = $props();
   const compact = $derived(iconOnly || variant === 'icon');
   const solid = $derived(variant === 'primary' || (variant === 'danger' && destructiveConfirm));
+  const engaged = $derived(variant === 'icon' && (pressed === true || expanded === true));
 </script>
 
 <button type="button" class="command-button"
   class:primary={solid} class:secondary={variant === 'secondary'}
-  class:danger={variant === 'danger'} class:icon-only={compact} class:solid class:pending
+  class:danger={variant === 'danger'} class:icon-only={compact} class:solid class:pending class:engaged
   disabled={disabled || pending} aria-label={label} aria-busy={pending || undefined}
+  aria-pressed={pressed} aria-expanded={expanded} aria-controls={controls}
   bind:this={element}
   use:hoverInfo={() => compact ? { title: label } : null}
   onclick={(event) => { if (!disabled && !pending) onclick(event); }}>
@@ -60,6 +66,11 @@
     background: var(--accent-fill); box-shadow: inset 0 0 0 100px color-mix(in srgb, var(--control-overlay-dark) 6%, transparent);
   }
   .command-button.solid.danger:active:not(:disabled) { background: var(--danger-fill); }
+  .command-button.engaged,
+  .command-button.engaged:hover:not(:disabled),
+  .command-button.engaged:active:not(:disabled) {
+    background: var(--accent-bg); color: var(--accent-ink);
+  }
   .command-button:disabled:not(.pending) { opacity: var(--control-disabled-opacity); cursor: default; }
   .command-button.pending { opacity: 1; cursor: progress; }
   .command-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

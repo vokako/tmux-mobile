@@ -199,6 +199,15 @@ outlines when only some controls inherit `corner-shape`.
 | `Segmented` | One group outline, equal option tracks and one travelling selection marker; no independently framed pill buttons or unused tail inside the group. |
 | `ConfirmDialog` | Same confirmation mechanism, shared command buttons; starts on Cancel, traps Tab inside, restores connected trigger focus, and does not cancel or resubmit while busy. Only the active modal handles keys. |
 
+**Controlled icon tools (#157, 2026-09-10):** `CommandButton` accepts optional
+`pressed`, `expanded` and `controls`, reflected as native `aria-pressed`,
+`aria-expanded` and `aria-controls`. Explicit false remains `"false"`; absent
+props omit the attributes. For `variant="icon"`, a pressed or expanded tool
+keeps the shared accent wash and readable accent ink through hover/press.
+The caller owns mode/disclosure state and the controlled element's ID; clicks
+only emit intent, and disabled/pending tools cannot activate. Ordinary command
+styling is unchanged. Boolean preferences still use `Switch`, not tool buttons.
+
 Modal ownership comes from the visible modal DOM through `activeModal`, not
 listener registration order or copied open flags. The Hub drawer's earlier
 Escape listener and desktop shell shortcuts yield before acting; stopping
