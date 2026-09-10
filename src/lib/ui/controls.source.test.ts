@@ -8,10 +8,18 @@ test('configuration controls have two named sizes without retuning the legacy te
   assert.match(css, /--control-height:\s*32px/u);
   assert.match(css, /--control-icon-size:\s*16px/u);
   assert.match(css, /--config-width:\s*860px/u);
+  assert.equal(/--config-width:\s*860px;\s*--config-editor-width:\s*(\d+)px;/u.exec(css)?.[1], '480',
+    'the editing-column budget is shared beside the configuration canvas width (#156)');
   assert.match(css, /@media \(any-pointer: coarse\)[\s\S]*?--control-height:\s*44px/u);
   assert.match(css, /--ui-control-height:\s*24px/u, 'legacy consumers migrate explicitly, never via a global size change');
   assert.match(css, /@supports \(-webkit-touch-callout: none\)[\s\S]*?@media \(any-pointer: coarse\)[\s\S]*?\.config-input \{ font-size: var\(--fs-input-touch\); \}/u,
     'the shared native field keeps the iOS no-auto-zoom exception');
+});
+
+test('configuration navigation rows have the approved pointer/touch floor (#156)', () => {
+  assert.match(css, /--config-nav-height:\s*40px/u);
+  assert.match(css, /@media \(any-pointer: coarse\)[^]*?--config-nav-height:\s*44px/u);
+  assert.match(css, /\.config-navigation \.side-row \{ min-height: var\(--config-nav-height\); \}/u);
 });
 
 test('configuration rectangles join the existing continuous-corner policy (#155)', () => {
@@ -19,6 +27,20 @@ test('configuration rectangles join the existing continuous-corner policy (#155)
   for (const selector of ['.command-button', '.config-input', '.segmented', '.segmented .slide-pill', '.check-box']) {
     assert.ok(policy.includes(selector), `${selector} uses the one global corner policy`);
   }
+});
+
+test('configuration headers wrap whole action groups instead of squeezing or eliding titles (#156)', () => {
+  const head = /\.config-head-inner \{([^}]+)\}/u.exec(css)?.[1] ?? '';
+  const title = /\.config-head-inner h1 \{([^}]+)\}/u.exec(css)?.[1] ?? '';
+  const actions = /\.config-actions \{([^}]+)\}/u.exec(css)?.[1] ?? '';
+  assert.match(head, /flex-wrap:\s*wrap;/u);
+  for (const declaration of ['flex: 1 1 160px;', 'white-space: normal;', 'overflow-wrap: anywhere;',
+    'overflow: visible;', 'text-overflow: clip;']) {
+    assert.ok(title.includes(declaration), `configuration title keeps ${declaration}`);
+  }
+  assert.match(actions, /margin-left:\s*auto;/u);
+  assert.match(actions, /display:\s*flex;/u);
+  assert.match(actions, /flex:\s*none;/u);
 });
 
 function color(body: string, name: string): number[] {

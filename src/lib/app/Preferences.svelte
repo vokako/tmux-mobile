@@ -1,5 +1,10 @@
 <script lang="ts">
+  import { onDestroy, untrack } from 'svelte';
   import Icon from '../ui/Icon.svelte';
+  import CommandButton from '../ui/CommandButton.svelte';
+  import Switch from '../ui/Switch.svelte';
+  import Stepper from '../ui/Stepper.svelte';
+  import Slider from '../ui/Slider.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import { scrollFade } from '../core/scrollFade.ts';
   import Select from '../ui/Select.svelte';
@@ -8,10 +13,11 @@
   import { t, i18n, setLocale } from '../core/i18n.svelte.ts';
   import { layout } from './layout.svelte.ts';
   import { fonts, uiFont, displayFont } from './fonts.svelte.ts';
+  import { UI_ZOOM_MIN, UI_ZOOM_MAX, UI_ZOOM_STEP } from './ui-zoom.ts';
   import { terminalPrefs, LINE_HEIGHT_MIN, LINE_HEIGHT_MAX } from './terminal-prefs.svelte.ts';
   import { hubPrefs } from '../hub/hub-prefs.svelte.ts';
   import { notifyEnabled, setNotifyEnabled, ensurePermission, previewCue, notifyPermission, systemNotify, notifyLevel, setNotifyLevel, NOTIFY_LEVELS, type NotifyLevel } from '../hub/notifications.ts';
-  import { SHORTCUT_DEFAULTS, shortcutFromEvent, shortcutLabel, type ShortcutAction } from './shortcuts.ts';
+  import { shortcutFromEvent, shortcutLabel, type ShortcutAction } from './shortcuts.ts';
   import { shortcuts } from './shortcuts.svelte.ts';
   import { agentHooksInstall, agentHooksRemove, agentHooksStatus } from '../core/ws.ts';
   import AgentsPage from '../hub/AgentsPage.svelte';
@@ -66,11 +72,11 @@
     linkCopied?: boolean;
     onClose?: () => void;
     onTheme?: (theme: string) => void;
-    onUiZoom?: (value: number) => void;
+    onUiZoom?: (value: number) => void | Promise<void>;
     onFontSize?: (size: number) => void;
     onDebug?: (on: boolean) => void;
-    onOptimize?: () => void;
-    onShare?: () => void;
+    onOptimize?: () => void | Promise<void>;
+    onShare?: () => void | Promise<void>;
     onGoBack?: ((fn: () => boolean) => void) | null;
     onDrill?: () => boolean | void;
     /** Touch only: the agent configuration is a CATEGORY here rather than a page
@@ -83,9 +89,9 @@
      *  the Files/Agents deep links use. Restoring a saved `agents` page on a
      *  phone lands here. */
     openRequest?: { tab: string; n: number } | null;
-    onAddress?: (address: string) => void;
-    onDisconnect?: () => void;
-    onConnectionSetup?: () => void;
+    onAddress?: (address: string) => void | Promise<void>;
+    onDisconnect?: () => void | Promise<void>;
+    onConnectionSetup?: () => void | Promise<void>;
     /** The current connected hostname (auth result; URL host before auth). */
     serverName?: string;
     /** Touch layout only: opens App's server registry popover from the row
@@ -128,25 +134,47 @@
   let notifyOn = $state(notifyEnabled());
   let notifyPerm = $state(notifyPermission());
   let notifyTested = $state(false);
+  let notifyBusy = $state(false);
+  let notifyError = $state('');
+  let notifyTimer: ReturnType<typeof setTimeout> | undefined;
+  let alive = true;
   // The LEVEL (owner, 2026-09-02: "只有完成才通知，还是中间状态都通知"):
   // done < replies < all, each a superset — see notifications.ts.
   let notifyLvl = $state<NotifyLevel>(notifyLevel());
   function setLevel(l: NotifyLevel) { notifyLvl = l; setNotifyLevel(l); }
   async function setNotify(on: boolean) {
+    if (notifyBusy) return;
+    const before = notifyOn;
+    notifyError = '';
     notifyOn = on;
     setNotifyEnabled(on);
     if (!on) return;
-    previewCue();
-    await ensurePermission();
-    notifyPerm = notifyPermission();
+    notifyBusy = true;
+    try {
+      previewCue();
+      await ensurePermission();
+      if (alive) notifyPerm = notifyPermission();
+    } catch (error) {
+      setNotifyEnabled(before);
+      if (alive) { notifyOn = before; notifyError = errorText(error); }
+    } finally { if (alive) notifyBusy = false; }
   }
   async function testNotify() {
-    previewCue();
-    await ensurePermission();
-    notifyPerm = notifyPermission();
-    systemNotify({ title: t('hubNotifyTestTitle'), body: t('hubNotifyTestBody'), tag: 'tmm:test' });
-    notifyTested = true;
-    setTimeout(() => { notifyTested = false; }, 1500);
+    if (notifyBusy) return;
+    notifyBusy = true;
+    notifyError = '';
+    notifyTested = false;
+    clearTimeout(notifyTimer);
+    try {
+      previewCue();
+      await ensurePermission();
+      if (!alive) return;
+      notifyPerm = notifyPermission();
+      notifyTested = systemNotify({ title: t('hubNotifyTestTitle'), body: t('hubNotifyTestBody'), tag: 'tmm:test' });
+      notifyTimer = setTimeout(() => { notifyTested = false; }, 1500);
+    } catch (error) {
+      if (alive) notifyError = errorText(error);
+    } finally { if (alive) notifyBusy = false; }
   }
 
   /** Two labelled groups (owner, 2026-09-05: "从上到下这些设置的顺序没有任何
@@ -194,14 +222,16 @@
     ['openFiles', 'shortcutOpenFiles'],
   ];
   let fontInput = $state(fonts.custom);
-  let fontInvalid = $state(false);
   // The other two roles (owner, 2026-08-25: "总之就三类…这些可以都是系统设
   // 置里的字体"): content prose and the chrome (titles/buttons/names). Same
   // validate-then-commit contract as the terminal font.
   let uiFontInput = $state(uiFont.custom);
-  let uiFontInvalid = $state(false);
   let displayFontInput = $state(displayFont.custom);
-  let displayFontInvalid = $state(false);
+  const fontState = $state({
+    mono: { pending: false, invalid: false },
+    ui: { pending: false, invalid: false },
+    display: { pending: false, invalid: false },
+  });
   let recordingShortcut = $state<ShortcutAction | ''>('');
   let shortcutError = $state('');
   type HookAgentStatus = { installed?: boolean };
@@ -210,19 +240,57 @@
   let hookBusy = $state(false);
   let hookError = $state('');
   let hookLoaded = false;
+  let hookOwner: string | null = null;
+  let hookGeneration = 0;
+  const commandState = () => ({ pending: false, error: '' });
+  const connectionCommands = () => ({
+    optimize: commandState(), share: commandState(), address: commandState(),
+    disconnect: commandState(), setup: commandState(),
+  });
+  let commands = $state(connectionCommands());
+  const zoomCommand = $state(commandState());
+  const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
+  async function runCommand(state: { pending: boolean; error: string }, action: () => void | Promise<void>) {
+    if (state.pending) return;
+    state.pending = true;
+    state.error = '';
+    try { await action(); }
+    catch (error) { if (alive) state.error = errorText(error); }
+    finally { if (alive) state.pending = false; }
+  }
   /** The embedded AgentsPage's own back chain, and whether it is showing an
    *  editor (which brings its own page head). */
   let agentsBack: (() => boolean) | null = null;
   let agentsDrilled = $state(false);
+  let agentsGuard: ((action: () => void) => void) | null = null;
+  let navigation = 0;
+  let acceptedAgentRequest = $state<{ name: string; n: number } | null>(null);
+  function registerAgentsGuard(guard: (action: () => void) => void) {
+    agentsGuard = guard;
+    return () => { if (agentsGuard === guard) agentsGuard = null; };
+  }
 
   $effect(() => {
-    if (!showShortcuts && tab === 'shortcuts') selectTab('appearance');
-    // A restored `agents` category on a device that has no such category (the
-    // desktop, where it is a page, or a server with no bus) must not leave the
-    // pane blank. Assigned rather than selectTab'd: this is a correction, and
-    // selectTab would DRILL into a category the user never tapped.
-    if (!showAgents && AGENT_TABS.includes(tab)) { tab = 'appearance'; localStorage.setItem(TAB_KEY, tab); }
-    if (connected && tab === 'connection' && !hookLoaded) loadHookStatus();
+    if ((!showShortcuts && tab === 'shortcuts') || (!showAgents && AGENT_TABS.includes(tab))) {
+      // A capability correction uses the same exit guard, without drilling.
+      untrack(() => selectTab('appearance', undefined, undefined, false));
+    }
+  });
+  $effect(() => {
+    const owner = connected ? serverInfo.machineId || activeAddress : null;
+    const online = connected, category = tab;
+    untrack(() => {
+      if (owner !== hookOwner) {
+        hookOwner = owner;
+        hookGeneration++;
+        hookLoaded = false;
+        hookStatus = null;
+        hookBusy = false;
+        hookError = '';
+        commands = connectionCommands();
+      }
+      if (online && category === 'connection' && !hookLoaded) loadHookStatus();
+    });
   });
 
   // A one-shot open request (restoring a saved `agents` page on a phone lands
@@ -231,41 +299,59 @@
   $effect(() => {
     const req = openRequest;
     if (!req || req.n === openedRequest) return;
-    openedRequest = req.n;
-    if (tabs.some((x) => x.id === req.tab)) selectTab(req.tab);
+    const edit = agentsEditRequest;
+    if (tabs.some((x) => x.id === req.tab)) untrack(() => selectTab(req.tab, () => {
+      openedRequest = req.n;
+      acceptedAgentRequest = req.tab === 'agents' ? edit : null;
+    }, () => openRequest?.n === req.n && openRequest.tab === req.tab));
   });
 
   async function loadHookStatus() {
+    if (!connected || hookBusy) return;
     hookLoaded = true;
+    hookBusy = true;
     hookError = '';
-    try { hookStatus = await agentHooksStatus(); }
-    catch (error) { hookError = (error as Error).message; }
+    const generation = hookGeneration;
+    try {
+      const result = await agentHooksStatus();
+      if (alive && generation === hookGeneration) hookStatus = result;
+    } catch (error) {
+      if (alive && generation === hookGeneration) hookError = errorText(error);
+    } finally { if (alive && generation === hookGeneration) hookBusy = false; }
   }
 
   async function updateHooks(install: boolean) {
+    if (!connected || hookBusy) return;
     hookBusy = true;
     hookError = '';
-    try { hookStatus = install ? await agentHooksInstall() : await agentHooksRemove(); }
-    catch (error) { hookError = (error as Error).message; }
-    finally { hookBusy = false; }
+    const generation = hookGeneration;
+    try {
+      const result = install ? await agentHooksInstall() : await agentHooksRemove();
+      if (alive && generation === hookGeneration) hookStatus = result;
+    } catch (error) {
+      if (alive && generation === hookGeneration) hookError = errorText(error);
+    } finally { if (alive && generation === hookGeneration) hookBusy = false; }
   }
 
-  async function saveFont() {
-    fontInput = fontInput.trim();
-    fontInvalid = !await fonts.set(fontInput);
-    return !fontInvalid;
-  }
-
-
-  async function saveUiFont() {
-    uiFontInput = uiFontInput.trim();
-    uiFontInvalid = !await uiFont.set(uiFontInput);
-    return !uiFontInvalid;
-  }
-  async function saveDisplayFont() {
-    displayFontInput = displayFontInput.trim();
-    displayFontInvalid = !await displayFont.set(displayFontInput);
-    return !displayFontInvalid;
+  async function saveFont(role: keyof typeof fontState) {
+    const state = fontState[role];
+    if (state.pending) return;
+    const pref = { mono: fonts, ui: uiFont, display: displayFont }[role];
+    const value = { mono: fontInput, ui: uiFontInput, display: displayFontInput }[role].trim();
+    state.pending = true;
+    state.invalid = false;
+    try {
+      const valid = await pref.set(value);
+      if (alive) state.invalid = !valid;
+    } catch { if (alive) state.invalid = true; }
+    finally {
+      if (alive) {
+        if (role === 'mono') fontInput = pref.custom;
+        else if (role === 'ui') uiFontInput = pref.custom;
+        else displayFontInput = pref.custom;
+        state.pending = false;
+      }
+    }
   }
 
   function setLineHeight(value: number) {
@@ -275,14 +361,30 @@
   // Compact drill-down (owner, 2026-08-25: "上边一行三个标签这个风格和别的
   // 页面太不一样"): the phone shows the CATEGORY LIST first — the same shared
   // sidebar every page has — and a tap opens that category full screen, the
-  // AgentsPage editor pattern. catOpen only means anything under 760px.
+  // AgentsPage editor pattern. catOpen governs compact or budget-limited panes.
   let catOpen = $state(false);
   // Drill motion (the navigation grammar in design-language.md §1): opening a
   // category slides it in from the RIGHT, backing out slides the list in from
   // the LEFT — the same 120ms the app-level tab slide speaks. The class
   // toggling fwd↔back is what replays the animation; no timers.
   let drillAnim = $state('');
-  const isCompact = () => window.matchMedia('(max-width: 760px)').matches;
+  let stacked = $state(false);
+  const isCompact = () => stacked || window.matchMedia('(max-width: 760px)').matches;
+  function measureLayout(node: HTMLElement) {
+    const measure = () => {
+      if (!node.clientWidth) return;
+      const style = getComputedStyle(node);
+      const sidebar = parseFloat(style.getPropertyValue('--sidebar-w')) || 240;
+      const editor = parseFloat(style.getPropertyValue('--config-editor-width')) || 480;
+      stacked = node.clientWidth < sidebar + editor;
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    const sidebar = node.querySelector(':scope > aside');
+    if (sidebar) observer.observe(sidebar);
+    measure();
+    return { destroy: () => observer.disconnect() };
+  }
   let drillPushed = false;
   function closeCat() { catOpen = false; drillAnim = 'back'; drillPushed = false; }
   $effect(() => {
@@ -296,16 +398,24 @@
     });
   });
 
-  function selectTab(value: string) {
-    // onDrill reports whether App pushed a history entry (it does not on a
-    // desktop layout, where Back is the browser's); only a real push is
-    // spent with history.back() later.
-    if (!catOpen && isCompact()) { drillAnim = 'fwd'; drillPushed = !!onDrill(); }
-    catOpen = true;
-    tab = value;
-    recordingShortcut = '';
-    shortcutError = '';
-    localStorage.setItem(TAB_KEY, value);
+  function selectTab(value: string, applied = () => {}, current = () => true, drill = true) {
+    const intent = ++navigation;
+    const apply = () => {
+      if (!alive || intent !== navigation || !current()) return;
+      // Only an accepted category jump may push, persist or forward an edit.
+      if (drill) {
+        if (!catOpen && isCompact()) { drillAnim = 'fwd'; drillPushed = !!onDrill(); }
+        catOpen = true;
+      }
+      tab = value;
+      acceptedAgentRequest = null;
+      recordingShortcut = '';
+      shortcutError = '';
+      localStorage.setItem(TAB_KEY, value);
+      applied();
+    };
+    if (value !== tab && AGENT_TABS.includes(tab) && agentsGuard) agentsGuard(apply);
+    else apply();
   }
 
   function recordShortcut(action: ShortcutAction, event: KeyboardEvent) {
@@ -327,13 +437,19 @@
     recordingShortcut = '';
     shortcutError = '';
   }
+
+  onDestroy(() => {
+    alive = false;
+    navigation++;
+    clearTimeout(notifyTimer);
+  });
 </script>
 
 <!-- Settings is a PAGE in the unified skeleton (ui-unification.md "Settings
      as a page"): shared sidebar with category rows, main column with a
      page-head. No backdrop, no X — the rail/tab bar is the way out. -->
-<section class="preferences" class:cat-open={catOpen} class:drill-fwd={drillAnim === 'fwd'} class:drill-back={drillAnim === 'back'} aria-label={t('settings')}>
-  <aside class="sidebar">
+<section class="preferences" use:measureLayout class:stacked class:cat-open={catOpen} class:drill-fwd={drillAnim === 'fwd'} class:drill-back={drillAnim === 'back'} aria-label={t('settings')}>
+  <aside class="sidebar config-navigation">
     <SideHandle />
     <!-- The category list unfolds on first paint (motion.md §1.15, .reveal:
          rows rise in with a 30ms stagger). Only then: on compact the sidebar
@@ -369,14 +485,14 @@
          editor, so Settings yields its head there — two stacked title bars is
          most of a phone's first screenful. -->
     {#if !(AGENT_TABS.includes(tab) && agentsDrilled)}
-      <div class="page-head">
+      <div class="page-head config-page-head">
+        <div class="config-head-inner">
         <!-- Compact only: the way back to the category list (the back gesture
              does the same through onGoBack). -->
-        <button class="icon-btn back" title={t('settings')} aria-label={t('settings')}
-          onclick={() => drillPushed ? history.back() : closeCat()}>
-          <Icon name="chevron-left" size={15} />
-        </button>
+        <span class="back"><CommandButton variant="icon" icon="arrow-left" label={t('settings')}
+          onclick={() => drillPushed ? history.back() : closeCat()} /></span>
         <h1>{tabs.find((x) => x.id === tab)?.label() ?? t('settings')}</h1>
+        </div>
       </div>
     {/if}
 
@@ -391,190 +507,242 @@
         <AgentsPage
           section={tab}
           visible={AGENT_TABS.includes(tab)}
-          editRequest={agentsEditRequest}
+          editRequest={tab === 'agents' ? acceptedAgentRequest : null}
+          onGuardExit={registerAgentsGuard}
           onGoBack={(fn: () => boolean) => agentsBack = fn}
           onDrilled={(d: boolean) => agentsDrilled = d}
         />
       </div>
     {:else}
-    <!-- Keyed on the category so a switch REMOUNTS the pane and its cards
-         unfold (.reveal) instead of swapping in as a finished wall. -->
+    <!-- The accepted category owns this pane and its existing reveal. -->
     {#key tab}
-    <div class="pref-content reveal">
+    <div class="pref-content">
+    <div class="config-form reveal">
       {#if tab === 'appearance'}
-        <div class="setting-card">
-          <div class="setting-row">
-            <div><strong>{t('theme')}</strong></div>
+        <div class="config-section">
+          <div class="preference-row">
+            <div class="pref-label"><strong class="config-field-label">{t('theme')}</strong></div>
+            <div class="pref-control">
             <Segmented value={theme} onchange={onTheme} ariaLabel={t('theme')}
               options={[{ value: 'system', label: t('themeAuto') }, { value: 'light', label: t('themeLight') }, { value: 'dark', label: t('themeDark') }]} />
+            </div>
           </div>
-          <div class="setting-row">
-            <div><strong>{t('language')}</strong></div>
+          <div class="preference-row">
+            <div class="pref-label"><strong class="config-field-label">{t('language')}</strong></div>
+            <div class="pref-control">
             <Segmented value={i18n.lang as 'en' | 'zh'} onchange={(l) => setLocale(l)} ariaLabel={t('language')}
               options={[{ value: 'en', label: 'EN' }, { value: 'zh', label: '中文' }]} />
+            </div>
           </div>
-          <div class="setting-row">
-            <div><strong>{t('layout')}</strong></div>
+          <div class="preference-row">
+            <div class="pref-label"><strong class="config-field-label">{t('layout')}</strong></div>
+            <div class="pref-control">
             <Segmented value={layout.mode} onchange={(m) => layout.set(m)} ariaLabel={t('layout')}
               options={[{ value: 'auto', label: t('layoutAuto') }, { value: 'desktop', label: t('layoutDesktop') }, { value: 'mobile', label: t('layoutMobile') }]} />
+            </div>
           </div>
-          <div class="setting-row">
-            <div><strong>{t('hubFeedLevel')}</strong></div>
+          <div class="preference-row">
+            <div class="pref-label"><strong class="config-field-label">{t('hubFeedLevel')}</strong></div>
+            <div class="pref-control">
             <Segmented value={hubPrefs.feedLevel} onchange={(l) => hubPrefs.setFeedLevel(l)} ariaLabel={t('hubFeedLevel')}
               options={[{ value: 'chat', label: t('hubFeedChat') }, { value: 'status', label: t('hubFeedStatus') }, { value: 'tools', label: t('hubFeedTools') }]} />
-          </div>
-          <div class="setting-row">
-            <div><strong>{t('hubStepsRows')}</strong></div>
-            <div class="stepper">
-              <button onclick={() => hubPrefs.setStepsRows(hubPrefs.stepsRows - 1)}>−</button><span>{hubPrefs.stepsRows}</span><button onclick={() => hubPrefs.setStepsRows(hubPrefs.stepsRows + 1)}>+</button>
             </div>
           </div>
-          <div class="setting-row">
-            <div use:hoverInfo={() => ({ title: t('uiFontBody'), text: t('uiFontBodyHint') })}><strong>{t('uiFontBody')}</strong></div>
-            <div class="font-control">
-              <Select bind:value={uiFontInput} editable dense fontPreview options={uiFont.common}
+          <div class="preference-row">
+            <div class="pref-label"><strong class="config-field-label">{t('hubStepsRows')}</strong></div>
+            <div class="pref-control">
+              <Stepper value={hubPrefs.stepsRows} min={3} max={30} label={t('hubStepsRows')}
+                decreaseLabel={`${t('configDecrease')} ${t('hubStepsRows')}`}
+                increaseLabel={`${t('configIncrease')} ${t('hubStepsRows')}`} onchange={hubPrefs.setStepsRows} />
+            </div>
+          </div>
+          <div class="preference-row">
+            <div class="pref-label" use:hoverInfo={() => ({ title: t('uiFontBody'), text: t('uiFontBodyHint') })}><strong class="config-field-label">{t('uiFontBody')}</strong></div>
+            <fieldset class="pref-control config-fields" aria-busy={fontState.ui.pending}>
+              <Select bind:value={uiFontInput} editable fontPreview options={uiFont.common}
                 placeholder={t('fontFamilySystem')} ariaLabel={`${t('uiFontBody')} — ${t('uiFontBodyHint')}`}
-                onchange={() => saveUiFont()} />
-              {#if uiFontInvalid}<small class="font-error appear">{t('fontFamilyInvalid')}</small>{/if}
-            </div>
+                disabled={fontState.ui.pending} onchange={() => saveFont('ui')} />
+              {#if fontState.ui.invalid}<small class="config-error font-error appear" role="alert">{t('fontFamilyInvalid')}</small>{/if}
+            </fieldset>
           </div>
-          <div class="setting-row">
-            <div use:hoverInfo={() => ({ title: t('uiFontDisplay'), text: t('uiFontDisplayHint') })}><strong>{t('uiFontDisplay')}</strong></div>
-            <div class="font-control">
-              <Select bind:value={displayFontInput} editable dense fontPreview options={displayFont.common}
+          <div class="preference-row">
+            <div class="pref-label" use:hoverInfo={() => ({ title: t('uiFontDisplay'), text: t('uiFontDisplayHint') })}><strong class="config-field-label">{t('uiFontDisplay')}</strong></div>
+            <fieldset class="pref-control config-fields" aria-busy={fontState.display.pending}>
+              <Select bind:value={displayFontInput} editable fontPreview options={displayFont.common}
                 placeholder={t('fontFamilySystem')} ariaLabel={`${t('uiFontDisplay')} — ${t('uiFontDisplayHint')}`}
-                onchange={() => saveDisplayFont()} />
-              {#if displayFontInvalid}<small class="font-error appear">{t('fontFamilyInvalid')}</small>{/if}
-            </div>
+                disabled={fontState.display.pending} onchange={() => saveFont('display')} />
+              {#if fontState.display.invalid}<small class="config-error font-error appear" role="alert">{t('fontFamilyInvalid')}</small>{/if}
+            </fieldset>
           </div>
           {#if showUiZoom}
-            <div class="setting-row">
-              <div><strong>{t('uiZoom')}</strong></div>
-              <div class="stepper">
-                <button onclick={() => onUiZoom(uiZoom - 0.1)}>−</button><span>{Math.round(uiZoom * 100)}%</span><button onclick={() => onUiZoom(uiZoom + 0.1)}>+</button>
-              </div>
+            <div class="preference-row">
+              <div class="pref-label"><strong class="config-field-label">{t('uiZoom')}</strong></div>
+              <fieldset class="pref-control config-fields" aria-busy={zoomCommand.pending}>
+                <Stepper value={uiZoom} min={UI_ZOOM_MIN} max={UI_ZOOM_MAX} step={UI_ZOOM_STEP}
+                  label={t('uiZoom')} format={(value) => `${Math.round(value * 100)}%`} disabled={zoomCommand.pending}
+                  decreaseLabel={`${t('configDecrease')} ${t('uiZoom')}`}
+                  increaseLabel={`${t('configIncrease')} ${t('uiZoom')}`}
+                  onchange={(value) => runCommand(zoomCommand, () => onUiZoom(value))} />
+                {#if zoomCommand.error}<small class="config-error appear" role="alert">{zoomCommand.error}</small>{/if}
+              </fieldset>
             </div>
           {/if}
         </div>
       {:else if tab === 'notifications'}
-        <div class="setting-card">
-          <div class="setting-row">
-            <div><strong>{t('hubNotify')}</strong>{#if notifyPerm === 'denied'}<small>{t('hubNotifyDenied')}</small>{:else if notifyPerm === 'unsupported'}<small>{t('hubNotifySoundOnly')}</small>{/if}</div>
-            <Segmented value={notifyOn} onchange={(on) => setNotify(on)} ariaLabel={t('hubNotify')}
-              options={[{ value: true, label: t('on') }, { value: false, label: t('off') }]} />
+        <div class="config-section">
+          <div class="preference-row">
+            <div class="pref-label"><strong class="config-field-label">{t('hubNotify')}</strong>{#if notifyPerm === 'denied'}<small class="config-note">{t('hubNotifyDenied')}</small>{:else if notifyPerm === 'unsupported'}<small class="config-note">{t('hubNotifySoundOnly')}</small>{/if}</div>
+            <fieldset class="pref-control config-fields" aria-busy={notifyBusy}>
+              <Switch checked={notifyOn} onchange={setNotify} label={t('hubNotify')} hideLabel disabled={notifyBusy} />
+            </fieldset>
           </div>
-          <div class="setting-row">
-            <div><strong>{t('hubNotifyLevel')}</strong></div>
+          <div class="preference-row">
+            <div class="pref-label"><strong class="config-field-label">{t('hubNotifyLevel')}</strong></div>
+            <div class="pref-control">
             <Segmented value={notifyLvl} onchange={setLevel} ariaLabel={t('hubNotifyLevel')}
               options={NOTIFY_LEVELS.map((l) => ({ value: l, label: t('hubNotifyLevel_' + l) }))} />
+            </div>
           </div>
-          <div class="setting-row">
-            <div><strong>{t('hubNotifyTest')}</strong></div>
-            <button class="reset" onclick={testNotify}>{notifyTested ? t('hubNotifyTestSent') : t('hubNotifyTestAction')}</button>
+          <div class="preference-row">
+            <div class="pref-label"><strong class="config-field-label">{t('hubNotifyTest')}</strong></div>
+            <div class="pref-control">
+              <CommandButton label={t('hubNotifyTestAction')} icon="bell" pending={notifyBusy} onclick={testNotify} />
+              {#if notifyTested}<div class="config-note appear" role="status">{t('hubNotifyTestSent')}</div>{/if}
+              {#if notifyError}<div class="config-error appear" role="alert">{notifyError}</div>{/if}
+            </div>
           </div>
         </div>
       {:else if tab === 'terminal'}
-        <div class="setting-card">
-          <div class="setting-row">
-            <div use:hoverInfo={() => ({ title: t('fontFamily'), text: t('fontFamilyHint') })}><strong>{t('fontFamily')}</strong></div>
-            <div class="font-control">
-              <Select bind:value={fontInput} editable dense fontPreview options={fonts.common}
+        <div class="config-section">
+          <div class="preference-row">
+            <div class="pref-label" use:hoverInfo={() => ({ title: t('fontFamily'), text: t('fontFamilyHint') })}><strong class="config-field-label">{t('fontFamily')}</strong></div>
+            <fieldset class="pref-control config-fields" aria-busy={fontState.mono.pending}>
+              <Select bind:value={fontInput} editable fontPreview options={fonts.common}
                 placeholder={t('fontFamilySystem')} ariaLabel={`${t('fontFamily')} — ${t('fontFamilyHint')}`}
-                onchange={() => saveFont()} />
-              {#if fontInvalid}<small class="font-error appear">{t('fontFamilyInvalid')}</small>{/if}
+                disabled={fontState.mono.pending} onchange={() => saveFont('mono')} />
+              {#if fontState.mono.invalid}<small class="config-error font-error appear" role="alert">{t('fontFamilyInvalid')}</small>{/if}
+            </fieldset>
+          </div>
+          <div class="preference-row">
+            <div class="pref-label"><strong class="config-field-label">{t('font')}</strong></div>
+            <div class="pref-control">
+              <Stepper value={fontSize} min={6} max={40} label={t('font')} format={(value) => `${value}px`}
+                decreaseLabel={`${t('configDecrease')} ${t('font')}`}
+                increaseLabel={`${t('configIncrease')} ${t('font')}`} onchange={onFontSize} />
             </div>
           </div>
-          <div class="setting-row">
-            <div><strong>{t('font')}</strong></div>
-            <div class="stepper">
-              <button onclick={() => onFontSize(fontSize - 1)}>−</button><span>{fontSize}px</span><button onclick={() => onFontSize(fontSize + 1)}>+</button>
-            </div>
-          </div>
-          <div class="setting-row">
-            <div><strong>{t('lineHeight')}</strong></div>
-            <div class="range-wrap">
-              <input type="range" min={LINE_HEIGHT_MIN} max={LINE_HEIGHT_MAX} step="0.05" value={terminalPrefs.lineHeight} oninput={(e) => setLineHeight(+e.currentTarget.value)} />
-              <span>{terminalPrefs.lineHeight.toFixed(2)}</span>
-              <button class="reset" onclick={() => setLineHeight(1)}>↺</button>
+          <div class="preference-row">
+            <div class="pref-label"><strong class="config-field-label">{t('lineHeight')}</strong></div>
+            <div class="pref-control">
+              <Slider value={terminalPrefs.lineHeight} min={LINE_HEIGHT_MIN} max={LINE_HEIGHT_MAX} step={0.05}
+                label={t('lineHeight')} resetLabel={`${t('configReset')} ${t('lineHeight')}`}
+                defaultValue={1} format={(value) => value.toFixed(2)} onchange={setLineHeight} />
             </div>
           </div>
         </div>
       {:else if tab === 'shortcuts'}
-        <div class="setting-card shortcut-card">
+        <div class="config-section">
           {#each shortcutActions as [action, label]}
-            <div class="setting-row">
-              <div><strong>{t(label)}</strong></div>
+            <div class="preference-row">
+              <div class="pref-label"><strong class="config-field-label">{t(label)}</strong></div>
+              <div class="pref-control">
               <button
-                class="shortcut-key"
+                type="button" class="config-input mono shortcut-key" aria-label={t(label)}
                 class:recording={recordingShortcut === action}
                 data-shortcut-recorder
                 onclick={() => { recordingShortcut = action; shortcutError = ''; }}
                 onkeydown={(event) => recordShortcut(action, event)}
               >{recordingShortcut === action ? t('shortcutPressKeys') : shortcutLabel(shortcuts.get(action))}</button>
-            </div>
-          {/each}
-        </div>
-        {#if shortcutError}<div class="shortcut-error appear">{shortcutError}</div>{/if}
-        <button class="shortcut-reset" onclick={() => { shortcuts.reset(); shortcutError = ''; }}>{t('shortcutReset')}</button>
-      {:else}
-        <div class="setting-card">
-          <div class="setting-row">
-            <div><strong>{t('debug')}</strong></div>
-            <Segmented value={debugMode} onchange={onDebug} ariaLabel={t('debug')}
-              options={[{ value: false, label: t('off') }, { value: true, label: t('on') }]} />
-          </div>
-        </div>
-        <div class="setting-card">
-          {#if connected}
-            <div class="connection-title">
-              <div><strong>{serverInfo.hostname || 'unknown'}</strong><small>{serverInfo.machineId?.slice(0, 8) || '—'}</small></div>
-              <div class="conn-actions">
-                {#if addresses.length > 1}<button onclick={onOptimize} disabled={optimizing}>{optimizing ? t('sniffing') : t('sniff')}</button>{/if}
-                <button onclick={onShare}><Icon name={linkCopied ? 'check' : 'copy'} size={13} /> {t('shareLink')}</button>
               </div>
             </div>
+          {/each}
+          {#if shortcutError}<div class="config-error appear" role="alert">{shortcutError}</div>{/if}
+          <CommandButton label={t('shortcutReset')} icon="undo"
+            onclick={() => { shortcuts.reset(); recordingShortcut = ''; shortcutError = ''; }} />
+        </div>
+      {:else}
+        <div class="config-section">
+          <div class="preference-row">
+            <div class="pref-label"><strong class="config-field-label">{t('debug')}</strong></div>
+            <div class="pref-control"><Switch checked={debugMode} onchange={onDebug} label={t('debug')} hideLabel /></div>
+          </div>
+        </div>
+        <div class="config-section">
+          {#if connected}
+            <div class="connection-title">
+              <div><strong class="config-field-label">{serverInfo.hostname || 'unknown'}</strong><small class="config-note connection-id">{serverInfo.machineId?.slice(0, 8) || '—'}</small></div>
+              <div class="conn-actions">
+                {#if addresses.length > 1}<CommandButton label={t('sniff')} icon="refresh"
+                  pending={optimizing || commands.optimize.pending}
+                  onclick={() => { if (!optimizing) void runCommand(commands.optimize, onOptimize); }} />{/if}
+                <CommandButton label={t('shareLink')} icon={linkCopied ? 'check' : 'copy'}
+                  pending={commands.share.pending} onclick={() => runCommand(commands.share, onShare)} />
+              </div>
+            </div>
+            {#each [commands.optimize, commands.share] as command}
+              {#if command.error}<div class="config-error appear" role="alert">{command.error}</div>{/if}
+            {/each}
             <!-- One status-dot language (design-language.md §Colour): at rest
                  achromatic, the current address accent, the one still dialing
                  accent + `.live-dot` — the same cue an agent in motion wears. -->
             <div class="address-list">
               {#each (addresses.length ? addresses : [activeAddress]) as address}
                 {@const pending = address === pendingAddress}
-                <button class:active={address === activeAddress} class:pending aria-busy={pending || undefined}
+                <button type="button" class="config-input address-choice" class:active={address === activeAddress} class:pending aria-busy={pending || undefined}
+                  disabled={!!pendingAddress || commands.address.pending}
                   use:hoverInfo={() => ({ title: address, lines: [pending
                     ? { label: t('status'), value: t('connecting'), tone: 'warn' }
                     : address === activeAddress ? { label: t('status'), value: t('serverCurrent'), tone: 'accent' }
                     : { label: t('status'), value: t('addressAlternate') }] })}
-                  onclick={() => address !== activeAddress && onAddress(address)}>
+                  onclick={() => { if (address !== activeAddress && !pendingAddress) void runCommand(commands.address, () => onAddress(address)); }}>
                   <span class="addr-dot" class:live-dot={pending}></span><span class="addr-text">{address}</span>
                 </button>
               {/each}
             </div>
-            <div class="setting-row hook-row">
-              <div><strong>{t('agentNotifications')}</strong></div>
-              <div class="hook-control">
+            {#if commands.address.error}<div class="config-error appear" role="alert">{commands.address.error}</div>{/if}
+            <div class="preference-row">
+              <div class="pref-label"><strong class="config-field-label">{t('agentNotifications')}</strong></div>
+              <div class="pref-control">
+                <div class="hook-control">
                 {#if hookStatus}
                   <span class="hook-backends">
-                    <span class:on={hookStatus.claude?.installed}>Claude</span>
-                    <span class:on={hookStatus.codex?.installed}>Codex</span>
-                    <span class:on={hookStatus.kiro?.installed}>Kiro</span>
+                    {#each [['claude', 'Claude'], ['codex', 'Codex'], ['kiro', 'Kiro']] as [id, name]}
+                      {@const installed = hookStatus[id as keyof HookStatus]?.installed}
+                      <span class:on={installed} aria-label={`${name}: ${t(installed ? 'on' : 'off')}`}>
+                        <Icon name={installed ? 'check' : 'minus'} size={14} />{name}
+                      </span>
+                    {/each}
                   </span>
                   {#if hookStatus.claude?.installed && hookStatus.codex?.installed && hookStatus.kiro?.installed}
-                    <button class="hook-action" disabled={hookBusy} onclick={() => updateHooks(false)}>{t('agentHooksRemove')}</button>
+                    <CommandButton label={t('agentHooksRemove')} icon="minus" pending={hookBusy} onclick={() => updateHooks(false)} />
                   {:else}
-                    <button class="hook-action primary" disabled={hookBusy} onclick={() => updateHooks(true)}>{hookBusy ? '…' : t('agentHooksInstall')}</button>
+                    <CommandButton label={t('agentHooksInstall')} icon="plus" pending={hookBusy} onclick={() => updateHooks(true)} />
                   {/if}
                 {:else}
-                  <button class="hook-action" disabled={hookBusy} onclick={loadHookStatus}>{hookBusy ? '…' : t('agentHooksCheck')}</button>
+                  <CommandButton label={t('agentHooksCheck')} icon="refresh" pending={hookBusy} onclick={loadHookStatus} />
                 {/if}
+                </div>
+                {#if hookError}<div class="config-error appear" role="alert">{hookError}</div>{/if}
               </div>
             </div>
-            {#if hookError}<div class="hook-error appear">{hookError}</div>{/if}
           {:else}
-            <div class="empty-connection"><Icon name="link" size={20} /><span>{t('notConnected')}</span><button onclick={onConnectionSetup}>{t('connectionSetup')}</button></div>
+            <div class="empty-connection">
+              <span class="config-note">{t('notConnected')}</span>
+              <CommandButton label={t('connectionSetup')} icon="link" pending={commands.setup.pending}
+                onclick={() => runCommand(commands.setup, onConnectionSetup)} />
+              {#if commands.setup.error}<div class="config-error appear" role="alert">{commands.setup.error}</div>{/if}
+            </div>
           {/if}
         </div>
-        {#if connected}<button class="disconnect" onclick={onDisconnect}>{t('disconnect')}</button>{/if}
+        {#if connected}
+          <div>
+            <CommandButton variant="danger" label={t('disconnect')} icon="x" pending={commands.disconnect.pending}
+              onclick={() => runCommand(commands.disconnect, onDisconnect)} />
+            {#if commands.disconnect.error}<div class="config-error appear" role="alert">{commands.disconnect.error}</div>{/if}
+          </div>
+        {/if}
       {/if}
+    </div>
     </div>
     {/key}
     {/if}
@@ -598,6 +766,10 @@
   .r-label { flex: 1; min-width: 0; }
   .pref-shell { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .back { display: none; }
+  .preferences.stacked { grid-template-columns: minmax(0, 1fr); }
+  .stacked:not(.cat-open) .pref-shell, .stacked.cat-open .sidebar { display: none; }
+  .stacked .sidebar { border-right: none; }
+  .stacked .back { display: grid; }
   /* Compact = the drill-down every other page speaks (AgentsPage's editor
      pattern): the category LIST is the first screen — the same shared sidebar,
      full width — and an open category takes the whole screen with a back
@@ -608,7 +780,6 @@
     .preferences:not(.cat-open) .pref-shell { display: none; }
     .preferences.cat-open .sidebar { display: none; }
     .sidebar { border-right: none; }
-    .sidebar :global(.side-row) { min-height: 44px; }
     .back { display: grid; }
     /* Drill motion, compact only: deeper enters from the right, back from
        the left — same 120ms grammar as the app-level page slide. */
@@ -618,51 +789,26 @@
   @media (prefers-reduced-motion: reduce) {
     .preferences.drill-fwd .pref-shell, .preferences.drill-back .sidebar { animation: none; }
   }
-  .pref-content { flex:1;min-width:0;overflow:auto;padding:14px clamp(12px,3vw,24px); }
+  .pref-content { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
   /* The embedded AgentsPage is a PAGE (its root is height:100%), so it takes the
      shell's remaining height instead of living inside a padded, scrolling pane —
      it brings its own list scroller and its own editor. */
   .agents-embed { flex: 1; min-width: 0; min-height: 0; }
-  .setting-card { max-width:720px;margin:0 auto;border:1px solid var(--border2);border-radius:var(--ui-radius-panel);background:var(--surface);overflow:hidden; }
-  .setting-row { min-height:52px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:16px; }
-  .setting-row+.setting-row { border-top:1px solid var(--border2); } .setting-row>div:first-child{display:flex;flex-direction:column;gap:4px;min-width:0;}
-  strong{font-size:var(--fs-ui);} small{font-size:var(--fs-meta);color:var(--text3);font-weight:400;line-height:1.35;}
-  /* App control dialect: --ui-radius-control squares like every chip-btn/
-     icon-btn — the 999px pills were this page's private language and are why
-     it read as a different app (owner, 2026-08-25: "和其他页面画风不一样").
-     Real pills stay for micro TAGS (.hook-backends) per the radius contract.
-     The segmented rows are ui/Segmented (the same dialect, plus the pill). */
-  .stepper button,.reset,.conn-actions button { height:var(--ui-control-height);border:1px solid var(--border2);background:transparent;color:var(--text3);padding:3px 8px;border-radius:var(--ui-radius-control);cursor:pointer;font-size:var(--ui-font-control);white-space:nowrap;transition:border-color var(--t-fast),background var(--t-fast),color var(--t-fast); }
-  .stepper button:active,.reset:active,.conn-actions button:active { border-color:var(--accent);color:var(--accent); }
-  .font-control{display:flex;flex-direction:column;align-items:flex-end;gap:3px}.font-error{color:var(--danger)}
-  .font-control :global(.sel-combo){width:min(230px,42vw)}
-  .font-control :global(.sel-trigger.combo){width:100%;font-family:var(--font-mono)}
-  .stepper { display:flex;align-items:center;gap:4px; }.stepper button{width:24px;padding:0;font-size:var(--fs-body)}.stepper span{min-width:42px;text-align:center;font-family:var(--font-mono);font-size:var(--fs-sub);}
-  .range-wrap { display:flex;align-items:center;gap:7px;min-width:min(280px,46vw); }
-  .range-wrap input { flex:1;height:14px;margin:0;appearance:none;-webkit-appearance:none;background:transparent;cursor:pointer; }
-  .range-wrap input::-webkit-slider-runnable-track { height:3px;border-radius:999px;background:var(--surface2);border:1px solid var(--border2); }
-  .range-wrap input::-webkit-slider-thumb { appearance:none;-webkit-appearance:none;width:12px;height:12px;margin-top:-5px;border:2px solid var(--bg);border-radius:50%;background:var(--accent);box-shadow:0 0 0 1px var(--accent); }
-  .range-wrap input::-moz-range-track { height:3px;border-radius:999px;background:var(--surface2);border:1px solid var(--border2); }
-  .range-wrap input::-moz-range-thumb { width:10px;height:10px;border:2px solid var(--bg);border-radius:50%;background:var(--accent);box-shadow:0 0 0 1px var(--accent); }
-  .range-wrap span{width:31px;font:10px var(--font-mono);color:var(--text2)}.reset{width:24px;padding:0}
-  .shortcut-key{min-width:74px;height:var(--ui-control-height);padding:3px 10px;border:1px solid var(--border2);border-radius:var(--ui-radius-control);background:var(--input-bg);color:var(--text);font:600 var(--fs-sub) var(--font-mono);cursor:pointer;transition:border-color var(--t-fast),background var(--t-fast),color var(--t-fast)}.shortcut-key.recording{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}
-  .shortcut-error{max-width:720px;margin:7px auto 0;color:var(--danger);font-size:var(--fs-meta);text-align:center}.shortcut-reset{display:block;margin:8px auto;padding:5px 10px;border:1px solid var(--border2);border-radius:var(--ui-radius-control);background:transparent;color:var(--text3);font-size:var(--fs-sub);cursor:pointer}
-  .connection-title{padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px}.connection-title>div:first-child{display:flex;flex-direction:column;gap:3px}.conn-actions{display:flex;gap:4px}.conn-actions button{display:flex;align-items:center;gap:4px}
-  .address-list{padding:0 12px 10px;display:flex;flex-direction:column;gap:3px}.address-list button{padding:7px 9px;border:1px solid var(--border2);border-radius:var(--ui-radius-control);background:var(--input-bg);color:var(--text3);font:var(--fs-sub) var(--font-mono);text-align:left;word-break:break-all;cursor:pointer;transition:border-color var(--t-fast),background var(--t-fast),color var(--t-fast)}.address-list button.active{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}
-  .address-list button{display:flex;align-items:center;gap:8px}.addr-text{min-width:0}
+  .pref-label { display: flex; flex-direction: column; gap: var(--config-label-gap); }
+  .shortcut-key { text-align: center; cursor: pointer; transition: background var(--t-fast), color var(--t-fast); }
+  .shortcut-key.recording { border-color: var(--accent-line); background: var(--accent-bg); color: var(--accent-ink); }
+  .connection-title { display: flex; flex-wrap: wrap; align-items: center; gap: var(--config-field-gap); margin-bottom: var(--config-field-gap); }
+  .connection-title > div:first-child { display: flex; flex-direction: column; gap: var(--config-label-gap); min-width: 0; }
+  .connection-id { font-family: var(--font-mono); user-select: text; }
+  .conn-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .address-list { display: flex; flex-direction: column; gap: 8px; }
+  .address-choice { display: flex; align-items: center; gap: 8px; text-align: left; cursor: pointer; }
+  .address-choice.active { border-color: var(--accent-line); background: var(--accent-bg); color: var(--accent-ink); }
+  .addr-text { min-width: 0; overflow-x: auto; white-space: nowrap; font-family: var(--font-mono); }
   .addr-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--status-sleep);transition:background var(--t-fast)}
   .address-list button.active .addr-dot,.address-list button.pending .addr-dot{background:var(--accent)}
-  .hook-row{border-top:1px solid var(--border2)}.hook-control{display:flex;align-items:center;gap:7px;flex-shrink:0}.hook-backends{display:flex;gap:3px}.hook-backends span{padding:2px 5px;border-radius:var(--ui-radius-pill);background:var(--surface2);color:var(--text3);font-size:var(--fs-micro);transition:background var(--t-fast),color var(--t-fast)}.hook-backends span.on{background:var(--accent-bg);color:var(--accent)}.hook-action{height:var(--ui-control-height);padding:3px 8px;border:1px solid var(--border2);border-radius:var(--ui-radius-control);background:transparent;color:var(--text3);font-size:var(--ui-font-control);cursor:pointer;transition:border-color var(--t-fast),background var(--t-fast),color var(--t-fast)}.hook-action.primary{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}.hook-action:disabled{opacity:.5}.hook-error{padding:0 12px 8px;color:var(--danger);font-size:var(--fs-meta)}
-  /* Lone danger dialect (design-language.md §3): quiet at rest — border2 box,
-     red ink — and only hover raises the red border + wash. The always-red
-     55% border was this button's own species. */
-  .disconnect{display:block;width:min(720px,100%);margin:8px auto;padding:7px;border:1px solid var(--border2);border-radius:var(--ui-radius-control);background:none;color:var(--danger);cursor:pointer;font-size:var(--fs-sub);font-weight:600;transition:border-color var(--t-fast),background var(--t-fast)}
-  .disconnect:hover{border-color:var(--danger);background:var(--danger-bg)}
-  .empty-connection{padding:28px 12px;display:flex;flex-direction:column;align-items:center;gap:9px;color:var(--text3);font-size:var(--fs-sub)}.empty-connection button{padding:6px 10px;border:1px solid var(--accent);border-radius:var(--ui-radius-control);background:var(--accent-bg);color:var(--accent);cursor:pointer;font-size:var(--fs-sub)}
-  /* ONE compact breakpoint with the rest of the app (760): this page used a
-     private 640, so a narrow window wore desktop clothes here after every
-     other page had switched. The old `inset` hack predates the page-layer
-     and positioned nothing. */
-  @media(max-width:760px){.pref-content{padding:12px}.setting-row{min-height:50px;padding:8px 10px;gap:10px}.font-control :global(.sel-combo){width:min(220px,48vw)}.range-wrap{min-width:min(250px,52vw)}.connection-title{align-items:flex-start;flex-direction:column}.conn-actions{width:100%}.conn-actions button{flex:1;justify-content:center}.hook-row{align-items:flex-start;flex-direction:column}.hook-control{width:100%;justify-content:space-between}.stepper button,.hook-action{min-height:32px}}
-  @media(max-width:420px){.setting-row{align-items:flex-start;flex-direction:column;gap:7px}.setting-row>div:last-child,.range-wrap{width:100%;min-width:0}.font-control{align-items:flex-start}.font-control :global(.sel-combo){width:100%}}
+  .hook-control, .hook-backends { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .hook-backends span { display: inline-flex; align-items: center; gap: 4px; color: var(--text2); font-size: var(--fs-sub); }
+  .hook-backends span.on { color: var(--accent-ink); }
+  .empty-connection { display: flex; flex-direction: column; align-items: flex-start; gap: var(--config-field-gap); }
 </style>

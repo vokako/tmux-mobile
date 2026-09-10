@@ -77,8 +77,10 @@ html {
   --control-overlay-light: #ffffff;
   --control-overlay-dark: #000000;
   --config-width: 860px;
+  --config-editor-width: 480px;
   --config-padding: 24px;
   --config-header-height: 48px;
+  --config-nav-height: 40px;
   --config-label-gap: 8px;
   --config-field-gap: 16px;
   --config-section-gap: 24px;
@@ -86,7 +88,7 @@ html {
 }
 
 @media (any-pointer: coarse) {
-  :root { --control-height: 44px; --control-icon-size: 18px; --config-header-height: 56px; --config-editor-min: 176px; }
+  :root { --control-height: 44px; --control-icon-size: 18px; --config-header-height: 56px; --config-nav-height: 44px; --config-editor-min: 176px; }
 }
 @media (max-width: 760px) {
   :root { --config-padding: 16px; }
@@ -860,12 +862,16 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 /* Configuration atoms. Flex/auto-fit wrapping avoids introducing a size
    containment ancestor that could re-anchor a Select's fixed popover. */
 .config-page-head { padding: 0; min-height: var(--config-header-height); }
+.config-navigation .side-row { min-height: var(--config-nav-height); }
 .config-head-inner {
-  display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; width: 100%;
   max-width: var(--config-width); min-height: var(--config-header-height);
   padding: calc((var(--config-header-height) - var(--control-height)) / 2) var(--config-padding);
 }
-.config-head-inner h1 { letter-spacing: 0; }
+.config-head-inner h1 {
+  flex: 1 1 160px; white-space: normal; overflow-wrap: anywhere;
+  overflow: visible; text-overflow: clip; letter-spacing: 0;
+}
 .config-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
 .config-form {
   display: flex; flex-direction: column; gap: var(--config-field-gap);

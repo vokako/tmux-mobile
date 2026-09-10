@@ -240,7 +240,9 @@ test('can_hire wears ONE atom — the boxed M, words in the title (board #7)', a
   // The atom renders as a literal M with the explanation in title/aria.
   assert.match(source, /class="m-badge" title=\{t\('agentsManagerHint'\)\}[^>]*>M</u, 'Hub preset rows wear the badge');
   assert.match(agentsPage, /class="m-badge" title=\{t\('agentsManagerHint'\)\}[^>]*>M</u, 'the config list wears the badge');
-  assert.match(agentsPage, /<span class="m-badge">M<\/span>\{t\('agentsManager'\)\}/u, 'the editor toggle: badge + the short word');
+  // #156: the badge remains a list fact; editing the boolean uses the shared
+  // Switch, not a second membership-pill dialect.
+  assert.match(agentsPage, /<Switch checked=\{editing\.can_hire\} label=\{t\('agentsManager'\)\}/u);
   // One declaration, twice: no app.css edits were allowed, so the two scoped
   // copies must stay TEXT-IDENTICAL or the atom forks.
   const decl = (src: string) => /\.m-badge \{([^}]*)\}/u.exec(src)?.[1]?.trim() ?? '';

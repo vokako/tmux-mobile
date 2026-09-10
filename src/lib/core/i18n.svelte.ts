@@ -415,6 +415,13 @@ const msgs: Record<string, Record<string, string>> = {
     fileName: 'file name...',
     newName: 'new name...',
     discardChanges: 'Discard unsaved changes?',
+    configDiscard: 'Discard',
+    configKeepEditing: 'Keep editing',
+    configDiscardNote: 'Changes to this configuration have not been saved.',
+    configDecrease: 'Decrease',
+    configIncrease: 'Increase',
+    configReset: 'Reset',
+    configRetry: 'Retry',
     // ── Confirmations for destructive verbs. The title names what is about to
     // happen, the note says what is LOST and what survives — that second half
     // is the whole reason a confirmation is more than a speed bump.
@@ -952,6 +959,13 @@ const msgs: Record<string, Record<string, string>> = {
     fileName: '文件名...',
     newName: '新名称...',
     discardChanges: '放弃未保存的更改？',
+    configDiscard: '放弃更改',
+    configKeepEditing: '继续编辑',
+    configDiscardNote: '此配置的更改尚未保存。',
+    configDecrease: '减少',
+    configIncrease: '增加',
+    configReset: '重置',
+    configRetry: '重试',
     projectArchiveConfirmTitle: '把「{name}」从项目列表移除？',
     projectArchiveConfirmNote: '停止跟踪项目；tmux 会话继续运行。',
     confirmDeleteAgentDefTitle: '删除 agent「{name}」？',

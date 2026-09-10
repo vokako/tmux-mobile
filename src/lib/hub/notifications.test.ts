@@ -293,8 +293,10 @@ test('the permission request and the audio unlock ride the SETTINGS toggle, neve
   assert.ok(!sendBody.includes('ensurePermission'), 'send() asks for nothing');
   assert.ok(!hub.includes('ensurePermission') && !hub.includes('setNotifyEnabled') && !hub.includes("'bell'"),
     'the Hub header carries no notification switch — a header keeps no spare switches, and on a phone it cost the row a button');
-  // The toggle's click carries all three: persist, preview (the unlock), permission.
-  assert.match(prefs, /setNotifyEnabled\(on\);\s*\n\s*if \(!on\) return;\s*\n\s*previewCue\(\);\s*\n\s*await ensurePermission\(\);/u);
+  // #156 keeps this ordering inside a serialized pending/error operation.
+  // Real Settings mount tests also execute the permission and duplicate guards.
+  const toggle = prefs.slice(prefs.indexOf('async function setNotify('), prefs.indexOf('async function testNotify('));
+  assert.match(toggle, /setNotifyEnabled\(on\);[\s\S]*?if \(!on\) return;[\s\S]*?previewCue\(\);[\s\S]*?await ensurePermission\(\);/u);
   const asks = prefs.match(/await ensurePermission\(\)/gu) ?? [];
   assert.equal(asks.length, 2, 'the toggle and the test row, nothing else');
   assert.match(prefs, /\{t\('hubNotify'\)\}/u, 'a labelled setting-row');
@@ -312,7 +314,7 @@ test('the permission request and the audio unlock ride the SETTINGS toggle, neve
   // the Tauri shim reports `denied` before the first ask.
   const notif = readFileSync(join(here, 'notifications.ts'), 'utf8');
   assert.match(notif, /Notification\.permission !== 'granted'\) \{\s*\n\s*await Notification\.requestPermission\(\)/u);
-  assert.match(prefs, /\{:else if notifyPerm === 'unsupported'\}<small>\{t\('hubNotifySoundOnly'\)\}<\/small>/u,
+  assert.match(prefs, /\{:else if notifyPerm === 'unsupported'\}<small class="config-note">\{t\('hubNotifySoundOnly'\)\}<\/small>/u,
     'an unsupported webview explicitly says sound is the whole channel');
 });
 

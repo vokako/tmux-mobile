@@ -11,7 +11,7 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
 
 **Configuration rollout (2026-09-10, owner-approved #154).** The concrete
 control contract below ships in #155; Settings and Agent-family adoption
-and draft workflows follow in #156, Files tools in #157. Approval does not
+and draft workflows ship in #156, Files tools follow in #157. Approval does not
 mean every legacy consumer has already migrated. Keep existing mechanisms
 and replace their consumers explicitly; do not retune Terminal geometry
 through the legacy `--ui-control-height` token.
@@ -171,7 +171,8 @@ unchanged until its consumers migrate.
 | `--control-height`, single-line controls | 32px | 44px |
 | Icon command box | 32x32px | 44x44px |
 | `--control-icon-size` | 16px | 18px |
-| `--config-header-height` | 48px | 56px |
+| `--config-header-height` (minimum) | 48px | 56px |
+| `--config-nav-height` (minimum row) | 40px | 44px |
 | `--config-padding` | 24px | 16px on compact |
 | Popover option minimum | 36px | 44px |
 | Label / field / section gaps | 8 / 16 / 24px | same |
@@ -207,7 +208,7 @@ This does not install a new global Back/history handler.
 
 No control owns persistence or a second copy of committed application state.
 Callers set pending synchronously before an asynchronous operation and enforce
-its request/identity guard; the entity-level rules and tests belong to #156.
+its request/identity guard; the entity-level rules are below.
 Do not use an always-enabled Save as the primary-colour demonstration.
 
 Primary is solid fill; secondary has a neutral surface/control border;
@@ -240,6 +241,75 @@ Preference rows wrap from a 160px label + 24px gap + 240px control budget;
 entity rows fit up to two 280px columns with 16px gap. Flex/auto-fit wrapping
 does not create a containment ancestor for fixed Select popovers.
 Terminal cells, cursor metrics and gesture coordinates are outside this scope.
+
+### Configuration forms and persistence (#156, 2026-09-10)
+
+Settings and Agent/Team/Skill/MCP/global-instruction editors use the shared
+canvas and controls above. Page sections are unframed; a team member is a
+repeated object, so its single frame remains. Remove the replaced 720px
+centered Settings cards, 980px Team editor and private field/command sizing.
+Category and object lists wear `config-navigation`, including the initial
+list before an editor is open. Their touch floor is a real row rectangle,
+not overlapping hit-area overlays.
+Header titles wrap at a 160px flexible basis and may grow the header; commands
+remain one right-aligned group. Never shrink type or elide the object name to
+preserve decoration. In a collapsed editor, one left Back replaces right
+Cancel; both use the same draft guard.
+Member sources and team-member summaries are readable metadata (`--fs-sub`,
+`--text2`), not micro decoration. Redundant file labels do not take width from
+the category name; the global document is already named in its own object row.
+Font-preview Selects change family, not size: they use the same body step as
+other configuration values, without the legacy `dense` option.
+Skill descriptions keep that body step in both reading and editing states.
+The click-to-edit reading target respects the shared minimum height; built-in
+descriptions are plain read-only text, without a misleading edit action.
+Entity failures use the same `config-error` text role and alert semantics as
+Settings; a page-local error frame does not introduce another state style.
+
+The Agent page retains categories, rows and editor as logical levels. A root
+ResizeObserver reads the actual container and requested sidebar/row widths;
+`--config-editor-width: 480px` is the editor budget. If three columns cannot
+fit, rows and editor alternate beside categories. If two cannot fit, levels
+drill in one column. Saved divider preferences are not overwritten by this
+adaptation. This is not a CSS containment ancestor for fixed Select menus.
+The list stays mounted, preserving its scroll position on an editor return.
+
+Only two persistence models exist:
+
+- **Immediate preference:** independently valid, reversible local settings
+  apply immediately. They do not get Save/Cancel. Commands and asynchronous
+  validation show their own pending/error state.
+- **Draft entity:** Agent, Team, Skill, MCP and global instructions use an
+  original fingerprint and a working copy. Save requires a valid new/dirty
+  value and no pending operation. The same payload definition measures dirty
+  state and builds the write; team disclosure is not data, while unknown
+  references and inline MCP objects remain data. Built-in skills and existing
+  identifiers are read-only, not dimmed to imitate disabled fields.
+
+Agent-family Save and Ctrl/Cmd+Enter enter one handler; IME key events do not
+submit. Capture payload and editor generation before awaiting. Lock the
+submitted fields without dimming their values, block duplicate activation,
+retain text on failure and return to the originating list/category on success.
+An unnamed skill import returns to its list too, rather than opening the first
+imported definition as a different editing task.
+
+Cancel, Escape, in-pane Back, object/category picks, external editor requests and the
+Settings host's category exit use one guard. Dirty exits use ConfirmDialog;
+Keep editing preserves the draft. Confirmations use the shared bottom-sheet
+form below the compact breakpoint and the centered form otherwise. A single
+bounded exit intent received while saving waits for the operation and is then
+rechecked against the current draft.
+Settings registers this guard instead of copying dirty/pending flags. Hiding an
+already-mounted page on a global tab switch preserves the draft. No global
+desktop Back/popstate or reload trap is added.
+
+Global instructions cannot be saved from an unfinished or failed read.
+Every opening has its own generation, including reopening the same document;
+an old reply cannot replace the newer text. Skill refresh also guards dirty
+work and freezes its target before awaiting. Skill file and file-list requests
+have their own sequence so a pre-refresh reply for the same path cannot
+overwrite the refreshed preview. Select and modal key handling precede the
+editor's Escape guard.
 
 ### Legacy consumers during migration
 
@@ -410,6 +480,20 @@ Those forms follow in #156, and the owner's actual browser/APK acceptance
 remains a separate gate. Restoring old pending, IME, native-value and modal
 handling fails the corresponding tests; restoring the range attribute order
 reproduces Chromium's fractional-value rounding.
+
+### Configuration adoption is measured per state (2026-09-10, #156)
+
+Chromium 152.0.7977.64 found that Settings font Selects still used 12.5px while
+Agent values used 13.5px, and the initial touch Agent list still had 32-33px
+rows. Sharing a component or testing only its height did not establish the
+contract. Remove the legacy dense option, apply the navigation atom to initial
+lists as well as editors, and inspect reading, pending, error and read-only
+states. Real-component mount tests caught a second discard prompt between
+Preferences and AgentsPage; the host's approved section is now accepted without
+another guard. Late global and skill-preview reads, duplicate saves and held
+exits have executable regressions and negative controls. The runtime matrix
+covers both themes, pointer/touch layouts, reduced-motion spots and Chinese;
+it does not substitute for native-platform or owner-build acceptance.
 
 ### The design language is a CONTRACT
 

@@ -38,6 +38,10 @@ test('Preferences spells every segmented row through the component', async () =>
   assert.doesNotMatch(markup, /class="segmented/u, 'no hand-rolled .segmented markup');
   assert.match(markup, /import Segmented from '\.\.\/ui\/Segmented\.svelte'/u);
   const uses = markup.match(/<Segmented\b/gu) ?? [];
-  assert.ok(uses.length >= 7, `theme, language, layout, feed level, notify on/off, notify level, debug — got ${uses.length}`);
+  // #156: boolean preferences deliberately move to Switch, not a second
+  // segmented implementation. Only the five multi-choice preferences remain.
+  assert.ok(uses.length >= 5, `theme, language, layout, feed level, notify level — got ${uses.length}`);
+  assert.match(markup, /<Switch checked=\{notifyOn\}/u);
+  assert.match(markup, /<Switch checked=\{debugMode\}/u);
   assert.doesNotMatch(prefs, /\.segmented/u, 'the dialect’s CSS moved with it');
 });

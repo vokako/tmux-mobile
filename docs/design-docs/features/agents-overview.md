@@ -4,6 +4,19 @@ The shape of the agent layer: what an agent SAYS goes through the `tmm` CLI, wha
 
 ## Rules and their reasons
 
+### Configuration drafts have one owner (2026-09-10, #156)
+
+AgentsPage owns the Agent/Team/Skill/MCP/global-instruction working copy, the
+save operation and the exit guard. `config-draft.ts` defines the payload and
+fingerprint once; expanding a team member does not make it dirty, and nested
+MCP data is not mistaken for UI state. Save freezes payload and editor identity,
+rejects duplicates and retains failed edits. The Settings embedding host uses
+the registered exit callback, not an independent dirty flag. Keyboard submission
+uses the same Save and skips IME events. Global reads are generation-scoped even
+when reopening the same document. These rules replace the independent unguarded
+close/save handlers found by #154. Exact geometry, shared controls and the
+pending/return contract live in [design-language.md](design-language.md).
+
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
 
 ### Agents v2 — CLI substrate, hooks telemetry, isolated homes
@@ -165,11 +178,11 @@ Owner, 2026-09-02: "除了定制 agent 之外，我们可以定义 agent team，
 
 **UI.** Agents page → Teams category (desktop: THREE levels — the sidebar
 lists categories, the category's rows are their own second column, and the
-main column holds the editor, so an open editor never replaces the list it
-came from (board #94, "右侧拆分成两级"; the rows column is a `SideHandle`
+main column holds the editor when the container can fit all three levels
+(board #94, "右侧拆分成两级"; the rows column is a `SideHandle`
 divider with its own remembered width, and the global instructions' level is
 the single AGENTS.md row — owner 2026-09-04, "不要全堆在一起了"; compact
-keeps the two-level drill); phone: Teams is its own Settings page): list rows (name + members) and an editor. The member-source Select offers Bare coding agent, Custom agent and Sub-team. Bare opens backend/model/effort/prompt/Skills/MCP; inherited sources hide those fields and keep only their team role (plus the existing model/effort override for a custom agent). A member card rests as a readable backend/avatar + name + source + role summary; tapping the broad summary expands that member and closes the previous one. Identity controls live only inside the expanded editor. Team rules, the team role and a bare member's prompt are full-width editors that grow with their text until a responsive height cap; their stable floors are 140/150/240px on desktop and 180/190/260px on compact, so long instructions are not keyhole fields. Existing teams open only the first member and a new member opens itself. Compact stacks every member grid into one column and gives the destructive member action a 44px target. Sections inside a member are divided, never nested cards; Add member is a command button, not a selection chip. Hub roster: `rosterGroups` folds same-team cards into one `.tgroup` (dashed row-radius frame, micro label) rendered through the one card snippet; the preset panel and the picker dialog list teams as one-tap starts.
+keeps the two-level drill); phone: Teams is its own Settings page): list rows (name + members) and an editor. The member-source Select offers Bare coding agent, Custom agent and Sub-team. Bare opens backend/model/effort/prompt/Skills/MCP; inherited sources hide those fields and keep only their team role (plus the existing model/effort override for a custom agent). A member card rests as a readable backend/avatar + name + source + role summary; tapping the broad summary expands that member and closes the previous one. Identity controls live only inside the expanded editor. Team rules, the team role and a bare member's prompt are full-width editors that grow with their text until the shared configuration height cap. Board #156 (2026-09-10) retires the private 140/150/240px desktop and 180/190/260px compact floors in favor of `--config-editor-min` and the common 860px canvas; those earlier measurements are history, not competing current rules. Existing teams open only the first member and a new member opens itself. Field grids wrap by available width; shared commands provide touch targets. Sections inside a member are divided, never nested cards; Add member is a command button, not a selection chip. Hub roster: `rosterGroups` folds same-team cards into one `.tgroup` (dashed row-radius frame, micro label) rendered through the one card snippet; the preset panel and the picker dialog list teams as one-tap starts.
 
 **Motion (Agents page).** Per [motion.md](motion.md): the sidebar list unfolds on its FIRST paint only — `reload()` sets `justLoaded` once (`painted`), `.reveal` on `.side-scroll` staggers rows 30ms from the top, and a timer clears it after `revealMs()` so a saved or imported row later mounts plain; a revisit is a cut. The compact editor drill keeps its 120ms linear slide.
 

@@ -46,9 +46,9 @@ test('the category exists only where Agents is not a page of its own', () => {
   assert.match(source, /const tabs = \$derived\(groups\.flatMap\(\(g\) => g\.rows\)\);/u,
     'the flat list every consumer reads is derived FROM the groups — one source of order');
   // A restored category that does not exist here must not leave a blank pane.
-  assert.match(source, /if \(!showAgents && AGENT_TABS\.includes\(tab\)\) \{ tab = 'appearance';/u);
-  assert.doesNotMatch(source, /if \(!showAgents && AGENT_TABS\.includes\(tab\)\) selectTab/u,
-    'a correction must not DRILL into a category the user never tapped');
+  assert.match(source, /!showAgents && AGENT_TABS\.includes\(tab\)/u);
+  assert.match(source, /untrack\(\(\) => selectTab\('appearance', undefined, undefined, false\)\)/u,
+    '#156: capability corrections use the exit guard without opening a drill');
 });
 
 test('groups label themselves only when there are two, in the sidebar\u2019s own header voice (owner, 2026-09-05)', () => {
@@ -68,8 +68,8 @@ test('the category is restorable, and it opens on request', () => {
   assert.match(source, /let openedRequest = 0;/u);
   assert.match(
     source,
-    /const req = openRequest;\s*if \(!req \|\| req\.n === openedRequest\) return;[\s\S]*?if \(tabs\.some\(\(x\) => x\.id === req\.tab\)\) selectTab\(req\.tab\)/u,
-    'a one-shot {tab, n} request, ignored when that category does not exist here',
+    /const req = openRequest;\s*if \(!req \|\| req\.n === openedRequest\) return;[\s\S]*?if \(tabs\.some\(\(x\) => x\.id === req\.tab\)\) untrack\(\(\) => selectTab\(req\.tab, \(\) => \{\s*openedRequest = req\.n;/u,
+    '#156: one-shot requests are consumed only inside the accepted category action',
   );
 });
 
@@ -86,7 +86,7 @@ test('back peels the embedded page first, then the category', () => {
 test('one head at a time: Settings yields its own to the editor', () => {
   // The embedded editor brings a .page-head of its own; two stacked title bars
   // is most of a phone's first screenful.
-  assert.match(source, /\{#if !\(AGENT_TABS\.includes\(tab\) && agentsDrilled\)\}\s*<div class="page-head">/u);
+  assert.match(source, /\{#if !\(AGENT_TABS\.includes\(tab\) && agentsDrilled\)\}\s*<div class="page-head config-page-head">/u);
   assert.match(source, /onDrilled=\{\(d: boolean\) => agentsDrilled = d\}/u);
 });
 
@@ -111,7 +111,7 @@ test('category and address rows explain themselves with the one hover card (moti
   }
   // An address row: the address and its state (current / dialing / alternate);
   // the dialing cue used to be a native title — the card replaces it.
-  const addr = source.match(/<button class:active=\{address === activeAddress\} class:pending[\s\S]*?onclick=/u)?.[0] ?? '';
+  const addr = source.match(/<button type="button" class="config-input address-choice" class:active=\{address === activeAddress\} class:pending[\s\S]*?onclick=/u)?.[0] ?? '';
   assert.match(addr, /use:hoverInfo=\{\(\) => \(\{ title: address, lines: \[pending/u);
   assert.doesNotMatch(addr, /title=/u);
 });
@@ -121,8 +121,8 @@ test('the category list and a switched category unfold instead of flashing (moti
   // sidebar, and a re-shown list must not replay the unfold over the
   // drill-back slide (one motion per view).
   assert.match(source, /<div class="side-scroll subtle-scroll" class:reveal=\{!drillAnim\} use:scrollFade>/u);
-  // The pane is keyed on the category so a switch remounts it and its cards rise in.
-  assert.match(source, /\{#key tab\}\s*<div class="pref-content reveal">/u);
+  // #156 retires the cards; the same accepted category key reveals its form.
+  assert.match(source, /\{#key tab\}\s*<div class="pref-content">\s*<div class="config-form reveal">/u);
   assert.match(source, /<\/div>\s*\{\/key\}\s*\{\/if\}\s*<\/div>\s*<\/section>/u, 'the key closes with the pane');
 });
 
@@ -150,9 +150,36 @@ test('settings controls use labels and values, not a subtitle under every row (b
     assert.doesNotMatch(source, new RegExp(`<small>\\{t\\('${key}'\\)\\}<\\/small>`, 'u'),
       `${key} must not become persistent tutorial copy`);
   }
-  assert.match(source, /notifyPerm === 'denied'[\s\S]{0,120}<small>\{t\('hubNotifyDenied'\)\}<\/small>/u,
+  assert.match(source, /notifyPerm === 'denied'[\s\S]{0,120}<small class="config-note">\{t\('hubNotifyDenied'\)\}<\/small>/u,
     'an actual permission problem still explains itself');
-  assert.match(source, /class="font-error appear"/u, 'validation errors remain visible');
+  assert.match(source, /class="config-error font-error appear" role="alert"/u, 'validation errors remain visible');
+});
+
+test('Settings adopts shared configuration geometry and semantic controls (#156)', () => {
+  for (const component of ['CommandButton', 'Switch', 'Stepper', 'Slider']) {
+    assert.match(source, new RegExp(`import ${component} from '../ui/${component}\\.svelte'`, 'u'));
+    assert.match(source, new RegExp(`<${component}\\b`, 'u'));
+  }
+  assert.match(source, /class="config-head-inner"/u);
+  assert.match(source, /class="preference-row"/u);
+  assert.match(source, /class="pref-label"/u);
+  assert.match(source, /class="pref-control/u);
+  assert.doesNotMatch(style, /setting-card|setting-row|\.stepper|\.range-wrap|\.hook-action|\.reset|--ui-control-height|720px|999px/u,
+    'retired per-page cards, controls and dimensions must not survive the migration');
+  assert.match(source, /class="config-input mono shortcut-key"[\s\S]*?data-shortcut-recorder/u,
+    'the native key recorder retains its own input semantics and shares field geometry');
+  assert.match(source, /onGuardExit=\{registerAgentsGuard\}/u);
+  assert.match(source, /editRequest=\{tab === 'agents' \? acceptedAgentRequest : null\}/u,
+    'a queued Agent jump is never forwarded into another section');
+  assert.doesNotMatch(source, /addEventListener\(['"]popstate|pushState\(/u,
+    'the local guard must not become a second browser-history controller');
+  const layout = source.slice(source.indexOf('function measureLayout'), source.indexOf('let drillPushed'));
+  assert.match(layout, /node\.clientWidth < sidebar \+ editor/u,
+    'the category/form budget follows available container space');
+  assert.match(layout, /observer\.observe\(sidebar\)/u, 'the shared resizer also changes the budget');
+  assert.doesNotMatch(layout, /selectTab|onDrill|history\.|tab =/u,
+    'layout changes presentation, never navigation or the mounted draft');
+  assert.doesNotMatch(style, /container-type/u, 'fixed Select popovers retain the viewport');
 });
 
 test('the three font pickers demonstrate themselves and name their scope (board #97)', async () => {
@@ -160,10 +187,12 @@ test('the three font pickers demonstrate themselves and name their scope (board 
   // font Select renders its options IN the family each names (fontPreview),
   // and each row explains WHICH surfaces its role paints through the hover
   // card (the #87 dialect — never a persistent subtitle) + the aria-label.
+  // #156 retires dense here: a font value shares the Agent form's body step,
+  // even though it previews a different family.
   for (const [sel, hint] of [
-    [/bind:value=\{fontInput\} editable dense fontPreview/u, /use:hoverInfo=\{\(\) => \(\{ title: t\('fontFamily'\), text: t\('fontFamilyHint'\) \}\)\}/u],
-    [/bind:value=\{uiFontInput\} editable dense fontPreview/u, /use:hoverInfo=\{\(\) => \(\{ title: t\('uiFontBody'\), text: t\('uiFontBodyHint'\) \}\)\}/u],
-    [/bind:value=\{displayFontInput\} editable dense fontPreview/u, /use:hoverInfo=\{\(\) => \(\{ title: t\('uiFontDisplay'\), text: t\('uiFontDisplayHint'\) \}\)\}/u],
+    [/bind:value=\{fontInput\} editable fontPreview/u, /use:hoverInfo=\{\(\) => \(\{ title: t\('fontFamily'\), text: t\('fontFamilyHint'\) \}\)\}/u],
+    [/bind:value=\{uiFontInput\} editable fontPreview/u, /use:hoverInfo=\{\(\) => \(\{ title: t\('uiFontBody'\), text: t\('uiFontBodyHint'\) \}\)\}/u],
+    [/bind:value=\{displayFontInput\} editable fontPreview/u, /use:hoverInfo=\{\(\) => \(\{ title: t\('uiFontDisplay'\), text: t\('uiFontDisplayHint'\) \}\)\}/u],
   ] as const) {
     assert.match(source, sel, `the picker previews: ${sel}`);
     assert.match(source, hint, `its scope is explained on hover: ${hint}`);

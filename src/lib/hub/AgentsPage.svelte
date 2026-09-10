@@ -1,4 +1,5 @@
 <script>
+  import { untrack } from 'svelte';
   // AgentsPage — the agent configuration page, in the Hub page format
   // (ui-unification.md "Page skeleton"): a real sidebar (bg2, .side-h,
   // .side-row entries) + a main column with a .page-head. Definitions
@@ -16,6 +17,11 @@
   import { hoverInfo } from '../ui/hover.ts';
   import Select from '../ui/Select.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
+  import CommandButton from '../ui/CommandButton.svelte';
+  import Switch from '../ui/Switch.svelte';
+  import CheckboxGroup from '../ui/CheckboxGroup.svelte';
+  import { activeModal } from '../ui/modal.ts';
+  import { configFingerprint, configPayload, configValid } from './config-draft.ts';
 
   // The backends a registry agent can run on and the effort levels each
   // accepts come from the SERVER (`backends_list`, board #130) — the client
@@ -30,7 +36,9 @@
   // instructions, agents, teams, skills, MCP) and the main column shows the
   // chosen one's rows, then its editor (owner, 2026-09-04: "左边侧边栏先写配置
   // 条目 右边展示详细内容 不要全堆在一起了").
-  let { visible = false, onGoBack = null, editRequest = null, onDrilled = null, section = null } = $props();
+  let { visible = false, onGoBack = null, editRequest = null, onDrilled = null,
+    onGuardExit = null, section: requestedSection = null } = $props();
+  let section = $state(untrack(() => requestedSection));
   const SECTION_META = {
     agents: ['agentsTitle', 'agentsHint'],
     teams: ['teamsTitle', 'teamsHint'],
@@ -56,20 +64,25 @@
   ]);
   const storedCat = typeof localStorage !== 'undefined' ? localStorage.getItem(CAT_KEY) : null;
   let cat = $state(storedCat && storedCat in CAT_META ? storedCat : 'agents');
+  let categoryOpen = $state(false);
   function pickCat(id) {
-    if (cat !== id) closeAll();
-    cat = id;
-    try { localStorage.setItem(CAT_KEY, id); } catch {}
-    // The instructions category IS its editor — there is no list to show first.
-    if (id === 'global' && !editingGlobal) startGlobal();
+    if (cat === id) { categoryOpen = true; return; }
+    requestLeave(() => {
+      closeAll();
+      categoryOpen = true;
+      cat = id;
+      try { localStorage.setItem(CAT_KEY, id); } catch {}
+      if (id === 'global') startGlobal();
+    });
   }
-  // Switching category closes whatever editor the previous one had open — the
-  // page-head above already names the new category, an editor from the old
-  // one would contradict it.
-  let lastSection;
+  // section is the host's committed navigation result, after onGuardExit.
+  // Guarding it again would ask twice after the user has already discarded.
+  let lastSection = untrack(() => requestedSection);
   $effect(() => {
-    if (lastSection !== undefined && section !== lastSection) closeAll();
-    lastSection = section;
+    const next = requestedSection;
+    if (next === lastSection) return;
+    lastSection = next;
+    untrack(() => { closeAll(); section = next; });
   });
 
   let defs = $state([]);
@@ -96,6 +109,105 @@
   let mcpIsNew = $state(false);
   let error = $state('');
   let info = $state(''); // a good-news line (e.g. what a plugin import installed)
+  let rootEl = $state(null);
+  let paneMode = $state('wide');
+  let compactViewport = $state(typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches);
+  $effect(() => {
+    const node = rootEl;
+    if (!node) return;
+    const measure = () => {
+      if (!node.clientWidth) return;
+      compactViewport = window.matchMedia('(max-width: 760px)').matches;
+      const style = getComputedStyle(node);
+      const sidebar = parseFloat(style.getPropertyValue('--sidebar-w')) || 240;
+      const rows = parseFloat(style.getPropertyValue('--agents-rows-w')) || 240;
+      const editor = parseFloat(style.getPropertyValue('--config-editor-width')) || 480;
+      paneMode = node.clientWidth < sidebar + editor ? 'stacked'
+        : !section && node.clientWidth < sidebar + rows + editor ? 'reduced' : 'wide';
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    for (const aside of node.querySelectorAll(':scope > aside')) observer.observe(aside);
+    measure();
+    return () => observer.disconnect();
+  });
+  let original = $state('');
+  let pendingOperation = $state('');
+  const saving = $derived(!!pendingOperation);
+  let epoch = 0;
+  let exitIntent = $state(null);
+  const pendingExit = $derived(exitIntent?.confirm ? exitIntent.action : null);
+  const draft = $derived(editing ? { kind: 'agent', value: editing }
+    : editingTeam ? { kind: 'team', value: editingTeam }
+    : editingSkill ? { kind: 'skill', value: editingSkill }
+    : editingMcp ? { kind: 'mcp', value: editingMcp }
+    : editingGlobal ? { kind: 'global', value: editingGlobal } : null);
+  const creating = $derived(draft?.kind === 'agent' ? isNew : draft?.kind === 'team' ? teamIsNew
+    : draft?.kind === 'skill' ? skillIsNew : draft?.kind === 'mcp' ? mcpIsNew : false);
+  const editorTitle = $derived(draft?.kind === 'global' ? t('agentsGlobal')
+    : creating ? t(({ agent: 'agentsNew', team: 'teamsNew', skill: 'skillsNew', mcp: 'mcpNew' })[draft?.kind])
+    : draft?.value.name ?? '');
+  const dirty = $derived(!!draft && configFingerprint(draft) !== original);
+  const savable = $derived(!saving && !removing && !pendingExit && !pending
+    && configValid(draft, creating) && (creating || dirty));
+  const rememberDraft = () => { original = configFingerprint(draft); };
+  function requestLeave(action) {
+    if (pending || pendingExit) return;
+    if (saving || removing) { exitIntent = { action, confirm: false }; return; }
+    if (dirty) exitIntent = { action, confirm: true };
+    else action();
+  }
+  $effect(() => {
+    if (!exitIntent || exitIntent.confirm || saving || removing) return;
+    untrack(() => {
+      const action = exitIntent.action;
+      exitIntent = null;
+      requestLeave(action);
+    });
+  });
+  $effect(() => onGuardExit?.(requestLeave));
+  $effect(() => () => { epoch++; });
+  function editorKey(event) {
+    if (!visible || !rootEl?.contains(event.target) || activeModal(document)) return;
+    if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
+    if (event.key === 'Escape') {
+      event.preventDefault(); event.stopPropagation();
+      requestLeave(closeAll);
+      return;
+    }
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      saveCurrent();
+    }
+  }
+  async function saveCurrent() {
+    if (!savable) return;
+    const generation = epoch;
+    const kind = draft.kind, payload = configPayload(draft);
+    const importSource = kind === 'skill' && creating && !payload.name;
+    pendingOperation = 'save'; error = ''; info = '';
+    let imported;
+    try {
+      if (kind === 'agent') await registrySave(payload);
+      else if (kind === 'team') await teamsSave(payload);
+      else if (kind === 'mcp') await mcpSave(payload);
+      else if (kind === 'global') await globalPromptSet(payload.text);
+      else if (importSource) imported = await skillsImport(payload.source);
+      else await skillsSave(payload);
+    } catch (e) {
+      if (generation === epoch) error = String(e?.message ?? e);
+      return;
+    } finally {
+      if (generation === epoch) pendingOperation = '';
+    }
+    if (generation !== epoch) return;
+    closeAll(false);
+    if (imported) {
+      const skipped = imported.skipped?.length ? ` · ${t('skillsSkipped')}: ${imported.skipped.join(', ')}` : '';
+      info = `${t('skillsImported')}: ${(imported.imported ?? []).join(', ') || '—'}${skipped}`;
+    }
+    await reload();
+  }
 
   /** The pending destructive action: `{ kind, name }`. Deleting an agent
    * definition, a skill or an MCP server used to be immediate — one stray tap
@@ -145,11 +257,11 @@
     onDrilled?.(drilled);
     if (!onGoBack) return;
     onGoBack(() => {
-      if (pending && !removing) { pending = null; return true; }
-      if (editing) { editing = null; return true; }
-      if (editingTeam) { editingTeam = null; return true; }
-      if (editingSkill) { editingSkill = null; return true; }
-      if (editingMcp) { editingMcp = null; return true; }
+      if (saving || removing) return true;
+      if (pendingExit) { exitIntent = null; return true; }
+      if (pending) { pending = null; return true; }
+      if (drilled) { requestLeave(closeAll); return true; }
+      if (!section && categoryOpen && paneMode === 'stacked') { categoryOpen = false; return true; }
       return false;
     });
   });
@@ -159,17 +271,24 @@
     mcp:   { title: 'confirmDeleteMcpTitle',      note: 'confirmDeleteMcpNote' },
     team:  { title: 'confirmDeleteTeamTitle',     note: 'confirmDeleteTeamNote' },
   };
-  const ask = (kind, name) => { pending = { kind, name }; };
+  const ask = (kind, name) => { if (!saving && !removing) pending = { kind, name }; };
   async function runPending() {
     if (!pending || removing) return;
     const { kind, name } = pending;
+    const generation = epoch;
     removing = true;
+    error = '';
     try {
-      if (kind === 'agent') await remove(name);
-      else if (kind === 'team') await removeTeam(name);
-      else if (kind === 'skill') await removeSkill(name);
-      else await removeMcp(name);
+      if (kind === 'agent') await registryDelete(name);
+      else if (kind === 'team') await teamsDelete(name);
+      else if (kind === 'skill') await skillsDelete(name);
+      else await mcpDelete(name);
+      if (generation !== epoch) return;
       pending = null;
+      closeAll();
+      await reload();
+    } catch (e) {
+      if (generation === epoch) error = String(e?.message ?? e);
     } finally { removing = false; }
   }
 
@@ -230,46 +349,39 @@
   let editReqDone = 0;
   $effect(() => {
     const req = editRequest;
-    if (!req || req.n === editReqDone) return;
+    if (!visible || saving || removing || pendingExit || pending || !req || req.n === editReqDone) return;
     const def = defs.find((d) => d.name === req.name);
     if (!def) return;
     editReqDone = req.n;
-    // An agent opened from the Hub lands in the Agents category on the desktop.
-    if (!section && cat !== 'agents') { cat = 'agents'; try { localStorage.setItem(CAT_KEY, 'agents'); } catch {} }
-    startEdit(def);
+    untrack(() => startEdit(def));
   });
 
-  function closeAll() {
+  function closeAll(clearExit = true) {
+    epoch++;
     editing = null; editingSkill = null; editingMcp = null; editingTeam = null; editingGlobal = null;
-    error = ''; info = '';
+    original = ''; if (clearExit) exitIntent = null; error = ''; info = '';
   }
 
   // ── The app-wide instructions ─────────────────────────────────────────
-  async function startGlobal() {
-    closeAll();
-    editingGlobal = { text: '', path: '', max_bytes: 24 * 1024, loading: true };
-    try {
-      const r = await globalPromptGet();
-      if (editingGlobal) editingGlobal = { text: r.text ?? '', path: r.path ?? '', max_bytes: r.max_bytes ?? 24 * 1024, loading: false };
-    } catch (e) {
-      error = String(e?.message ?? e);
-      if (editingGlobal) editingGlobal.loading = false;
-    }
+  function startGlobal() {
+    requestLeave(async () => {
+      closeAll();
+      const generation = epoch;
+      editingGlobal = { text: '', path: '', max_bytes: 24 * 1024, loading: true };
+      rememberDraft();
+      try {
+        const r = await globalPromptGet();
+        if (generation !== epoch) return;
+        editingGlobal = { text: r.text ?? '', path: r.path ?? '', max_bytes: r.max_bytes ?? 24 * 1024, loading: false };
+        rememberDraft();
+      } catch (e) {
+        if (generation !== epoch) return;
+        error = String(e?.message ?? e);
+        editingGlobal.loading = false; editingGlobal.failed = true;
+      }
+    });
   }
-  let savingGlobal = $state(false);
   const globalBytes = $derived(editingGlobal ? new TextEncoder().encode(editingGlobal.text.trim()).length : 0);
-  async function saveGlobal() {
-    if (!editingGlobal || savingGlobal) return;
-    savingGlobal = true; error = ''; info = '';
-    try {
-      await globalPromptSet(editingGlobal.text);
-      editingGlobal = null;
-    } catch (e) {
-      error = String(e?.message ?? e);
-    } finally {
-      savingGlobal = false;
-    }
-  }
 
   // ── Agent teams (board #74) ───────────────────────────────────────────
   // A member has exactly one source: a BARE coding backend configured here, a
@@ -293,23 +405,27 @@
     };
   }
   function startTeam(team) {
-    closeAll();
-    teamIsNew = !team;
-    let members = [];
-    if (team) { try { members = JSON.parse(team.members) ?? []; } catch { members = []; } }
-    editingTeam = team
-      ? { name: team.name, description: team.description ?? '', members: members.map((m, i) => ({ name: m.name ?? '', base: m.base ?? '', team: m.team ?? '', role: m.role ?? '', model: m.model ?? '', effort: m.effort ?? '', agent: m.agent ? bareEditor(m.agent) : null, expanded: i === 0 })) }
-      : { name: '', description: '', members: [blankMember()] };
+    if (team && editingTeam?.name === team.name && !teamIsNew) return;
+    requestLeave(() => {
+      closeAll();
+      teamIsNew = !team;
+      let members = [];
+      if (team) { try { members = JSON.parse(team.members) ?? []; } catch { members = []; } }
+      editingTeam = team
+        ? { name: team.name, description: team.description ?? '', members: members.map((m, i) => ({ name: m.name ?? '', base: m.base ?? '', team: m.team ?? '', role: m.role ?? '', model: m.model ?? '', effort: m.effort ?? '', agent: m.agent ? bareEditor(m.agent) : null, expanded: i === 0 })) }
+        : { name: '', description: '', members: [blankMember()] };
+      rememberDraft();
+    });
   }
   function addMember() {
-    if (!editingTeam || editingTeam.members.length >= TEAM_MAX) return;
+    if (saving || !editingTeam || editingTeam.members.length >= TEAM_MAX) return;
     editingTeam.members = [
       ...editingTeam.members.map((member) => ({ ...member, expanded: false })),
       blankMember(),
     ];
   }
   function removeMember(i) {
-    if (!editingTeam) return;
+    if (saving || !editingTeam) return;
     const removedWasOpen = editingTeam.members[i]?.expanded;
     const members = editingTeam.members.filter((_, k) => k !== i);
     if (removedWasOpen && members.length && !members.some((member) => member.expanded)) {
@@ -331,6 +447,7 @@
    * agent or team. */
   const kindOf = (m) => (m.team ? `team:${m.team}` : m.base);
   function setBase(i, v) {
+    if (saving) return;
     const m = editingTeam.members[i];
     if (v.startsWith('team:')) { m.team = v.slice(5); m.base = ''; m.agent = null; m.expanded = true; return; }
     m.team = '';
@@ -363,40 +480,6 @@
       else if (m.base) ensureModels(baseBackend(m));
     }
   });
-  const teamSavable = $derived(!!editingTeam && editingTeam.name.trim() && editingTeam.members.length > 0
-    && editingTeam.members.every((m) => m.team || (m.name.trim() && (m.base || m.agent))));
-  async function saveTeam() {
-    if (!editingTeam) return;
-    error = '';
-    try {
-      await teamsSave({
-        name: editingTeam.name.trim(),
-        description: editingTeam.description.trim(),
-        members: JSON.stringify(editingTeam.members.map((m) => ({
-          name: m.team ? '' : m.name.trim(), base: m.team ? '' : m.base, team: m.team ?? '', role: m.role.trim(),
-          model: m.base && !m.team ? (m.model ?? '').trim() : '', effort: m.base && !m.team ? (m.effort ?? '') : '',
-          agent: m.base || m.team ? null : {
-            name: m.name.trim(), backend: m.agent.backend, model: (m.agent.model ?? '').trim(),
-            effort: m.agent.effort ?? '', system: m.agent.system ?? '',
-            skills: JSON.stringify(m.agent.skillSel ?? []),
-            mcp: JSON.stringify([...(m.agent.mcpSel ?? []), ...(m.agent.mcpExtra ?? [])]),
-            can_hire: false,
-          },
-        }))),
-      });
-      editingTeam = null;
-      await reload();
-    } catch (e) {
-      error = String(e?.message ?? e);
-    }
-  }
-  async function removeTeam(name) {
-    try {
-      await teamsDelete(name);
-      if (editingTeam?.name === name) editingTeam = null;
-      await reload();
-    } catch (e) { error = String(e?.message ?? e); }
-  }
   /** One-line summary for the sidebar row: member names, base in parentheses. */
   function teamSummary(team) {
     try { return (JSON.parse(team.members) ?? []).map((m) => (m.team ? `+${m.team}` : m.name)).filter(Boolean).join(' · '); } catch { return ''; }
@@ -408,6 +491,7 @@
   let skFiles = $state([]);
   let skSel = $state('SKILL.md');
   let skText = $state('');
+  let skillListRequest = 0, skillFileRequest = 0;
   // The YAML frontmatter duplicates the form fields (name/description) —
   // the preview shows the skill's BODY.
   function stripFrontmatter(md) {
@@ -415,20 +499,24 @@
     return m ? md.slice(m[0].length) : md;
   }
   function loadSkillFiles(name) {
+    const generation = epoch;
+    const request = ++skillListRequest;
     skFiles = [];
     skSel = 'SKILL.md';
     skText = '';
     skillsFiles(name)
-      .then((r) => { if (editingSkill?.name === name) skFiles = r.files ?? []; })
-      .catch(() => { skFiles = []; });
+      .then((r) => { if (generation === epoch && request === skillListRequest) skFiles = r.files ?? []; })
+      .catch(() => { if (generation === epoch && request === skillListRequest) skFiles = []; });
     loadSkillFile(name, 'SKILL.md');
   }
   function loadSkillFile(name, path) {
+    const generation = epoch;
+    const request = ++skillFileRequest;
     skSel = path;
     skText = '';
     skillsFile(name, path)
-      .then((r) => { if (editingSkill?.name === name && skSel === path) skText = r.content; })
-      .catch((e) => { if (editingSkill?.name === name && skSel === path) skText = String(e?.message ?? e); });
+      .then((r) => { if (generation === epoch && request === skillFileRequest) skText = r.content; })
+      .catch((e) => { if (generation === epoch && request === skillFileRequest) skText = String(e?.message ?? e); });
   }
   // The description is READING by default — skill descriptions run to
   // paragraphs (they teach the model when to fire) and a one-line input
@@ -436,89 +524,65 @@
   // (owner, 2026-08-29: "description 应该是多行的 默认是让我浏览 点击才能编辑").
   let descEditing = $state(false);
   function startSkill(sk) {
-    closeAll();
-    skillIsNew = !sk;
-    editingSkill = sk ? { ...sk } : { name: '', source: '', description: '' };
-    descEditing = false;
-    if (sk) loadSkillFiles(sk.name); else { skFiles = []; skText = ''; }
+    if (sk && editingSkill?.name === sk.name && !skillIsNew) return;
+    requestLeave(() => {
+      closeAll();
+      skillIsNew = !sk;
+      editingSkill = sk ? { ...sk } : { name: '', source: '', description: '' };
+      descEditing = false;
+      if (sk) loadSkillFiles(sk.name); else { skFiles = []; skText = ''; }
+      rememberDraft();
+    });
   }
-  let syncing = $state(false);
-  async function saveSkill() {
-    syncing = true;
-    error = '';
-    try {
-      if (skillIsNew && !editingSkill.name.trim()) {
-        // No name = install whatever the source contains (a claude plugin
-        // url imports each of its skills; the names come from the skills).
-        const r = await skillsImport(editingSkill.source);
-        await reload();
-        const first = skills.find((x) => x.name === r.imported?.[0]);
-        if (first) startSkill(first); else editingSkill = null;
-        const skipped = r.skipped?.length ? ` · ${t('skillsSkipped')}: ${r.skipped.join(', ')}` : '';
-        info = `${t('skillsImported')}: ${(r.imported ?? []).join(', ') || '—'}${skipped}`;
-        return;
-      }
-      await skillsSave(editingSkill);
-      editingSkill = null;
-      await reload();
-    } catch (e) { error = String(e?.message ?? e); }
-    finally { syncing = false; }
-  }
-  async function refreshSkill() {
-    syncing = true;
-    error = '';
-    try {
-      await skillsRefresh(editingSkill.name);
-      await reload();
-      editingSkill = { ...skills.find((x) => x.name === editingSkill.name) };
-      loadSkillFiles(editingSkill.name);
-    } catch (e) { error = String(e?.message ?? e); }
-    finally { syncing = false; }
-  }
-  async function removeSkill(name) {
-    try { await skillsDelete(name); editingSkill = null; await reload(); }
-    catch (e) { error = String(e?.message ?? e); }
+  function refreshSkill() {
+    requestLeave(async () => {
+      if (!editingSkill) return;
+      const generation = epoch, name = editingSkill.name;
+      pendingOperation = 'refresh'; error = '';
+      try {
+        await skillsRefresh(name);
+        const result = await skillsList();
+        if (generation !== epoch) return;
+        skills = result.skills ?? skills;
+        const refreshed = skills.find(x => x.name === name);
+        if (refreshed) { editingSkill = { ...refreshed }; rememberDraft(); loadSkillFiles(name); }
+      } catch (e) {
+        if (generation === epoch) error = String(e?.message ?? e);
+      } finally { if (generation === epoch) pendingOperation = ''; }
+    });
   }
 
   function startMcp(m) {
-    closeAll();
-    mcpIsNew = !m;
-    editingMcp = m ? { ...m, defText: pretty(m.def) } : { name: '', defText: '{\n  "command": "",\n  "args": []\n}' };
-  }
-  async function saveMcp() {
-    let def;
-    try { def = JSON.stringify(JSON.parse(editingMcp.defText)); }
-    catch { error = t('agentsMcpInvalid'); return; }
-    try {
-      await mcpSave({ name: editingMcp.name.trim(), def });
-      editingMcp = null;
-      await reload();
-    } catch (e) { error = String(e?.message ?? e); }
-  }
-  async function removeMcp(name) {
-    try { await mcpDelete(name); editingMcp = null; await reload(); }
-    catch (e) { error = String(e?.message ?? e); }
+    if (m && editingMcp?.name === m.name && !mcpIsNew) return;
+    requestLeave(() => {
+      closeAll();
+      mcpIsNew = !m;
+      editingMcp = m ? { ...m, defText: pretty(m.def) } : { name: '', defText: '{\n  "command": "",\n  "args": []\n}' };
+      rememberDraft();
+    });
   }
 
   function startEdit(def) {
-    closeAll();
-    isNew = !def;
-    // skills / mcp become SELECTIONS over the central assets (closed loop —
-    // no free-text names). Legacy inline objects or unknown names in an old
-    // def are preserved untouched in `extra` so saving does not eat them.
-    const skillSel = def ? parseRefs(def.skills) : [];
-    const mcpEntries = def ? parseRefs(def.mcp) : [];
-    editing = def
-      ? {
-          ...def,
-          skillSel: skillSel.filter((x) => typeof x === 'string'),
-          mcpSel: mcpEntries.filter((x) => typeof x === 'string'),
-          mcpExtra: mcpEntries.filter((x) => typeof x !== 'string'),
-        }
-      : { name: '', backend: defaultBackend(), model: '', effort: '', system: '', can_hire: false, skillSel: [], mcpSel: [], mcpExtra: [] };
-  }
-  function toggleSel(list, name) {
-    return list.includes(name) ? list.filter((n) => n !== name) : [...list, name];
+    if (def && editing?.name === def.name && !isNew) return;
+    requestLeave(() => {
+      closeAll();
+      if (!section) { cat = 'agents'; categoryOpen = true; try { localStorage.setItem(CAT_KEY, 'agents'); } catch {} }
+      isNew = !def;
+      // Preserve unknown references and inline MCP objects while editing the
+      // choices currently present in the shared catalogs.
+      const skillSel = def ? parseRefs(def.skills) : [];
+      const mcpEntries = def ? parseRefs(def.mcp) : [];
+      editing = def
+        ? {
+            ...def,
+            effort: def.effort ?? '',
+            skillSel: skillSel.filter((x) => typeof x === 'string'),
+            mcpSel: mcpEntries.filter((x) => typeof x === 'string'),
+            mcpExtra: mcpEntries.filter((x) => typeof x !== 'string'),
+          }
+        : { name: '', backend: defaultBackend(), model: '', effort: '', system: '', can_hire: false, skillSel: [], mcpSel: [], mcpExtra: [] };
+      rememberDraft();
+    });
   }
 
   function parseRefs(json) {
@@ -528,36 +592,9 @@
     try { return JSON.stringify(JSON.parse(json), null, 2); } catch { return json || '[]'; }
   }
 
-  async function save() {
-    if (!editing) return;
-    error = '';
-    try {
-      await registrySave({
-        name: editing.name.trim(),
-        backend: editing.backend,
-        model: editing.model.trim(),
-        effort: editing.effort ?? '',
-        system: editing.system,
-        skills: JSON.stringify(editing.skillSel),
-        mcp: JSON.stringify([...editing.mcpSel, ...editing.mcpExtra]),
-        can_hire: editing.can_hire,
-      });
-      editing = null;
-      await reload();
-    } catch (e) {
-      error = String(e?.message ?? e);
-    }
-  }
-
-  async function remove(name) {
-    try {
-      await registryDelete(name);
-      if (editing?.name === name) editing = null;
-      await reload();
-    } catch (e) { error = String(e?.message ?? e); }
-  }
 </script>
 
+<svelte:window onkeydown={editorKey} />
 {#snippet rows(kind)}
   <!-- One kind's definitions as rows — the phone's sidebar list (narrowed by
        `section`) and the desktop's main list (the chosen category) render the
@@ -626,8 +663,10 @@
       {/if}
 {/snippet}
 
-<div class="agents-root" class:editing={drilled} class:with-rows={!section} class:drill-fwd={drillAnim === 'fwd'} class:drill-back={drillAnim === 'back'}>
-  <aside class="sidebar">
+<div class="agents-root" bind:this={rootEl} class:editing={drilled} class:with-rows={!section}
+  class:reduced={paneMode === 'reduced'} class:stacked={paneMode === 'stacked'} class:category-open={categoryOpen}
+  class:drill-fwd={drillAnim === 'fwd'} class:drill-back={drillAnim === 'back'}>
+  <aside class="sidebar config-navigation">
     <SideHandle />
     <div class="side-scroll subtle-scroll" class:reveal={justLoaded} use:scrollFade>
       {#if section}
@@ -642,7 +681,7 @@
           <button class="side-row" class:open={cat === c.id} onclick={() => pickCat(c.id)}
             use:hoverInfo={() => ({ title: t(c.label), text: t(c.hint) })}>
             <span class="r-name">{t(c.label)}</span>
-            {#if c.count}<span class="r-backend">{c.count()}</span>{:else}<span class="r-backend">AGENTS.md</span>{/if}
+            {#if c.count}<span class="r-backend">{c.count()}</span>{/if}
           </button>
         {/each}
       {/if}
@@ -657,7 +696,15 @@
          instructions have no roster, only the one document, so their level
          is that single row. Compact keeps the drill — this column is
          desktop-only. -->
-    <aside class="cat-rows">
+    <aside class="cat-rows config-navigation">
+      {#if paneMode === 'stacked'}
+        <div class="page-head config-page-head">
+          <div class="config-head-inner">
+            <CommandButton variant="icon" icon="chevron-left" label={t('back')} onclick={() => categoryOpen = false} />
+            <h1>{t(CAT_META[cat].label)}</h1>
+          </div>
+        </div>
+      {/if}
       <SideHandle varName="--agents-rows-w" storeKey="tmux_agents_rows_w" min={180} max={420} def={240} label={t(CAT_META[cat].label)} />
       <div class="rows-scroll subtle-scroll" class:reveal={justLoaded} use:scrollFade>
         {#if cat === 'global'}
@@ -672,71 +719,75 @@
   {/if}
 
   <main class="mid">
+    {#if drilled}
+      <div class="page-head config-page-head">
+        <div class="config-head-inner">
+          {#if paneMode !== 'wide'}
+            <CommandButton variant="icon" icon="chevron-left" label={t('back')} disabled={saving || removing}
+              onclick={() => requestLeave(closeAll)} />
+          {/if}
+          <h1>{editorTitle}</h1>
+          <div class="config-actions">
+            {#if !creating && draft.kind !== 'global' && editingSkill?.source !== 'builtin'}
+              <CommandButton variant="danger" iconOnly icon="trash" label={t('delete')}
+                disabled={saving || removing} onclick={() => ask(draft.kind, draft.value.name)} />
+            {/if}
+            {#if editingSkill && !skillIsNew}
+              <CommandButton variant="icon" icon="refresh" label={t('skillsRefresh')}
+                disabled={saving || removing} pending={pendingOperation === 'refresh'} onclick={refreshSkill} />
+            {/if}
+            {#if editingGlobal?.failed}
+              <CommandButton variant="icon" icon="refresh" label={t('configRetry')} onclick={startGlobal} />
+            {/if}
+            {#if paneMode === 'wide'}
+              <CommandButton variant="icon" icon="x" label={t('cancel')} disabled={saving || removing}
+                onclick={() => requestLeave(closeAll)} />
+            {/if}
+            <CommandButton variant="primary" iconOnly icon={editingSkill && skillIsNew ? 'download' : 'check'}
+              label={editingSkill && skillIsNew ? t('skillsImport') : t('save')}
+              disabled={!savable} pending={pendingOperation === 'save'} onclick={saveCurrent} />
+          </div>
+        </div>
+      </div>
+    {/if}
     {#if editingGlobal}
-      <div class="page-head">
-        <h1>{t('agentsGlobal')}</h1>
-        <span class="spacer"></span>
-        <div class="head-acts">
-        <button class="icon-btn" title={t('cancel')} aria-label={t('cancel')} onclick={() => editingGlobal = null}><Icon name="x" size={14} /></button>
-        <button class="icon-btn go" disabled={editingGlobal.loading || savingGlobal || globalBytes > editingGlobal.max_bytes}
-          title={t('save')} aria-label={t('save')} onclick={saveGlobal}><Icon name="check" size={14} /></button>
-        </div>
-      </div>
-      <div class="editor">
-        {#if error}<div class="err appear">{error}</div>{/if}
+      <div class="editor config-form"><fieldset class="config-fields" disabled={saving || removing || editingGlobal.loading || editingGlobal.failed} aria-busy={saving}>
+        {#if error}<div class="err config-error appear" role="alert">{error}</div>{/if}
         <p class="hint wide">{t('agentsGlobalHint').replace('{path}', editingGlobal.path || '<config>/AGENTS.md')}</p>
-        <textarea class="mono" rows="16" bind:value={editingGlobal.text} spellcheck="false"
-          disabled={editingGlobal.loading} placeholder={t('agentsGlobalPh')}></textarea>
+        <textarea class="config-input mono" rows="16" bind:value={editingGlobal.text} spellcheck="false"
+          aria-label={t('agentsGlobal')} placeholder={t('agentsGlobalPh')}></textarea>
         <p class="hint" class:over={globalBytes > editingGlobal.max_bytes}>{t('agentsGlobalBytes').replace('{n}', String(globalBytes)).replace('{max}', String(editingGlobal.max_bytes))}</p>
-      </div>
+      </fieldset></div>
     {:else if editingSkill}
-      <div class="page-head">
-        <h1>{skillIsNew ? t('skillsNew') : editingSkill.name}</h1>
-        <span class="spacer"></span>
-        <div class="head-acts">
-        <!-- Icon-only, borderless, the label on hover — the same grammar the
-             conversation header speaks (owner, 2026-08-28: "能用图标就不用
-             文字了…只有鼠标移在上边才有小的文字alt标签"). -->
-        {#if !skillIsNew && editingSkill.source !== 'builtin'}
-          <!-- A built-in would reseed at the next server start — offering
-               delete would be a lie the restart un-tells. -->
-          <button class="icon-btn danger" title={t('delete')} aria-label={t('delete')} onclick={() => ask('skill', editingSkill.name)}><Icon name="trash" size={14} /></button>
-        {/if}
-        {#if !skillIsNew}
-          <button class="icon-btn" disabled={syncing} title={t('skillsRefresh')} aria-label={t('skillsRefresh')} onclick={refreshSkill}><Icon name="refresh" size={14} /></button>
-        {/if}
-        <button class="icon-btn" title={t('cancel')} aria-label={t('cancel')} onclick={() => editingSkill = null}><Icon name="x" size={14} /></button>
-        <button class="icon-btn go" disabled={!editingSkill.source.trim() || (!skillIsNew && !editingSkill.name.trim()) || syncing}
-          title={skillIsNew ? t('skillsImport') : t('save')} aria-label={skillIsNew ? t('skillsImport') : t('save')}
-          onclick={saveSkill}><Icon name={skillIsNew ? 'download' : 'check'} size={14} /></button>
-        </div>
-      </div>
-      <div class="editor">
-        {#if error}<div class="err appear">{error}</div>{/if}
+      <div class="editor config-form"><fieldset class="config-fields" disabled={saving || removing} aria-busy={saving}>
+        {#if error}<div class="err config-error appear" role="alert">{error}</div>{/if}
         {#if info}<p class="hint appear">{info}</p>{/if}
-        <label>{t('agentsName')}
-          <input bind:value={editingSkill.name} disabled={!skillIsNew} placeholder="git-review" />
+        <label class="config-field"><span class="config-field-label">{t('agentsName')}</span>
+          <input class="config-input" bind:value={editingSkill.name} readonly={!skillIsNew} placeholder="git-review" />
         </label>
         {#if skillIsNew}
           <p class="hint">{t('skillsImportHint')}</p>
         {/if}
-        <label>{t('skillsSource')}
-          <input bind:value={editingSkill.source} disabled={editingSkill.source === 'builtin'} placeholder="https://github.com/org/repo/tree/main/skills/git-review 或 /abs/local/dir" />
+        <label class="config-field"><span class="config-field-label">{t('skillsSource')}</span>
+          <input class="config-input" bind:value={editingSkill.source} readonly={editingSkill.source === 'builtin'} placeholder="https://github.com/org/repo/tree/main/skills/git-review" />
         </label>
         {#if editingSkill.source === 'builtin'}
           <p class="hint">{t('skillsBuiltin')}</p>
         {/if}
-        <label>{t('skillsDesc')}
-          {#if skillIsNew || descEditing}
+        <div class="config-field"><span class="config-field-label">{t('skillsDesc')}</span>
+          {#if editingSkill.source === 'builtin'}
+            <p class="desc-readonly">{editingSkill.description || '—'}</p>
+          {:else if skillIsNew || descEditing}
             <!-- svelte-ignore a11y_autofocus — the user just clicked "edit
                  this text"; focusing anywhere else would drop the intent. -->
-            <textarea rows="4" bind:value={editingSkill.description} autofocus={descEditing}
+            <textarea class="config-input" rows="4" bind:value={editingSkill.description} autofocus={descEditing}
+              aria-label={t('skillsDesc')}
               onblur={() => descEditing = false}></textarea>
           {:else}
             <button class="desc-view" type="button" title={t('edit')} onclick={() => descEditing = true}
               >{editingSkill.description || '—'}</button>
           {/if}
-        </label>
+        </div>
         {#if editingSkill.synced_at}
           <p class="hint">{t('skillsSynced')} {new Date(editingSkill.synced_at * 1000).toLocaleString()}</p>
         {/if}
@@ -763,54 +814,33 @@
             {/if}
           </div>
         {/if}
-      </div>
+      </fieldset></div>
     {:else if editingMcp}
-      <div class="page-head">
-        <h1>{mcpIsNew ? t('mcpNew') : editingMcp.name}</h1>
-        <span class="spacer"></span>
-        <div class="head-acts">
-        {#if !mcpIsNew}
-          <button class="icon-btn danger" title={t('delete')} aria-label={t('delete')} onclick={() => ask('mcp', editingMcp.name)}><Icon name="trash" size={14} /></button>
-        {/if}
-        <button class="icon-btn" title={t('cancel')} aria-label={t('cancel')} onclick={() => editingMcp = null}><Icon name="x" size={14} /></button>
-        <button class="icon-btn go" disabled={!editingMcp.name.trim()} title={t('save')} aria-label={t('save')} onclick={saveMcp}><Icon name="check" size={14} /></button>
-        </div>
-      </div>
-      <div class="editor">
-        {#if error}<div class="err appear">{error}</div>{/if}
-        <label>{t('agentsName')}
-          <input bind:value={editingMcp.name} disabled={!mcpIsNew} placeholder="files" />
+      <div class="editor config-form"><fieldset class="config-fields" disabled={saving || removing} aria-busy={saving}>
+        {#if error}<div class="err config-error appear" role="alert">{error}</div>{/if}
+        <label class="config-field"><span class="config-field-label">{t('agentsName')}</span>
+          <input class="config-input" bind:value={editingMcp.name} readonly={!mcpIsNew} placeholder="files" />
         </label>
-        <label>{t('mcpDef')}
-          <textarea class="mono" rows="10" bind:value={editingMcp.defText} spellcheck="false"></textarea>
+        <label class="config-field"><span class="config-field-label">{t('mcpDef')}</span>
+          <textarea class="config-input mono" rows="10" bind:value={editingMcp.defText} spellcheck="false"></textarea>
         </label>
-      </div>
+        {#if dirty && !configValid(draft, creating)}<p class="config-error">{t('agentsMcpInvalid')}</p>{/if}
+      </fieldset></div>
     {:else if editingTeam}
-      <div class="page-head">
-        <h1>{teamIsNew ? t('teamsNew') : editingTeam.name}</h1>
-        <span class="spacer"></span>
-        <div class="head-acts">
-        {#if !teamIsNew}
-          <button class="icon-btn danger" title={t('delete')} aria-label={t('delete')} onclick={() => ask('team', editingTeam.name)}><Icon name="trash" size={14} /></button>
-        {/if}
-        <button class="icon-btn" title={t('cancel')} aria-label={t('cancel')} onclick={() => editingTeam = null}><Icon name="x" size={14} /></button>
-        <button class="icon-btn go" disabled={!teamSavable} title={t('save')} aria-label={t('save')} onclick={saveTeam}><Icon name="check" size={14} /></button>
-        </div>
-      </div>
-      <div class="editor team-editor">
-        {#if error}<div class="err appear">{error}</div>{/if}
-        <div class="team-basics">
-          <label>{t('teamsName')}
-            <input bind:value={editingTeam.name} disabled={!teamIsNew} placeholder="dev-squad" />
+      <div class="editor config-form"><fieldset class="config-fields" disabled={saving || removing} aria-busy={saving}>
+        {#if error}<div class="err config-error appear" role="alert">{error}</div>{/if}
+        <div class="config-fields">
+          <label class="config-field"><span class="config-field-label">{t('teamsName')}</span>
+            <input class="config-input" bind:value={editingTeam.name} readonly={!teamIsNew} placeholder="dev-squad" />
           </label>
-          <label class="team-rules">{t('teamsDesc')}
-            <textarea class="rules-editor" rows="6" bind:value={editingTeam.description}
+          <label class="config-field"><span class="config-field-label">{t('teamsDesc')}</span>
+            <textarea class="config-input" rows="6" bind:value={editingTeam.description}
               placeholder={t('teamsDescPh')} use:autoGrow></textarea>
           </label>
         </div>
-        <div class="pick-block team-members">
+          <div class="config-fields">
           <div class="members-head">
-            <span class="pick-label">{t('teamsMembers')}</span>
+            <span class="config-field-label">{t('teamsMembers')}</span>
             <span class="members-count">{editingTeam.members.length}/{TEAM_MAX}</span>
           </div>
           {#each editingTeam.members as m, i (i)}
@@ -838,22 +868,22 @@
                   </span>
                 </button>
                 <div class="member-actions">
-                  <button class="icon-btn danger" type="button" title={t('teamsRemoveMember')} aria-label={t('teamsRemoveMember')}
-                    disabled={editingTeam.members.length <= 1} onclick={() => removeMember(i)}><Icon name="x" size={13} /></button>
+                  <CommandButton variant="danger" iconOnly icon="x" label={t('teamsRemoveMember')}
+                    disabled={saving || removing || editingTeam.members.length <= 1} onclick={() => removeMember(i)} />
                 </div>
               </div>
               {#if m.expanded}
                 <div class="member-body appear">
                   <section class="member-section identity-section">
                     <div class="member-section-title">{t('teamsMemberSetup')}</div>
-                    <div class="member-identity" class:single={!!m.team}>
+                    <div class="config-row">
                       {#if !m.team}
-                        <label>{t('teamsMemberName')}
-                          <input class="member-name" bind:value={m.name} placeholder="dev" />
+                        <label class="config-field"><span class="config-field-label">{t('teamsMemberName')}</span>
+                          <input class="config-input" bind:value={m.name} placeholder="dev" />
                         </label>
                       {/if}
-                      <label>{t('teamsBase')}
-                        <Select value={kindOf(m)} dense ariaLabel={t('teamsBase')}
+                      <label class="config-field"><span class="config-field-label">{t('teamsBase')}</span>
+                        <Select value={kindOf(m)} disabled={saving || removing} ariaLabel={t('teamsBase')}
                           options={[
                             { value: '', label: t('teamsBare') },
                             ...defs.map((d) => ({ value: d.name, label: `${t('teamsCustomAgent')}: ${d.name}`, icon: backendIcon(d.backend) ?? undefined })),
@@ -864,8 +894,8 @@
                     </div>
                   </section>
                   <section class="member-section role-section">
-                    <label>{m.team ? t('teamsSubBrief') : t('teamsRole')}
-                      <textarea class="role-editor" rows="6" bind:value={m.role}
+                    <label class="config-field"><span class="config-field-label">{m.team ? t('teamsSubBrief') : t('teamsRole')}</span>
+                      <textarea class="config-input" rows="6" bind:value={m.role}
                         placeholder={m.team ? t('teamsSubBriefPh') : t('teamsRolePh')} use:autoGrow></textarea>
                     </label>
                   </section>
@@ -874,13 +904,13 @@
                          runtime overrides and the team role live here. -->
                     <section class="member-section">
                       <div class="member-section-title">{t('teamsOverrides')}</div>
-                      <div class="row2">
-                        <label>{t('agentsModel')}
-                          <Select bind:value={m.model} editable dense options={modelsByBackend[baseBackend(m)] ?? []}
+                      <div class="config-row">
+                        <label class="config-field"><span class="config-field-label">{t('agentsModel')}</span>
+                          <Select bind:value={m.model} editable disabled={saving || removing} options={modelsByBackend[baseBackend(m)] ?? []}
                             placeholder={t('teamsInherit')} ariaLabel={t('agentsModel')} />
                         </label>
-                        <label>{t('agentsEffort')}
-                          <Select bind:value={m.effort} dense
+                        <label class="config-field"><span class="config-field-label">{t('agentsEffort')}</span>
+                          <Select bind:value={m.effort} disabled={saving || removing}
                             options={[{ value: '', label: t('teamsInherit') }, ...backendEfforts(baseBackend(m))]}
                             ariaLabel={t('agentsEffort')} />
                         </label>
@@ -893,53 +923,43 @@
                          expose prompt / Skills / MCP here. -->
                     <section class="member-section">
                       <div class="member-section-title">{t('teamsBareConfig')}</div>
-                      <div class="row3">
-                        <label>{t('agentsBackend')}
-                          <Select bind:value={m.agent.backend} dense ariaLabel={t('agentsBackend')}
+                      <div class="config-row">
+                        <label class="config-field"><span class="config-field-label">{t('agentsBackend')}</span>
+                          <Select bind:value={m.agent.backend} disabled={saving || removing} ariaLabel={t('agentsBackend')}
                             options={backends.map((b) => ({ value: b, icon: backendIcon(b) ?? undefined }))} />
                         </label>
-                        <label>{t('agentsModel')}
-                          <Select bind:value={m.agent.model} editable dense options={modelsByBackend[m.agent.backend] ?? []}
+                        <label class="config-field"><span class="config-field-label">{t('agentsModel')}</span>
+                          <Select bind:value={m.agent.model} editable disabled={saving || removing} options={modelsByBackend[m.agent.backend] ?? []}
                             placeholder={t('agentsModelDefault')} ariaLabel={t('agentsModel')} />
                         </label>
-                        <label>{t('agentsEffort')}
-                          <Select bind:value={m.agent.effort} dense
+                        <label class="config-field"><span class="config-field-label">{t('agentsEffort')}</span>
+                          <Select bind:value={m.agent.effort} disabled={saving || removing}
                             options={[{ value: '', label: t('agentsModelDefault') }, ...backendEfforts(m.agent.backend)]}
                             ariaLabel={t('agentsEffort')} />
                         </label>
                       </div>
-                      <label>{t('agentsSystem')}
-                        <textarea class="agent-prompt" rows="12" bind:value={m.agent.system}
+                      <label class="config-field"><span class="config-field-label">{t('agentsSystem')}</span>
+                        <textarea class="config-input" rows="12" bind:value={m.agent.system}
                           placeholder={t('agentsSystemPh')} use:autoGrow></textarea>
                       </label>
-                      <div class="member-assets">
-                        <div class="pick-block">
-                          <span class="pick-label">{t('agentsSkills')}</span>
+                      <div class="config-row">
+                        <div class="config-field">
                           {#if skills.length}
-                            <div class="pick-row">
-                              {#each skills as sk (sk.name)}
-                                <button type="button" class="pick" class:sel={m.agent.skillSel.includes(sk.name)}
-                                  onclick={() => m.agent.skillSel = toggleSel(m.agent.skillSel, sk.name)}>
-                                  <Icon name="zap" size={11} />{sk.name}
-                                </button>
-                              {/each}
-                            </div>
+                            <CheckboxGroup label={t('agentsSkills')} value={m.agent.skillSel} disabled={saving || removing}
+                              options={skills.map(sk => ({ value: sk.name, label: sk.name }))}
+                              onchange={next => m.agent.skillSel = next} />
                           {:else}
+                            <span class="config-field-label">{t('agentsSkills')}</span>
                             <p class="hint">{t('agentsNoSkills')}</p>
                           {/if}
                         </div>
-                        <div class="pick-block">
-                          <span class="pick-label">{t('agentsMcp')}</span>
+                        <div class="config-field">
                           {#if mcps.length}
-                            <div class="pick-row">
-                              {#each mcps as server (server.name)}
-                                <button type="button" class="pick" class:sel={m.agent.mcpSel.includes(server.name)}
-                                  onclick={() => m.agent.mcpSel = toggleSel(m.agent.mcpSel, server.name)}>
-                                  <Icon name="link" size={11} />{server.name}
-                                </button>
-                              {/each}
-                            </div>
+                            <CheckboxGroup label={t('agentsMcp')} value={m.agent.mcpSel} disabled={saving || removing}
+                              options={mcps.map(server => ({ value: server.name, label: server.name }))}
+                              onchange={next => m.agent.mcpSel = next} />
                           {:else}
+                            <span class="config-field-label">{t('agentsMcp')}</span>
                             <p class="hint">{t('agentsNoMcp')}</p>
                           {/if}
                           {#if m.agent.mcpExtra.length}
@@ -954,119 +974,90 @@
             </div>
           {/each}
           {#if editingTeam.members.length < TEAM_MAX}
-            <button class="chip-btn team-add" type="button" onclick={addMember}><Icon name="plus" size={12} />{t('teamsAddMember')}</button>
+            <div><CommandButton icon="plus" label={t('teamsAddMember')} disabled={saving || removing} onclick={addMember} /></div>
           {:else}
             <p class="hint">{t('teamsMax').replace('{n}', String(TEAM_MAX))}</p>
           {/if}
         </div>
-      </div>
+      </fieldset></div>
     {:else if editing}
-      <div class="page-head">
-        <h1>{isNew ? t('agentsNew') : editing.name}</h1>
-        <span class="spacer"></span>
-        <div class="head-acts">
-        {#if !isNew}
-          <button class="icon-btn danger" title={t('delete')} aria-label={t('delete')} onclick={() => ask('agent', editing.name)}><Icon name="trash" size={14} /></button>
-        {/if}
-        <button class="icon-btn" title={t('cancel')} aria-label={t('cancel')} onclick={() => editing = null}><Icon name="x" size={14} /></button>
-        <button class="icon-btn go" disabled={!editing.name.trim()} title={t('save')} aria-label={t('save')} onclick={save}><Icon name="check" size={14} /></button>
-        </div>
-      </div>
-      <div class="editor">
-        {#if error}<div class="err appear">{error}</div>{/if}
+      <div class="editor config-form"><fieldset class="config-fields" disabled={saving || removing} aria-busy={saving}>
+        {#if error}<div class="err config-error appear" role="alert">{error}</div>{/if}
 
-        <label>{t('agentsName')}
-          <input bind:value={editing.name} disabled={!isNew} placeholder="reviewer" />
+        <label class="config-field"><span class="config-field-label">{t('agentsName')}</span>
+          <input class="config-input" bind:value={editing.name} readonly={!isNew} placeholder="reviewer" />
         </label>
-        <div class="row2">
-          <label>{t('agentsBackend')}
-            <Select bind:value={editing.backend} dense ariaLabel={t('agentsBackend')}
+        <div class="config-row">
+          <label class="config-field"><span class="config-field-label">{t('agentsBackend')}</span>
+            <Select bind:value={editing.backend} disabled={saving || removing} ariaLabel={t('agentsBackend')}
               options={backends.map((b) => ({ value: b, icon: backendIcon(b) ?? undefined }))} />
           </label>
-          <label>{t('agentsModel')}
+          <label class="config-field"><span class="config-field-label">{t('agentsModel')}</span>
             <!-- Editable Select, not a native <datalist>: the OS suggestion
                  popup is the seam the shared dropdown exists to remove (owner,
                  2026-08-24: "模型选择下拉框明显不对"). The value stays free
                  text — an id we cannot enumerate is still typeable, and
                  registry_save remains the authority that rejects a bad one. -->
-            <Select bind:value={editing.model} editable dense options={models}
+            <Select bind:value={editing.model} editable disabled={saving || removing} options={models}
               placeholder={t('agentsModelDefault')} ariaLabel={t('agentsModel')} />
           </label>
-        </div>
-        <div class="row2">
-          <label>{t('agentsEffort')}
+          <label class="config-field"><span class="config-field-label">{t('agentsEffort')}</span>
             <!-- A fixed enum per backend (the CLI's own levels), so a Select,
                  not free text: a typo'd effort is a warning above the splash
                  and a silent fallback to the default. '' = backend default,
                  same contract as the model. -->
-            <Select bind:value={editing.effort} dense
+            <Select bind:value={editing.effort} disabled={saving || removing}
               options={[{ value: '', label: t('agentsModelDefault') }, ...backendEfforts(editing.backend)]}
               ariaLabel={t('agentsEffort')} />
           </label>
-          <div></div>
         </div>
-        <!-- can_hire is a MEMBERSHIP toggle like the skill/MCP picks below, so
-             it wears the same .pick chip — a native checkbox next to custom
-             fields read as a different species (owner, 2026-08-24: "can hire
-             样式也不和谐"). -->
-        <div class="pick-block">
-          <button class="pick" class:sel={editing.can_hire} type="button"
-            aria-pressed={editing.can_hire} title={t('agentsManagerHint')}
-            onclick={() => editing.can_hire = !editing.can_hire}>
-            {#key editing.can_hire}<span class="pick-glyph appear-pop"><Icon name={editing.can_hire ? 'check' : 'bot'} size={11} /></span>{/key}<span class="m-badge">M</span>{t('agentsManager')}
-          </button>
-        </div>
-        <label>{t('agentsSystem')}
-          <textarea rows="6" bind:value={editing.system} placeholder={t('agentsSystemPh')}></textarea>
+        <Switch checked={editing.can_hire} label={t('agentsManager')} disabled={saving || removing}
+          onchange={next => editing.can_hire = next} />
+        <label class="config-field"><span class="config-field-label">{t('agentsSystem')}</span>
+          <textarea class="config-input" rows="6" bind:value={editing.system} placeholder={t('agentsSystemPh')}></textarea>
         </label>
-        <div class="pick-block">
-          <span class="pick-label">{t('agentsSkills')}</span>
+        <div class="config-field">
           {#if skills.length}
-            <div class="pick-row">
-              {#each skills as sk (sk.name)}
-                <button class="pick" class:sel={editing.skillSel.includes(sk.name)} onclick={() => editing.skillSel = toggleSel(editing.skillSel, sk.name)}>
-                  <Icon name="zap" size={11} />{sk.name}
-                </button>
-              {/each}
-            </div>
+            <CheckboxGroup label={t('agentsSkills')} value={editing.skillSel} disabled={saving || removing}
+              options={skills.map(sk => ({ value: sk.name, label: sk.name }))}
+              onchange={next => editing.skillSel = next} />
           {:else}
+            <span class="config-field-label">{t('agentsSkills')}</span>
             <p class="hint">{t('agentsNoSkills')}</p>
           {/if}
         </div>
-        <div class="pick-block">
-          <span class="pick-label">{t('agentsMcp')}</span>
+        <div class="config-field">
           {#if mcps.length}
-            <div class="pick-row">
-              {#each mcps as m (m.name)}
-                <button class="pick" class:sel={editing.mcpSel.includes(m.name)} onclick={() => editing.mcpSel = toggleSel(editing.mcpSel, m.name)}>
-                  <Icon name="link" size={11} />{m.name}
-                </button>
-              {/each}
-            </div>
+            <CheckboxGroup label={t('agentsMcp')} value={editing.mcpSel} disabled={saving || removing}
+              options={mcps.map(server => ({ value: server.name, label: server.name }))}
+              onchange={next => editing.mcpSel = next} />
           {:else}
+            <span class="config-field-label">{t('agentsMcp')}</span>
             <p class="hint">{t('agentsNoMcp')}</p>
           {/if}
           {#if editing.mcpExtra.length}
             <p class="hint">{t('agentsMcpExtra').replace('{n}', String(editing.mcpExtra.length))}</p>
           {/if}
         </div>
-      </div>
+      </fieldset></div>
     {:else if !section}
       <!-- Desktop, nothing being edited: the rows live in their own column
            now (board #94), so the main column is the category's front page —
            its name, the "+", and the hint that used to sit above the rows. -->
-      <div class="page-head">
-        <h1>{t(CAT_META[cat].label)}</h1>
-        <span class="spacer"></span>
-        <div class="head-acts">
+      <div class="page-head config-page-head">
+        <div class="config-head-inner">
+          <h1>{t(CAT_META[cat].label)}</h1>
+          <div class="config-actions">
           {#if cat === 'global'}
-            <button class="icon-btn" title={t('edit')} aria-label={t('edit')} onclick={startGlobal}><Icon name="edit" size={14} /></button>
+            <CommandButton variant="icon" icon="edit" label={t('edit')} onclick={startGlobal} />
           {:else}
-            <button class="icon-btn" title={t(CAT_META[cat].add)} aria-label={t(CAT_META[cat].add)} onclick={() => CAT_META[cat].start(null)}><Icon name="plus" size={14} /></button>
+            <CommandButton variant="icon" icon="plus" label={t(CAT_META[cat].add)} onclick={() => CAT_META[cat].start(null)} />
           {/if}
+          </div>
         </div>
       </div>
       <div class="placeholder">
+        {#if info}<p class="hint appear">{info}</p>{/if}
         <p class="hint">{t(CAT_META[cat].hint)}</p>
       </div>
     {:else}
@@ -1078,11 +1069,16 @@
   </main>
 </div>
 
-<ConfirmDialog open={!!pending} busy={removing}
+<ConfirmDialog open={!!pending} busy={removing} compact={compactViewport}
   title={pending ? t(COPY[pending.kind].title).replace('{name}', pending.name) : ''}
-  note={pending ? t(COPY[pending.kind].note) : ''}
+  note={pending ? t(COPY[pending.kind].note) + (error ? `\n${error}` : '') : ''}
   confirmLabel={t('delete')}
   onconfirm={runPending} oncancel={() => (pending = null)} />
+<ConfirmDialog open={!!pendingExit} danger={false} compact={compactViewport}
+  title={t('discardChanges')} note={t('configDiscardNote')}
+  confirmLabel={t('configDiscard')} cancelLabel={t('configKeepEditing')}
+  onconfirm={() => { const action = pendingExit; exitIntent = null; action?.(); }}
+  oncancel={() => exitIntent = null} />
 
 <style>
   .agents-root { height: 100%; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 0; background: var(--bg); }
@@ -1090,6 +1086,14 @@
      the editor. The rows column has its own remembered width, same SideHandle
      dialect as every other divider. */
   .agents-root.with-rows { grid-template-columns: var(--sidebar-w) var(--agents-rows-w, 240px) minmax(0, 1fr); }
+  .agents-root.reduced.with-rows { grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }
+  .reduced.editing .cat-rows, .reduced:not(.editing) .mid { display: none; }
+  .agents-root.stacked, .agents-root.stacked.with-rows { grid-template-columns: minmax(0, 1fr); }
+  .stacked .sidebar { border-right: none; }
+  .stacked.editing .sidebar, .stacked.editing .cat-rows, .stacked:not(.editing) .mid { display: none; }
+  .stacked.with-rows:not(.category-open) .cat-rows { display: none; }
+  .stacked.with-rows.category-open:not(.editing) .sidebar { display: none; }
+  .stacked.with-rows.category-open:not(.editing) .cat-rows { display: flex; }
   .cat-rows { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
   .rows-scroll { flex: 1; overflow-y: auto; padding: 8px; }
   @media (max-width: 760px) {
@@ -1122,12 +1126,6 @@
   .m-badge { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border: 1px solid var(--accent); border-radius: 4px; color: var(--accent); font-size: var(--fs-micro); font-weight: 700; line-height: 1; }
 
   .mid { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  .spacer { flex: 1; }
-  /* The head actions move as ONE block: on a phone they wrap under the
-     title together instead of scattering one button per row. */
-  .head-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
-  /* The confirm among equals wears the shared armed-go rule (app.css,
-     board #98): green + bold when clickable. No local colour here. */
   /* Skill files as a quiet list — rows in the wash hover family, the
      selected one in the accent wash (same states the sidebar rows speak). */
   .file-list {
@@ -1146,9 +1144,9 @@
   .f-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .f-size { margin-left: auto; flex: none; color: var(--text3); font-size: var(--fs-micro); }
   .placeholder { flex: 1; display: grid; place-items: center; }
-  .hint { color: var(--text3); font-size: var(--fs-meta); margin: 0; line-height: 1.5; max-width: 420px; }
+  .hint { color: var(--text2); font-size: var(--fs-sub); margin: 0; line-height: 1.5; max-width: 100%; }
   .hint.wide { max-width: 640px; }
-  .hint.over { color: var(--danger); }
+  .hint.over { color: var(--danger-ink); }
   /* The house-rules row's glyph: a document, not a backend — quiet grey. */
   .ava.global { display: grid; place-items: center; background: var(--surface2); color: var(--text2); }
   /* Description at rest: the text itself, whole and wrapped; the wash on
@@ -1156,37 +1154,19 @@
   .desc-view {
     background: none; border: 1px solid transparent; border-radius: var(--ui-radius-control);
     padding: 6px 8px; margin: 0; text-align: left; cursor: text;
-    font: inherit; font-size: var(--fs-ui); color: var(--text); line-height: 1.55;
+    font: inherit; font-size: var(--fs-body); color: var(--text); line-height: 1.55;
+    min-height: var(--control-height);
     white-space: pre-wrap; overflow-wrap: anywhere;
     transition: background var(--t-fast), border-color var(--t-fast);
     -webkit-tap-highlight-color: transparent;
   }
   .desc-view:hover { background: var(--surface2); }
+  .desc-readonly {
+    margin: 0; color: var(--text); font: var(--fs-body)/1.55 var(--font-ui);
+    white-space: pre-wrap; overflow-wrap: anywhere;
+  }
 
-  .editor { flex: 1; overflow-y: auto; padding: 14px 18px 24px; display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 860px; box-sizing: border-box; }
-  .editor.team-editor { max-width: 980px; gap: 16px; }
-  .err { color: var(--danger); font-size: var(--fs-ui); background: var(--danger-bg); border-radius: var(--ui-radius-row); padding: 8px 12px; }
-  /* Field captions are QUIET — the field carries the content, the label only
-     names it (the dialog dialect's .dlg-note voice). fs-ui labels over
-     fs-body inputs were the page reading a size too big everywhere
-     (owner, 2026-08-24: "很多字号有点大很奇怪，也和页面风格不符"). */
-  /* The Settings grammar (the owner's reference): a full-ink 600-weight
-     title leads each field, hints are --fs-meta grey UNDER it, values are
-     full ink. One grey for everything left nothing leading. */
-  label { display: flex; flex-direction: column; gap: 4px; color: var(--text); font-size: var(--fs-ui); font-weight: 600; }
-  label > input, label > textarea, label > .desc-view { font-weight: 400; }
-  /* The dense field dialect (Team's template editor / the shared Select's
-     `dense`), so every box in the form is ONE species at ONE size. */
-  input, textarea { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: var(--ui-radius-control); color: var(--text); padding: 6px 9px; font-size: var(--fs-ui); outline: none; font-family: inherit; }
-  input:focus, textarea:focus { border-color: var(--accent); }
-  input:disabled { opacity: 0.5; }
-  textarea { resize: vertical; line-height: 1.5; }
-  textarea.mono { font-family: var(--font-mono); }
-  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .row3 { display: grid; grid-template-columns: 0.8fr 1.25fr 0.8fr; gap: 10px; }
-  .team-basics { display: flex; flex-direction: column; gap: 12px; }
-  .rules-editor { min-height: 140px; max-height: 320px; }
-  .team-members { gap: 10px; }
+  .editor { flex: 1; min-height: 0; overflow-y: auto; }
   .members-head { display: flex; align-items: center; gap: 8px; min-height: 22px; }
   .members-count { margin-left: auto; color: var(--text3); font: 500 var(--fs-micro)/1 var(--font-mono); }
   /* Each member is a readable summary first. Clicking the broad summary
@@ -1221,55 +1201,27 @@
   .member-ava.collab { background: var(--surface2); color: var(--accent); }
   .member-copy { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); gap: 2px 9px; min-width: 0; align-items: baseline; }
   .member-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 var(--fs-body)/1.3 var(--font-display); }
-  .member-source { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text3); font: 500 var(--fs-micro)/1.3 var(--font-mono); }
+  .member-source { min-width: 0; overflow-wrap: anywhere; color: var(--text2); font: 500 var(--fs-sub)/1.3 var(--font-mono); }
   .member-role {
     grid-column: 1 / -1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     color: var(--text2); font-size: var(--fs-sub); line-height: 1.4;
   }
   .member-chevron { display: inline-flex; color: var(--text3); }
   .member-actions { display: flex; align-items: center; padding: 0 7px 0 2px; }
-  .member-actions .icon-btn { width: 38px; height: 38px; }
   .member-body { display: flex; flex-direction: column; border-top: 1px solid var(--border2); }
-  .member-section { display: flex; flex-direction: column; gap: 10px; padding: 11px 12px; }
+  .member-section { display: flex; flex-direction: column; gap: var(--config-field-gap); padding: var(--config-field-gap); }
   .member-section + .member-section { border-top: 1px solid var(--border2); }
   .member-section-title { color: var(--text2); font-size: var(--fs-meta); font-weight: 600; }
-  .member-identity { display: grid; grid-template-columns: minmax(150px, 0.8fr) minmax(220px, 1.2fr); gap: 10px; }
-  .member-identity.single { grid-template-columns: minmax(0, 1fr); }
-  .member-name { min-width: 0; width: 100%; }
-  .role-editor { min-height: 150px; max-height: 340px; }
-  .agent-prompt { min-height: 240px; max-height: 65vh; }
-  .member-assets { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
-  .team-add { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin-top: 2px; }
   .team-row { align-items: flex-start; }
   .r-col { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
-  .r-sub { font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pick-block { display: flex; flex-direction: column; gap: 6px; }
-  .pick-label { color: var(--text); font-size: var(--fs-ui); font-weight: 600; }
-  .pick-row { display: flex; flex-wrap: wrap; gap: 6px; }
-  .pick {
-    display: flex; align-items: center; gap: 5px;
-    background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
-    color: var(--text2); padding: 4px 10px; font-size: var(--fs-ui); cursor: pointer;
-    transition: border-color var(--t-fast), color var(--t-fast), background var(--t-fast);
-  }
-  .pick-glyph { display: inline-flex; }
-  .pick:hover { border-color: var(--input-border); }
-  .pick.sel { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+  .r-sub { font-family: var(--font-mono); font-size: var(--fs-sub); color: var(--text2); overflow-wrap: anywhere; }
   @media (max-width: 760px) {
-    .editor { max-width: none; padding: 12px 12px 22px; }
-    .editor.team-editor { gap: 14px; }
-    .row2, .row3, .member-assets, .member-identity { grid-template-columns: minmax(0, 1fr); }
-    .rules-editor { min-height: 180px; max-height: 42vh; }
     .member-head { min-height: 72px; }
     .member-summary { grid-template-columns: 34px minmax(0, 1fr) auto; min-height: 72px; padding: 10px 8px 10px 10px; }
     .member-ava { width: 34px; height: 34px; }
     .member-copy { grid-template-columns: minmax(0, 1fr); gap: 1px; }
     .member-role { grid-column: 1; }
     .member-actions { padding-right: 4px; }
-    .member-actions .icon-btn { width: 44px; height: 44px; }
-    .member-section { padding: 12px 10px; }
-    .role-editor { min-height: 190px; max-height: 46vh; }
-    .agent-prompt { min-height: 260px; max-height: 62vh; }
   }
   .md-preview { border-top: 1px solid var(--border2); margin-top: 6px; display: flex; flex-direction: column; gap: 8px; }
   .file-pre {
@@ -1282,16 +1234,5 @@
     background: var(--surface); border: 1px solid var(--border2); border-radius: var(--ui-radius-panel);
     padding: 12px 14px; font-size: var(--fs-body); color: var(--text); line-height: 1.55;
     overflow-wrap: anywhere;
-  }
-  /* iOS zooms a focused control below 16px — but ONLY iOS. On Android the
-     blanket bump made the name input and the prompt textarea 16px while the
-     dense Selects stayed at --fs-ui (.dense is 0,2,0; a media query adds no
-     specificity), which is the "字号还是偏大不一致" the owner saw. The
-     -webkit-touch-callout gate is iOS-family only, so the bump now fires
-     exactly where the auto-zoom exists (owner, 2026-08-24). */
-  @supports (-webkit-touch-callout: none) {
-    @media (max-width: 760px) {
-      input, textarea { font-size: var(--fs-input-touch); }
-    }
   }
 </style>
