@@ -366,18 +366,22 @@ pub(crate) fn refresh(home: &Path, window_name: &str, notify: &str) -> bool {
         if !home.join("launch.json").exists() {
             // Best effort: a backfill that cannot be written changes nothing,
             // and the restart then takes the generic launch path.
-            changed |= crate::projects::spawn::write_launch_recipe(
-                home,
-                "kiro",
-                &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())],
-                &format!(
+            changed |= crate::projects::spawn::LaunchRecipe {
+                backend: "kiro",
+                env: &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())],
+                cmd: &format!(
                     "command kiro-cli chat --agent {} --trust-all-tools kick",
                     crate::shell::quote(window_name),
                 ),
                 // A backfilled recipe cannot know who spawned the agent — the
                 // provenance does not exist for pre-recipe spawns; refresh
                 // falls back to the window name.
-                "", None, "", "")
+                spawned_by: "",
+                team: None,
+                agent_def: "",
+                member: "",
+            }
+            .write(home)
             .is_ok();
         }
     }

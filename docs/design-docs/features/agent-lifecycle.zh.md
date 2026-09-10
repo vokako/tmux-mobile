@@ -25,7 +25,7 @@
 | 窗口名 | `dev`、`dev-2`… | **窗口名就是 agent 的身份** —— 遥测、`tmm`、消息投递、托管门禁全都以它为键 |
 | `agent_home()` | `<ws>/.tmm/agents/<名字>/` | 隔离 home。`KIRO_HOME` / `CODEX_HOME` / `--settings` 都指向这里，用户自己的配置漏不进来；这个目录同时也是"**这个 agent 是我们创建的**"的定义（`projects::managed_home`） |
 | `render_kiro/claude/codex` | 配置 + hooks + MCP + skills | hooks 在这里写下；以后每次启动 `refresh_hooks` 都会重写它 |
-| `write_launch_recipe` | 隔离 home 里的 `launch.json`：环境 + 身份命令（剥掉 kick） | **重启必须重放完整身份。**没有配方时，重启跑的是裸后端命令（`kiro-cli chat --resume-id …`——没有 `KIRO_HOME`、没有 `--agent`），即用户空间配置，而它的 hooks 永远不触发：agent 还能回答，但观测上全聋——没有工具行、没有自动转发、条条消息 "unconfirmed"（2026-08-18 使用者报告）。`relaunch_line` = 配方环境 + 身份命令 + resume 参数；`refresh_hooks` 为旧 agent 回填配方 |
+| `LaunchRecipe::write` | 隔离 home 里的 `launch.json`：backend、环境、身份命令（原样存，kick 从不进配方）、spawned_by、team、agent_def、member；结构体字段即文件的键（board #153） | **重启必须重放完整身份。**没有配方时，重启跑的是裸后端命令（`kiro-cli chat --resume-id …`——没有 `KIRO_HOME`、没有 `--agent`），即用户空间配置，而它的 hooks 永远不触发：agent 还能回答，但观测上全聋——没有工具行、没有自动转发、条条消息 "unconfirmed"（2026-08-18 使用者报告）。`relaunch_line` = 配方环境 + 身份命令 + resume 参数；`refresh_hooks` 为旧 agent 回填配方 |
 | `new_named_window` + `. launch.sh` | 真正把 CLI 起来 | 启动命令是 source 一个脚本，绝不用 `send-keys` —— tty shim 会吞掉 ≳2 KB 的突发输入 |
 | `bus.post` | `[tmm] spawned dev — brief` | 房间就是记录 |
 

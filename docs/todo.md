@@ -190,7 +190,9 @@
   signatures, which the mechanical-move discipline forbade in that pass).
   Done: `handle_connection`(9) / `handle_connection_ws`(11) take a
   `ConnContext` built once at the accept site (board #151, 2026-09-09;
-  too_many_arguments 7 → 5). Open: `Outbound::InitCipher` is ~700 bytes vs
+  too_many_arguments 7 → 5); `write_launch_recipe`(8) → `LaunchRecipe`, whose
+  fields are launch.json's keys, one writer, three recipe shapes diffed
+  byte-identical (board #153; 5 → 4 — the rest are store row inserts). Open: `Outbound::InitCipher` is ~700 bytes vs
   24 for `Plain` (large_enum_variant) — boxing is trivial but touches the hot
   send funnel, so do it with a connection-path regression run, not blind.
 - [ ] Frontend backend lists: `AgentsPage.svelte` and `TeamTemplates.svelte`
