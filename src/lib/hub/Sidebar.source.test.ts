@@ -45,3 +45,14 @@ test('the sidebar keeps the shared sheet and delegates consequential actions', (
   assert.doesNotMatch(css, /^\s*\.(?:st|note-dot|spacer|empty)(?:[.#:{\s])/mu,
     'unrelated private Hub atoms are not copied into this component');
 });
+
+test('the sidebar head carries the collapse control the Hub hands it, at its right end (board #174)', () => {
+  // Owner, 2026-09-11: "左侧侧边栏可以加一个折叠展开的按钮，在左侧边栏右上角的
+  // 位置". ONE control, defined once in Hub as a snippet and rendered here
+  // and (collapsed) in the Hub header — the sidebar owns no second button.
+  assert.match(source, /collapse\?: Snippet;/u, 'the control arrives as a snippet prop');
+  assert.match(source, /<div class="side-h side-head"><span>\{t\('hubProjects'\)\}<\/span>\{@render collapse\?\.\(\)\}<\/div>/u,
+    'rendered in the head row, after the title');
+  assert.match(source, /\.side-head \{ display: flex; align-items: center; justify-content: space-between;/u);
+  assert.doesNotMatch(source, /CommandButton/u, 'no second button species in the sidebar');
+});

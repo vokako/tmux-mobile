@@ -8,6 +8,11 @@
     iconOnly?: boolean;
     pressed?: boolean;
     expanded?: boolean;
+    /** The disclosure control STANDS INSIDE the region it discloses (the Hub
+     * sidebar's collapse, board #174): the region being visible is the whole
+     * signal, so the button keeps its rest look instead of the engaged wash a
+     * disclosure of content elsewhere wears (the roster's). */
+    inside?: boolean;
     controls?: string;
     disabled?: boolean;
     destructiveConfirm?: boolean;
@@ -16,14 +21,16 @@
   } & ({ pending?: false; icon?: string } | { pending: boolean; icon: string });
   let {
     label, icon = '', variant = 'secondary', iconOnly = false,
-    pressed, expanded, controls,
+    pressed, expanded, inside = false, controls,
     disabled = false, pending = false, destructiveConfirm = false,
     onclick = () => {}, element = $bindable(null),
   }: Props = $props();
   const compact = $derived(iconOnly || variant === 'icon');
   const solid = $derived(variant === 'primary' || (variant === 'danger' && destructiveConfirm));
-  const engaged = $derived(variant === 'icon' && (pressed === true || expanded === true));
-  const disclosure = $derived(!pending && expanded !== undefined && (icon === 'chevron-up' || icon === 'chevron-down'));
+  const engaged = $derived(variant === 'icon' && (pressed === true || (expanded === true && !inside)));
+  // A disclosure chevron turns instead of swapping (motion.md 4) — vertical
+  // for a roster, horizontal for a side partition (board #174).
+  const disclosure = $derived(!pending && expanded !== undefined && icon.startsWith('chevron-'));
 </script>
 
 <button type="button" class="command-button"

@@ -639,3 +639,24 @@ test('the drawer REVEALS, it never resizes: pinned content, one moving gate, no 
   assert.match(source, /const drawerShown = \$derived\(termOpen \|\| drawerClosing\);/u);
   assert.match(source, /class:drawer-open=\{termOpen && !compact\}/u, 'the rest class follows the intent, not the mount');
 });
+
+test('the sidebar collapses and expands by the same reveal, from ONE control that turns (board #174)', () => {
+  // Rest state: the factor is 0 and the content is unreachable, not narrowed.
+  assert.match(rule('.hub-root.side-collapsed .cols'), /^\s*--side-open:\s*0;\s*$/u);
+  assert.match(source, /\.hub-root\.side-collapsed \.cols:not\(:global\(\.moving\)\) > \.track\.side \{ visibility: hidden; \}/u,
+    'collapsed at rest = hidden from sight, tab order and assistive tech; visible only while it moves');
+  assert.match(source, /<div class="track side" bind:this=\{sideTrackEl\}>\s*<Sidebar /u, 'the sidebar sits in its own track');
+  assert.match(source, /class:side-collapsed=\{sideCollapsed && !compact\}/u, 'desktop only — the phone has its sheet');
+  assert.match(source, /const sideCollapsed = \$derived\(hubPrefs\.sidebarCollapsed\);/u, 'the state IS the app-wide preference');
+  // Collapse: pin at the current width, rest state, move from 1. Expand: rest
+  // state, flush, pin at the FINAL width, move from 0 (placed first).
+  assert.match(source, /const unpin = pinTrack\(sideTrackEl, 'end'\);\s*\n\s*await withReadingAnchor\(\(\) => hubPrefs\.setSidebarCollapsed\(true\)\);\s*\n\s*await moveTrack\(colsEl, '--side-open', 1\);\s*\n\s*unpin\(\);/u);
+  assert.match(source, /await withReadingAnchor\(\(\) => hubPrefs\.setSidebarCollapsed\(false\)\);\s*\n\s*const unpin = pinTrack\(sideTrackEl, 'end'\);\s*\n\s*await moveTrack\(colsEl, '--side-open', 0\);\s*\n\s*unpin\(\);/u);
+  // ONE control: a snippet, one CommandButton with one glyph that turns,
+  // rendered in the sidebar's head and — collapsed — at the header's left.
+  assert.equal([...source.matchAll(/\{#snippet sideToggle\(\)\}/gu)].length, 1);
+  assert.match(source, /<CommandButton variant="icon" icon="chevron-right" expanded=\{!sideCollapsed\} inside controls="hub-sidebar"\s+label=\{sideCollapsed \? t\('hubSidebarExpand'\) : t\('hubSidebarCollapse'\)\}\s+onclick=\{\(\) => setSidebar\(!sideCollapsed\)\} \/>/u);
+  assert.equal([...source.matchAll(/\{@render sideToggle\(\)\}/gu)].length, 1, 'the header slot renders it when collapsed');
+  assert.match(source, /\{#if !compact && sideCollapsed\}\{@render sideToggle\(\)\}\{\/if\}/u);
+  assert.match(source, /<Sidebar \{compact\} open=\{sideOpen\}[^>]*collapse=\{compact \? null : sideToggle\}/u, 'the sidebar renders the same snippet');
+});

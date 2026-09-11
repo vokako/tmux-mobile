@@ -18,6 +18,32 @@ test('disclosure chevrons turn with the controlled expanded state through the sh
   }
 });
 
+test('a horizontal disclosure chevron turns the same way (board #174: the sidebar collapse control)', async context => {
+  for (const expanded of [false, true]) {
+    const app = await (await compiled).mount(context, {
+      props: { label: 'Sidebar', icon: 'chevron-right', variant: 'icon', expanded, controls: 'sidebar' }, modules: [],
+    });
+    try {
+      const icon = app.document.querySelector('.command-icon')!;
+      assert.ok(icon.classList.contains('flip'), 'one glyph that turns, never two icons');
+      assert.equal(icon.classList.contains('on'), expanded);
+      assert.equal(app.document.querySelector('button')!.classList.contains('engaged'), expanded,
+        'a disclosure of content elsewhere wears the engaged wash while open');
+    } finally { await app.close(); }
+  }
+  // Standing INSIDE the region it discloses, the control is at rest in both
+  // states — the visible region is the signal (design-language: at rest is
+  // achromatic).
+  const app = await (await compiled).mount(context, {
+    props: { label: 'Sidebar', icon: 'chevron-right', variant: 'icon', expanded: true, inside: true, controls: 'sidebar' }, modules: [],
+  });
+  try {
+    assert.ok(!app.document.querySelector('button')!.classList.contains('engaged'));
+    assert.ok(app.document.querySelector('.command-icon')!.classList.contains('on'), 'the glyph still turns');
+    assert.equal(app.document.querySelector('button')!.getAttribute('aria-expanded'), 'true');
+  } finally { await app.close(); }
+});
+
 test('commands keep their name and reject activation while disabled or pending', async context => {
   const fixture = await compiled;
   for (const state of [{}, { disabled: true }, { pending: true }]) {

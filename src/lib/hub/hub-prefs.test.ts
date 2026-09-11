@@ -116,3 +116,21 @@ test('renameSession moves and persists roster expansion exactly once (#168)', as
   reloaded.renameSession('new', 'new');
   assert.deepEqual(writes, [], 'invalid and identity renames remain no-ops');
 });
+
+test('the sidebar collapse is one app-wide switch: persisted, default open, untouched by a project rename (board #174)', async () => {
+  const prefs = await freshPrefs();
+  assert.equal(prefs.sidebarCollapsed, false, 'open by default — the project list is the desktop map');
+  writes.length = 0;
+  prefs.setSidebarCollapsed(true);
+  assert.equal(prefs.sidebarCollapsed, true);
+  assert.deepEqual(writes, ['tmux_hub_sidebar']);
+  assert.equal(store.get('tmux_hub_sidebar'), '1');
+  const reloaded = await freshPrefs();
+  assert.equal(reloaded.sidebarCollapsed, true, 'survives a reload');
+  writes.length = 0;
+  reloaded.renameSession('alpha', 'beta');
+  assert.equal(reloaded.sidebarCollapsed, true);
+  assert.ok(!writes.includes('tmux_hub_sidebar'), 'not a per-project preference');
+  reloaded.setSidebarCollapsed(false);
+  assert.equal(store.get('tmux_hub_sidebar'), '0');
+});

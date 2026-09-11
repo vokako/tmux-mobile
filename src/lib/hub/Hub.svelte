@@ -22,6 +22,7 @@
   import Drawer from './Drawer.svelte';
   import { copyText } from '../core/clipboard.ts';
   import Lightbox from '../ui/Lightbox.svelte';
+  import CommandButton from '../ui/CommandButton.svelte';
   import './hub-atoms.css';
   import Icon from '../ui/Icon.svelte';
   import { tick as settled } from 'svelte';
@@ -110,6 +111,31 @@
   const drawerShown = $derived(termOpen || drawerClosing);
   let colsEl = $state(null);
   let drawerTrackEl = $state(null);
+  // The project sidebar collapses and expands the same way (owner, board
+  // #174: "左侧侧边栏可以加一个折叠展开的按钮 … 折叠展开最好是有动画，不是直接
+  // 跳"). The state IS the app-wide preference; the desktop-only class puts
+  // the track factor at 0 and hides the content at rest.
+  let sideTrackEl = $state(null);
+  const sideCollapsed = $derived(hubPrefs.sidebarCollapsed);
+  /** Collapse: pin at the current width, rest state, move from 1. Expand:
+   * rest state, flush, pin at the FINAL width, move from 0 — placed first,
+   * then revealed (reveal.ts). Both through the reading anchor: the chat
+   * column changes width either way. */
+  async function setSidebar(collapsed) {
+    if (compact || collapsed === sideCollapsed) return;
+    if (!colsEl || !sideTrackEl) { hubPrefs.setSidebarCollapsed(collapsed); return; }
+    if (collapsed) {
+      const unpin = pinTrack(sideTrackEl, 'end');
+      await withReadingAnchor(() => hubPrefs.setSidebarCollapsed(true));
+      await moveTrack(colsEl, '--side-open', 1);
+      unpin();
+    } else {
+      await withReadingAnchor(() => hubPrefs.setSidebarCollapsed(false));
+      const unpin = pinTrack(sideTrackEl, 'end');
+      await moveTrack(colsEl, '--side-open', 0);
+      unpin();
+    }
+  }
   // What the drawer SHOWS: the terminal, or the file browser (owner,
   // 2026-08-28: "右侧边栏，可以展开文件浏览器的分区，类似展示 terminal 面板
   // 一样的逻辑"). One drawer, one width handle, two bodies — the hidden one
@@ -1424,15 +1450,27 @@
   }
 </script>
 
-<div class="hub-root" class:compact class:drawer-open={termOpen && !compact}>
+<!-- The ONE sidebar collapse/expand control (board #174): a snippet, so the
+     sidebar's head (open) and the header's left edge (collapsed) render the
+     same button — one glyph that turns (motion.md 4), never two icons. -->
+{#snippet sideToggle()}
+  <CommandButton variant="icon" icon="chevron-right" expanded={!sideCollapsed} inside controls="hub-sidebar"
+    label={sideCollapsed ? t('hubSidebarExpand') : t('hubSidebarCollapse')}
+    onclick={() => setSidebar(!sideCollapsed)} />
+{/snippet}
+<div class="hub-root" class:compact class:drawer-open={termOpen && !compact} class:side-collapsed={sideCollapsed && !compact}>
   <div class="cols" bind:this={colsEl}>
+    <!-- The .track is the grid item the reveal pins; the Sidebar inside never
+         changes size while the track moves (board #174). -->
+    <div class="track side" bind:this={sideTrackEl}>
     <Sidebar {compact} open={sideOpen} {rows} {trash} {rowsBase} {selected}
-      {panes} {agentStates} {talkMap} {tick} unreadCount={unread.size}
+      {panes} {agentStates} {talkMap} {tick} unreadCount={unread.size} collapse={compact ? null : sideToggle}
       onselect={(session) => { selectProject(session); sideOpen = false; }}
       oncreate={() => { createOpen = true; sideOpen = false; }}
       onclose={() => { sideOpen = false; }}
       onmenu={(row, at) => openCtx(at, row.project.name, projectItems(row))}
       onrestore={restoreProject} onpurge={(row) => { trashAsk = row; }} />
+    </div>
 
     <!-- ── Main: the conversation ─────────── -->
     <main class="mid">
@@ -1444,6 +1482,10 @@
             <Icon name="menu" size={17} />
           </button>
         {/if}
+        <!-- Collapsed, the way back to the project list is the same control
+             at the header's left edge — where the phone's menu button
+             stands (board #174). -->
+        {#if !compact && sideCollapsed}{@render sideToggle()}{/if}
         <!-- The title IS the rename control: a project's name is the one thing
              in this header you might want to change, and a second pencil button
              would be a duplicate of the thing it edits. -->
@@ -1768,6 +1810,7 @@
   /* A track is a single-cell grid so its partition stretches to it at rest;
      pinned, it keeps the inline width and hugs the edge that does not move. */
   .track { display: grid; min-width: 0; min-height: 0; }
+  .track > :global(*) { min-width: 0; } /* a partition follows its track at rest (yield, #158) instead of overflowing it */
   .track:global(.pin-start) { justify-self: start; }
   .track:global(.pin-end) { justify-self: end; }
   .hub-root.compact .track { display: contents; }
@@ -1792,6 +1835,11 @@
      container cannot fit them, without rewriting the saved preferences.
      Chat keeps its reading floor and takes any remaining space. */
   .hub-root.drawer-open .cols { --drawer-open: 1; }
+  /* Collapsed = the track is 0 and the content is UNREACHABLE (not merely
+     narrowed): hidden from sight, tab order and assistive tech at rest, and
+     visible only while the move uncovers or withdraws it. */
+  .hub-root.side-collapsed .cols { --side-open: 0; }
+  .hub-root.side-collapsed .cols:not(:global(.moving)) > .track.side { visibility: hidden; }
   /* The project title, in its two states. The idle one carries a visible pencil
      and only underlines on hover — a permanent box would make the header look
      like a form, but relying on hover ALONE hid the feature (no hover on a

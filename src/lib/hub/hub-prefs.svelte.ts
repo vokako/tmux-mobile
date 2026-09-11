@@ -31,6 +31,9 @@ const STEPS_ROWS_KEY = 'tmux_hub_steps_rows';
 // switching projects and returning restores the same partition, and a room
 // where it was closed comes back closed.
 const DRAWER_KEY = 'tmux_hub_drawer';
+// The desktop sidebar's collapse (board #174): ONE app-wide switch, not a
+// per-project one — where the project list is, is a property of the window.
+const SIDEBAR_KEY = 'tmux_hub_sidebar';
 // Roster disclosure belongs to the project, like its drawer view (#168).
 const ROSTER_EXPANDED_KEY = 'tmux_hub_roster_expanded';
 export type FeedLevel = 'chat' | 'status' | 'tools';
@@ -62,6 +65,7 @@ const state = $state({
   // Per project: the drawer partition that was open ('' / absent = closed).
   drawers: readMap<string>(DRAWER_KEY),
   rosterExpanded: readMap<boolean>(ROSTER_EXPANDED_KEY),
+  sidebarCollapsed: localStorage.getItem(SIDEBAR_KEY) === '1',
   // Tool-lane cap in rows; the stored value passes the same clamp as the
   // setter so an old or hand-edited entry cannot render a broken lane.
   stepsRows: clampStepsRows(localStorage.getItem(STEPS_ROWS_KEY) ?? STEPS_ROWS),
@@ -72,6 +76,12 @@ export const hubPrefs = {
   setFeedLevel(v: FeedLevel) {
     state.feedLevel = v;
     localStorage.setItem(FEED_LEVEL_KEY, v);
+  },
+  /** The desktop sidebar is collapsed (board #174). App-wide; false = open. */
+  get sidebarCollapsed() { return state.sidebarCollapsed; },
+  setSidebarCollapsed(v: boolean) {
+    state.sidebarCollapsed = v;
+    localStorage.setItem(SIDEBAR_KEY, v ? '1' : '0');
   },
   /** Tool-lane cap: how many rows a folded tool group shows before it scrolls. */
   get stepsRows() { return state.stepsRows; },

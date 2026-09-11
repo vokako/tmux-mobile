@@ -10,6 +10,7 @@
   import { longpress } from '../ui/longpress.ts';
   import { hoverInfo } from '../ui/hover.ts';
   import type { HoverInfo } from '../ui/hover.svelte.ts';
+  import type { Snippet } from 'svelte';
   import { flip } from 'svelte/animate';
   import { moveMs } from '../ui/motion.ts';
 
@@ -30,6 +31,9 @@
     onselect?: (session: string) => void;
     oncreate?: () => void;
     onclose?: () => void;
+    /** The Hub's ONE collapse control (board #174), rendered at the head's
+     * right end — the sidebar owns no button of its own for it. */
+    collapse?: Snippet;
     onmenu?: (row: ProjectRow, at: MenuPosition) => void;
     onrestore?: (row: ProjectRow) => void;
     onpurge?: (row: ProjectRow) => void;
@@ -37,7 +41,7 @@
   let {
     compact = false, open = false, rows = [], trash = [], rowsBase = null,
     selected = '', panes = [], agentStates = {}, talkMap = {}, tick = Date.now(),
-    unreadCount = 0, onselect = () => {}, oncreate = () => {}, onclose = () => {},
+    unreadCount = 0, onselect = () => {}, oncreate = () => {}, onclose = () => {}, collapse = undefined,
     onmenu = () => {}, onrestore = () => {}, onpurge = () => {},
   }: Props = $props();
   let trashOpen = $state(false);
@@ -62,7 +66,7 @@
 <aside class="sidebar" class:side-sheet={compact} class:sheet={compact} class:open={compact && open}>
   {#if !compact}<SideHandle />{/if}
   <div class="side-scroll subtle-scroll" use:scrollFade>
-    <div class="side-h">{t('hubProjects')}</div>
+    <div class="side-h side-head"><span>{t('hubProjects')}</span>{@render collapse?.()}</div>
     {#each rows as row (row.project.id)}
       <div class="side-row proj-row" role="group" aria-label={row.project.name} class:open={row.project.session === selected}
         class:appear={!!rowsBase && !rowsBase.has(row.project.id)}
@@ -138,6 +142,9 @@
   /* Sheet geometry/motion and project-row atoms remain in app.css. */
   .sidebar.sheet .side-row { min-height: 44px; }
   .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
+  /* The head is a row so the collapse control can sit at its right end; the
+     look (face, size, tracking, padding) stays app.css's .side-h. */
+  .side-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
   .trash-row { cursor: default; color: var(--text3); }
   .trash-row:hover { background: var(--surface); }
   .trash-name { font-weight: 450; }
