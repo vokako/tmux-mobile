@@ -800,11 +800,14 @@
       <div class="prompt" class:appear-rise={b.ts > openedAt}>
         <!-- The machine stamp comes OFF (owner, 2026-08-30): the sender
              joins the head, and a board delivery wears the board
-             dialect — issue chip (+ review badge) — instead of raw
-             log text. -->
+             dialect — issue chip (+ review/reply badge) — instead of raw
+             log text. ONE badge for every tagged shape, coloured by
+             boardStatusColor: review is a status and takes its colour,
+             reply is not and takes the function's default reading ink
+             (board #172 — no new colour, no per-shape markup). -->
         <div class="p-head"><span class="p-who">{windowName(b.window)}</span><span class="p-tag">{t('hubPromptIn')}</span>{#if pp.from}<span class="p-from">{pp.from}</span>{/if}<span>{fmtTime(b.ts)}</span></div>
         <div class="p-body">
-          {#if pp.board}<span class="p-chip">#{pp.board.id}</span>{#if pp.board.review}<span class="p-badge" style:color={boardStatusColor('review')}><span class="pb-dot" aria-hidden="true"></span>{t('boardStatus_review')}</span>{/if}{/if}{folded ? foldBody(pp.text) : pp.text}
+          {#if pp.board}<span class="p-chip">#{pp.board.id}</span>{#if pp.board.tag}<span class="p-badge" style:color={boardStatusColor(pp.board.tag)}><span class="pb-dot" aria-hidden="true"></span>{pp.board.tag === 'review' ? t('boardStatus_review') : t('boardReply')}</span>{/if}{/if}{folded ? foldBody(pp.text) : pp.text}
         </div>
         {#if foldable}{@render unfold(key, folded)}{/if}
       </div>

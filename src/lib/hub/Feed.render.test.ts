@@ -70,6 +70,11 @@ test('Feed renders direct rows, safe rich content, complete capped tools and the
     assert.ok(longBody.endsWith(ELIDE), `the folded prompt ends with the marker: ${longBody.slice(-20)}`);
     assert.ok(longBody.length < longNotice.length, 'folded means shorter');
     assert.ok(longRow.querySelector('.m-unfold'), 'the way to the whole prompt');
+    // The reply notice wears the board dialect: chip + badge, marker gone.
+    assert.equal(longRow.querySelector('.p-chip')?.textContent, '#168');
+    assert.ok(longRow.querySelector('.p-badge'), 'a reply notice carries the badge');
+    assert.ok(!longBody.includes('[board #168 reply]'), 'the marker never renders as text');
+    assert.equal(prompts[1]!.querySelector('.p-badge'), null, 'a plain board delivery has no badge');
     const shortBody = prompts[1]!.querySelector('.p-body')!.textContent ?? '';
     assert.ok(shortBody.includes('Feed extraction: status todo → doing'), 'a short prompt renders whole');
     assert.equal(prompts[1]!.querySelector('.m-unfold'), null, 'nothing to unfold when it fits');

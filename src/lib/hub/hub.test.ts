@@ -1315,11 +1315,21 @@ test('promptParts strips the machine stamp and structures board deliveries', () 
   // A board change notice: stamp off, sender out, chip + text.
   assert.deepEqual(
     promptParts('[tmm chat 2026-08-30 11:33] human: [board #15] board任务交互优化: status doing → todo'),
-    { from: 'human', board: { id: '15', review: false }, text: 'board任务交互优化: status doing → todo' });
-  // A review handoff keeps its review flag for the badge.
+    { from: 'human', board: { id: '15', tag: null }, text: 'board任务交互优化: status doing → todo' });
+  // A review handoff keeps its review tag for the badge.
   const r = promptParts('[tmm chat 2026-08-30 12:00] builder: [board #17 review] file返回逻辑 — done. `tmm board move 17 done` to accept, or note what to fix + move doing.');
   assert.equal(r.from, 'builder');
-  assert.deepEqual(r.board, { id: '17', review: true });
+  assert.deepEqual(r.board, { id: '17', tag: 'review' });
+  // A note on an issue you reported or hold (hub_rpc board_note_notice) is
+  // the THIRD shape, `[board #N reply]` — it rendered as raw log text (board
+  // #172, owner 2026-09-11 "有消息没有渲染").
+  const n = promptParts('[tmm chat 2026-09-11 08:00] claude: [board #168 reply] Composer agent strip — the strip replaces the chip. Reply on the issue with `tmm board note 168 "..."`.');
+  assert.equal(n.from, 'claude');
+  assert.deepEqual(n.board, { id: '168', tag: 'reply' });
+  assert.ok(n.text.startsWith('Composer agent strip — '), n.text);
+  // An unrecognised board shape passes through WHOLE: no chip, nothing eaten.
+  assert.deepEqual(promptParts('[tmm chat 2026-09-11 08:00] claude: [board #168 shipped] all done'),
+    { from: 'claude', board: null, text: '[board #168 shipped] all done' });
   // A stamped plain message: stamp off, no chip.
   assert.deepEqual(promptParts('[tmm chat 2026-08-30 10:00] lead: please rebase'),
     { from: 'lead', board: null, text: 'please rebase' });

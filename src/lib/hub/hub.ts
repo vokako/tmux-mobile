@@ -976,21 +976,31 @@ export function boardStatusColor(to: string): string {
   }
 }
 
+/** The tag a board delivery marker may carry after the id — the THREE
+ * notices hub_rpc.rs types into a pane: `[board #N]` (a change to an issue
+ * you hold), `[board #N review]` (a handoff to the reporter),
+ * `[board #N reply]` (a note on an issue you reported or hold,
+ * `board_note_notice`). A new server shape is added HERE, or it renders as
+ * raw log text (board #172). */
+export type BoardPromptTag = 'review' | 'reply';
+
 /**
  * A delivered prompt, read for display (owner, 2026-08-30: "在 chat 对话视图
  * 上展示得不是很好"): the machine stamp (`[tmm chat <ts>] <who>: `) comes off
  * — the row's head shows the SENDER instead — and a `[board #N]` /
- * `[board #N review]` marker becomes a structured chip so board deliveries
- * wear the board dialect instead of raw log text. Anything else passes
- * through whole: an unrecognised shape must render as itself.
+ * `[board #N review]` / `[board #N reply]` marker becomes a structured chip
+ * (+ tag) so board deliveries wear the board dialect instead of raw log text.
+ * Anything else passes through whole: an unrecognised shape must render as
+ * itself — which is how the reply notice surfaced (board #172, owner
+ * 2026-09-11 "有消息没有渲染": the third shape rendered as its raw marker).
  */
-export function promptParts(text: string | null | undefined): { from: string; board: { id: string; review: boolean } | null; text: string } {
+export function promptParts(text: string | null | undefined): { from: string; board: { id: string; tag: BoardPromptTag | null } | null; text: string } {
   const line = (text ?? '').trim();
   const m = /^\[tmm chat [^\]]*\] (\S+): ([\s\S]*)$/u.exec(line);
   const from = m ? m[1]!.replace(/:$/u, '') : '';
   const rest = m ? m[2]! : line;
-  const b = /^\[board #(\d+)( review)?\]\s*([\s\S]*)$/u.exec(rest);
-  if (b) return { from, board: { id: b[1]!, review: !!b[2] }, text: b[3]!.trim() };
+  const b = /^\[board #(\d+)(?: (review|reply))?\]\s*([\s\S]*)$/u.exec(rest);
+  if (b) return { from, board: { id: b[1]!, tag: (b[2] as BoardPromptTag | undefined) ?? null }, text: b[3]!.trim() };
   return { from, board: null, text: rest };
 }
 

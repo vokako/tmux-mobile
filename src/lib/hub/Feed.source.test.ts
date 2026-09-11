@@ -309,8 +309,12 @@ test('a delivered prompt sheds its stamp and board deliveries wear the dialect (
   assert.match(source, /\{#if pp\.from\}<span class="p-from">\{pp\.from\}<\/span>\{\/if\}/u,
     'the sender joins the head — the stamp never renders');
   assert.match(source, /<span class="p-chip">#\{pp\.board\.id\}<\/span>/u, 'the issue chip');
-  assert.match(source, /style:color=\{boardStatusColor\('review'\)\}/u,
-    'the review badge speaks the one status language');
+  // Three shapes, ONE badge (board #172): review and reply both wear the
+  // existing badge coloured by boardStatusColor — `reply` is not a status,
+  // so it takes that function's default reading ink, no new colour.
+  assert.match(source, /\{#if pp\.board\.tag\}<span class="p-badge" style:color=\{boardStatusColor\(pp\.board\.tag\)\}/u,
+    'the badge speaks the one status language for every tagged shape');
+  assert.doesNotMatch(source, /boardStatusColor\('review'\)/u, 'no shape is special-cased in the markup');
 });
 
 test('leaving at the tail means returning to the tail — and ONLY then (board #38)', () => {
