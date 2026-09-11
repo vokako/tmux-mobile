@@ -1125,21 +1125,36 @@ test('Feed settles image load/error before reapplying live tail intent', { timeo
     assert.ok(image);
     // Observe the write and DOM-update order only. jsdom supplies no image
     // dimensions; cold/cached pixel gaps and history intent belong to Chromium.
-    const writes: boolean[] = [];
+    // Each tail write records what the image slot showed at that moment:
+    // the picture, the grey reference (a re-sign in flight, board #175), or
+    // the warn-coloured failed reference.
+    const writes: string[] = [];
     Object.defineProperty(feed, 'scrollTop', {
       configurable: true, get: () => 0,
-      set: () => { writes.push(!!feed.querySelector('.ci-ref.failed')); },
+      set: () => { writes.push(feed.querySelector('.ci-ref.failed') ? 'failed' : feed.querySelector('.ci-ref') ? 'pending' : 'image'); },
     });
     image.dispatchEvent(new app.window.Event('load'));
     assert.deepEqual(writes, [], 'the capture handler must wait for the component update');
     await app.flush();
     assert.ok(writes.length > 0, 'a loaded image reapplies the live tail');
-    assert.ok(writes.every((failed) => !failed));
+    assert.ok(writes.every((w) => w === 'image'));
     writes.length = 0;
+    // First error: the signature is re-minted once (board #175) — the slot
+    // shows the grey reference while the new url is fetched.
     image.dispatchEvent(new app.window.Event('error'));
     assert.deepEqual(writes, []);
     await app.flush();
-    assert.ok(writes.length > 0, 'a failed image also changes the content height');
-    assert.ok(writes.every(Boolean), 'the fallback is rendered before measuring/writing the tail');
+    assert.ok(writes.length > 0, 'a failed load also changes the content height');
+    assert.ok(writes.every((w) => w === 'pending'), 'the re-sign fallback is rendered before measuring/writing the tail');
+    for (let i = 0; i < 4; i++) await app.flush();
+    const retried = feed.querySelector<HTMLImageElement>('.ci')!;
+    assert.ok(retried, 'the re-signed image mounts');
+    writes.length = 0;
+    // Second error: the file is unreachable — the failed reference, no loop.
+    retried.dispatchEvent(new app.window.Event('error'));
+    assert.deepEqual(writes, []);
+    await app.flush();
+    assert.ok(writes.length > 0);
+    assert.ok(writes.every((w) => w === 'failed'), 'the failed fallback is rendered before measuring/writing the tail');
   } finally { await app.close(); }
 });
