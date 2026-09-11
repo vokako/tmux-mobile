@@ -6,6 +6,16 @@ const source = await readFile(new URL('./Roster.svelte', import.meta.url), 'utf8
 const rule = (selector: string) =>
   source.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
 
+test('context meters reuse ctxColor at the card edge without adding a row (#173)', () => {
+  assert.match(source, /style:background=\{ctxColor\(a\.vitals\.context_pct\)\}/u);
+  assert.match(rule('.acard'), /position: relative/u);
+  const bar = rule('.ac-bar');
+  assert.match(bar, /position: absolute/u);
+  assert.match(bar, /height: 2px/u);
+  assert.match(bar, /pointer-events: none/u);
+  assert.match(bar, /var\(--pill-bg\)/u);
+});
+
 test('one controlled roster replaces the delayed tap menu whole (#168)', () => {
   assert.match(source, /import \{ ALL_TARGET \} from '\.\/hub-composer\.ts'/u);
   assert.match(source, /const ranked = \$derived\(sortAgentsForRoster\(managedAgents\)\)/u,
@@ -107,7 +117,9 @@ test('one in-flow disclosure controls one list without remounting its cards', ()
     'order releases on input lifecycle events, not a timer');
   assert.match(source, /focused = !!cardsEl\?\.contains\(document\.activeElement\)/u,
     'removed controls can lose focus without emitting focusout');
-  assert.doesNotMatch(source, /transition:[^;\n]*(?:height|width)|@keyframes|position: fixed/u);
+  assert.doesNotMatch(rule('.cards') + rule('.cards.expanded') + rule('.roster'), /transition:[^;\n]*(?:height|width)/u,
+    'list geometry never animates; the absolute context fill may change width (#173)');
+  assert.doesNotMatch(source, /@keyframes|position: fixed/u);
 });
 
 test('idle cards keep their width but give the vacant Stop track back to selection', () => {

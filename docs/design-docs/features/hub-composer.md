@@ -7,6 +7,20 @@ per-agent interruption. The feed is `hub-feed.md`.
 
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
 
+### Card refinements (board #173, 2026-09-11)
+
+Owner, 08:39: "卡片显示优化，context 长度比例还是直接帮我可视化出来，还有 everyon 可以换一个样式，不然我以为还是和 agent 会话一样。还有终止按钮，不要圆形的阴影了，还有这个黑方块看着不知道是停止的意思，是不是换个颜色？让我能更容易够理解这个按钮的含义。还有缺少了双击show 单独过滤某个 agent 消息的能力，是不是可以双击后，卡片样式给我一些改变。"
+
+Context usage is visible again as the existing 2px `.ac-bar` at the card's
+bottom edge, in both strip and expanded views. It uses `ctxColor`, not a new
+threshold or colour family; zero is a reading, missing data has no bar, and
+over-capacity readings saturate the fill while hover/ARIA retain the exact
+percentage. The track sits between the rounded corners, costs no layout
+height and never intercepts clicks or clips the command focus ring.
+Chromium 152 desktop/390px light/dark, collapsed/expanded comparisons keep
+card and roster boxes identical across 16 captures; fill/track ratios match
+the reported percentage. A zero-fill negative control breaks that ratio.
+
 ### One roster above the input, one Stop operation (board #168, 2026-09-11)
 
 Owner, 03:32: "我看到这个设计挺好看的，因为我们有多个 agent，可以在上边去展示哪些agent 在工作，并且我可以对某一个 agent 单独点停止。可以把原来我们的 agent 擦片就放到发送框上边的位置，然后我们消息输入框里，就不用 to 谁了"

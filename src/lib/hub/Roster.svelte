@@ -5,7 +5,7 @@
   import { untrack } from 'svelte';
   import { ALL_TARGET } from './hub-composer.ts';
   import { backendIcon } from '../core/agents.ts';
-  import { backendColor, stateDotColor, stateIsLive, chipExtras, fmtElapsed, modelLabel, sortAgentsForRoster } from './hub.ts';
+  import { backendColor, stateDotColor, stateIsLive, chipExtras, ctxColor, fmtElapsed, modelLabel, sortAgentsForRoster } from './hub.ts';
   import { hoverInfo } from '../ui/hover.ts';
   import { longpress } from '../ui/longpress.ts';
   import { flip } from 'svelte/animate';
@@ -187,6 +187,13 @@
                 onclick={(e) => { e.stopPropagation(); interrupt(a.name); }} />
             </span>
           {/if}
+          {#if a.vitals?.context_pct != null}
+            {@const pct = Math.max(0, Math.min(100, a.vitals.context_pct))}
+            <div class="ac-bar" role="meter" aria-label={t('hubCtxUsed')}
+              aria-valuemin="0" aria-valuemax="100" aria-valuenow={pct} aria-valuetext={`${a.vitals.context_pct}%`}>
+              <i style:width={`${pct}%`} style:background={ctxColor(a.vitals.context_pct)}></i>
+            </div>
+          {/if}
         </div>
       {/each}
       {#each stopped as name (name)}
@@ -243,6 +250,7 @@
   .sk-cards { display: flex; gap: var(--roster-gap); flex: none; grid-column: 1 / -1; }
   .sk-card { width: calc(3 * var(--control-height)); height: var(--control-height); border-radius: var(--ui-radius-row); }
   .acard {
+    position: relative;
     display: grid; grid-template-columns: minmax(0, 1fr) var(--control-height);
     align-items: center; flex: none; width: max-content; min-width: 0;
     border: 0; border-radius: var(--ui-radius-row); background: var(--surface);
@@ -251,6 +259,12 @@
   }
   .acard:hover { box-shadow: inset 0 0 0 1px var(--input-border); }
   .acard.sel { background: var(--accent-bg); box-shadow: inset 0 0 0 1px var(--accent-line); }
+  .ac-bar {
+    position: absolute; left: var(--ui-radius-row); right: var(--ui-radius-row); bottom: 0; height: 2px;
+    background: var(--pill-bg); overflow: hidden; pointer-events: none;
+  }
+  .ac-bar > i { display: block; height: 100%; transition: width var(--t-move), background var(--t-move); }
+  @media (prefers-reduced-motion: reduce) { .ac-bar > i { transition: none; } }
   .cards.expanded .acard { width: auto; }
   .agent-select {
     display: flex; align-items: center; gap: var(--roster-control-gap);

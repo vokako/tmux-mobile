@@ -112,6 +112,17 @@ test('Roster renders the controlled destination strip (#168)', { timeout: 60000 
       assert.equal(view({ recipient: '' }).querySelector('.agent-mention'), null);
     });
 
+    await ctx.test('context usage is a visible edge meter, including zero and saturated readings (#173)', () => {
+      for (const pct of [0, 20, 60, 85, 100, 125]) {
+        const root = view({ managedAgents: [{ ...agents[0], vitals: { context_pct: pct } }] });
+        const meter = card(root, 'runner').querySelector('.ac-bar');
+        assert.ok(meter, `${pct}% has a visible meter`);
+        assert.equal(meter.getAttribute('aria-valuenow'), String(Math.min(100, pct)));
+        assert.equal(meter.querySelector('i')?.style.width, `${Math.min(100, pct)}%`);
+      }
+      assert.equal(view().querySelector('.ac-bar'), null, 'unknown is absent, not a guessed zero');
+    });
+
     await ctx.test('one controlled disclosure targets the same single list in either mode', () => {
       for (const expanded of [false, true]) {
         const root = view({ expanded });
