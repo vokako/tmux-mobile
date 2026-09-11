@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ALL_TARGET, attachmentBody, attachToken, paletteBackendFor } from './hub-composer.ts';
+import { ALL_TARGET, attachmentBody, attachToken, busyTargetsFor, paletteBackendFor } from './hub-composer.ts';
 import { addressed, commandPalette } from './hub.ts';
 
 const roster = [
@@ -8,6 +8,38 @@ const roster = [
   { name: 'bob', managed: true, agent: 'codex' },
   { name: 'shell', managed: false, agent: 'grok' },
 ];
+
+// #168: card Stop and double Ctrl+C share exactly this target boundary.
+test('interrupt targets include only busy managed members of the selected card', () => {
+  const agents = [
+    ...['running', 'working', 'waiting', 'blocked', 'idle', 'done', 'unknown']
+      .map((state) => ({ name: state, state, managed: true })),
+    { name: 'shell', state: 'running', managed: false },
+    { name: 'missing-state', managed: true },
+  ];
+  assert.deepEqual(busyTargetsFor(ALL_TARGET, agents), ['running', 'working', 'waiting', 'blocked']);
+  for (const name of ['running', 'working', 'waiting', 'blocked']) {
+    assert.deepEqual(busyTargetsFor(name, agents), [name]);
+  }
+  for (const name of ['', 'idle', 'done', 'unknown', 'shell', 'missing-state', 'absent']) {
+    assert.deepEqual(busyTargetsFor(name, agents), [], name);
+  }
+  assert.deepEqual(busyTargetsFor(ALL_TARGET, []), []);
+});
+
+test('interrupt targets are a deduplicated activation snapshot, not live roster objects', () => {
+  const agents = [
+    { name: 'alice', state: 'running', managed: true },
+    { name: 'alice', state: 'working', managed: true },
+    { name: 'bob', state: 'idle', managed: true },
+  ];
+  const captured = busyTargetsFor(ALL_TARGET, agents);
+  assert.deepEqual(captured, ['alice']);
+  agents[0]!.name = 'renamed';
+  agents[2]!.state = 'waiting';
+  assert.deepEqual(captured, ['alice']);
+  assert.deepEqual(busyTargetsFor(ALL_TARGET, agents), ['renamed', 'alice', 'bob']);
+});
 
 test('palette uses a leading addressee before the recipient chip', () => {
   assert.equal(paletteBackendFor(' @bob /', 'alice', roster), 'codex');

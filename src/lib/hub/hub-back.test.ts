@@ -3,9 +3,10 @@ import test from 'node:test';
 import { createHubBackRegistry } from './hub-back.ts';
 import type { HubBackLayer } from './hub-back.ts';
 
+// #168 removes agentMenu/recipient/send-arm whole; surviving priority is unchanged.
 // The contract is independent of the implementation's order table.
 const priority: HubBackLayer[] = [
-  'lightbox', 'contextMenu', 'agentMenu', 'recipient', 'palette', 'interrupt',
+  'lightbox', 'contextMenu', 'palette',
   'action', 'trash', 'picker', 'create', 'rename', 'filter', 'files', 'drawer', 'sidebar',
 ];
 
@@ -46,7 +47,7 @@ test('repeated Back reaches the compact list floor without cycling it closed', (
   let open = true;
   let compact = true;
   let sideOpen = false;
-  registry.register('recipient', () => {
+  registry.register('palette', () => {
     if (!open) return false;
     open = false;
     return true;

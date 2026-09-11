@@ -25,6 +25,17 @@ Settings adopts the compact composition in #162. Its three font roles and
 brand/canvas defaults remain: the prototype's `font-display=font-ui` was a
 comparison shortcut, not a decision to replace user font preferences.
 
+**Chat strip revision (2026-09-11, #168).** The owner's request to place
+working agents above the input and stop them individually is recorded verbatim
+in [hub-composer.md](hub-composer.md#one-roster-above-the-input-one-stop-operation-board-168-2026-09-11).
+One roster replaces the old delivery chip and delayed card menu. Selection
+uses the existing accent fill/border with `aria-pressed`, not an additional
+check glyph; body mentions use one `@` glyph, not a dashed card ring.
+Stop and attach/send use shared `CommandButton` paint and native 28px pointer /
+44px coarse targets. Stop response is recoverable interruption, not the
+destructive process-stop confirmation. Status remains `.live-dot` /
+`stateDotColor`; no extra busy-colour family or permanent stop-spinner.
+
 ## 1 · Tokens (app.css `:root` — never restate a value)
 
 - **Type scale, six chrome steps**: `--fs-micro 9 · --fs-meta 10.5 · --fs-sub
@@ -85,8 +96,9 @@ comparison shortcut, not a decision to replace user font preferences.
   and `ui/statusdot.source.test.ts` pins all of this.
 - **Motion**: `--t-fast 120ms` = micro feedback (hover, border, colour);
   `--t-move 200ms` = things that move or resize (drawer, bars, width).
-  Spinner tempos are semantic, not tokens: 0.6s = loading, 2.2s = "a turn is
-  open" (send button), breathe ≈ 1.3–5s (presence). Every looping animation
+  Spinner tempos are semantic, not tokens: 0.6s = loading,
+  breathe ≈ 1.3–5s (presence). The former 2.2s send-button turn spinner was
+  removed with the send/interrupt dual mode in #168. Every looping animation
   stills under `prefers-reduced-motion`. **Micro-motion** (owner, 2026-09-03:
   a state change is a movement, not a swap): a glyph that reads two ways
   TURNS (`.chev`/`.flip`/`.quarter-turn`), things that enter fade or rise in (`.appear*`),

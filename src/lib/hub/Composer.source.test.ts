@@ -6,18 +6,19 @@ const source = await readFile(new URL('./Composer.svelte', import.meta.url), 'ut
 const rule = (selector: string) =>
   source.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
 
-test('the open-turn arc uses the shared spin without adopting the faster loading tempo (#156)', () => {
-  assert.match(rule('.ss-ring'), /transform-origin: 50% 50%; animation: spin 2\.2s linear infinite;/u);
-  assert.doesNotMatch(source, /@keyframes\s+(?:stop-spin|spin)\b/u);
-  assert.match(source, /@media \(prefers-reduced-motion: reduce\) \{ \.ss-ring \{ animation: none; \} \}/u);
+test('Composer retires inline recipient and send-arm mechanisms whole (#168)', () => {
+  assert.doesNotMatch(source, /recipientOpen|toChipW|toExtras|toChipInfo|toMenuH|managedAgents|managedNames|setRecipient/u);
+  assert.doesNotMatch(source, /closeRecipient|recipientChanged|intArm|intTimer|intTargets|intWho|recipientBusy|armInterrupt|fireInterrupt/u);
+  assert.doesNotMatch(source, /mirrorEl|SEND_ZONE|lastLineCollides|text-indent|c-mirror|ss-ring|stop-spin|int-pill/u);
+  assert.doesNotMatch(source, /setTimeout|clearTimeout/u,
+    'the keyboard-only sequence expires by elapsed time, not a hidden send-button timer');
 });
 
-test('Composer retains its stacking context and orders its menus inside it (#133)', () => {
+test('Composer retains its stacking context around the one remaining palette (#168)', () => {
   const composer = /\n  \.composer \{([^}]*)\}/u.exec(source)?.[1] ?? '';
   assert.match(composer, /position:\s*relative/u);
   assert.match(composer, /z-index: 15/u, 'Feed.source pins the feed below this context');
-  const z = (css: string) => Number(/z-index:\s*(\d+)/u.exec(css)?.[1] ?? NaN);
-  assert.ok(z(rule('.cmd-menu')) > z(rule('.to-menu')));
+  assert.match(rule('.cmd-menu'), /z-index: 14/u);
   assert.match(source, /:global\(\.hub-root\.compact\) \.composer/u,
     'the compact ancestor crosses the component boundary without another wrapper');
   assert.doesNotMatch(source, /^\s*\.(st|note-dot|live-dot) \{/mu, 'shared atoms are not copied');
@@ -33,28 +34,20 @@ test('Composer owns local UI state, while transport and capture ordering stay ou
   assert.match(source, /onfocus=\{onfocus\}/u);
   assert.match(source, /export function caret\(\) \{ return composerEl\?\.selectionStart; \}/u);
   assert.match(source, /export function focus\(\) \{ composerEl\?\.focus\(\); \}/u);
-  const chip = /<button class="to-chip"[\s\S]*?>/u.exec(source)?.[0] ?? '';
-  assert.match(chip, /use:hoverInfo=\{toChipInfo\}/u);
-  assert.doesNotMatch(chip, /\stitle=/u);
+  assert.match(source, /export function hasTransient\(\) \{ return !!palette; \}/u);
 });
 
-test('Composer registers the three original Back guards and preserves capture territories (#133)', () => {
-  const guards = {
-    recipient: 'if (recipientOpen) { recipientOpen = false; return true; }',
-    palette: 'if (palette) { paletteOff = true; return true; }',
-    interrupt: 'if (intArm) { intArm = false; return true; }',
-  };
-  for (const [name, guard] of Object.entries(guards)) {
-    assert.ok(source.includes(`registerBack('${name}', () => { ${guard} return false; })`));
-  }
-  assert.match(source, /return \(\) => \{ for \(const dispose of disposers\) dispose\(\); \};/u);
-  assert.match(source, /if \(recipientOpen && !t\?\.closest\?\.\('\.to-wrap'\)\) recipientOpen = false;/u);
+test('Composer registers only palette Back and preserves the capture boundary (#168)', () => {
+  assert.equal([...source.matchAll(/registerBack\('/gu)].length, 1);
+  assert.match(source, /return registerBack\('palette', \(\) => \{ if \(palette\) \{ paletteOff = true; return true; \} return false; \}\);/u);
   assert.match(source, /if \(palette && !t\?\.closest\?\.\('\.cmd-menu, \.compose-shell'\)\) paletteOff = true;/u);
-  assert.match(source, /if \(recipientOpen\) \{ recipientOpen = false; e\.stopPropagation\(\); \}/u);
+  const escape = source.slice(source.indexOf('export function dismissEscape'), source.indexOf('let composerEl'));
+  assert.match(escape, /ctrlCTapAt = null;/u);
+  assert.match(escape, /if \(palette\) \{ paletteOff = true; e\.preventDefault\(\); e\.stopPropagation\(\); \}/u);
 });
 
 test('Composer attachment rendering and button gates retain the coordinator verdicts (#133)', () => {
-  assert.match(source, /disabled=\{!selected \|\| attaching \|\| failed \|\|/u);
+  assert.match(source, /disabled=\{!selected \|\| attaching \|\| failed \|\| !sendable\}/u);
   assert.match(source, /\{#each pending as a, i \(a\.key\)\}\s*\n\s*\{#if a\.error\}/u);
   const err = rule('.pend-chip.err');
   assert.match(err, /var\(--status-danger\)/u);
@@ -63,37 +56,20 @@ test('Composer attachment rendering and button gates retain the coordinator verd
   assert.match(source, /onpreview\(a\.thumb\)/u, 'the preview opens the original local thumbnail URL');
 });
 
-test('the composer\u2019s two upward menus grow from the chip like every other popover (motion.md wave 6)', () => {
-  // Both are absolutely positioned above the capsule, so the corner touching
-  // their trigger is the bottom-left one; the atom only touches opacity /
-  // transform / pointer-events, and rests with `transform: none`, so the
-  // menus' own `position: absolute; bottom: calc(100% + 6px)` still places them.
-
-  for (const menu of ['to-menu', 'cmd-menu']) {
-    const re = new RegExp(`<div class="${menu} pop-layer" class:ready=\\{(\\w+) > 0\\} style:--pop-origin="bottom left"[^>]*bind:clientHeight=\\{\\1\\}`, 'u');
-    assert.match(source, re, `.${menu} is measured, then grows from bottom left`);
-  }
+test('the remaining command palette keeps its measured upward placement (#168)', () => {
+  assert.match(source, /<div class="cmd-menu pop-layer" class:ready=\{cmdMenuH > 0\} style:--pop-origin="bottom left"[^>]*bind:clientHeight=\{cmdMenuH\}/u);
   // A closed menu forgets its height, so the NEXT opening is measured (and
   // animated) again instead of appearing already `.ready`.
-  assert.match(source, /if \(!recipientOpen\) toMenuH = 0;/u, 'the recipient menu re-measures per opening');
   assert.match(source, /if \(!palette\?\.items\.length\) cmdMenuH = 0;/u, 'the palette re-measures per opening');
-  assert.match(rule('.to-menu'), /position: absolute; bottom: calc\(100% \+ 6px\)/u, 'the recipient menu keeps its own placement');
   assert.match(rule('.cmd-menu'), /position: absolute; bottom: calc\(100% \+ 6px\)/u, 'the palette keeps its own placement');
 });
 
-test('a command-shaped draft styles the composer, with the mirror in step', () => {
-
+test('a command-shaped draft retains its machine-text role without a layout mirror (#168)', () => {
   // The look mirrors send()'s own branch (slashCommand + a target), so the
   // capsule never promises a command that send() would deliver as prose.
   assert.match(source, /class:cmd=\{composerIsCmd\}/u);
   assert.match(source, /const composerIsCmd = \$derived/u);
-  // The metrics trap: growComposer's mirror re-lays-out the text to find the
-  // last line. If the input flips to monospace and the mirror does not, the
-  // send button's collision zone is measured in the wrong font.
-  assert.match(
-    source,
-    /\.compose-shell\.cmd \.c-input, \.compose-shell\.cmd :global\(\.c-mirror\) \{ font-family: var\(--font-mono\)/u,
-  );
+  assert.match(rule('.compose-shell.cmd .c-input'), /font-family: var\(--font-mono\)/u);
   // And the height re-measures when the font flips, not just when text changes.
   assert.match(source, /void composerIsCmd;/u);
 });
@@ -120,13 +96,13 @@ test('paste and the + button stage attachments through ONE pipeline (board #25)'
   assert.doesNotMatch(picker, /fsUpload|encodeImage/u, 'the picker holds no upload logic of its own');
 });
 
-test('the composer scrollbar exists exactly while overflowing, and placeholders are short (board #34)', async () => {
+test('the composer scrollbar follows measured overflow and the placeholder names its destination (#168)', () => {
   // hidden → auto → hidden: the base CSS state is hidden (an empty composer
   // never shows a track), growComposer flips it in its ONE measurement — the
   // same `scrollHeight > maxH + 1` verdict that drives the padding — so a
   // shrink or the post-send reset (growComposer re-runs on composerText)
   // lands back on hidden immediately.
-  assert.match(source, /const overflowing = el\.scrollHeight > maxH \+ 1;/u, 'one verdict for scrollbar AND padding');
+  assert.match(source, /const overflowing = el\.scrollHeight > maxH \+ 1;/u, 'the existing overflow threshold stays measured');
   assert.match(source, /el\.style\.overflowY = overflowing \? 'auto' : 'hidden';/u, 'the toggle rides that verdict');
   assert.match(source, /resize: none; overflow-y: hidden;/u, 'the base state is hidden');
   // Not hidden PERMANENTLY: a long message must really scroll — the .c-input
@@ -136,12 +112,37 @@ test('the composer scrollbar exists exactly while overflowing, and placeholders 
   assert.equal([...cInput.matchAll(/overflow-y/g)].length, 1, 'one overflow-y in .c-input, the hidden base');
   assert.ok(!/\.c-input[^}]*scrollbar-width:\s*none/su.test(source), 'the real scrollbar is never masked away');
 
-  // The placeholders name the reach; the menu labels the destinations once.
-  const i18n = await readFile(new URL('../core/i18n.svelte.ts', import.meta.url), 'utf8');
-  assert.equal([...i18n.matchAll(/hubComposerAll: 'Message every agent…',/g)].length, 1, 'EN all is short');
-  assert.equal([...i18n.matchAll(/hubComposerRoom: 'Leave a note…',/g)].length, 1, 'EN room is short');
-  assert.equal([...i18n.matchAll(/hubComposerAll: '发给所有 agent…',/g)].length, 1, 'zh all is short');
-  assert.equal([...i18n.matchAll(/hubComposerRoom: '留一句话…',/g)].length, 1, 'zh room is short');
+  // Parent-owned wording can change; these are the existing destination keys,
+  // now carried by the textarea rather than an inline recipient control.
+  assert.match(source, /recipient === ALL_TARGET \? t\('hubComposerAll'\) : recipient \? t\('hubComposerDm'\)\.replace\('\{name\}', recipient\) : t\('hubComposerRoom'\)/u);
   assert.doesNotMatch(source, /t\('hubTo(?:All|Room)Hint'\)/u,
     'destination labels need no explanatory subtitle');
+});
+
+test('normal-flow actions use the existing shared commands without corner hit overlays (#168)', async () => {
+  assert.match(source, /import CommandButton from '\.\.\/ui\/CommandButton\.svelte';/u);
+  assert.match(source, /<div class="composer-actions">/u);
+  assert.match(rule('.composer-actions'), /display: flex/u);
+  assert.doesNotMatch(rule('.composer-actions'), /position:\s*absolute/u);
+  assert.match(rule('.compose-shell'), /border-radius: 16px/u);
+  const appCss = await readFile(new URL('../../app.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(appCss, /\.compose-shell\b/u, 'native round corners do not opt into the shared squircle list');
+  assert.doesNotMatch(source, /corner-shape:/u, 'this property stays in its shared owner; the Svelte CSS service does not support it yet');
+  assert.doesNotMatch(source, /\.send-btn|\.attach-btn|backdrop-filter|paddingRight|paddingBottom/u);
+});
+
+test('double Ctrl+C has only a timestamp and asks the parent about the current recipient (#168)', () => {
+  assert.match(source, /interruptible = false/u);
+  assert.match(source, /let ctrlCTapAt = null;/u);
+  assert.match(source, /if \(e\.repeat\) return;/u);
+  assert.match(source, /e\.keyCode !== 229/u);
+  assert.match(source, /!e\.metaKey && !e\.altKey/u);
+  assert.match(source, /composerEl\?\.selectionStart !== composerEl\?\.selectionEnd/u);
+  assert.match(source, /selection && !selection\.isCollapsed/u);
+  assert.match(source, /!selected \|\| !recipient \|\| !interruptible/u);
+  assert.match(source, /const now = performance\.now\(\);/u);
+  assert.match(source, /ctrlCTapAt !== null && now - ctrlCTapAt <= 3000/u);
+  assert.match(source, /ctrlCTapAt = null;\s*void oninterrupt\(recipient\);/u);
+  assert.equal([...source.matchAll(/oninterrupt\(/gu)].length, 1, 'one keyboard dispatch site, never a send-button path');
+  assert.match(source, /void selected; void recipient; void composerText; void interruptible; ctrlCTapAt = null;/u);
 });

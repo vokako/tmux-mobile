@@ -72,10 +72,12 @@ test('every placed popover wears .pop-layer and no component keeps a private opa
     assert.match(src, /class="[^"]*\bpop-layer\b[^"]*" class:ready=/u, `${rel}: the placed layer wears .pop-layer with the ready gate`);
     assert.match(src, /style:--pop-origin=/u, `${rel}: tells the atom which corner it grows from`);
   }
-  for (const rel of ['src/lib/hub/Roster.svelte', 'src/App.svelte']) {
+  // #168 removes Roster's private tap menu; its actions use ContextMenu above.
+  for (const rel of ['src/App.svelte']) {
     const src = readFileSync(join(root, rel), 'utf8');
     assert.match(src, /class="(a-menu|server-menu) pop-layer" class:ready=/u, `${rel}: its menu wears .pop-layer`);
   }
+  assert.doesNotMatch(readFileSync(join(root, 'src/lib/hub/Roster.svelte'), 'utf8'), /class="a-menu/u);
   for (const file of components) {
     const src = readFileSync(file, 'utf8');
     const rel = file.slice(root.length);

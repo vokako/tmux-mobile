@@ -6,6 +6,15 @@ normative motion contract; [design-language.md](design-language.md) §1 keeps
 the one-paragraph summary and links here. `ui/motion.source.test.ts` pins the
 vocabulary.
 
+**Composer revision (board #168, 2026-09-11).** The agent strip replaces the
+recipient chip and delayed tap menu; Send no longer swaps into a Stop or shows
+an arm caption. Their wave-history entries below are retired, not invitations
+to restore them. The remaining command palette and shared ContextMenu keep
+`.pop-layer`; card state uses the existing `.live-dot` and token transitions.
+Mentions carry one `@` mark. No height animation or new loop accompanies the
+normal-flow composer, and the existing shell-height notification still runs
+only when its measured height changes.
+
 ## 1 · Principles
 
 1. **Motion explains a cause.** Every animation answers "what just happened

@@ -34,7 +34,7 @@
   import { sortRows } from '../projects/projects.ts';
   import { stateDotColor, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, unreadSenders, stoppedAgents, slashCommand, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
   import { resolvePathRef } from '../core/path-links.ts';
-  import { ALL_TARGET, attachmentBody, attachToken } from './hub-composer.ts';
+  import { ALL_TARGET, attachmentBody, attachToken, busyTargetsFor } from './hub-composer.ts';
   import { walkFeedGap } from './hub-history.ts';
   import { createHubBackRegistry } from './hub-back.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
@@ -275,8 +275,6 @@
     // The cached roster can seat the recipient immediately — same rule as
     // loadAgents, which will confirm or correct it when the fresh roster lands.
     if (agents.length) recipient = pickLead(agents, registry, hubPrefs.lead(session));
-    composer?.closeRecipient();
-    menuFor = '';
     filterAgent = ''; // a filter is a reading choice, scoped to its room
     // The drawer follows the project (board #23, owner: "chat的右侧边栏打开
     // 哪个的状态前端帮我记住，这样我切换不同的 project 回来原来的视图还在"):
@@ -733,12 +731,8 @@
 
   // Roster owns card interaction; Hub owns the resulting reading filter.
   let filterAgent = $state('');
-  /** The filter as a MENU verb (review, 2026-09-03: the double-click was the
-   * only way in, undocumented, and a selected card waited 260 ms for its menu).
-   * Same toggle as the double-click; it does not touch the recipient, so a
-   * STOPPED agent's history can be narrowed to without seating it as lead. */
+  /** Filtering is a ContextMenu verb, independent of the delivery recipient. */
   function toggleFilter(name) {
-    menuFor = '';
     filterAgent = filterAgent === name ? '' : name;
   }
   const filterItem = (name) => ({
@@ -754,7 +748,6 @@
    * the user had just dismissed (review C, 2026-09-03). */
   function setRecipient(name) {
     recipient = name;
-    composer?.recipientChanged();
     if (selected) hubPrefs.setLead(selected, name);
     // An OPEN terminal partition follows the selection (board #91): choosing
     // an agent is also choosing whose pane you are watching — the same reading
@@ -776,27 +769,31 @@
      Escape must be the NAMED key: with extended-keys on, tmux drops raw C0
      bytes sent to a pane in extended mode (see CLAUDE.md). Stop/restart stay
      separate and heavier: this cancels output, it does not kill the agent. */
-  async function interrupt(name) {
-    // One implementation, server-side (`hub_agent_interrupt`), so the CLI's
-    // `tmm agent interrupt` and this button cannot drift apart — and so the
-    // managed-agent gate is enforced in the same place as stop/restart.
-    try {
-      await hubAgentInterrupt(selected, name);
-    } catch (e) {
-      console.warn('interrupt failed', name, e);
-    }
-  }
+  let interruptJobs = $state.raw([]);
+  const interrupting = $derived(interruptJobs.filter((job) => job.session === selected).map((job) => job.name));
+  const busyNames = $derived(busyTargetsFor(ALL_TARGET, agents));
+  const interruptible = $derived(busyTargetsFor(recipient, agents).length > 0
+    && !busyTargetsFor(recipient, agents).some((name) => interrupting.includes(name)));
 
-  async function fireInterrupt(targets) {
-    if (!selected || !targets.length) return;
-    following = true;
-    try {
-      await Promise.all(targets.map((n) => hubAgentInterrupt(selected, n)));
-      // The room recorded `[tmm] interrupted <name>` — show it where the
-      // owner asked to see it ("发送 interrupt 的状态在消息列表里也要展示").
-      await loadFeed();
-      scrollFeed(true);
-    } catch (e) { console.warn('interrupt failed', e); }
+  async function interrupt(target, session = selected) {
+    if (!session || session !== selected) return;
+    // Snapshot before the first await. A peer Stop never selects its card,
+    // changes the reading anchor, or reaches an idle/unmanaged window.
+    const targets = busyTargetsFor(target, agents);
+    if (targets.some((name) => interruptJobs.some((job) => job.session === session && job.name === name))) return;
+    const jobs = targets.map((name) => ({ session, name }));
+    interruptJobs = [...interruptJobs, ...jobs];
+    await Promise.all(jobs.map(async (job) => {
+      try {
+        await hubAgentInterrupt(job.session, job.name);
+      } catch (e) {
+        console.warn('interrupt failed', job.name, e);
+      } finally {
+        interruptJobs = interruptJobs.filter((pending) => pending !== job);
+      }
+    }));
+    // The existing push/poll path reads the server's reset-first status and
+    // [tmm] interrupted line; acknowledging a request does not invent either.
   }
 
   async function withReadingAnchor(mutate) {
@@ -1149,12 +1146,6 @@
     return () => window.removeEventListener('keydown', onKey, true);
   });
 
-  // ── The agent action menu is a CONTEXT MENU next to its chip, not a row.
-  // It used to open as a bar under the roster because the roster scrolls
-  // horizontally and a popover positioned inside a scroll container gets
-  // clipped by it. A fixed layer escapes that container entirely, so the menu
-  // can sit where the click was (owner, 2026-08-19).
-  let cardsEl = $state(null);
   // ── Right-click on the desktop, long press on a phone. One menu component, one
   // piece of state, three subjects (owner, 2026-08-20: "还有很多地方增加右键点击操
   // 作，和手机长按"). The ITEMS are built per subject, and each surface offers the
@@ -1189,7 +1180,6 @@
     const disposers = [
       backLayers.register('lightbox', () => { if (shotView) { shotView = ''; return true; } return false; }),
       backLayers.register('contextMenu', () => { if (ctxAt) { closeCtx(); return true; } return false; }),
-      backLayers.register('agentMenu', () => { if (menuFor) { menuFor = ''; return true; } return false; }),
       backLayers.register('action', () => { if (pendingAct && !acting) { pendingAct = null; return true; } return false; }),
       backLayers.register('trash', () => { if (trashAsk) { trashAsk = null; return true; } return false; }),
       backLayers.register('picker', () => { if (pickerOpen) { pickerOpen = false; return true; } return false; }),
@@ -1208,6 +1198,7 @@
   /** One order for every agent menu — rising consequence, destructive last
    * (owner, 2026-08-25: "停止删除应该靠后"), interrupt in the warn tone. */
   function agentItems(name) {
+    const session = selected;
     const config = openAgentConfig
       ? [{ label: t('hubAgentConfig'), icon: 'gear', onselect: () => openAgentConfig(name) }]
       : [];
@@ -1225,7 +1216,9 @@
       { label: t('hubWatch'), icon: 'terminal', onselect: () => { if (a) openDrawer(a); } },
       filterItem(name),
       ...config,
-      { label: t('hubInterrupt'), icon: 'x', warn: true, onselect: () => interrupt(name) },
+      ...(busyTargetsFor(name, agents).length
+        ? [{ label: t('hubInterrupt'), icon: 'stop', warn: true, disabled: interrupting.includes(name), onselect: () => interrupt(name, session) }]
+        : []),
       { label: t('hubRestart'), icon: 'refresh', onselect: () => restartAgent(name) },
       { label: t('hubStop'), icon: 'stop', danger: true, onselect: () => askAction('stop', name) },
       { label: t('hubRemove'), icon: 'trash', danger: true, onselect: () => askAction('remove', name) },
@@ -1268,30 +1261,7 @@
   }
 
 
-  // Any click elsewhere, Escape, a scroll of the roster or a resize dismisses
-  // it — a menu you have to close by hand is a menu you forget to close.
-  $effect(() => {
-    if (!menuFor) return;
-    const close = () => { menuFor = ''; };
-    // The card is the trigger: a pointerdown on it must not pre-close the
-    // menu, or the click's toggle would reopen it — the toggle itself owns
-    // same-card close and other-card switch.
-    const onDown = (e) => { if (!e.target?.closest?.('.a-menu, .acard:not(.add)')) close(); };
-    const onKey = (e) => { if (e.key === 'Escape') { close(); e.stopPropagation(); } };
-    window.addEventListener('pointerdown', onDown, true);
-    window.addEventListener('keydown', onKey, true);
-    window.addEventListener('resize', close);
-    cardsEl?.addEventListener('scroll', close, { passive: true });
-    return () => {
-      window.removeEventListener('pointerdown', onDown, true);
-      window.removeEventListener('keydown', onKey, true);
-      window.removeEventListener('resize', close);
-      cardsEl?.removeEventListener('scroll', close);
-    };
-  });
-
-  // The SAME rule for the other two transient layers — the message action row
-  // (copy/raw under a tapped bubble) and the recipient picker. Both used to
+  // The same dismissal order for Copy/Raw and the command palette. Both used to
   // stay up until something happened to replace them (owner, 2026-08-22:
   // "在其他操作之后应该自动隐藏 不应该一直常驻显示"). A tap anywhere outside
   // the layer (or Escape) closes them; the toggles themselves and clicks
@@ -1324,11 +1294,10 @@
   const blocks = $derived.by(() => {
     const all = feedBlocks(feed, activity, hubPrefs.feedLevel, (from) => agents.find((a) => a.name === from)?.name);
     if (!filterAgent) return all;
-    // The double-click filter: one agent's world (its replies, what was
-    // addressed to it, its own telemetry lane) — rules live in filterBlocks.
+    // Replies, addressed messages and this agent's telemetry lane:
+    // the reading rule lives in filterBlocks.
     return filterBlocks(all, filterAgent, agents.find((a) => a.name === filterAgent)?.name);
   });
-  let menuFor = $state('');         // agent name whose card menu is open
 
   /** Four states, one word each. Anything unexpected shows itself rather than
    * being silently relabelled. */
@@ -1554,14 +1523,6 @@
         </button>
       </div>
 
-      <Roster {selected} {compact} {managedAgents} {stopped} {selectedRow}
-        {recipient} {filterAgent} {unread} {acting} {tick} {roomReady} {justLoaded} {rosterBase}
-        bind:menuFor bind:cardsEl {stateLabel} {stateTone}
-        onselect={setRecipient} onfilter={toggleFilter} onwatch={openDrawer}
-        onstart={startAgent} oninterrupt={interrupt} onrestart={restartAgent}
-        onaction={askAction} onconfigure={openAgentConfig} onadd={() => openPicker('add')}
-        oncontext={(at, name) => openCtx(at, name, agentItems(name))} />
-
       {#snippet emptyFeed()}
           {#if selected && !managedAgents.length && registry.length}
             <!-- Nothing to talk to yet: start from a preset. One tap = that
@@ -1611,10 +1572,17 @@
         }}
         registerActions={registerFeedActions} />
 
+      <Roster {selected} {compact} {managedAgents} {stopped} {selectedRow}
+        {recipient} {composerText} {managedNames} {busyNames} {interrupting}
+        {unread} {acting} {tick} {roomReady} {justLoaded} {rosterBase}
+        {stateLabel} {stateTone} onselect={setRecipient} oninterrupt={interrupt}
+        onadd={() => openPicker('add')}
+        oncontext={(at, name) => openCtx(at, name, agentItems(name))} />
+
       <Composer bind:this={composer} bind:composerText {selected} {compact} {recipient}
-        {agents} {managedAgents} {managedNames} {pending} {attaching} {failed} {sendable}
-        onselect={setRecipient} onsend={send} onstage={stageFiles} onremove={removeAttachment}
-        onmodels={modelsList} oninterrupt={fireInterrupt} onpreview={(path) => { shotView = path; }}
+        {agents} {pending} {attaching} {failed} {sendable} {interruptible}
+        onsend={send} onstage={stageFiles} onremove={removeAttachment}
+        onmodels={modelsList} oninterrupt={interrupt} onpreview={(path) => { shotView = path; }}
         onfocus={() => { following = true; scrollFeed(true); setTimeout(() => scrollFeed(true), 300); }}
         onheightchange={() => { if (following) scrollFeed(true); }}
         registerBack={onGoBack ? backLayers.register : null} />

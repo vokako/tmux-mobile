@@ -115,8 +115,8 @@ App seeds/re-pushes `{app:true}` history entries and routes `popstate` to the vi
 
 **Hub dispatch ownership** (board #119, 2026-09-09): one per-Hub
 `hub-back.ts` registry replaces the closure-wide flag chain. Its fixed order
-is lightbox -> ContextMenu -> agent tap menu -> recipient -> palette ->
-armed interrupt -> non-busy action confirmation -> trash confirmation ->
+is lightbox -> ContextMenu -> palette ->
+non-busy action confirmation -> trash confirmation ->
 agent picker -> create project -> rename -> agent filter -> Files delegate ->
 drawer close -> compact project-list floor. This is not registration order
 or a chronological stack. Each callback reads its owner's live state;
@@ -125,8 +125,11 @@ Each disposer belongs to one registration, so an old owner cannot remove
 its replacement even when both register the same function.
 
 Hub still publishes one callback through `onGoBack`; cleanup removes each
-owner's registrations. Since board #133 (2026-09-09), Composer registers its
-recipient/palette/interrupt slots; Hub owns the other twelve. The original
+owner's registrations. Board #168 (2026-09-11) removes the agent tap menu,
+recipient popup and send-arm mechanism whole, including their Back slots
+and the obsolete card-menu capture effect. Composer registers only palette;
+Hub owns the other eleven slots. All surviving guards and their relative
+order are unchanged. The original
 guards remain: a truthy palette consumes even
 without items, busy action confirmation falls through, and Files is called
 only for an open Files partition and consumes only on a true return.
@@ -136,7 +139,7 @@ including the terminal/Files/Board focus territories. The registry neither
 installs listeners nor calls browser history. Desktop still uses in-pane
 Files Back/breadcrumbs; a narrow desktop is not a reason to trap browser Back.
 Unit traces cover every layer and overlap; a mounted Hub test exercises
-recipient/palette priority, the compact floor and registration cleanup.
+ContextMenu/palette priority, the compact floor and registration cleanup.
 Since board #134 (2026-09-09), Feed owns Copy/Raw state and registers live
 `isOpen`/`outside`/`escape` callbacks with Hub's existing capture listener.
 No flags are copied and no new listener or Back layer is installed.

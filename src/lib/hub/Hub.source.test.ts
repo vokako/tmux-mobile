@@ -60,12 +60,12 @@ test('Hub keeps Feed coordination and exposes only the agreed reading boundary (
 test('Hub dot sizing has one shared declaration without restyling embedded pages (#132)', async () => {
   const css = await readFile(new URL('./hub-atoms.css', import.meta.url), 'utf8');
   assert.match(source, /import '\.\/hub-atoms\.css';/u);
-  assert.match(css, /\.hub-root :where\(\.ac-top, \.to-menu button, \.m-state, \.win-pill\) > \.st \{ width: 6px; height: 6px; border-radius: 50%; flex: none; transition: background var\(--t-fast\); \}/u,
+  assert.match(css, /\.hub-root :where\(\.ac-top, \.m-state, \.win-pill\) > \.st \{ width: 6px; height: 6px; border-radius: 50%; flex: none; transition: background var\(--t-fast\); \}/u,
     ':where adds no specificity; the two classes match the former scoped rule');
   assert.doesNotMatch(source, /^\s*\.st \{/mu, 'the former private definition is removed');
   assert.doesNotMatch(css, /live-dot|@keyframes/u, 'status motion stays in app.css');
-  assert.match(css, /\.hub-root :where\(\.to-menu button, \.m-state\) > \.note-dot \{ border: 1px dashed var\(--text3\); background: none; \}/u,
-    'the receipt and recipient menu share one dashed note mark (#133)');
+  assert.match(css, /\.hub-root :where\(\.m-state\) > \.note-dot \{ border: 1px dashed var\(--text3\); background: none; \}/u,
+    '#168 removes the recipient menu selector, retaining the receipt note mark');
   assert.doesNotMatch(source, /^\s*\.note-dot \{/mu);
   assert.match(css, /\.hub-root :where\(\.page-head, \.drawer-head\) > \.spacer \{ flex: 1; \}/u,
     'the Hub and drawer headers share the original filler without a copy (#136)');
@@ -91,7 +91,7 @@ test('Hub hover surfaces keep the shared status vocabulary (board #87)', () => {
   // The tone of the state row is the SAME family the dot paints — no second
   // colour language (rule 6).
   assert.match(source, /function stateTone\(state\) \{\s*switch \(stateDotColor\(state\)\)/u, 'the hover tone derives from stateDotColor');
-  assert.match(source, /bind:menuFor bind:cardsEl \{stateLabel\} \{stateTone\}/u,
+  assert.match(source, /\{stateLabel\} \{stateTone\} onselect=\{setRecipient\}/u,
     'Roster consumes the existing shared formatters');
   assert.match(source, /\{agents\} \{panes\} \{managedAgents\} \{winsExpanded\} \{stateLabel\} \{stateTone\}/u,
     'Drawer consumes the same formatters without copying them (#136)');
@@ -112,33 +112,42 @@ test('Hub keeps selection, Back and consequential actions around the extracted S
     'the old view and private fold state have one new owner');
 });
 
-test('Hub retains roster actions and the original dismissal state (#132)', () => {
+test('Hub owns one strip above Composer; ContextMenu replaces the delayed menu (#168)', () => {
   const start = source.indexOf('<Roster ');
   const roster = source.slice(start, source.indexOf('/>', start));
-  assert.match(roster, /bind:menuFor bind:cardsEl/u);
-  assert.match(roster, /onselect=\{setRecipient\} onfilter=\{toggleFilter\} onwatch=\{openDrawer\}/u);
-  assert.match(roster, /onstart=\{startAgent\} oninterrupt=\{interrupt\} onrestart=\{restartAgent\}/u);
-  assert.match(roster, /onaction=\{askAction\} onconfigure=\{openAgentConfig\}/u);
+  assert.match(roster, /\{composerText\} \{managedNames\} \{busyNames\} \{interrupting\}/u);
+  assert.match(roster, /onselect=\{setRecipient\} oninterrupt=\{interrupt\}/u);
   assert.match(roster, /oncontext=\{\(at, name\) => openCtx\(at, name, agentItems\(name\)\)\}/u);
-  assert.match(source, /cardsEl\?\.addEventListener\('scroll', close, \{ passive: true \}\)/u);
-  assert.match(source, /backLayers\.register\('agentMenu', \(\) => \{ if \(menuFor\)/u);
-  assert.doesNotMatch(source, /function cardClick|function toggleAgentMenu|class="roster"|class="a-menu pop-layer"/u);
+  assert.equal([...source.matchAll(/<Roster /g)].length, 1);
+  assert.ok(source.indexOf('<Feed ') < start && start < source.indexOf('<Composer '));
+  assert.doesNotMatch(source, /menuFor|cardsEl|agentMenu|function cardClick|function toggleAgentMenu|class="a-menu/u,
+    'the 260ms menu and its capture-listener lifetime are removed whole');
+});
+
+test('card and keyboard interrupts snapshot the same busy membership without changing reading intent (#168)', () => {
+  const body = source.slice(source.indexOf('async function interrupt'), source.indexOf('async function withReadingAnchor'));
+  assert.match(body, /const targets = busyTargetsFor\(target, agents\);/u);
+  assert.match(body, /const jobs = targets\.map\(\(name\) => \(\{ session, name \}\)\);/u);
+  assert.match(body, /await hubAgentInterrupt\(job\.session, job\.name\)/u);
+  assert.match(body, /pending !== job/u, 'settling an old job cannot clear a newer one');
+  assert.doesNotMatch(body, /following =|scrollFeed|setRecipient|hubAgentStop|hubAgentRestart/u);
+  assert.equal([...source.matchAll(/oninterrupt=\{interrupt\}/g)].length, 2);
+  assert.doesNotMatch(source, /fireInterrupt/u);
 });
 
 test('Hub keeps Composer transport and capture listeners at the coordinator boundary (#133)', () => {
   assert.match(source, /<Composer bind:this=\{composer\} bind:composerText \{selected\} \{compact\} \{recipient\}/u);
-  assert.match(source, /onselect=\{setRecipient\} onsend=\{send\} onstage=\{stageFiles\} onremove=\{removeAttachment\}/u);
-  assert.match(source, /onmodels=\{modelsList\} oninterrupt=\{fireInterrupt\}/u);
+  assert.match(source, /onsend=\{send\} onstage=\{stageFiles\} onremove=\{removeAttachment\}/u);
+  assert.match(source, /onmodels=\{modelsList\} oninterrupt=\{interrupt\}/u);
   assert.match(source, /onheightchange=\{\(\) => \{ if \(following\) scrollFeed\(true\); \}\}/u);
   assert.match(source, /onfocus=\{\(\) => \{ following = true; scrollFeed\(true\); setTimeout\(\(\) => scrollFeed\(true\), 300\); \}\}/u);
   assert.match(source, /let at = composer\?\.caret\(\) \?\? composerText\.length;/u);
   assert.match(source, /composer\?\.focus\(\);/u);
-  assert.match(source, /composer\?\.recipientChanged\(\);/u);
+  assert.doesNotMatch(source, /recipientChanged|closeRecipient/u);
   assert.match(source, /hubPrefs\.setDraft\(selected, composerText\)/u);
   const drawer = source.indexOf("if (!termOpen || !visible) return;");
-  const roster = source.indexOf("if (!menuFor) return;");
   const transients = source.indexOf("if (!feedActions?.isOpen() && !composer?.hasTransient()) return;");
-  assert.ok(drawer < roster && roster < transients, 'the existing capture effects keep their order');
+  assert.ok(drawer < transients, 'surviving capture effects keep their order after menu removal');
   assert.match(source, /feedActions\?\.outside\(e\);\s*composer\?\.dismissOutside\(e\);/u);
   assert.match(source, /feedActions\?\.escape\(e\);\s*composer\?\.dismissEscape\(e\);/u);
   assert.doesNotMatch(source, /let (recipientOpen|paletteOff|intArm|composerEl)|function growComposer/u);
@@ -149,7 +158,6 @@ test('Back registers the original live guards and publishes one local dispatcher
   const guards = {
     lightbox: "if (shotView) { shotView = ''; return true; }",
     contextMenu: 'if (ctxAt) { closeCtx(); return true; }',
-    agentMenu: "if (menuFor) { menuFor = ''; return true; }",
     action: 'if (pendingAct && !acting) { pendingAct = null; return true; }',
     trash: 'if (trashAsk) { trashAsk = null; return true; }',
     picker: 'if (pickerOpen) { pickerOpen = false; return true; }',
@@ -164,9 +172,9 @@ test('Back registers the original live guards and publishes one local dispatcher
     assert.ok(region.includes(`backLayers.register('${layer}', () => { ${guard} return false; })`),
       `${layer} keeps its original guard/action inside a live callback`);
   }
-  assert.equal([...region.matchAll(/backLayers\.register\(/g)].length, 12);
+  assert.equal([...region.matchAll(/backLayers\.register\(/g)].length, 11);
   assert.match(source, /registerBack=\{onGoBack \? backLayers\.register : null\}/u,
-    'Composer registers its three original slots with the same registry');
+    'Composer registers its remaining palette slot with the same registry');
   assert.match(region, /onGoBack\(backLayers\.back\);/u);
   assert.match(region, /return \(\) => \{ for \(const dispose of disposers\) dispose\(\); \};/u);
   assert.doesNotMatch(region, /onGoBack\(\(\) =>|addEventListener|popstate|pushState/u,
@@ -176,7 +184,7 @@ test('Back registers the original live guards and publishes one local dispatcher
 test('selecting an agent retargets an OPEN terminal partition (board #91)', () => {
   // Choosing who you talk to is also choosing whose pane you are watching:
   // when the drawer's terminal partition is open, clicking an agent card (and
-  // every other setRecipient path — the composer picker, "talk to", restart)
+  // every other setRecipient path — "talk to", restart)
   // switches the embedded terminal to that agent's window. The lookup is by
   // roster name, so @all and the room (which match no agent) naturally skip;
   // a CLOSED drawer must not spring open — this follows, it never opens.
@@ -189,17 +197,15 @@ test('selecting an agent retargets an OPEN terminal partition (board #91)', () =
 test('the filter and the detail level are reachable from menus, not only from a gesture and Settings', () => {
   // Review, 2026-09-03: filtering by agent existed only as an undocumented
   // double-click; the detail level only in Settings (cycleFeedLevel was dead).
-  // Both card menus — the tap menu and the right-click/long-press ContextMenu
-  // — carry the filter verb from ONE toggle (a menu with its own action set is
-  // a second source of truth), and the project title's menu carries the three
-  // levels with the current one ticked.
+  // #168 keeps the filter in the single right-click/long-press ContextMenu
+  // after deleting the tap-menu and double-click paths. The project title's
+  // menu still carries the three detail levels with the current one ticked.
   const items = source.slice(source.indexOf('function agentItems'), source.indexOf('function projectItems'));
   assert.equal([...items.matchAll(/filterItem\(name\)/g)].length, 2, 'live AND stopped agents get the filter verb');
-  assert.match(source, /onfilter=\{toggleFilter\}/u, 'Roster uses the same parent filter toggle');
-  assert.match(source, /function toggleFilter\(name\) \{\s*\n\s*menuFor = '';\s*\n\s*filterAgent = filterAgent === name \? '' : name;/u,
-    'the menu toggle is the double-click\u2019s rule, minus the recipient change');
+  assert.match(source, /function toggleFilter\(name\) \{\s*filterAgent = filterAgent === name \? '' : name;/u,
+    '#168 ContextMenu retains the toggle without selecting or opening a second menu');
   assert.match(source, /projectItems\(selectedRow, true\)/u, 'the title caret asks for the view rows');
-  const lv = source.slice(source.indexOf('function feedLevelItems'), source.indexOf('// Any click elsewhere'));
+  const lv = source.slice(source.indexOf('function feedLevelItems'), source.indexOf('// The same dismissal'));
   assert.match(lv, /hubPrefs\.feedLevel === level \? 'check' : 'circle'/u, 'radio semantics through the menu\u2019s own icons');
   assert.match(lv, /hubPrefs\.setFeedLevel\(level\)/u, 'and it writes the one pref Settings reads');
   assert.ok(!source.includes('cycleFeedLevel'), 'the dead cycle control stays gone');
@@ -209,7 +215,7 @@ test('agent restart remains one parent action for roster and context menu (board
   const items = source.slice(source.indexOf('function agentItems'), source.indexOf('function projectItems'));
   assert.match(items, /label: t\('hubRestart'\), icon: 'refresh', onselect: \(\) => restartAgent\(name\)/u,
     'right-click and long-press keep the same restart action');
-  assert.match(source, /onstart=\{startAgent\} oninterrupt=\{interrupt\} onrestart=\{restartAgent\}/u);
+  assert.match(items, /onselect: \(\) => startAgent\(name\)/u);
 
   const action = source.slice(source.indexOf('async function restartAgent'), source.indexOf('// Live pushes'));
   assert.match(action, /await hubAgentRestart\(selected, name\)/u, 'Restart calls the existing lifecycle RPC');
@@ -544,7 +550,7 @@ test('a failed attachment is a chip that blocks send, never a console line', () 
 });
 
 test('composer calculations use the pure helpers without moving send or its gates (#117)', () => {
-  assert.match(source, /import \{ ALL_TARGET, attachmentBody, attachToken \} from '\.\/hub-composer\.ts';/u);
+  assert.match(source, /import \{ ALL_TARGET, attachmentBody, attachToken, busyTargetsFor \} from '\.\/hub-composer\.ts';/u);
   const send = /async function send\(\) \{[\s\S]*?\n  \}/u.exec(source)?.[0] ?? '';
   const interpolation = send.indexOf('const body = attachmentBody(raw, atts);');
   assert.ok(interpolation > send.indexOf('if (attaching) return;'));

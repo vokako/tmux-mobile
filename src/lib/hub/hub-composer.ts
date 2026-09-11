@@ -1,5 +1,22 @@
 export const ALL_TARGET = 'all';
 
+interface InterruptAgent {
+  name: string;
+  managed: boolean;
+  state?: string;
+}
+
+const INTERRUPTIBLE_STATES = new Set(['running', 'working', 'waiting', 'blocked']);
+
+/** A card owns only its busy managed members; callers capture before awaiting. */
+export function busyTargetsFor(target: string, agents: readonly InterruptAgent[]): string[] {
+  if (!target) return [];
+  return [...new Set(agents
+    .filter((a) => a.managed && (target === ALL_TARGET || a.name === target)
+      && INTERRUPTIBLE_STATES.has(a.state ?? ''))
+    .map((a) => a.name))];
+}
+
 interface PaletteAgent {
   name: string;
   managed: boolean;

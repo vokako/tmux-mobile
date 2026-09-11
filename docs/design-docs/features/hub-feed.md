@@ -6,6 +6,24 @@ The chat column of the Hub: bubble language, the single user-message anchor, lay
 
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
 
+### Agent strip revision (board #168, 2026-09-11)
+
+The owner requested one working-agent strip above the input, with a Stop
+on each agent and no inline To control. The current contract is in
+[hub-composer.md](hub-composer.md#one-roster-above-the-input-one-stop-operation-board-168-2026-09-11).
+It supersedes the older composer-chip/mirror and 260ms card-menu descriptions
+below, which remain historical evidence. Roster is still one unkeyed component,
+now between Feed and Composer; `groupRoster` retains team identity and order.
+Secondary card actions, including filtering and restart, use only ContextMenu.
+The fixed tap menu and double-click filter shortcut no longer exist.
+
+Feed itself is unchanged: direct child rows, following/newBelow, the three
+reading exports, retained resize anchor and `.to-tail` remain its single
+reading mechanism. Stopping a card never forces tail-following or remounts
+Feed. The drawer's window selector is not another delivery roster and stays.
+State dots still use the shared status language; body mentions use one `@`
+glyph, not a dashed card ring or a second selected state.
+
 ### The room's transcript lives in state.db, and rooms are implicit (board #107, 2026-09-09)
 
 Hub chat used to sit on the desktop Team's agora bus: hub_rpc's post/page/search/delete all crossed the `TeamBridge` trait into `team.db`. That was a third truth store (tenet 7 allows exactly two — state.db and `<ws>/.tmm/`) and an in-process bus (tenet 4's named anti-pattern), and it chained the Hub's life to a feature the owner deleted whole (board #100). Since board #107 the transcript is state.db's `hub_msgs` (`projects/rooms.rs`), and three decisions there are load-bearing: (1) **rooms are implicit** — a room exists exactly when it has messages; the bus's `open_room` registration step is gone because a registry separate from the data it indexes is a second source of truth (tenet: one definition per concept). (2) **the legacy import preserves `seq`/`id`/`ts` byte-for-byte** — `seq` is the paging cursor already held by every connected client and every `tmm log` walk, so an import that renumbered would strand every cursor mid-conversation; `INSERT OR IGNORE` + a `meta` flag make the one-off import retry-safe, and a legacy `team.db` stays on disk unread (the room is the only record — losing history to a storage migration is not acceptable). (3) **the wire is unchanged** — message JSON `{seq,id,ts,room,from,to,kind,body}` and the `team_message` push frame name survive, because renaming a frame breaks every deployed client for zero behaviour change. The bus's `requires_reply` obligation graph died unmourned: the Hub never read it — reply behaviour is hooks plus the single reply edge (derive, never declare).

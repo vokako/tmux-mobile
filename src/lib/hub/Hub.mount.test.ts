@@ -71,6 +71,11 @@ test('saved all restores through a fresh mount and room revisit without deliveri
   }
 });
 
+const selectedCard = (document: Document) =>
+  document.querySelector('.agent-select[aria-pressed="true"]')?.closest<HTMLElement>('.acard')?.dataset.agent ?? '';
+const stripCard = (document: Document, name: string) =>
+  document.querySelector<HTMLElement>(`.acard[data-agent="${name}"]`)!;
+
 async function characterize(context: TestContext, fixture: Awaited<ReturnType<typeof compileMount>>) {
   const { pushed, rpc } = roomFixture();
   const app = await fixture.mount(context, {
@@ -82,8 +87,7 @@ async function characterize(context: TestContext, fixture: Awaited<ReturnType<ty
       await app.flush();
     }
     const card = (name: string) => {
-      const found = [...app.document.querySelectorAll<HTMLElement>('.acard:not(.add)')]
-        .find((element) => element.querySelector('.a-name')?.textContent === name);
+      const found = stripCard(app.document, name)?.querySelector<HTMLButtonElement>('.agent-select');
       assert.ok(found, `${name} is rendered by the real Hub`);
       return found;
     };
@@ -91,28 +95,23 @@ async function characterize(context: TestContext, fixture: Awaited<ReturnType<ty
       card(name).dispatchEvent(new app.window.MouseEvent('click', { bubbles: true }));
       await app.flush();
     };
-    const recipient = () => app.document.querySelector('.to-name')?.textContent;
-    const menu = () => app.document.querySelector('.a-menu .am-who')?.textContent ?? null;
+    const recipient = () => selectedCard(app.document);
 
     assert.equal(recipient(), 'alice');
     await click('bob');
     assert.equal(recipient(), 'bob');
-    assert.equal(menu(), null, 'first click selects without opening a menu');
     await click('bob');
-    await app.advance(259);
-    assert.equal(menu(), null);
-    await app.advance(1);
-    assert.equal(menu(), 'bob', 'the selected card opens its menu at 260ms');
-
-    app.document.body.dispatchEvent(new app.window.Event('pointerdown', { bubbles: true }));
-    await app.flush();
-    assert.equal(menu(), null);
-    await click('bob');
-    await app.advance(100);
+    assert.equal(recipient(), '', 'reselecting a card immediately chooses record-only');
+    await click('all');
+    assert.equal(recipient(), 'all');
     await click('alice');
-    assert.equal(recipient(), 'alice', 'another card is not swallowed by the pending timer');
+    assert.equal(recipient(), 'alice');
     await app.advance(260);
-    assert.equal(menu(), null, 'the old card menu was cancelled, not delayed');
+    assert.equal(app.document.querySelector('.a-menu, .to-chip, .to-menu, .int-pill'), null,
+      '#168 retires the delayed menu, recipient popup and send arm whole');
+    const roster = app.document.querySelector('.roster')!;
+    const composer = app.document.querySelector('.composer')!;
+    assert.ok(roster.compareDocumentPosition(composer) & app.window.Node.DOCUMENT_POSITION_FOLLOWING);
     assert.equal(pushed.size, 1);
   } finally {
     await app.close();
@@ -120,7 +119,7 @@ async function characterize(context: TestContext, fixture: Awaited<ReturnType<ty
   assert.equal(pushed.size, 0, 'unmount releases the real push subscription');
 }
 
-test('the real Hub defers the selected card menu and cancels it for another card', { timeout: 60000 }, async (context) => {
+test('the real Hub strip selects one destination and deselects to record-only without a tap timer', { timeout: 60000 }, async (context) => {
   const fixture = await compiledHub();
   // Repeat the same characterization, not extra scenarios: fresh realm and
   // cleanup must work with a reused bundle, and their cost is measured apart.
@@ -156,13 +155,13 @@ test('a pending attachment blocks Enter until the real Hub can send the complete
     }],
   });
   try {
-    for (let i = 0; i < 10 && app.document.querySelector('.to-name')?.textContent !== 'alice'; i++) {
+    for (let i = 0; i < 10 && selectedCard(app.document) !== 'alice'; i++) {
       await app.flush();
     }
-    assert.equal(app.document.querySelector('.to-name')?.textContent, 'alice');
+    assert.equal(selectedCard(app.document), 'alice');
     const input = app.document.querySelector<HTMLTextAreaElement>('.c-input')!;
     const picker = app.document.querySelector<HTMLInputElement>('input[type="file"]')!;
-    const send = app.document.querySelector<HTMLButtonElement>('.send-btn')!;
+    const send = app.document.querySelector<HTMLButtonElement>('.composer-actions button:last-child')!;
     input.value = 'Inspect ';
     input.dispatchEvent(new app.window.Event('input', { bubbles: true }));
     await app.flush();
@@ -199,7 +198,7 @@ test('a pending attachment blocks Enter until the real Hub can send the complete
   context.diagnostic(`attachment scenario after shared compilation ${(performance.now() - started).toFixed(1)}ms`);
 });
 
-test('the local Hub Back callback peels recipient before palette and stops at the compact floor', { timeout: 60000 }, async (context) => {
+test('the local Hub Back callback peels ContextMenu before palette and stops at the compact floor', { timeout: 60000 }, async (context) => {
   const fixture = await compiledHub();
   const started = performance.now();
   const { rpc } = roomFixture();
@@ -213,10 +212,10 @@ test('the local Hub Back callback peels recipient before palette and stops at th
     modules: [{ ...rpc, modelsList: async () => ({ models: [] }) }],
   });
   try {
-    for (let i = 0; i < 10 && app.document.querySelector('.to-name')?.textContent !== 'alice'; i++) {
+    for (let i = 0; i < 10 && selectedCard(app.document) !== 'alice'; i++) {
       await app.flush();
     }
-    assert.equal(app.document.querySelector('.to-name')?.textContent, 'alice');
+    assert.equal(selectedCard(app.document), 'alice');
     const historyLength = app.window.history.length;
     const published = back;
     const input = app.document.querySelector<HTMLTextAreaElement>('.c-input')!;
@@ -224,13 +223,13 @@ test('the local Hub Back callback peels recipient before palette and stops at th
     input.dispatchEvent(new app.window.Event('input', { bubbles: true }));
     await app.flush();
     assert.ok(app.document.querySelector('.cmd-menu'));
-    app.document.querySelector<HTMLButtonElement>('.to-chip')!.click();
+    stripCard(app.document, 'alice').querySelector('.agent-select')!.dispatchEvent(new app.window.MouseEvent('contextmenu', { bubbles: true }));
     await app.flush();
-    assert.ok(app.document.querySelector('.to-menu'));
+    assert.ok(app.document.querySelector('.ctx'));
 
     assert.equal(back(), true);
     await app.flush();
-    assert.equal(app.document.querySelector('.to-menu'), null, 'recipient is peeled first');
+    assert.equal(app.document.querySelector('.ctx'), null, 'ContextMenu is peeled first');
     assert.ok(app.document.querySelector('.cmd-menu'), 'palette survives the first Back');
     assert.equal(back(), true);
     await app.flush();
@@ -246,9 +245,9 @@ test('the local Hub Back callback peels recipient before palette and stops at th
     assert.equal(app.window.history.length, historyLength, 'local dispatch never pushes browser history');
 
     app.document.querySelector<HTMLElement>('.side-scrim')!.click();
-    app.document.querySelector<HTMLButtonElement>('.to-chip')!.click();
+    stripCard(app.document, 'alice').querySelector('.agent-select')!.dispatchEvent(new app.window.MouseEvent('contextmenu', { bubbles: true }));
     await app.flush();
-    assert.ok(app.document.querySelector('.to-menu'), 'leave a live layer for the unmount check');
+    assert.ok(app.document.querySelector('.ctx'), 'leave a live layer for the unmount check');
   } finally {
     await app.close();
   }
@@ -412,7 +411,7 @@ test('a confirmation consumes Escape without also closing the earlier-mounted Hu
   } finally { await app.close(); }
 });
 
-test('Roster double-click filters without a menu and a stopped surface never resumes', { timeout: 60000 }, async (context) => {
+test('Roster ContextMenu filters without selecting and a stopped surface never resumes on tap', { timeout: 60000 }, async (context) => {
   const fixture = await compiledHub();
   const started = performance.now();
   const { rpc } = roomFixture();
@@ -443,29 +442,36 @@ test('Roster double-click filters without a menu and a stopped surface never res
     for (let i = 0; i < 10 && !app.document.querySelector('.acard.off'); i++) await app.flush();
     const off = app.document.querySelector<HTMLElement>('.acard.off')!;
     assert.ok(off);
-    off.click();
+    off.querySelector<HTMLButtonElement>('.agent-select')!.click();
     await app.flush();
     assert.deepEqual(restarts, []);
-    assert.equal(app.document.querySelector('.am-who')?.textContent, 'paused');
+    assert.equal(app.document.querySelector('.ctx-who')?.textContent, 'paused');
     app.window.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await app.flush();
-    assert.equal(app.document.querySelector('.a-menu'), null);
-    off.querySelector<HTMLButtonElement>('.a-start')!.click();
+    assert.equal(app.document.querySelector('.ctx'), null);
+    off.querySelector<HTMLButtonElement>('.agent-select')!.click();
+    await app.flush();
+    const restart = [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')]
+      .find((button) => button.textContent?.includes('Resume'))!;
+    assert.ok(restart);
+    restart.click();
     for (let i = 0; i < 10 && app.document.querySelector('.acard.off'); i++) await app.flush();
     assert.deepEqual(restarts, [['fixture', 'paused']]);
     assert.equal(app.document.querySelector('.acard.off'), null);
     const bob = [...app.document.querySelectorAll<HTMLElement>('.acard')]
       .find((card) => card.querySelector('.a-name')?.textContent === 'bob')!;
     assert.ok(bob);
+    const recipientBeforeFilter = selectedCard(app.document);
     for (const shouldFilter of [true, false]) {
-      bob.click();
-      bob.click();
-      bob.dispatchEvent(new app.window.MouseEvent('dblclick', { bubbles: true }));
+      bob.querySelector('.agent-select')!.dispatchEvent(new app.window.MouseEvent('contextmenu', { bubbles: true }));
       await app.flush();
-      await app.advance(260);
-      assert.equal(app.document.querySelector('.a-menu'), null, 'double-click cancels the pending menu');
+      const filter = [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')]
+        .find((button) => /Only its messages|Show everything/.test(button.textContent ?? ''))!;
+      assert.ok(filter);
+      filter.click();
+      await app.flush();
       assert.equal(!!app.document.querySelector('.filter-pill'), shouldFilter);
-      assert.equal(app.document.querySelector('.to-name')?.textContent, 'bob');
+      assert.equal(selectedCard(app.document), recipientBeforeFilter, 'filtering never changes delivery');
     }
   } finally {
     await app.close();
@@ -487,7 +493,10 @@ async function composerFixture(context: TestContext, extra: Record<string, (...a
   const { rpc } = roomFixture();
   const app = await fixture.mount(context, {
     props: { visible: true, mobile },
-    setup(window) { window.Element.prototype.getAnimations = () => []; },
+    setup(window) {
+      window.Element.prototype.getAnimations = () => [];
+      Object.defineProperty(window.performance, 'now', { value: () => window.Date.now() });
+    },
     modules: [{
       ...rpc,
       projectList: async () => ({ projects: ['fixture', 'other'].map((session) => ({
@@ -503,9 +512,9 @@ async function composerFixture(context: TestContext, extra: Record<string, (...a
     for (let i = 0; i < 20 && !predicate(); i++) await app.flush();
     assert.ok(predicate(), 'composer state settled');
   };
-  await wait(() => app.document.querySelector('.to-name')?.textContent === 'alice');
+  await wait(() => selectedCard(app.document) === 'alice');
   const input = app.document.querySelector<HTMLTextAreaElement>('.c-input')!;
-  const send = app.document.querySelector<HTMLButtonElement>('.send-btn')!;
+  const send = app.document.querySelector<HTMLButtonElement>('.composer-actions button:last-child')!;
   const text = async (value: string) => {
     input.value = value;
     input.dispatchEvent(new app.window.Event('input', { bubbles: true }));
@@ -522,10 +531,10 @@ async function composerFixture(context: TestContext, extra: Record<string, (...a
     await wait(() => app.document.querySelector('.h1-text')?.textContent === name);
   };
   const to = async (name: string) => {
-    app.document.querySelector<HTMLElement>('.to-chip')!.click();
-    await app.flush();
-    const button = [...app.document.querySelectorAll<HTMLButtonElement>('.to-menu button')]
-      .find((element) => element.textContent?.trim() === name);
+    const target = name === 'everyone' ? 'all' : name === 'note' ? '' : name;
+    const current = selectedCard(app.document);
+    if (current === target) return;
+    const button = stripCard(app.document, target || current)?.querySelector<HTMLButtonElement>('.agent-select');
     assert.ok(button, name);
     button.click();
     await app.flush();
@@ -581,57 +590,132 @@ test('Composer keeps readline caret, palette, room drafts and all three destinat
     assert.deepEqual(posts, [['fixture', '@alice hello'], ['fixture', '@all broadcast'], ['fixture', 'record']]);
     await app.room('other');
     await app.room('fixture');
-    assert.equal(app.document.querySelector('.to-name')?.textContent, 'note', 'an explicit room recipient persists');
+    assert.equal(selectedCard(app.document), '', 'an explicit room recipient persists');
   } finally { await app.close(); }
 });
 
-test('Composer interrupt mixes button and Ctrl+C, expires, disarms and respects destination', { timeout: 60000 }, async (context) => {
+test('body mentions mark cards without replacing the selected delivery target (#168)', { timeout: 60000 }, async (context) => {
+  const posts: string[] = [];
+  const app = await composerFixture(context, {
+    hubPost: async (_session: string, body: string) => { posts.push(body); return {}; },
+  });
+  try {
+    await app.text('@bob Review the change.');
+    assert.equal(selectedCard(app.document), 'alice');
+    assert.equal(stripCard(app.document, 'bob').querySelector('.agent-mention')?.textContent, '@');
+    app.send.click();
+    await app.wait(() => posts.length === 1);
+    assert.deepEqual(posts, ['@alice @bob Review the change.']);
+    await app.to('note');
+    await app.text('@all Report progress.');
+    for (const name of ['all', 'alice', 'bob']) {
+      assert.equal(stripCard(app.document, name).querySelector('.agent-mention')?.textContent, '@');
+    }
+    assert.equal(selectedCard(app.document), '');
+    app.send.click();
+    await app.wait(() => posts.length === 2);
+    assert.equal(posts[1], '@all Report progress.');
+  } finally { await app.close(); }
+});
+
+test('send never interrupts; double Ctrl+C mirrors only the selected busy card (#168)', { timeout: 60000 }, async (context) => {
   const interrupts: Array<[string, string]> = [];
   const app = await composerFixture(context, {
+    hubAgents: async () => ({ agents: [
+      { name: 'alice', window: 0, managed: true, agent: 'kiro', state: 'running' },
+      { name: 'bob', window: 1, managed: true, agent: 'codex', state: 'blocked' },
+      { name: 'idle', window: 2, managed: true, agent: 'codex', state: 'idle' },
+      { name: 'shell', window: 3, managed: false, state: 'running' },
+    ] }),
     hubAgentInterrupt: async (session: string, name: string) => { interrupts.push([session, name]); return {}; },
   }, true);
-  const armed = () => !!app.document.querySelector('.int-pill');
+  const ctrlC = () => app.key('c', { ctrlKey: true });
   try {
     assert.equal(await app.key('Enter'), false, 'compact Enter remains a newline');
+    assert.equal(app.send.disabled, true);
     app.send.click();
     await app.flush();
-    assert.equal(armed(), true);
-    await app.advance(2999);
-    assert.equal(armed(), true);
-    await app.advance(1);
-    assert.equal(armed(), false);
-    await app.key('c', { ctrlKey: true });
+    await ctrlC();
+    assert.deepEqual(interrupts, [], 'empty Send cannot be the first keyboard activation');
+    await app.advance(3001);
+    await ctrlC();
+    assert.deepEqual(interrupts, [], 'an expired first key cannot fire');
     await app.key('Escape');
-    assert.equal(armed(), false);
-    app.send.click();
+    await ctrlC();
+    assert.deepEqual(interrupts, []);
     await app.text('copy me');
-    assert.equal(armed(), false);
     assert.equal(await app.key('c', { ctrlKey: true }), false, 'nonempty Ctrl+C is native copy');
     await app.text('');
-    app.send.click();
-    await app.flush();
+    await ctrlC();
     await app.to('bob');
-    assert.equal(armed(), false, 'changing recipient disarms synchronously');
-    app.send.click();
-    await app.flush();
+    await ctrlC();
+    assert.deepEqual(interrupts, [], 'recipient change resets the key sequence');
     await app.room('other');
-    assert.equal(armed(), false);
-    app.send.click();
-    await app.flush();
-    await app.key('c', { ctrlKey: true });
+    await ctrlC();
+    assert.deepEqual(interrupts, [], 'room change resets the key sequence');
+    await app.key('c', { ctrlKey: true, repeat: true });
+    await app.key('c', { ctrlKey: true, isComposing: true });
+    assert.deepEqual(interrupts, [], 'repeat/composition cannot fire Stop');
+    await ctrlC();
     await app.wait(() => interrupts.length === 1);
     assert.deepEqual(interrupts, [['other', 'alice']]);
     await app.to('everyone');
-    await app.key('c', { ctrlKey: true });
-    app.send.click();
+    await ctrlC();
+    await ctrlC();
     await app.wait(() => interrupts.length === 3);
-    assert.deepEqual(interrupts.slice(1), [['other', 'alice'], ['other', 'bob']]);
+    assert.deepEqual(interrupts.slice(1), [['other', 'alice'], ['other', 'bob']],
+      '@all excludes idle and unmanaged windows');
+    await app.to('idle');
+    await ctrlC();
+    await ctrlC();
     await app.to('note');
     assert.equal(app.send.disabled, true);
-    await app.key('c', { ctrlKey: true });
-    assert.equal(armed(), false);
+    await ctrlC();
+    await ctrlC();
     assert.equal(interrupts.length, 3);
+    assert.equal(app.document.querySelector('.int-pill, .to-chip'), null);
   } finally { await app.close(); }
+});
+
+test('a peer Stop captures its room, deduplicates pending clicks and never selects or kills (#168)', { timeout: 60000 }, async (context) => {
+  const jobs: Array<{ session: string; name: string; task: ReturnType<typeof deferred<object>> }> = [];
+  const app = await composerFixture(context, {
+    hubAgents: async () => ({ agents: [
+      { name: 'alice', window: 0, managed: true, agent: 'kiro', state: 'running' },
+      { name: 'bob', window: 1, managed: true, agent: 'codex', state: 'working' },
+    ] }),
+    hubAgentInterrupt: (session: string, name: string) => {
+      const task = deferred<object>();
+      jobs.push({ session, name, task });
+      return task.promise;
+    },
+    hubAgentStop: () => assert.fail('Stop response must not kill the process'),
+  });
+  const stop = (name: string) => stripCard(app.document, name).querySelector<HTMLButtonElement>('.agent-stop button')!;
+  try {
+    stop('bob').click();
+    stop('bob').click();
+    await app.flush();
+    assert.deepEqual(jobs.map(({ session, name }) => [session, name]), [['fixture', 'bob']]);
+    assert.equal(selectedCard(app.document), 'alice');
+    assert.equal(stop('bob').disabled, true);
+    assert.equal(stop('alice').disabled, false);
+    await app.room('other');
+    assert.equal(stop('bob').disabled, false, 'another room has its own pending identity');
+    stop('bob').click();
+    await app.flush();
+    jobs[0]!.task.resolve({});
+    await app.flush();
+    assert.equal(stop('bob').disabled, true, 'old room completion cannot clear the new job');
+    jobs[1]!.task.resolve({});
+    await app.flush();
+    assert.equal(stop('bob').disabled, false);
+    assert.equal(selectedCard(app.document), 'alice');
+    assert.deepEqual(jobs.map(({ session, name }) => [session, name]), [['fixture', 'bob'], ['other', 'bob']]);
+  } finally {
+    for (const job of jobs) job.task.resolve({});
+    await app.close();
+  }
 });
 
 test('Composer paste keeps Office words, stages files once and isolates overlapping generations', { timeout: 60000 }, async (context) => {
@@ -754,6 +838,7 @@ test('Feed keeps native selection, Copy/Raw dismissal, path intents and room-loc
       projectList: async () => ({ projects: ['fixture', 'other'].map((session) => ({
         project: { id: session, name: session, session, path: `/${session}` }, live: true, slots: [],
       })) }),
+      modelsList: async () => ({ models: [] }),
       hubLog: async () => ({ messages: [
         { id: 'question', seq: 1, ts: 100, from: 'human', body: '@alice Review this.' },
         { id: 'reply', seq: 2, ts: 200, from: 'alice', body },
@@ -793,12 +878,15 @@ test('Feed keeps native selection, Copy/Raw dismissal, path intents and room-loc
     actions()!.querySelector<HTMLElement>('button:last-child')!.click();
     await app.flush();
     assert.equal(reply().querySelector('.raw')?.textContent, body);
-    app.document.querySelector<HTMLElement>('.to-chip')!.click();
+    const composer = app.document.querySelector<HTMLTextAreaElement>('.c-input')!;
+    composer.value = '/';
+    composer.dispatchEvent(new app.window.Event('input', { bubbles: true }));
     await app.flush();
+    assert.ok(app.document.querySelector('.cmd-menu'));
     app.window.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await app.flush();
     assert.equal(actions(), null);
-    assert.equal(app.document.querySelector('.to-menu'), null, 'one capture callback closes both existing territories');
+    assert.equal(app.document.querySelector('.cmd-menu'), null, 'one capture callback closes both surviving territories');
     assert.ok(reply().querySelector('.raw'), 'Escape closes the actions, never the raw reading mode');
     reply().querySelector<HTMLElement>('.m-meta')!.click();
     await app.flush();
@@ -865,7 +953,7 @@ test('Feed observes its box once across data updates and releases the observer o
   });
   let owner: typeof observers[number] | undefined;
   try {
-    for (let i = 0; i < 10 && !app.document.querySelector('.to-name'); i++) await app.flush();
+    for (let i = 0; i < 10 && !selectedCard(app.document); i++) await app.flush();
     const feed = app.document.querySelector('.feed')!;
     const owning = observers.filter((observer) => observer.targets.has(feed));
     assert.equal(owning.length, 1);

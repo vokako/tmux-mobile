@@ -1,10 +1,69 @@
 # Hub — the composer
 
-Who a message goes to, the three ways a line lands, `/commands` and the transcribed palette, readline editing, and the two-beat interrupt. The feed is `hub-feed.md`.
+Who a message goes to, the agent strip, `/commands`, readline editing and
+per-agent interruption. The feed is `hub-feed.md`.
 
 ## Rules and their reasons
 
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
+
+### One roster above the input, one Stop operation (board #168, 2026-09-11)
+
+Owner, 03:32: "我看到这个设计挺好看的，因为我们有多个 agent，可以在上边去展示哪些agent 在工作，并且我可以对某一个 agent 单独点停止。可以把原来我们的 agent 擦片就放到发送框上边的位置，然后我们消息输入框里，就不用 to 谁了"
+
+The single `Roster` sits between Feed and Composer. Its native selection
+button chooses `@name`; selecting it again chooses no implicit recipient.
+An explicit everyone card chooses `@all`. The placeholder names that
+destination, and the selected card's existing hover card explains delivery.
+Body mentions still deliver through the existing parser; `chipExtras` uses
+`mentionTokens` to mark reached cards with one `@` glyph, never a second
+parser, dashed ring or selection change. The drawer's window selector has
+a different purpose and stays. Team grouping/order remains `groupRoster`.
+
+Each busy card exposes a sibling Stop button, not a nested selection button.
+`busyTargetsFor` in `hub-composer.ts` is the sole membership decision:
+running/working/waiting/blocked managed agents only; everyone includes only
+busy members, no selection includes none. Both that button and empty-composer
+double Ctrl+C call the same Hub dispatcher. The dispatcher captures room and
+names before awaiting, prevents overlapping requests for a member, and cleans
+up only its own jobs. A peer Stop never changes recipient, opens/retargets a
+drawer or forces the feed to its tail. Existing server push/poll reads the
+reset-first state and `[tmm] interrupted <name>` line; no optimistic status
+store is added. Process kill/remove remain separate consequential menu verbs.
+
+The keyboard can do no more than the visible Stop: two non-repeated Ctrl+C
+presses within three seconds, only with an empty composer and no text
+selection. Text, room or recipient changes and Escape reset that sequence;
+native copy and IME composition remain untouched. It has no send-button
+arming state, timer or caption. Send only sends and is disabled while empty,
+uploading or blocked by a failed attachment.
+
+The delayed 260ms card menu, double-click filter shortcut, recipient popup
+and two-beat send-button mechanism are removed whole. Secondary agent verbs
+use `ContextMenu` with `longpress`; stopped slots open that menu, never select
+an undeliverable destination. Only the command palette remains a Composer
+Back layer. The textarea and attach/send row are normal flow, so the old
+recipient indent, last-line mirror and corner-collision padding are gone.
+Actual shell-height changes still notify Hub through the existing reading
+boundary; no animated height, new scroll mechanism or lifecycle remount.
+
+The pre-#168 descriptions below of the chip, mirror, recipient menu and
+two-beat button are historical evidence, not alternate supported controls.
+Delivery parsing, attachment gates and readline rules are unchanged.
+
+Verification on Node 22.23.2 / Svelte 5.55.5 / Vite 6.4.2: pure target
+vectors plus the mounted real Hub pin selection, body mentions, busy-only
+Stop, keyboard parity, duplicate requests and room identity across awaits.
+Negative controls remove the managed gate (reaches a shell) and make Stop
+select its target (changes Alice to Bob); both fail their tests. Seven retained
+Hub transport/staging/reading functions are AST-identical to the #171 base.
+Chromium 152 checks desktop and 390px light/dark, explicit coarse media,
+long names, nested teams, menu/Stop reach, reload, reduced motion and a
+reduced-height multiline input. Settled history typing and peer Stop preserve
+the reference row within 1px. Tests wait for the existing 300ms focus-tail
+callback before beginning a history transaction; racing that separate callback
+is not evidence of a composer-growth defect. Synthetic touch and key checks
+do not replace native Android keyboard/IME acceptance.
 
 ### The room has a default recipient
 
@@ -43,7 +102,8 @@ a name (the default lead) types into ONE agent's input; `@all` types into EVERY 
 ### Pure composer decisions (board #117, 2026-09-09)
 
 `hub-composer.ts` owns palette-backend selection, `ALL_TARGET`, attachment
-token spelling and body substitution. These were closure-local calculations;
+token spelling and body substitution; #168 adds the pure busy-target
+selector described above. The original helpers were closure-local calculations;
 parameterizing them adds executing boundary tests without changing behavior.
 The selector still requires a managed target, keeps unknown targets empty,
 and offers a shared dialect only when the managed roster has exactly one.
@@ -58,7 +118,7 @@ observes no post; after upload it observes the complete addressed body.
 Removing the actual `attaching` guard is the negative control. This proves
 the event-to-send path, not native clipboard behavior or layout.
 
-### Extraction characterization (board #133, 2026-09-09)
+### Historical extraction characterization (board #133, 2026-09-09)
 
 Before moving the view, the mounted Hub characterizes readline caret after
 settling, kill-buffer and draft lifetime across rooms, palette focus, all
@@ -77,7 +137,7 @@ is relocated once, with the same two-class specificity and restricted parent
 selectors, so extracting the Composer does not duplicate it or restyle
 embedded Files/Terminal/Board content.
 
-### View ownership (board #133, 2026-09-09)
+### Historical view ownership (board #133, 2026-09-09; superseded by #168)
 
 `Composer.svelte` owns the capsule, textarea/mirror sizing, paste/key adapters,
 palette/model cache, readline kill buffer, recipient popover and interrupt
@@ -128,6 +188,6 @@ typing `Escape` into the agent's own pane (`hub_agent_interrupt` server-side so 
 
 **While the recipient is mid-turn the resting button says so**: a stop square inside a slowly circling arc (2.2s — a fast spin says "loading", this says "a turn is open"; accent on the resting grey, `prefers-reduced-motion` stills it), the glyph every chat product speaks — the armed state keeps the same glyph on the amber ground, because the earlier `zap` bolt read as nothing ("我看打断是闪电，看着好像不是那么容易理解", owner 2026-08-25). Busy means the hook-derived running/working/waiting/blocked of the recipient (any managed agent for `@all`); idle and failed show the plain grey arrow — an ended turn has nothing to interrupt. The interrupt reaches whoever the composer reaches — the recipient, or every managed agent for `@all`; an unaddressed room note arms nothing. Armed state stands down by itself: 3 s, typing, Escape, or switching projects. And the room now RECORDS the act — `hub_agent_interrupt` posts `[tmm] interrupted <name>` (the sys grammar already spoke it: amber, a turn cut short), so the feed shows what the app did ("发送 interrupt 的状态在消息列表里也要展示出来"); a real-tmux test pins window-survives + room-line.
 
-### Motion: the arrow turns, what enters pops
+### Historical composer motion (before #168)
 
 Per [motion.md](motion.md). The recipient chip's arrow is ONE chevron in `.flip` — up while closed (the menu opens upward), turned down while open — never two glyphs swapped (principle 4, the owner's own example). `+@bob` fades in (`.appear`); attachment chips and thumbs pop in (`.appear-pop`; the list is keyed by `a.key`, but its three chip species sit under an `{#if}`, so there is no `animate:flip`); the interrupt caption rises (`.appear-rise`); the send glyph pops when the `{#if}` swaps arrow ↔ stop-square — unrelated glyphs may swap. The recipient menu and the `/` palette are placed popovers like every other (principle 8, wave 6): each wears `.pop-layer` with `bind:clientHeight` as its `.ready` gate and `--pop-origin: bottom left` — the corner touching the chip, since both open upward — so it is measured invisible, then grows from the chip on `--t-fast`; the height resets when the menu closes so every opening is measured (and animated) again, and the atom touches only opacity/transform/pointer-events, so their own `position: absolute; bottom: calc(100% + 6px)` placement is untouched and the rest state is `transform: none`. Exits are cuts. **Hover** (principle 16): resting on the recipient chip opens the one hover card with a sentence for the CURRENT destination in the three-destination model — `@name` types into one pane, `@all` into every managed pane, no recipient records only — with the body's `+@` extras as its note; the chip carries no native `title` any more. The composer's height is JS-measured per keystroke and never animated.
