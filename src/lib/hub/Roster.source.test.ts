@@ -4,7 +4,7 @@ import test from 'node:test';
 
 const source = await readFile(new URL('./Roster.svelte', import.meta.url), 'utf8');
 const rule = (selector: string) =>
-  source.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
+  source.match(new RegExp(`(?:^|\\n)\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
 
 test('context meters reuse ctxColor at the card edge without adding a row (#173)', () => {
   assert.match(source, /style:background=\{ctxColor\(a\.vitals\.context_pct\)\}/u);
@@ -14,6 +14,15 @@ test('context meters reuse ctxColor at the card edge without adding a row (#173)
   assert.match(bar, /height: 2px/u);
   assert.match(bar, /pointer-events: none/u);
   assert.match(bar, /var\(--pill-bg\)/u);
+});
+
+test('everyone is a broadcast capsule while selection keeps the shared accent vocabulary (#173)', async () => {
+  assert.doesNotMatch(source, /all-ava/u);
+  assert.match(rule('.acard.all'), /border-radius: var\(--ui-radius-pill\)/u);
+  assert.match(rule('.acard.all'), /color: var\(--accent-ink\)/u);
+  assert.match(rule('.acard.all.sel'), /background: var\(--accent-bg\)/u);
+  const css = await readFile(new URL('../../app.css', import.meta.url), 'utf8');
+  assert.match(css, /\.hub-root \.acard\.all \{ corner-shape: round; \}/u);
 });
 
 test('one controlled roster replaces the delayed tap menu whole (#168)', () => {

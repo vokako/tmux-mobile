@@ -874,6 +874,8 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 /* Pill variants of listed classes go back to the circular arc: a superellipse
    flattens a stadium's caps. */
 .sessions .icon-btn { corner-shape: round; }
+/* #173: the broadcast choice is a capsule, not an agent avatar card. */
+.hub-root .acard.all { corner-shape: round; }
 /* #161: compact controls use circular arcs; squircle would flatten their caps.
    The legacy list is zero-specificity so context selectors cannot defeat it. */
 :is(.command-button, .control-field, .config-input, .segmented, .segmented button,

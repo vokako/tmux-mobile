@@ -21,6 +21,11 @@ Chromium 152 desktop/390px light/dark, collapsed/expanded comparisons keep
 card and roster boxes identical across 16 captures; fill/track ratios match
 the reported percentage. A zero-fill negative control breaks that ratio.
 
+The everyone choice is a broadcast capsule: no avatar tile, a group glyph
+and accent-ink label, with the same accent fill/border for selected state.
+It is deliberately distinct from a named partner, not another agent. Its
+round-corner exception stays in app.css, the existing corner-policy owner.
+
 ### One roster above the input, one Stop operation (board #168, 2026-09-11)
 
 Owner, 03:32: "我看到这个设计挺好看的，因为我们有多个 agent，可以在上边去展示哪些agent 在工作，并且我可以对某一个 agent 单独点停止。可以把原来我们的 agent 擦片就放到发送框上边的位置，然后我们消息输入框里，就不用 to 谁了"

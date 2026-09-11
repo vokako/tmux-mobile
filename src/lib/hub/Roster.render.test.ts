@@ -57,6 +57,8 @@ test('Roster renders the controlled destination strip (#168)', { timeout: 60000 
       assert.equal(select(root, 'all').getAttribute('aria-pressed'), 'false');
       assert.equal(select(root, 'waiting').getAttribute('aria-pressed'), 'false');
       assert.match(select(root, 'all').getAttribute('aria-label')!, /everyone/u);
+      assert.equal(select(root, 'all').querySelector('.ava'), null, 'broadcast is not another agent avatar (#173)');
+      assert.ok(select(root, 'all').querySelector('.broadcast-glyph svg'));
       assert.match(select(root, 'runner').getAttribute('aria-label')!, /unread/iu);
       assert.ok(card(root, 'runner').querySelector('.st.live-dot'));
       assert.ok(card(root, 'runner').querySelector('.unread'));

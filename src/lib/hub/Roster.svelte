@@ -141,7 +141,7 @@
             aria-label={[t('hubEveryone'), '@all', extras.includes(ALL_TARGET) ? t('hubToAlsoHint').replace('{names}', '@all') : ''].filter(Boolean).join(' · ')}
             use:hoverInfo={() => ({ title: t('hubEveryone'), note: destinationNote(ALL_TARGET) })}
             onclick={() => selectTarget(ALL_TARGET)}>
-            <span class="ava all-ava"><Icon name="collab" size={18} /></span>
+            <span class="broadcast-glyph"><Icon name="collab" size={18} /></span>
             <span class="a-name">{t('hubEveryone')}</span>
             <span class="agent-marks" class:unmarked={!extras.includes(ALL_TARGET)}>
               {#if extras.includes(ALL_TARGET)}<span class="agent-mention" aria-hidden="true">@</span>{/if}
@@ -259,6 +259,12 @@
   }
   .acard:hover { box-shadow: inset 0 0 0 1px var(--input-border); }
   .acard.sel { background: var(--accent-bg); box-shadow: inset 0 0 0 1px var(--accent-line); }
+  .acard.all {
+    border-radius: var(--ui-radius-pill); background: transparent; color: var(--accent-ink);
+    box-shadow: inset 0 0 0 1px var(--accent-line);
+  }
+  .acard.all.sel { background: var(--accent-bg); }
+  .acard.all .agent-select { border-radius: inherit; }
   .ac-bar {
     position: absolute; left: var(--ui-radius-row); right: var(--ui-radius-row); bottom: 0; height: 2px;
     background: var(--pill-bg); overflow: hidden; pointer-events: none;
@@ -283,7 +289,7 @@
   .agent-mention { color: var(--accent-ink); font-family: var(--font-mono); font-size: var(--fs-meta); font-weight: 600; }
   .agent-stop { display: flex; align-items: center; justify-self: end; }
   .ava { width: var(--roster-avatar-size); height: var(--roster-avatar-size); flex: none; }
-  .all-ava { display: grid; place-items: center; background: var(--surface2); color: var(--text2); }
+  .broadcast-glyph { display: grid; place-items: center; width: var(--roster-avatar-size); height: var(--roster-avatar-size); flex: none; }
   .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--status-danger); flex: none; }
   .off { color: var(--text2); }
   .off .agent-select { grid-column: 1 / -1; }
