@@ -229,6 +229,8 @@ unchanged until its consumers migrate.
 | Popover option minimum | 36px | 44px |
 | Label / field / section gaps | 8 / 16 / 24px | same |
 | `config-compact` label / field / section gaps (#162) | 6 / 12 / 20px | same |
+| `config-entity` short-row minimum / vertical inset (#163) | 44 / 2px | same; 44px control makes a 49px row |
+| `config-entity` writing-surface minimum (#163) | 128px | 140px |
 
 Input capability, not a narrow viewport alone, selects touch sizes.
 Single-line controls are border-box sized with an 18px line box. Layout,
@@ -334,8 +336,19 @@ The row minimum is 48px with 5px vertical insets; a 44px touch control
 naturally makes it 55px including the divider. Labels and error/status text
 wrap rather than clipping; the control column has no inherited 240px floor.
 Font values use quiet unfilled Selects and standalone switches align right.
-The last row drops its separator. Entity rows retain the existing two
-280px-column budget until their own surface migration.
+The last row drops its separator.
+Entity forms opt into `config-entity` alongside `config-compact` (#163).
+Short input/Select labels share a 110px-minimum flexible label and a value
+capped at 360px, with the same 16px gap. Their multi-field groups become
+one column; groups of checkbox choices keep their existing layout. Under
+760px, short rows use the same 108px label basis and 12px gap as preferences.
+Choice buttons wrap when their intrinsic label needs it. Native inputs and
+editable Selects use the remaining width, not the input's default 20-character
+intrinsic size; their existing horizontal editing behavior handles long text.
+Textarea labels remain
+above their writing surface, never inheriting a horizontal label basis.
+The 128/140px editor minimum does not replace native rows, auto-growth,
+vertical resizing or the existing maximum-height/scroll rules.
 Neither the grid nor the compact tokens create a containment ancestor for
 fixed Select popovers.
 Terminal cells, cursor metrics and gesture coordinates are outside this scope.
@@ -682,6 +695,44 @@ did not fix equal-segment text overflow. Content-aware wrapping plus the
 Segmented grid's honest intrinsic width preserves the ordinary 390px reference
 and lets wide labels/commands fall back without clipping. Its existing
 indicator, state callbacks and native touch targets are unchanged.
+
+### Compact entity forms and unframed identity (2026-09-11, #163)
+
+This adopts the owner's 2026-09-10 14:19/14:58 compact choice quoted above
+for Agent, Team, Skill, MCP and global-instruction editors. The shared
+controls were already compact, but the page still used the old stacked
+labels and 280px-column budget. `app.css` owns the replacement short rows
+and writing-surface metrics; the page opts in, without a private skin.
+The existing three font roles, canvas palette and shared 6/12/20px rhythm
+remain, as in #162; the prototype's temporary font/canvas overrides are not
+production decisions. Checkbox legends now inherit the shared label gap
+and weight, with unchanged defaults outside configuration forms.
+In the 360px fixture, using native input `max-content` put even a short model
+value on a second line (78.5px row). The editable-field basis therefore
+shrinks to available space; this does not require text-width estimation or
+another geometry observer.
+
+Owner, 2026-09-11 03:00 (avatar excerpt, verbatim):
+> 还有 agent team 配置里，agent 图标是一个小圆外边多了一个圆角矩形，这个边缘没必要，agent 图标用圆形没问题的。
+
+Remove only the member avatar's extra shadow and 8px box. Its 32px desktop /
+34px compact dimensions, backend asset/brand colour and fallback stay;
+the avatar is circular and no longer opts into the global squircle list.
+The member itself remains one framed repeated object, with its existing
+summary, disclosure, actions and focus treatment.
+
+This revision changes no editor handler, payload, draft, Save/Back guard,
+request generation, geometry observer or selection mechanism. Native
+28/44px targets and the shared Select anchor remain. Chromium 152.0.7977.64
+measures ordinary short rows at 44px on desktop (formerly 53.5px) and 49px
+at 390px coarse input (formerly 69.5px), with 360/238px value widths.
+The 360px model row also stays 49px after correcting its native width basis.
+Before/after fixtures cover both themes, 360px, a 500px embedded form,
+wide touch, alternate mono text, reduced motion, real backend assets,
+popover/focus placement and dirty/error/pending states. Removing the entity
+opt-in restores stacked rows; restoring the avatar's box/shadow fails the
+shape check. Owner acceptance on the merged browser/APK, including native
+IME behavior, is separate from this controlled-RPC browser evidence.
 
 ### Configuration adoption is measured per state (2026-09-10, #156)
 

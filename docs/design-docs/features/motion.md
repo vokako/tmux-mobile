@@ -355,6 +355,13 @@ sizes (owner declined).
   recorded in design-language.md, not another navigation or font mechanism.
   Segmented's equal grid tracks supply intrinsic sizing for the narrow-row
   fallback; the same indicator action still owns the moving selection.
+- **Compact entity forms keep their existing drill and member disclosure**
+  (2026-09-11, #163): the page opts into shared field metrics and removes
+  only the avatar's decorative frame. The owner's compact choice and
+  circular-avatar correction are recorded in design-language.md. No
+  layout animation, timer, listener or alternative easing is added; the
+  existing draft guard still commits navigation, and the shared Select
+  remains viewport-anchored. Textarea sizing is layout, not moving paint.
 - **Compact controls change paint, not motion or hit geometry** (2026-09-10,
   #160/#161): the owner's 14:19/14:58 words are recorded verbatim in
   [design-language.md](design-language.md#compact-paint-does-not-shrink-the-input-target-2026-09-10-160161).

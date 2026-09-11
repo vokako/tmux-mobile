@@ -31,7 +31,7 @@
 
 <style>
   .checkbox-group { margin: 0; padding: 0; border: 0; min-width: 0; }
-  legend { padding: 0; margin-bottom: 8px; color: var(--text); font: 600 var(--fs-ui)/1.4 var(--font-ui); }
+  legend { padding: 0; margin-bottom: var(--config-label-gap, 8px); color: var(--text); font: var(--config-label-weight, 600) var(--fs-ui)/1.4 var(--font-ui); }
   .checkbox-options { display: flex; flex-wrap: wrap; gap: 0 16px; }
   .checkbox-option {
     position: relative; display: inline-flex; align-items: center; gap: 8px;

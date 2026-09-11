@@ -663,7 +663,7 @@
       {/if}
 {/snippet}
 
-<div class="agents-root" bind:this={rootEl} class:editing={drilled} class:with-rows={!section}
+<div class="agents-root config-compact config-entity" bind:this={rootEl} class:editing={drilled} class:with-rows={!section}
   class:reduced={paneMode === 'reduced'} class:stacked={paneMode === 'stacked'} class:category-open={categoryOpen}
   class:drill-fwd={drillAnim === 'fwd'} class:drill-back={drillAnim === 'back'}>
   <aside class="sidebar config-navigation">
@@ -1191,8 +1191,7 @@
   }
   .member-summary:hover { background: var(--surface2); }
   .member-ava {
-    width: 32px; height: 32px; border-radius: 8px; object-fit: cover; flex: none;
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 72%, transparent);
+    width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex: none;
   }
   .member-ava.collab, .member-ava.fallback {
     display: grid; place-items: center; color: var(--text);

@@ -4,6 +4,29 @@ import { readFile } from 'node:fs/promises';
 
 const css = await readFile(new URL('../../app.css', import.meta.url), 'utf8');
 
+test('compact entity fields share inline rows and content-aware narrow wrapping (#163)', () => {
+  assert.match(css, /--config-entity-label:\s*110px/u);
+  assert.match(css, /--config-entity-value:\s*360px/u);
+  assert.match(css, /--config-entity-height:\s*44px/u);
+  assert.match(css, /--config-editor-min:\s*128px/u);
+  assert.match(css, /\.config-compact\.config-entity \{[^}]*--config-editor-min:\s*140px/u);
+  assert.match(css, /\.config-entity \.config-row:has\(> label\.config-field\)/u);
+  assert.match(css, /grid-template-columns:\s*minmax\(var\(--config-entity-label\), 1fr\) minmax\(0, var\(--config-entity-value\)\)/u);
+  assert.match(css, /\.config-entity label\.config-field:has\(> input, > \.sel-trigger, > \.sel-combo\) \{\s*display: flex; flex-direction: row; flex-wrap: wrap/u,
+    'short rows must override the base field column direction before using a horizontal label basis');
+  assert.match(css, /flex:\s*1 1 max-content; width: auto; max-width: 100%/u);
+  assert.match(css, /\.config-entity label\.config-field > :is\(input, \.sel-combo\) \{ flex-basis: 0; \}/u,
+    'native 20-character input sizing must not force a short editable value onto another row');
+  assert.doesNotMatch(css, /container-type:|contain:\s*(?:layout|paint)/u,
+    'field rows must not become a containing block for fixed Selects');
+});
+
+test('checkbox legends inherit the same configuration label rhythm (#163)', async () => {
+  const checkbox = await readFile(new URL('./CheckboxGroup.svelte', import.meta.url), 'utf8');
+  assert.match(checkbox, /margin-bottom: var\(--config-label-gap, 8px\)/u);
+  assert.match(checkbox, /font: var\(--config-label-weight, 600\) var\(--fs-ui\)/u);
+});
+
 test('compact controls separate paint from hit geometry without retuning terminal metrics (#161)', () => {
   // Owner selected #160, then asked for lower dropdowns. These replace #155's
   // painted 32/44px boxes, not its native touch-target or keyboard contracts.

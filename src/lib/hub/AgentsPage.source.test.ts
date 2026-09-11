@@ -5,6 +5,24 @@ import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('./AgentsPage.svelte', import.meta.url), 'utf8');
 const i18n = await readFile(new URL('../core/i18n.svelte.ts', import.meta.url), 'utf8');
 
+test('Agent-family forms opt into the shared compact composition (#163)', () => {
+  assert.match(source, /class="agents-root config-compact config-entity"/u);
+  assert.doesNotMatch(source, /\.config-field\s*\{|\.config-row\s*\{/u,
+    'shared field layout belongs to app.css, not a page-local override');
+});
+
+test('member identity is circular and unframed without removing the member boundary (#163)', async () => {
+  const avatar = /\.member-ava \{([^}]*)\}/u.exec(source)?.[1] ?? '';
+  assert.match(avatar, /width: 32px; height: 32px; border-radius: 50%/u);
+  assert.doesNotMatch(avatar, /box-shadow|border:/u);
+  assert.match(source, /\.member-ava \{ width: 34px; height: 34px; \}/u);
+  const member = /\.member \{([^}]*)\}/u.exec(source)?.[1] ?? '';
+  assert.match(member, /border: 1px solid var\(--border\)/u);
+  const css = await readFile(new URL('../../app.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(css, /\.agents-root \.member-ava/u,
+    'a circle must not opt into the global squircle policy');
+});
+
 test('the desktop config page has THREE levels: categories | rows | editor (board #94)', () => {
   // "在桌面版，可以再多一级，右侧拆分成两级": the chosen category's rows are
   // their own column, so an open editor no longer REPLACES them — the list

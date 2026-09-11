@@ -863,7 +863,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
   .card, .connect-btn, .cancel-btn, .share-btn, .hist-list, .setting-card,
   .text-input, .address-list button, .disconnect, .empty-connection button,
   .agents-root input, .agents-root textarea, .agents-root .member,
-  .agents-root .member-ava, .md-doc,
+  .md-doc,
   /* shared ui components */
   .command-button, .config-input, .segmented, .segmented button, .segmented .slide-pill, .check-box,
   .sel-trigger, .sel-menu, .sel-opt, .ctx, .ctx button, .dlg, .dlg input,
@@ -918,8 +918,14 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
   --config-label-gap: 6px; --config-field-gap: 12px; --config-section-gap: 20px;
   --config-form-inset: 12px; --config-label-weight: 500;
 }
+.config-compact.config-entity {
+  --config-entity-label: 110px; --config-entity-value: 360px;
+  --config-entity-height: 44px; --config-entity-inset: 2px;
+  --config-editor-min: 128px;
+}
 @media (any-pointer: coarse) {
   .config-compact { --config-header-height: 56px; --config-nav-height: 44px; }
+  .config-compact.config-entity { --config-editor-min: 140px; }
 }
 .config-compact .config-navigation .side-row.open { background: var(--control-surface); }
 .config-page-head { padding: 0; min-height: var(--config-header-height); }
@@ -971,6 +977,24 @@ textarea.config-input {
 .config-row {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: var(--config-field-gap); min-width: 0;
+}
+.config-entity .config-row:has(> label.config-field) { display: flex; flex-direction: column; gap: 0; }
+.config-entity label.config-field:has(> input, > .sel-trigger, > .sel-combo) {
+  display: grid; align-items: center;
+  grid-template-columns: minmax(var(--config-entity-label), 1fr) minmax(0, var(--config-entity-value));
+  gap: var(--config-pref-gap); min-height: var(--config-entity-height);
+  padding-block: var(--config-entity-inset); border-bottom: 1px solid var(--border);
+}
+.config-entity .config-field-label { overflow-wrap: anywhere; }
+.config-entity label.config-field > :is(input, .sel-trigger, .sel-combo) { min-width: 0; max-width: 100%; }
+@media (max-width: 760px) {
+  .config-entity label.config-field:has(> input, > .sel-trigger, > .sel-combo) {
+    display: flex; flex-direction: row; flex-wrap: wrap; gap: var(--config-pref-gap-compact);
+  }
+  .config-entity label.config-field:has(> input, > .sel-trigger, > .sel-combo) > .config-field-label { flex: 0 1 var(--config-pref-label-compact); }
+  .config-entity label.config-field > :is(input, .sel-trigger, .sel-combo) { flex: 1 1 max-content; width: auto; max-width: 100%; }
+  /* Editable text scrolls natively; its preferred 20ch is not a row minimum. */
+  .config-entity label.config-field > :is(input, .sel-combo) { flex-basis: 0; }
 }
 .preference-row {
   display: grid; align-items: center;
