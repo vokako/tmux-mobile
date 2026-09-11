@@ -344,6 +344,18 @@ test('a confirmation consumes Escape without also closing the earlier-mounted Hu
     files.click();
     for (let i = 0; i < 12 && !app.document.querySelector('.drawer .file-list'); i++) await app.flush();
     assert.ok(app.document.querySelector('.drawer'));
+    app.document.querySelector<HTMLButtonElement>('.drawer [aria-label="New item"]')!.click();
+    await app.flush();
+    const origin = app.document.querySelector<HTMLInputElement>('.drawer .new-item input')!;
+    origin.focus();
+    app.document.querySelector<HTMLButtonElement>('.row-menu')!.click();
+    await app.flush();
+    app.document.activeElement!.dispatchEvent(new app.window.KeyboardEvent('keydown', {
+      key: 'Escape', bubbles: true, cancelable: true,
+    }));
+    await app.flush();
+    assert.equal(app.document.querySelector('.ctx'), null);
+    assert.ok(app.document.querySelector('.drawer'), '#164: a focused project menu cannot close the Files drawer below it');
     app.document.querySelector<HTMLButtonElement>('.row-menu')!.click();
     await app.flush();
     const close = [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')]
@@ -358,6 +370,7 @@ test('a confirmation consumes Escape without also closing the earlier-mounted Hu
     await app.flush();
     assert.equal(app.document.querySelector('[aria-modal="true"]'), null);
     assert.ok(app.document.querySelector('.drawer'), 'the underlying capture handler yields to the modal');
+    assert.equal(app.document.activeElement, origin, '#164: menu-to-confirm transfers the live focus origin');
   } finally { await app.close(); }
 });
 

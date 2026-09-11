@@ -294,6 +294,12 @@ sizes (owner declined).
 
 ## Rules and their reasons
 
+- **Dense Files tools do not animate their packing** (2026-09-11, #164):
+  measured trailing overflow replaces toolbar wrapping; the shared command
+  paint may be smaller, but the native 28/44px targets stay fixed. Menus still
+  use `.pop-layer` after border-box measurement and the existing dismissal
+  set; no layout animation, second popover tempo or history listener is added.
+  The owner's size/row correction is quoted in file-handling.md.
 - **Compact Settings keeps the same accepted-category motion** (2026-09-10,
   #162): the row budget and spacing change in the shared CSS owner. The
   existing accepted category, drill slide and answer-time reveal remain

@@ -1133,6 +1133,7 @@
     const onKey = (e) => {
       if (e.key !== 'Escape') return;
       if (activeModal(document)) return;
+      if (e.target?.closest?.('[role="menu"]')) return;
       if (e.target?.closest?.('.xterm')) return; // focused terminal: the pane gets it
       // Same territory rule for the files partition: an Esc from inside it
       // (editor, rename field, preview) is the browser's own — closing the

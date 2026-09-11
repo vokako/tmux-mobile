@@ -8,14 +8,73 @@ Base64 encoding for small file transfer (previews), streaming HTTP for large-fil
 
 ## Key Decisions
 
+### Compact rows and contextual actions (#164, 2026-09-11)
+
+Owner, 03:00, verbatim:
+> 文件管理浏览上边那一行的按钮太大了，还有文件每一行里文件大小单独起了一行，和上边的文件夹行高不一致，不和谐，文件大小应该放到右边就行。
+
+The size-below rule from #157 is superseded: size is a nonshrinking column
+to the right of the complete name, on the same row. Ordinary files and folders
+share a 32px pointer / 44px coarse minimum before the divider. Long names may
+still wrap rather than being truncated to enforce an artificial fixed height.
+The independent listing width and linked-preview Back history are unchanged.
+
+Toolbar packing follows measured content width, the native target size and
+the gap, not a device-specific item count. If all actions fit, all remain
+visible. Otherwise reserve one target for More and put only trailing actions
+in the shared ContextMenu. Nine 44px targets alone exceed 390px; shrinking
+touch reach or forcing two toolbar rows is not the solution. More is a real
+overflow control, not a speculative menu. `file-tools.ts` owns the tested
+packing decision and the captured row-action definitions. The toolbar and its
+overflow/directory menu share the same action list; row tools and the row menu
+share their own captured entry actions. Native targets remain 28/44px while
+the shared `compact-tools` paint is 20/28px. No second button implementation.
+
+Owner, same message, verbatim:
+> 另外文件管理里的桌边操作的右键菜单帮我也加上吧。对了右键的菜单风格都检查统一。
+
+Desktop contextmenu and the existing longpress action open row or directory
+actions through the same ContextMenu. Preview prose is outside these gesture
+surfaces and retains native selection. The directory action rejects row
+targets through longpress's start predicate, so parent and child cannot both
+arm and consume the same release; touch events still reach the existing Back
+gesture. Menus capture the entry, session,
+directory, listing and view; a replaced/closed context cannot run a queued
+action. Back closes the menu before navigating. Menus close on context change
+and toolbar-overflow resize, without adding a global history handler.
+Open from a row or menu goes through `leaveEditor`, so an unsaved editor is
+not overwritten by the new entry point. Delete still uses ConfirmDialog.
+Copy path checks the shared clipboard helper's boolean and never starts a
+success toast for a failed copy; broader operation-feedback ownership is #167.
+
+ContextMenu prerequisites are fixed at that shared layer: full border-box
+measurement, a viewport height cap with internal scrolling, 44px coarse
+rows, checked-state semantics and disabled activation guards. The menu takes
+keyboard focus and yields to an active modal; dismissal restores connected
+focus without stealing it from a newer control. Before invoking an action,
+the menu returns focus to its live origin so a newly opened confirmation
+captures that origin, not the menu that is about to disappear. This matters
+in the Hub: its earlier Escape listener yields to semantic menu territory
+as well as `.files-body`, so a focused project menu cannot close a Files drawer
+underneath it. Merely adding a later menu listener cannot undo that close.
+The existing listeners and placement helper remain the only mechanisms.
+
+Chromium 152.0.7977.64 measures the 390px toolbar at 49px instead of 105px
+and ordinary rows at 45px including the divider, instead of 45px folders
+and 53px files. At desktop the toolbar is 33px instead of 48px and ordinary
+rows are 33px instead of 37/53px. Native-platform acceptance remains separate.
+
 ### File tools and name space (#157, 2026-09-10)
+
+Historical rollout measurements follow. The 32px pointer/full-height tool
+paint was revised by #161, and toolbar wrapping plus size-below by #164 above.
 
 The #154 audit measured a 24x24px touch toolbar with three unnamed actions,
 and an AGENTS.md name squeezed to 47.53px inside a 240px list while an unused
 preview held 1154px. The fault was in the private tool dialect and layout,
 not file routing or the preview renderer.
 
-Files uses `CommandButton` for tools, actions and Back: localized names and
+That rollout adopted `CommandButton` for tools, actions and Back: localized names and
 shared hover information, 32px pointer / 44px touch boxes, proper pressed or
 expanded state for icon tools, and wrapping toolbar/header groups. File/folder
 creation uses the existing Segmented control. Breadcrumbs and path rows keep
@@ -32,8 +91,8 @@ Both flex containers have `min-width: 0`: Chromium 152 measured a long code
 preview expanding the outer Files item to 1126.6px inside an 854px allocation
 without it. Content scrolls inside its preview, never by pushing tools offscreen.
 
-File names preserve their whitespace and wrap in full. Size metadata occupies
-the next line, not another competing column. This deliberately retires the
+File names preserve their whitespace and wrap in full. Size metadata occupied
+the next line in #157; #164 deliberately replaces that choice. This retired the
 hidden horizontal-name scroller and the shared-navigation-width prescription
 for this listing. The path breadcrumb and saved full-path rows may still scroll
 horizontally; they are paths, not shortened file names.

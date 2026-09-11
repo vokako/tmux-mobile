@@ -16,6 +16,8 @@ const HOLD_MS = 500;
 const SLOP_PX = 10;
 
 export interface LongPressOptions {
+  /** Nested surfaces may leave a child's gesture to that child without stopping propagation. */
+  accept?: (target: EventTarget | null) => boolean;
   /** Fired with the touch point once the hold completes. */
   onlongpress?: (p: { x: number; y: number }) => void;
   ms?: number;
@@ -48,13 +50,13 @@ export function longpress(node: HTMLElement, options: LongPressOptions = {}) {
   };
 
   const onTouchStart = (e: TouchEvent) => {
-    if (e.touches.length !== 1) {
+    fired = false;
+    if (e.touches.length !== 1 || opts.accept?.(e.target) === false) {
       clear();
       return;
     }
     const t = e.touches[0]!;
     start = { x: t.clientX, y: t.clientY };
-    fired = false;
     timer = setTimeout(() => {
       timer = null;
       if (!start) return;

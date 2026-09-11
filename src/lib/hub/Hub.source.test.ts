@@ -314,6 +314,8 @@ test('an Esc typed into the drawer terminal reaches the pane, not closeDrawer', 
   // (owner, 2026-08-26). Two guards, both load-bearing:
   // an event from inside the terminal is the pane's,
   assert.match(source, /e\.target\?\.closest\?\.\('\.xterm'\)/u, 'focused-terminal Esc must pass through');
+  assert.match(source, /e\.target\?\.closest\?\.\('\[role="menu"\]'\)/u,
+    '#164: focused app menus own Escape even outside the drawer input territory');
   // and a HIDDEN Hub (pages stay mounted) must not steal the Terminal page's Esc.
   assert.match(source, /if \(!termOpen \|\| !visible\) return;/u, 'the listener is gated on visible');
 });

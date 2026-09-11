@@ -7,8 +7,10 @@ The starting directory follows the active terminal/team session's working
 directory, or the server's home directory when no session is open yet.
 
 ## Components
-- Unified toolbar: named shared icon controls, 32px for pointer input and
-  44px for touch; rows wrap when the available width cannot fit the tools.
+- Unified toolbar: named shared icon controls, 28px pointer / 44px coarse
+  native targets with compact inset paint. Keep one row; measured overflow
+  exposes trailing actions through the shared More menu, without shrinking
+  touch targets or removing actions.
   Its first control
   (terminal glyph, "Session directory") returns to the active session's
   working directory; it is NOT a home button — the house icon means the
@@ -17,7 +19,8 @@ directory, or the server's home directory when no session is open yet.
 - File/directory list with icons, size, modified date
 - The desktop list uses the available width until a preview is open. Beside a
   preview its independent, resizable width defaults to 400px (320-520px), not
-  the global navigation sidebar width. File sizes sit below complete names.
+  the global navigation sidebar width. File sizes sit to the right of complete
+  names, on the same row; ordinary file and folder rows share a height.
 - Bookmark panel (star current dir, scrollable saved paths)
 - Recent files panel (last 20 opened files, scrollable, capped to 40vh)
 - File preview: Markdown (rendered through the shared safe renderer, `core/markdown.ts`, + mermaid + KaTeX), CSV (table), code (syntax highlighted; the lined view shows the first 3000 lines with a "Show all N lines" button), HTML (sandboxed iframe), PDF (pdf.js), images. pdf.js, mermaid and highlight.js load on first use, not at startup.
@@ -47,7 +50,12 @@ directory, or the server's home directory when no session is open yet.
   follow-the-cwd move, and the Hub drawer's "look here" jump. Cancel keeps the
   editor; a cancelled programmatic move (cwd follow) is skipped for that
   event, not replayed later
-- Long-press / info button → file info panel
+- Desktop right-click / long-press on a row → shared actions for that entry.
+  Blank-directory context and toolbar More reuse toolbar actions; a menu
+  cannot act on a different entry after navigation. Info remains available
+  through the preview's existing info action.
+- Menu Open and row Open both protect an unsaved editor. Menu Delete still
+  requires confirmation; Back closes the menu before leaving the current view.
 - Star button → bookmark current directory
 - Hidden-file and bookmark tools expose pressed state; bookmark/recent panels
   expose expanded state and an associated panel ID. An opened empty panel

@@ -134,3 +134,142 @@ test('a row action retains its row path, not the open preview path (#157)', asyn
     assert.deepEqual(renames, [['/fixture/next.md', '/fixture/renamed.md']]);
   } finally { await app.close(); }
 });
+
+function contextMenu(app: App, element: Element) {
+  element.dispatchEvent(new app.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 50 }));
+}
+function menuAction(app: App, label: string) {
+  const element = [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')].find(b => b.textContent?.trim() === label);
+  assert.ok(element, `context action: ${label}`); return element;
+}
+
+test('measured overflow retains the same trailing disclosure action and controlled state (#164)', async context => {
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, session: 'fixture' }, modules: [rpc()],
+    setup(window) {
+      // Synthetic layout outputs exercise wiring only; Chromium owns geometry.
+      Object.defineProperty(window.HTMLElement.prototype, 'clientWidth', {
+        configurable: true, get() { return this.classList.contains('toolbar') ? 390 : 0; },
+      });
+      const computed = window.getComputedStyle.bind(window);
+      window.getComputedStyle = element => {
+        const style = computed(element);
+        return element.classList.contains('toolbar') ? new Proxy(style, {
+          get(target, key) {
+            if (key === 'paddingLeft' || key === 'paddingRight') return '6px';
+            if (key === 'columnGap') return '2px';
+            if (key === 'getPropertyValue') return (name: string) => name === '--control-height' ? '44px' : target.getPropertyValue(name);
+            return Reflect.get(target, key);
+          },
+        }) : style;
+      };
+    },
+  });
+  try {
+    await settle(app);
+    const more = button(app, 'More file actions');
+    assert.equal(app.document.querySelector('.toolbar [aria-label="Recent files"]'), null);
+    more.click(); await app.flush();
+    assert.ok(app.document.getElementById(more.getAttribute('aria-controls')!));
+    assert.equal(menuAction(app, 'Recent files').getAttribute('aria-checked'), 'false');
+    menuAction(app, 'Recent files').click(); await app.flush();
+    assert.match(app.document.querySelector('.bookmarks-panel')?.textContent ?? '', /No recent files/);
+    more.click(); await app.flush();
+    assert.equal(menuAction(app, 'Recent files').getAttribute('aria-checked'), 'true');
+  } finally { await app.close(); }
+});
+
+test('row context actions use the clicked file even beside another preview (#164)', async context => {
+  const renames: string[][] = [];
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, session: 'fixture' },
+    modules: [rpc({ fsRename: async (from: string, to: string) => { renames.push([from, to]); return {}; } })],
+    setup(window) { window.localStorage.setItem('tmux_layout_mode', 'desktop'); },
+  });
+  try {
+    await settle(app);
+    app.document.querySelector<HTMLButtonElement>('.file-main')!.click(); await settle(app);
+    contextMenu(app, app.document.querySelectorAll('.file-row')[1]!); await app.flush();
+    assert.equal(app.document.querySelector('.ctx-who')?.textContent, 'next.md');
+    menuAction(app, 'Rename').click(); await app.flush();
+    const input = app.document.querySelector<HTMLInputElement>('.new-item input')!;
+    input.value = 'renamed.md'; input.dispatchEvent(new app.window.Event('input', { bubbles: true }));
+    await app.flush(); button(app, 'Rename').click(); await settle(app);
+    assert.deepEqual(renames, [['/fixture/next.md', '/fixture/renamed.md']]);
+  } finally { await app.close(); }
+});
+
+test('context Delete still requires confirmation and a stale menu cannot act after Back (#164)', async context => {
+  const deletes: string[] = [];
+  let back!: () => boolean;
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, session: 'fixture', onGoBack: (fn: () => boolean) => back = fn },
+    modules: [rpc({ fsDelete: async (path: string) => { deletes.push(path); return {}; } })],
+  });
+  try {
+    await settle(app);
+    const origin = app.document.querySelectorAll<HTMLButtonElement>('.file-main')[1]!;
+    origin.focus();
+    contextMenu(app, app.document.querySelectorAll('.file-row')[1]!); await app.flush();
+    const oldDelete = menuAction(app, 'Delete');
+    assert.equal(back(), true); await app.flush();
+    // Reattach the old node so Svelte's delegated handler actually executes.
+    // A click on a detached node would be a false-positive stale-action test.
+    app.document.querySelector('.files')!.append(oldDelete);
+    oldDelete.dispatchEvent(new app.window.MouseEvent('click', { bubbles: true }));
+    await app.flush();
+    assert.equal(app.document.querySelector('[role=alertdialog]'), null);
+    oldDelete.remove();
+    contextMenu(app, app.document.querySelectorAll('.file-row')[1]!); await app.flush();
+    menuAction(app, 'Delete').click(); await app.flush();
+    assert.deepEqual(deletes, []);
+    assert.match(app.document.querySelector('[role=alertdialog]')?.textContent ?? '', /next\.md/);
+    button(app, 'Cancel').click(); await app.flush();
+    assert.deepEqual(deletes, []);
+    assert.equal(app.document.activeElement, origin, 'Cancel returns past the dismissed menu to the row');
+  } finally { await app.close(); }
+});
+
+test('blank-directory context reuses toolbar modes and native preview selection is untouched (#164)', async context => {
+  const hidden: boolean[] = [];
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, session: 'fixture' },
+    modules: [rpc({ fsList: async (_path: string, show: boolean) => { hidden.push(show); return { path: '/fixture', entries }; } })],
+  });
+  try {
+    await settle(app);
+    contextMenu(app, app.document.querySelector('.file-list')!); await app.flush();
+    const toggle = menuAction(app, 'Show hidden files');
+    assert.equal(toggle.getAttribute('aria-checked'), 'false');
+    toggle.click(); await settle(app);
+    assert.equal(hidden.at(-1), true);
+    assert.equal(button(app, 'Show hidden files').getAttribute('aria-pressed'), 'true');
+    const rowHold = new app.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    Object.defineProperty(rowHold, 'pointerType', { value: 'touch' });
+    app.document.querySelector('.file-row')!.dispatchEvent(rowHold);
+    assert.equal(rowHold.defaultPrevented, true, 'the list hold is the shared app gesture, not browser chrome');
+    app.document.querySelector<HTMLButtonElement>('.file-main')!.click(); await settle(app);
+    const event = new app.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'pointerType', { value: 'touch' });
+    app.document.querySelector('.md-render')!.dispatchEvent(event);
+    assert.equal(event.defaultPrevented, false);
+    assert.equal(app.document.querySelector('.ctx'), null);
+  } finally { await app.close(); }
+});
+
+test('Copy path cannot report success when both clipboard paths fail (#164)', async context => {
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, session: 'fixture' }, modules: [rpc()],
+    setup(window) {
+      window.document.execCommand = () => false;
+      Object.defineProperty(window.navigator, 'clipboard', { value: { writeText: async () => { throw Error('denied'); } } });
+    },
+  });
+  try {
+    await settle(app);
+    contextMenu(app, app.document.querySelector('.file-row')!); await app.flush();
+    menuAction(app, 'Copy path').click(); await settle(app);
+    assert.equal(app.document.querySelector('.copy-toast'), null);
+    assert.match(app.document.body.textContent ?? '', /Copy failed/);
+  } finally { await app.close(); }
+});

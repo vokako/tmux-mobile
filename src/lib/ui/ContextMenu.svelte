@@ -9,6 +9,8 @@
   // is what it is anchored to: a pointer instead of a trigger's rect.
   import Icon from './Icon.svelte';
   import { menuPlacement, pointAnchor, popOrigin, viewBox } from './placement.ts';
+  import { activeModal } from './modal.ts';
+  const menuId = $props.id();
 
   /**
    * @typedef {{ label: string, icon?: string, hint?: string, checked?: boolean, title?: string,
@@ -26,7 +28,7 @@
      * carry `{ anchor, align }` — an element's AnchorRect (already
      * zoom-corrected via anchorOf) and 'left' for the dropdown reading, used
      * by the title caret (board #32). A plain `{x, y}` keeps the pointer
-     * default: right-aligned, exactly as every right-click/long-press was.
+     * default: left-aligned at the pointer.
      * An optional `trigger` (the element whose click opened the menu) is not
      * "outside": its pointerdown is left alone so the trigger's own click
      * can TOGGLE the menu closed instead of closing-and-reopening it. */
@@ -34,6 +36,7 @@
     /** @type {MenuItem[]} */ items = [],
     /** Optional heading — usually the name of what was clicked. */
     who = '',
+    id = menuId,
     oncancel = () => {},
   } = $props();
 
@@ -41,6 +44,13 @@
   let w = $state(0);
   let h = $state(0);
   let cursor = $state(-1);
+  let restoreFocus = () => {};
+  function selectItem(item) {
+    if (item.disabled) return;
+    restoreFocus();
+    item.onselect();
+    oncancel();
+  }
 
   // Measured before it is placed: an unmeasured menu would be positioned from a
   // zero height and jump. Hidden for that one frame, exactly like the agent menu.
@@ -60,6 +70,18 @@
       cursor = -1;
       return;
     }
+    if (!el) return;
+    const menu = el;
+    const previousFocus = document.activeElement;
+    const modal = activeModal(document);
+    if (!modal || modal.contains(menu)) menu.focus({ preventScroll: true });
+    const restore = () => {
+      const modal = activeModal(document);
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected
+        && (document.activeElement === document.body || menu.contains(document.activeElement))
+        && (!modal || modal.contains(previousFocus))) previousFocus.focus({ preventScroll: true });
+    };
+    restoreFocus = restore;
     // Dismissal, all four ways. `pointerdown` rather than click, so the menu goes
     // away on the press that starts somewhere else instead of waiting for its
     // release.
@@ -68,6 +90,8 @@
       if (el && !el.contains(e.target)) oncancel();
     };
     const onKey = (e) => {
+      const modal = activeModal(document);
+      if (modal && !modal.contains(menu)) return;
       if (e.key === 'Escape') {
         e.preventDefault();
         oncancel();
@@ -84,14 +108,14 @@
         while (items[cursor]?.disabled && guard++ < items.length) {
           cursor = (cursor + step + items.length) % items.length;
         }
+        menu.querySelectorAll('button')[cursor]?.scrollIntoView?.({ block: 'nearest' });
         return;
       }
       if (e.key === 'Enter' || e.key === ' ') {
         const it = items[cursor];
         if (it && !it.disabled) {
           e.preventDefault();
-          it.onselect();
-          oncancel();
+          selectItem(it);
         }
       }
     };
@@ -111,21 +135,26 @@
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('resize', oncancel);
       window.removeEventListener('scroll', onScroll, true);
+      restore();
+      if (restoreFocus === restore) restoreFocus = () => {};
     };
   });
 </script>
 
 {#if at && items.length}
-  <div class="ctx pop-layer" class:ready={h > 0} bind:this={el} role="menu" tabindex="-1"
+  <div class="ctx pop-layer" class:ready={h > 0} bind:this={el} role="menu" tabindex="-1" {id} aria-label={who || undefined}
+    aria-activedescendant={cursor >= 0 && items[cursor] ? `${id}-${cursor}` : undefined}
     style:left="{pos.x}px" style:top="{pos.y}px"
     style:--pop-origin={at ? popOrigin(at.anchor ?? pointAnchor(at.x, at.y), pos, align) : undefined}
-    bind:clientWidth={w} bind:clientHeight={h}>
+    bind:offsetWidth={w} bind:offsetHeight={h}>
     {#if who}<div class="ctx-who">{who}</div>{/if}
     {#each items as it, i (it.label)}
-      <button role="menuitem" class:danger={it.danger} class:warn={it.warn} class:cur={i === cursor}
+      <button role={it.checked === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-checked={it.checked}
+        id={`${id}-${i}`}
+        class:danger={it.danger} class:warn={it.warn} class:cur={i === cursor}
         disabled={it.disabled} title={it.title}
         onpointerenter={() => (cursor = i)}
-        onclick={() => { it.onselect(); oncancel(); }}>
+        onclick={() => selectItem(it)}>
         {#if it.icon}<Icon name={it.icon} size={12} />{/if}<span class="ctx-label">{it.label}</span>
         {#if it.hint}<span class="ctx-hint">{it.hint}</span>{/if}
         {#if it.checked}<span class="ctx-check"><Icon name="check" size={12} /></span>{/if}
@@ -137,6 +166,7 @@
 <style>
   .ctx {
     position: fixed; z-index: 60; min-width: 156px; max-width: 260px;
+    max-height: calc(100vh / var(--ui-zoom, 1) - 16px); overflow-y: auto;
     background: var(--bg); border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
     box-shadow: 0 14px 38px rgba(0, 0, 0, 0.45); padding: 5px;
     display: flex; flex-direction: column; gap: 1px;
@@ -171,7 +201,7 @@
   .ctx-check { margin-left: auto; display: flex; color: var(--accent); }
   .ctx-hint + .ctx-check { margin-left: 0; }
   /* A phone needs a real target; the desktop stays compact. */
-  @media (max-width: 760px) {
-    .ctx button { min-height: 40px; font-size: var(--fs-body); }
+  @media (any-pointer: coarse) {
+    .ctx button { min-height: 44px; font-size: var(--fs-body); }
   }
 </style>

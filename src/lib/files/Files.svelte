@@ -14,6 +14,11 @@
   import CommandButton from '../ui/CommandButton.svelte';
   import Segmented from '../ui/Segmented.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
+  import ContextMenu from '../ui/ContextMenu.svelte';
+  import { longpress } from '../ui/longpress.ts';
+  import { anchorOf } from '../ui/placement.ts';
+  import { systemOwnsContextMenu } from '../ui/native-context-menu.ts';
+  import { entryToolActions, visibleToolCount } from './file-tools.ts';
   import SideHandle from '../ui/SideHandle.svelte';
   import GitPanel from './GitPanel.svelte';
   import { hoverInfo } from '../ui/hover.ts';
@@ -84,6 +89,7 @@
   // Register goBack for Android back gesture
   $effect(() => {
     if (onGoBack) onGoBack(() => {
+      if (fileMenu) { closeFileMenu(); return true; }
       // navAnim('back') rides only the branches that CHANGE the view — the
       // git panel's internal peel and the unsaved-changes dialog move
       // nothing, so they must not slide the page.
@@ -289,6 +295,74 @@
   let showBookmarks = $state(false);
   let recentFiles = $state([]);
   let showRecent = $state(false);
+  let fileMenu = $state(null);
+  let toolbarBox = $state({ width: 0, target: 0, gap: 0 });
+  const rowHandlers = {
+    open: (entry) => { const target = { ...entry }; leaveEditor(() => openEntry(target)); },
+    copy: (path) => copyPath(path).catch(e => { error = e.message; }),
+    download: handleDownload,
+    rename: (entry) => { renaming = entry.path; renameValue = entry.name; },
+    remove: (path) => { pendingAct = { kind: 'file', path }; },
+  };
+  const rowActions = (entry) => entryToolActions(entry, t, rowHandlers);
+  const toolbarActions = $derived([
+    { key: 'cwd', label: t('filesSessionDir'), icon: 'terminal', run: goSessionDir },
+    { key: 'refresh', label: t('filesRefresh'), icon: 'refresh', pending: loading, run: () => loadDir(cwd) },
+    { key: 'new', label: t('filesNew'), icon: 'plus', expanded: !!newType, controls: newType ? `${panelId}-new` : undefined,
+      run: () => { newType = newType ? '' : 'file'; newName = ''; } },
+    { key: 'upload', label: t('filesUpload'), icon: 'upload', run: handleUpload },
+    { key: 'hidden', label: t('filesShowHidden'), icon: showHidden ? 'eye' : 'eye-off', pressed: showHidden,
+      run: () => { showHidden = !showHidden; loadDir(cwd); } },
+    { key: 'bookmark', label: t('filesBookmark'), icon: isBookmarked(cwd) ? 'star-filled' : 'star', pressed: isBookmarked(cwd),
+      run: () => toggleBookmark(cwd) },
+    { key: 'bookmarks', label: t('filesBookmarks'), icon: 'folder-star', expanded: showBookmarks,
+      controls: showBookmarks ? `${panelId}-bookmarks` : undefined, run: () => { showBookmarks = !showBookmarks; showRecent = false; } },
+    { key: 'recent', label: t('filesRecent'), icon: 'clock', expanded: showRecent,
+      controls: showRecent ? `${panelId}-recent` : undefined, run: () => { showRecent = !showRecent; showBookmarks = false; } },
+    ...(hasGit ? [{ key: 'git', label: 'Git', icon: 'git-branch', run: openGitView }] : []),
+    ...(isTauri ? [{ key: 'downloads', label: t('downloads'), icon: 'download', run: openLocalFiles }] : []),
+  ]);
+  const toolCount = $derived(visibleToolCount(toolbarActions.length, toolbarBox.width, toolbarBox.target, toolbarBox.gap));
+  const closeFileMenu = () => { fileMenu = null; };
+  const menuCurrent = (menu) => fileMenu === menu && visible && session === menu.session
+    && cwd === menu.cwd && entries === menu.entries && view === menu.view
+    && (menu.kind !== 'overflow' || toolCount < toolbarActions.length);
+  const menuActions = $derived.by(() => {
+    const menu = fileMenu;
+    if (!menu) return [];
+    const actions = menu.entry ? rowActions(menu.entry)
+      : menu.kind === 'overflow' ? toolbarActions.slice(toolCount) : toolbarActions;
+    return actions.map(action => ({
+      label: action.label, icon: action.icon, danger: action.danger,
+      disabled: !!action.disabled || !!action.pending, checked: action.pressed ?? action.expanded,
+      onselect: () => { if (menuCurrent(menu) && !action.disabled && !action.pending) action.run(); },
+    }));
+  });
+  function openFileMenu(at, kind, entry = null) {
+    if (!visible || pendingAct || acting) return;
+    fileMenu = { at, kind, entry, session, cwd, entries, view };
+  }
+  function contextFile(event, entry = null) {
+    if (systemOwnsContextMenu(event)) { event.preventDefault(); return; }
+    event.preventDefault(); event.stopPropagation();
+    const at = event.clientX || event.clientY ? { x: event.clientX, y: event.clientY }
+      : { anchor: anchorOf(event.currentTarget), align: 'left' };
+    openFileMenu(at, entry ? 'entry' : 'directory', entry);
+  }
+  const directoryPress = (target) => !target?.closest?.('.file-row');
+  function measureToolbar(node) {
+    const measure = () => {
+      if (!node.clientWidth) return;
+      const style = getComputedStyle(node);
+      const width = node.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      if (fileMenu?.kind === 'overflow' && width !== toolbarBox.width) closeFileMenu();
+      toolbarBox = { width, target: parseFloat(style.getPropertyValue('--control-height')), gap: parseFloat(style.columnGap) || 0 };
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(node); measure();
+    return { destroy: () => observer.disconnect() };
+  }
+  $effect(() => { if (fileMenu && !menuCurrent(fileMenu)) closeFileMenu(); });
   const bookmarksRead = $state({ ready: false, error: '' });
   const recentsRead = $state({ ready: false, error: '' });
 
@@ -1355,7 +1429,7 @@
   let copyToast = $state(false);
   let copyTimer;
   async function copyPath(path) {
-    await copyText(path);
+    if (!await copyText(path)) { error = t('copyFailed'); return; }
     clearTimeout(copyTimer);
     copyToast = true;
     copyTimer = setTimeout(() => copyToast = false, 1200);
@@ -1415,28 +1489,18 @@
 <!-- View blocks live in snippets so both layouts (mobile single-pane + desktop
      two-pane) render the same markup. -->
 {#snippet listPanel()}
-    <div class="toolbar" role="group" aria-label={t('filesTools')}>
-      <CommandButton variant="icon" icon="terminal" label={t('filesSessionDir')} onclick={goSessionDir} />
-      <CommandButton variant="icon" icon="refresh" label={t('filesRefresh')} pending={loading} onclick={() => loadDir(cwd)} />
-      <CommandButton variant="icon" icon="plus" label={t('filesNew')} expanded={!!newType}
-        controls={newType ? `${panelId}-new` : undefined}
-        onclick={() => { newType = newType ? '' : 'file'; newName = ''; }} />
-      <CommandButton variant="icon" icon="upload" label={t('filesUpload')} onclick={handleUpload} />
-      <CommandButton variant="icon" icon={showHidden ? 'eye' : 'eye-off'} label={t('filesShowHidden')} pressed={showHidden}
-        onclick={() => { showHidden = !showHidden; loadDir(cwd); }} />
-      <CommandButton variant="icon" icon={isBookmarked(cwd) ? 'star-filled' : 'star'} label={t('filesBookmark')}
-        pressed={isBookmarked(cwd)} onclick={() => toggleBookmark(cwd)} />
-      <CommandButton variant="icon" icon="folder-star" label={t('filesBookmarks')} expanded={showBookmarks}
-        controls={showBookmarks ? `${panelId}-bookmarks` : undefined}
-        onclick={() => { showBookmarks = !showBookmarks; showRecent = false; }} />
-      <CommandButton variant="icon" icon="clock" label={t('filesRecent')} expanded={showRecent}
-        controls={showRecent ? `${panelId}-recent` : undefined}
-        onclick={() => { showRecent = !showRecent; showBookmarks = false; }} />
-      {#if hasGit}
-        <CommandButton variant="icon" icon="git-branch" label="Git" onclick={openGitView} />
-      {/if}
-      {#if isTauri}
-        <CommandButton variant="icon" icon="download" label={t('downloads')} onclick={openLocalFiles} />
+    <div class="toolbar compact-tools" role="group" aria-label={t('filesTools')} use:measureToolbar
+      oncontextmenu={(event) => contextFile(event)}
+      use:longpress={{ onlongpress: (point) => openFileMenu(point, 'directory') }}>
+      {#each toolbarActions.slice(0, toolCount) as action (action.key)}
+        <CommandButton variant="icon" icon={action.icon} label={action.label} pending={!!action.pending}
+          pressed={action.pressed} expanded={action.expanded} controls={action.controls} onclick={action.run} />
+      {/each}
+      {#if toolCount < toolbarActions.length}
+        <CommandButton variant="icon" icon="dots" label={t('filesMore')}
+          expanded={fileMenu?.kind === 'overflow'} controls={fileMenu?.kind === 'overflow' ? `${panelId}-menu` : undefined}
+          onclick={(event) => fileMenu?.kind === 'overflow' ? closeFileMenu()
+            : openFileMenu({ anchor: anchorOf(event.currentTarget), trigger: event.currentTarget }, 'overflow')} />
       {/if}
     </div>
 
@@ -1536,6 +1600,8 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="file-list" class:panel-open={showBookmarks || showRecent} class:drop-hot={dragOver} class:busy={loading} class:reveal={!!revealDir}
       bind:this={fileListEl}
+      oncontextmenu={(event) => { if (!event.target.closest('.file-row')) contextFile(event); }}
+      use:longpress={{ accept: directoryPress, onlongpress: (point) => openFileMenu(point, 'directory') }}
       ondragover={onListDragOver} ondragleave={onListDragLeave} ondrop={onListDrop}>
       {#if dragOver}
         <div class="drop-hint appear"><Icon name="upload" size={16} />{t('dropToUpload')}</div>
@@ -1548,28 +1614,26 @@
         <div class="loading">{t('loading')}</div>
       {:else}
         {#each entries as entry (entry.path)}
-          <div class="file-row" class:broken={entry.type === 'broken'}>
-            <button class="file-main" onclick={() => openEntry(entry)} use:hoverInfo={() => entryInfo(entry)}>
+          <div class="file-row" class:broken={entry.type === 'broken'} oncontextmenu={(event) => contextFile(event, entry)}
+            use:longpress={{ onlongpress: (point) => openFileMenu(point, 'entry', entry) }}>
+            <button class="file-main" onclick={() => rowHandlers.open(entry)} use:hoverInfo={() => entryInfo(entry)}>
               <span class="file-icon" class:is-link={entry.is_symlink}>
                 <Icon name={fileIcon(entry)} size={16} />
               </span>
-              <span class="file-label"><span
+              <span
                 class="file-name"
                 class:dir-name={entry.type === 'dir'}
                 class:link-name={entry.is_symlink}
               >{entry.name}</span>
               {#if entry.type !== 'dir'}
                 <span class="file-size">{formatSize(entry.size)}</span>
-              {/if}</span>
-            </button>
-            <div class="file-actions">
-              {#if entry.type !== 'dir' && entry.type !== 'broken'}
-                <CommandButton variant="icon" icon="download" label={`${t('filesDownload')}: ${entry.name}`} onclick={() => handleDownload(entry.path)} />
               {/if}
-              <CommandButton variant="icon" icon="edit" label={`${t('filesRename')}: ${entry.name}`}
-                onclick={() => { renaming = entry.path; renameValue = entry.name; }} />
-              <CommandButton variant="danger" iconOnly icon="trash" label={`${t('delete')}: ${entry.name}`}
-                onclick={() => (pendingAct = { kind: 'file', path: entry.path })} />
+            </button>
+            <div class="file-actions compact-tools">
+              {#each rowActions(entry).filter(action => action.inline) as action (action.key)}
+                <CommandButton variant={action.danger ? 'danger' : 'icon'} iconOnly icon={action.icon}
+                  label={`${action.label}: ${entry.name}`} onclick={action.run} />
+              {/each}
             </div>
           </div>
         {/each}
@@ -1582,7 +1646,7 @@
 
 {#snippet previewPanel()}
     <!-- File preview -->
-    <div class="preview-header">
+    <div class="preview-header compact-tools">
       <CommandButton variant="icon" icon="arrow-left" label={t('back')} onclick={backToList} />
       <span class="preview-name">{currentFile.name}</span>
       <div class="preview-actions">
@@ -1769,6 +1833,8 @@
   {/if}
 </div>
 
+<ContextMenu at={fileMenu?.at} items={menuActions} who={fileMenu?.entry?.name || fileMenu?.cwd || t('filesTools')}
+  id={`${panelId}-menu`} oncancel={closeFileMenu} />
 <ConfirmDialog open={!!pendingAct} busy={acting} compact={narrowViewport}
   title={pendingAct ? t(ACT_COPY[pendingAct.kind].title).replace('{name}', actName(pendingAct)) : ''}
   note={pendingAct ? t(ACT_COPY[pendingAct.kind].note) : ''}
@@ -1809,7 +1875,8 @@
   }
 
   .toolbar {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: var(--config-header-height); padding: 6px 10px; box-sizing: border-box;
+    display: flex; flex-wrap: nowrap; align-items: center; gap: var(--tool-gap); min-width: 0;
+    min-height: var(--control-height); padding: var(--tool-inset-block) var(--tool-inset-inline); box-sizing: border-box;
     border-bottom: 1px solid var(--border); background: transparent; flex-shrink: 0;
   }
 
@@ -1894,12 +1961,12 @@
     display: flex; align-items: center; border-bottom: 1px solid var(--border2);
   }
   .file-main {
-    flex: 1; display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    flex: 1; display: flex; align-items: center; gap: 8px; padding: 4px 8px;
     border: none; background: none; color: var(--text); cursor: pointer; text-align: left;
     font-size: var(--fs-body); min-width: 0; -webkit-tap-highlight-color: transparent;
     font-family: var(--font-ui); /* file names are data, not chrome */
     transition: background var(--t-fast);
-    min-height: var(--control-height);
+    min-height: var(--files-row-height);
   }
   .file-main:active { background: var(--input-bg); }
   /* Symlink badge — small ↗ arrow overlaid on the bottom-right of the
@@ -1930,11 +1997,10 @@
   .file-row.broken { opacity: 0.55; }
   .file-row.broken .file-icon.is-link::after { color: var(--danger, #f87171); }
   .link-name { font-style: italic; }
-  .file-label { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .file-name { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   .dir-name { color: var(--accent-ink); }
-  .file-size { color: var(--text2); font-size: var(--fs-sub); font-family: var(--font-mono); white-space: nowrap; }
-  .file-actions { display: flex; flex: none; gap: 4px; padding-right: 8px; }
+  .file-size { flex: none; color: var(--text2); font-size: var(--fs-sub); font-family: var(--font-mono); white-space: nowrap; }
+  .file-actions { display: flex; flex: none; gap: 0; padding-right: 4px; }
   .empty, .loading { padding: 40px; text-align: center; color: var(--text3); font-size: var(--fs-body); }
 
   /* Preview header */

@@ -1,0 +1,42 @@
+export interface FileToolAction {
+  key: string;
+  label: string;
+  icon: string;
+  inline?: boolean;
+  disabled?: boolean;
+  pending?: boolean;
+  pressed?: boolean;
+  expanded?: boolean;
+  controls?: string;
+  danger?: boolean;
+  run: () => unknown;
+}
+
+interface Entry { path: string; name: string; type: string }
+interface EntryHandlers {
+  open(entry: Entry): unknown;
+  copy(path: string): unknown;
+  download(path: string): unknown;
+  rename(entry: Entry): unknown;
+  remove(path: string): unknown;
+}
+
+/** available is the toolbar's content width, in untransformed CSS pixels. */
+export function visibleToolCount(total: number, available: number, target: number, gap: number): number {
+  if (available <= 0 || target <= 0) return total;
+  const slots = Math.max(1, Math.floor((available + gap) / (target + gap)));
+  return total <= slots ? total : slots - 1;
+}
+
+/** Inline tools and context menus are views of these same captured actions. */
+export function entryToolActions(entry: Entry, t: (key: string) => string, handlers: EntryHandlers): FileToolAction[] {
+  const target = { ...entry };
+  return [
+    { key: 'open', label: t('open'), icon: 'arrow-right', disabled: target.type === 'broken', run: () => handlers.open(target) },
+    { key: 'copy', label: t('filesCopyPath'), icon: 'copy', run: () => handlers.copy(target.path) },
+    ...(target.type !== 'dir' && target.type !== 'broken'
+      ? [{ key: 'download', label: t('filesDownload'), icon: 'download', inline: true, run: () => handlers.download(target.path) }] : []),
+    { key: 'rename', label: t('filesRename'), icon: 'edit', inline: true, run: () => handlers.rename(target) },
+    { key: 'delete', label: t('delete'), icon: 'trash', inline: true, danger: true, run: () => handlers.remove(target.path) },
+  ];
+}

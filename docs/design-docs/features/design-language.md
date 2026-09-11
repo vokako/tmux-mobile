@@ -189,6 +189,7 @@ unchanged until its consumers migrate.
 | `--control-paint-inset` (each vertical side) | 2px | 6px |
 | `--control-field-inset` (each vertical side) | 2px | 8px |
 | `--control-icon-size` | 16px | 17px |
+| `compact-tools` paint height (#164) | 20px inside 28px target | 28px inside 44px target |
 | `--config-header-height` (minimum) | 48px | 56px |
 | `--config-nav-height` (minimum row) | 40px | 44px |
 | `config-compact` header / navigation minimum (#162) | 44 / 36px | 56 / 44px |
@@ -379,11 +380,17 @@ editor's Escape guard.
 ### File tools (#157, 2026-09-10)
 
 Files tools adopt the shared command metrics and state contract too.
-Their bars wrap within the available width; the listing is a
+#164 (owner, 2026-09-11) refines dense tool groups through the shared
+`compact-tools` inset, without changing CommandButton state/activation or
+28/44px native targets. The toolbar stays one row and measures whether a
+trailing More menu is necessary; it is not a fixed device-specific cutoff.
+The listing is a
 content surface, not a navigation sidebar. It fills an unused preview area,
 then uses its own SideHandle width beside an open preview. Names wrap in full,
-with size on a secondary line. See [file-handling.md](file-handling.md) for
-the measured cause, width bounds and unchanged routing/Back contract.
+with size on the right in the same row, superseding #157's secondary-line
+rule. Ordinary files/folders share one row minimum; long names may grow.
+See [file-handling.md](file-handling.md) for the verbatim owner correction,
+measurements, width bounds and unchanged routing/Back contract.
 
 ### Legacy consumers during migration
 
@@ -464,6 +471,21 @@ press-scale/brightness details below do not override it.
 
 ## 5 · Menus & popovers
 
+- **ContextMenu activation contract (#164, 2026-09-11):** checked view/tool
+  choices announce `menuitemcheckbox` and `aria-checked`; ordinary verbs remain
+  `menuitem`. Disabled entries reject queued activation too. Its dimensions
+  include borders, its height is bounded inside the same 8px viewport inset,
+  and internal scrolling remains exempt from outside-scroll dismissal.
+  The focused menu announces its keyboard cursor through active-descendant
+  IDs and scrolls that item into view inside the bounded list.
+  Coarse pointers get 44px rows even on wide screens. Opening moves focus into
+  the menu so earlier territory-based Escape listeners see the correct owner;
+  active modals keep their keyboard priority. Connected focus is restored
+  before invoking an action, so a following dialog inherits the live origin,
+  and cleanup never steals focus from a newer control. Earlier Hub capture
+  handling yields to menu territory instead of closing the drawer below it.
+  These are shared prerequisites,
+  not a second Files menu or a global history trap; visual adoption is #165.
 - ONE popover mechanism: `position: fixed` layer placed by `menuPlacement`
   (`anchorOf`/`pointAnchor` divide by `--ui-zoom`), styled `--bg` surface,
   1px `--border`, `--ui-radius-panel`, shadow, `--ui-font-control` rows;

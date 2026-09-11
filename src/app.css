@@ -97,6 +97,16 @@ html {
   --config-pref-inset: 5px;
   --config-pref-gap: 16px;
   --config-pref-gap-compact: 12px;
+  --files-row-height: 32px;
+  --tool-gap: 2px;
+  --tool-inset-block: 2px;
+  --tool-inset-inline: 6px;
+}
+
+.compact-tools { --control-paint-inset: 4px; }
+@media (any-pointer: coarse) {
+  :root { --files-row-height: 44px; }
+  .compact-tools { --control-paint-inset: 8px; }
 }
 
 @media (any-pointer: coarse) {
