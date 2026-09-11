@@ -18,7 +18,44 @@ destination, and the selected card's existing hover card explains delivery.
 Body mentions still deliver through the existing parser; `chipExtras` uses
 `mentionTokens` to mark reached cards with one `@` glyph, never a second
 parser, dashed ring or selection change. The drawer's window selector has
-a different purpose and stays. Team grouping/order remains `groupRoster`.
+a different purpose and stays. The owner-selected ordering and disclosure
+below supersede the prototype's team-group adjacency.
+
+**Final density and ordering, owner 07:09:** "用单行的形式吧，而且不要进行中这种文字描述了，最好有一个展开的小按钮，展开一个多行的 list ，但是限制高度，我可以一下子看到很多，而且 agent 卡片排序，一般最后活跃的放到最前边"
+
+Cards have one line: avatar, name, the existing status dot, optional mention/
+unread marks and a separate Stop. State words remain in hover/ARIA, not the
+visible row. `sortAgentsForRoster` in `hub.ts` puts the existing busy membership
+first, then sorts each busy/nonbusy partition by `since` descending and window
+index ascending. For hooked agents this is turn-level recency: `since` is the
+prompt start while running, ask time while waiting, and end time while
+idle/failed, not the latest tool call. The server's existing no-hook fallback
+is unchanged; the client adds no pane reading, clock, telemetry field or
+history scan.
+Global order replaces `groupRoster`; team paths remain in hover and accessible
+names, rather than forcing members to remain adjacent.
+
+One shared icon-only CommandButton expands the same keyed list in normal
+flow. The default is one horizontal row; expansion uses 1/2/4 columns and
+internal scrolling, capped at `min(240px, 32dvh / --ui-zoom)`. Long names wrap
+in expanded cells instead of clipping. Both selection and Stop retain native
+28px pointer / 44px coarse targets; the Stop track remains reserved when idle.
+The disclosure chevron uses the existing `.flip` atom through controlled
+`expanded`, never a second glyph or animation. `hubPrefs.rosterExpanded` stores
+the mode per project and follows project rename like the drawer preference.
+Hub captures project and next mode before its existing `withReadingAnchor`
+transaction; this is not a popup or new Back/history layer.
+
+While a card is pointed at, pressed or focused, hold the display order but
+read current agent objects for state and actions. Remove departed names and
+append new members; adopt the latest turn order on pointerleave/blur/release,
+not a timer. An idle expanded view reorders live: freezing until collapse
+would hide new activity (lead clarification, 08:04). Keyed `flip` uses
+`moveMs()` for that reorder, not a new timing curve. A new Stop must not move
+under an active gesture. Pointer-up/lost capture releases the press lock even
+when a disabled target emits no click.
+Relevant DOM updates recheck actual focus because removing a Stop or agent
+does not guarantee a `focusout` event.
 
 Each busy card exposes a sibling Stop button, not a nested selection button.
 `busyTargetsFor` in `hub-composer.ts` is the sole membership decision:

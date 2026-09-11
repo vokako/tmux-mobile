@@ -29,30 +29,30 @@ test('Roster renders the controlled destination strip (#168)', { timeout: 60000 
     const Roster = (await vite.ssrLoadModule('/src/lib/hub/Roster.svelte')).default;
     const { render } = await vite.ssrLoadModule('svelte/server');
     const agents = [
-      { name: 'runner', window: 1, agent: 'kiro', state: 'working', team: 'dev', since: 0 },
-      { name: 'solo', window: 3, agent: 'claude', state: 'idle', since: 0 },
-      { name: 'waiting', window: 2, agent: 'codex', state: 'waiting', team: 'dev/review', since: 0 },
+      { name: 'runner', window: 1, managed: true, agent: 'kiro', state: 'working', team: 'dev', since: 10 },
+      { name: 'solo', window: 3, managed: true, agent: 'claude', state: 'idle', since: 90 },
+      { name: 'waiting', window: 2, managed: true, agent: 'codex', state: 'waiting', team: 'dev/review', since: 30 },
     ];
     const view = (props: Record<string, unknown> = {}) => JSDOM.fragment(render(Roster, { props: {
       selected: 'fixture', roomReady: true, managedAgents: agents, stopped: ['paused'],
       managedNames: agents.map((agent) => agent.name), busyNames: ['runner', 'waiting'],
       selectedRow: { project: { path: '/fixture' }, live: false, slots: [{ window_name: 'paused', command: 'codex' }] },
-      recipient: 'runner', unread: new Set(['runner']), stateLabel: (state: string) => state,
+      recipient: 'runner', unread: new Set(['runner']), stateLabel: (state: string) => `State: ${state}`,
       ...props,
     } }).body as string);
     const card = (root: DocumentFragment, name: string) => root.querySelector(`.acard[data-agent="${name}"]`)!;
     const select = (root: DocumentFragment, name: string) => card(root, name).querySelector('button.agent-select')!;
     const stop = (root: DocumentFragment, name: string) => card(root, name).querySelector('.agent-stop > button');
 
-    await ctx.test('native sibling controls preserve team order, identity and status', () => {
+    await ctx.test('native sibling controls use global turn order with team identity in ARIA, not group order', () => {
       const root = view();
       assert.equal(root.children.length, 1);
       assert.equal(root.querySelectorAll('.roster').length, 1);
-      assert.equal(root.querySelectorAll('.tgroup').length, 2);
-      assert.equal(root.querySelectorAll('.tgroup[role="group"][aria-label]').length, 2);
+      assert.equal(root.querySelectorAll('.tgroup').length, 0);
       assert.deepEqual([...root.querySelectorAll('.acard[data-agent]')].map((node) => node.getAttribute('data-agent')),
-        ['all', 'runner', 'waiting', 'solo', 'paused']);
-      assert.deepEqual([...root.querySelectorAll('.tg-label')].map((node) => node.textContent?.trim()), ['dev', 'review']);
+        ['all', 'waiting', 'runner', 'solo', 'paused']);
+      assert.match(select(root, 'waiting').getAttribute('aria-label')!, /dev\/review/u);
+      assert.doesNotMatch(root.textContent!, /State:|stopped|@all/u, 'state words live only in hover/ARIA');
       assert.equal(select(root, 'runner').getAttribute('aria-pressed'), 'true');
       assert.equal(select(root, 'all').getAttribute('aria-pressed'), 'false');
       assert.equal(select(root, 'waiting').getAttribute('aria-pressed'), 'false');
@@ -60,7 +60,9 @@ test('Roster renders the controlled destination strip (#168)', { timeout: 60000 
       assert.match(select(root, 'runner').getAttribute('aria-label')!, /unread/iu);
       assert.ok(card(root, 'runner').querySelector('.st.live-dot'));
       assert.ok(card(root, 'runner').querySelector('.unread'));
-      assert.ok(card(root, 'waiting').querySelector('.agent-state.needs'));
+      assert.equal(card(root, 'runner').querySelector('.agent-marks')!.classList.contains('unmarked'), false);
+      assert.equal(card(root, 'waiting').querySelector('.agent-marks')!.classList.contains('unmarked'), true);
+      assert.match(card(root, 'waiting').querySelector('.st')!.getAttribute('style')!, /--status-warn/u);
       assert.equal(card(root, 'waiting').querySelector('.st.live-dot'), null);
       assert.equal(stop(root, 'runner')?.parentElement?.parentElement, card(root, 'runner'));
       assert.equal(stop(root, 'runner')?.getAttribute('aria-label'), 'Interrupt runner');
@@ -101,13 +103,27 @@ test('Roster renders the controlled destination strip (#168)', { timeout: 60000 
       assert.deepEqual(marked(extra), ['waiting']);
       assert.equal(select(extra, 'runner').getAttribute('aria-pressed'), 'true');
       assert.equal(select(extra, 'waiting').getAttribute('aria-pressed'), 'false');
-      assert.deepEqual(marked(view({ composerText: '@all' })), ['all', 'runner', 'waiting', 'solo']);
+      assert.deepEqual(marked(view({ composerText: '@all' })), ['all', 'waiting', 'runner', 'solo']);
       assert.deepEqual(marked(view({ recipient: 'all', composerText: '@waiting' })), []);
       assert.equal(select(view({ recipient: 'all' }), 'all').getAttribute('aria-pressed'), 'true');
       const none = view({ recipient: '', composerText: '@waiting' });
       assert.equal(none.querySelector('[aria-pressed="true"]'), null);
       assert.deepEqual(marked(none), ['waiting']);
       assert.equal(view({ recipient: '' }).querySelector('.agent-mention'), null);
+    });
+
+    await ctx.test('one controlled disclosure targets the same single list in either mode', () => {
+      for (const expanded of [false, true]) {
+        const root = view({ expanded });
+        const toggle = root.querySelector('.roster-toggle button')!;
+        const list = root.querySelector('.cards')!;
+        assert.ok(toggle);
+        assert.equal(toggle.getAttribute('aria-expanded'), String(expanded));
+        assert.equal(toggle.getAttribute('aria-controls'), list.id);
+        assert.equal(list.classList.contains('expanded'), expanded);
+        assert.equal(root.querySelectorAll('.cards').length, 1);
+        assert.equal(root.querySelectorAll('[data-agent=runner]').length, 1);
+      }
     });
 
     await ctx.test('stopped context targets retain backend identity but cannot receive or interrupt', () => {
@@ -120,7 +136,7 @@ test('Roster renders the controlled destination strip (#168)', { timeout: 60000 
     });
 
     await ctx.test('empty/closed rooms retain add; loading and long names remain honest', () => {
-      assert.ok(view({ managedAgents: [], stopped: [], managedNames: [], busyNames: [] }).querySelector('.acard.add'));
+      assert.ok(view({ managedAgents: [], stopped: [], managedNames: [], busyNames: [] }).querySelector('.roster-add button'));
       assert.equal(view({ selected: '' }).querySelector('.roster'), null);
       assert.ok(view({ roomReady: false }).querySelector('.sk-cards[aria-hidden="true"]'));
       assert.equal(view({ roomReady: false }).querySelector('[data-agent="all"]'), null, 'no empty-all verdict before first answer');

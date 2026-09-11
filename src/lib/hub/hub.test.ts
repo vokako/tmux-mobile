@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
+import { sortAgentsForRoster } from './hub.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
   ts: 0, window: 'w1', kind: 'tool', text: '', ...e,
@@ -47,6 +48,76 @@ test('mergeMessages dedupes by id and by content triple, sorts by ts', () => {
 
 const ag = (a: Partial<HubAgent>): HubAgent => ({
   window: 1, name: 'a', command: '', agent: 'kiro', managed: true, state: 'idle', detail: '', since: 0, ...a,
+});
+
+test('sortAgentsForRoster: older busy agents precede newer idle agents (#168)', () => {
+  const agents = [
+    ag({ name: 'idle', state: 'idle', since: 1000, window: 0 }),
+    ag({ name: 'running', state: 'running', since: 10, window: 4 }),
+    ag({ name: 'waiting', state: 'waiting', since: 30, window: 2 }),
+    ag({ name: 'blocked', state: 'blocked', since: 40, window: 3 }),
+    ag({ name: 'working', state: 'working', since: 20, window: 1 }),
+  ];
+  assert.deepEqual(sortAgentsForRoster(agents).map((a) => a.name),
+    ['blocked', 'waiting', 'working', 'running', 'idle']);
+});
+
+test('sortAgentsForRoster: since desc then window asc within both partitions', () => {
+  const agents = [
+    ag({ name: 'idle-old', since: 10, window: 0 }),
+    ag({ name: 'busy-high-window', state: 'running', since: 20, window: 8 }),
+    ag({ name: 'failed-high-window', state: 'failed', since: 50, window: 7 }),
+    ag({ name: 'busy-new', state: 'waiting', since: 30, window: 9 }),
+    ag({ name: 'idle-low-window', since: 50, window: 2 }),
+    ag({ name: 'busy-low-window', state: 'blocked', since: 20, window: 3 }),
+  ];
+  assert.deepEqual(sortAgentsForRoster(agents).map((a) => a.name),
+    ['busy-new', 'busy-low-window', 'busy-high-window', 'idle-low-window', 'failed-high-window', 'idle-old']);
+});
+
+test('sortAgentsForRoster: busy membership follows the existing managed-only selector', () => {
+  const agents = [
+    ag({ name: 'direct', state: 'running', managed: false, since: 200 }),
+    ag({ name: 'managed', state: 'working', since: 1 }),
+    ag({ name: 'unknown', state: 'unknown', since: 300 }),
+  ];
+  assert.deepEqual(sortAgentsForRoster(agents).map((a) => a.name), ['managed', 'unknown', 'direct']);
+});
+
+test('sortAgentsForRoster: absent since is zero only at the display edge', () => {
+  const missingBusy = ag({ name: 'missing-busy', state: 'running', window: 2 });
+  const missingIdle = ag({ name: 'missing-idle', window: 4 });
+  // Older/partial wire records can omit since without changing the wire type.
+  Reflect.deleteProperty(missingBusy, 'since');
+  Reflect.deleteProperty(missingIdle, 'since');
+  Object.freeze(missingBusy);
+  Object.freeze(missingIdle);
+  const agents = [
+    missingIdle, missingBusy,
+    ag({ name: 'zero-busy', state: 'waiting', since: 0, window: 1 }),
+    ag({ name: 'new-idle', since: 10, window: 9 }),
+    ag({ name: 'new-busy', state: 'blocked', since: 1, window: 8 }),
+    ag({ name: 'zero-idle', since: 0, window: 3 }),
+  ];
+  assert.deepEqual(sortAgentsForRoster(agents).map((a) => a.name),
+    ['new-busy', 'zero-busy', 'missing-busy', 'new-idle', 'zero-idle', 'missing-idle']);
+  assert.equal('since' in missingBusy, false);
+  assert.equal('since' in missingIdle, false);
+});
+
+test('sortAgentsForRoster: copies the array without mutating or cloning agents', () => {
+  const idle = Object.freeze(ag({ name: 'idle', since: 100 }));
+  const busy = Object.freeze(ag({ name: 'busy', state: 'running', since: 1 }));
+  const agents = Object.freeze([idle, busy]);
+  const sorted = sortAgentsForRoster(agents);
+  assert.notEqual(sorted, agents);
+  assert.deepEqual(agents, [idle, busy]);
+  assert.equal(sorted[0], busy);
+  assert.equal(sorted[1], idle);
+  const empty = Object.freeze([]);
+  const sortedEmpty = sortAgentsForRoster(empty);
+  assert.deepEqual(sortedEmpty, []);
+  assert.notEqual(sortedEmpty, empty);
 });
 
 

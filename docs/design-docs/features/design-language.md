@@ -35,6 +35,15 @@ Stop and attach/send use shared `CommandButton` paint and native 28px pointer /
 44px coarse targets. Stop response is recoverable interruption, not the
 destructive process-stop confirmation. Status remains `.live-dot` /
 `stateDotColor`; no extra busy-colour family or permanent stop-spinner.
+The owner's 07:09 final selection (quoted in hub-composer.md) is single-line,
+without visible state words. One chevron reveals the same list in flow, with
+1/2/4 columns at 360/720px roster-container thresholds and a maximum height of
+`min(240px, 32dvh / --ui-zoom)`, scrolling internally. Native targets remain
+28/44px; 20px avatars, 6px card gaps and 4px internal gaps replace the provisional two-line
+geometry. State stays available in hover/ARIA, team adjacency yields to
+turn-level activity order, and long names may wrap in expanded cells.
+An empty mention/unread slot reserves width only in the horizontal strip;
+expanded grid cells already have stable widths and release that space to names.
 
 ## 1 · Tokens (app.css `:root` — never restate a value)
 

@@ -8,14 +8,15 @@ const rule = (selector: string) =>
 
 test('one controlled roster replaces the delayed tap menu whole (#168)', () => {
   assert.match(source, /import \{ ALL_TARGET \} from '\.\/hub-composer\.ts'/u);
-  assert.match(source, /const rosterGroups = \$derived\(groupRoster\(managedAgents\)\)/u);
+  assert.match(source, /const ranked = \$derived\(sortAgentsForRoster\(managedAgents\)\)/u,
+    'owner 07:09 replaces team adjacency with turn-edge recency');
   assert.match(source, /onselect: setRecipient = \(\) => \{\}/u);
   assert.match(source, /setRecipient\(recipient === name \? '' : name\)/u);
   assert.match(source, /onclick=\{\(\) => selectTarget\(ALL_TARGET\)\}/u);
   assert.match(source, /onclick=\{\(\) => selectTarget\(a\.name\)\}/u);
   assert.doesNotMatch(source.slice(source.indexOf('} = $props();')), /\brecipient\s*=(?!=)/u,
     'selection emits intent without locally committing recipient');
-  assert.doesNotMatch(source, /menuFor|cardsEl|cardTimer|cardDbl|cardClick|toggleAgentMenu|menuAnchor|menuPos|vitalsFor|menuAgent|a-menu|am-who|am-vitals/u);
+  assert.doesNotMatch(source, /menuFor|bind:cardsEl|cardTimer|cardDbl|cardClick|toggleAgentMenu|menuAnchor|menuPos|vitalsFor|menuAgent|a-menu|am-who|am-vitals|groupRoster|tgroup/u);
   assert.doesNotMatch(source, /onfilter|onwatch|onstart|onrestart|onaction|onconfigure|ondblclick|setTimeout|addEventListener|popstate|history\./u);
 });
 
@@ -64,9 +65,10 @@ test('identity, readiness and motion retain their existing authorities', () => {
   assert.match(source, /class:reveal=\{justLoaded\}/u);
   assert.match(source, /class:appear-pop=\{!!rosterBase && !rosterBase\.has\(a\.name\)\}/u);
   assert.match(source, /class:live-dot=\{stateIsLive\(a\.state\)\} style:background=\{stateDotColor\(a\.state\)\}/u);
-  assert.match(source, /class:needs=\{stateNeedsYou\(a\.state\)\}/u);
-  assert.match(rule('.agent-state.needs'), /var\(--status-warn\)/u);
-  assert.doesNotMatch(rule('.agent-state.needs'), /animation/u);
+  assert.doesNotMatch(source, /<span>\{stateLabel\(a\.state\)\}<\/span>|agent-state|stateNeedsYou/u,
+    'owner 07:09 retains state wording in accessible/hover facts only');
+  assert.match(source, /\{#each orderedAgents as a \(a\.name\)\}/u);
+  assert.equal([...source.matchAll(/animate:flip=\{\{ duration: moveMs\(\) \}\}/gu)].length, 2);
   assert.doesNotMatch(source, /^\s*\.st \{/mu, 'the shared Hub dot box is not copied');
   assert.match(source, /const slotBackend = \(name\) => \(selectedRow\?\.slots \?\? \[\]\)\.find\(\(s\) => s\.window_name === name\)\?\.command;/u);
   assert.match(source, /img class="ava dim" src=\{backendIcon\(backend\)\}/u);
@@ -76,16 +78,41 @@ test('identity, readiness and motion retain their existing authorities', () => {
 
 test('density lives in local tokens; full names and native targets do not shrink', () => {
   const roster = rule('.roster');
-  assert.match(roster, /--roster-facts-flow: column/u);
-  assert.match(roster, /--roster-card-width: 180px/u);
-  assert.match(roster, /--roster-select-height: 54px/u);
-  assert.match(source, /@media \(any-pointer: coarse\)[\s\S]*--roster-card-width: 184px/u);
-  assert.match(rule('.agent-facts'), /flex-direction: var\(--roster-facts-flow\)/u);
-  assert.match(rule('.agent-select'), /min-height: max\(var\(--control-height\), var\(--roster-select-height\)\)/u);
-  assert.match(rule('.agent-stop'), /flex: none/u);
-  assert.match(rule('.acard'), /min-width: var\(--roster-card-width\)/u);
+  assert.match(roster, /--roster-avatar-size: 20px/u);
+  assert.match(roster, /--roster-expanded-max: min\(240px, calc\(32dvh \/ var\(--ui-zoom, 1\)\)\)/u);
+  assert.match(rule('.agent-select'), /min-height: var\(--control-height\)/u);
+  assert.match(rule('.acard'), /grid-template-columns: minmax\(0, 1fr\) var\(--control-height\)/u,
+    'the Stop track stays reserved when a turn ends');
   assert.match(rule('.cards'), /overflow-x: auto/u);
+  assert.match(rule('.cards.expanded'), /overflow-y: auto/u);
+  assert.match(rule('.cards.expanded'), /max-height: var\(--roster-expanded-max\)/u);
+  assert.match(source, /repeat\(2, minmax\(0, 1fr\)\)/u);
+  assert.match(source, /repeat\(4, minmax\(0, 1fr\)\)/u);
+  assert.match(rule('.cards.expanded .a-name'), /overflow-wrap: anywhere/u);
+  assert.match(rule('.cards.expanded .agent-marks.unmarked'), /display: none/u);
+  assert.doesNotMatch(source, /\.agent-marks:empty/u,
+    'Svelte leaves conditional whitespace; CSS :empty kept 12.5px reserved and split ordinary phone names');
   assert.match(rule('.a-name'), /white-space: nowrap/u);
   assert.doesNotMatch(rule('.a-name'), /max-width|ellipsis|overflow: hidden/u);
   assert.doesNotMatch(source, /data-density|URLSearchParams|location\.search/u);
+});
+
+test('one in-flow disclosure controls one list without remounting its cards', () => {
+  assert.equal([...source.matchAll(/class="cards"/gu)].length, 1);
+  assert.match(source, /icon="chevron-up" variant="icon"/u);
+  assert.match(source, /\{expanded\} controls=\{cardsId\} disabled=\{!roomReady\} onclick=\{onexpand\}/u);
+  assert.match(source, /const holdOrder = \$derived\(hovering \|\| focused \|\| pressing\)/u);
+  assert.match(source, /onpointerdown=\{beginPress\} onpointerup=\{clearPress\} onlostpointercapture=\{clearPress\}/u);
+  assert.doesNotMatch(source, /requestAnimationFrame|cancelAnimationFrame|setTimeout/u,
+    'order releases on input lifecycle events, not a timer');
+  assert.match(source, /focused = !!cardsEl\?\.contains\(document\.activeElement\)/u,
+    'removed controls can lose focus without emitting focusout');
+  assert.doesNotMatch(source, /transition:[^;\n]*(?:height|width)|@keyframes|position: fixed/u);
+});
+
+test('idle cards keep their width but give the vacant Stop track back to selection', () => {
+  const idle = rule('.acard:not(.has-stop):not(.off) .agent-select');
+  assert.match(idle, /grid-column: 1 \/ -1/u);
+  assert.match(idle, /padding-right: calc\(6px \+ var\(--control-height\)\)/u,
+    'the hit box spans the object while the content budget stays stable');
 });

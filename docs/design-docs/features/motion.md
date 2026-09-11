@@ -14,6 +14,12 @@ to restore them. The remaining command palette and shared ContextMenu keep
 Mentions carry one `@` mark. No height animation or new loop accompanies the
 normal-flow composer, and the existing shell-height notification still runs
 only when its measured height changes.
+The owner's 07:09 final choice adds an in-flow roster disclosure: its
+CommandButton chevron wears `.flip.on` from the existing controlled `expanded`
+state. The list height is a cut inside the reading transaction, never animated.
+Global turn-edge order uses keyed `flip`/`moveMs()` once pointing/press/focus
+releases the held order. An idle expanded view stays live; no timer controls
+release. Tool-call detail or poll time does not reorder cards.
 
 ## 1 · Principles
 

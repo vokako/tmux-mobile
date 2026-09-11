@@ -4,6 +4,20 @@ import { compileMount } from '../test/mount.ts';
 
 const compiled = compileMount(new URL('./CommandButton.svelte', import.meta.url), []);
 
+test('disclosure chevrons turn with the controlled expanded state through the shared flip atom (#168)', async context => {
+  for (const expanded of [false, true]) {
+    const app = await (await compiled).mount(context, {
+      props: { label: 'Agents', icon: 'chevron-up', variant: 'icon', expanded, controls: 'roster' }, modules: [],
+    });
+    try {
+      const icon = app.document.querySelector('.command-icon')!;
+      assert.ok(icon.classList.contains('flip'));
+      assert.equal(icon.classList.contains('on'), expanded);
+      assert.equal(app.document.querySelector('button')!.getAttribute('aria-expanded'), String(expanded));
+    } finally { await app.close(); }
+  }
+});
+
 test('commands keep their name and reject activation while disabled or pending', async context => {
   const fixture = await compiled;
   for (const state of [{}, { disabled: true }, { pending: true }]) {

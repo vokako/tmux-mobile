@@ -13,7 +13,12 @@ on each agent and no inline To control. The current contract is in
 [hub-composer.md](hub-composer.md#one-roster-above-the-input-one-stop-operation-board-168-2026-09-11).
 It supersedes the older composer-chip/mirror and 260ms card-menu descriptions
 below, which remain historical evidence. Roster is still one unkeyed component,
-now between Feed and Composer; `groupRoster` retains team identity and order.
+now between Feed and Composer. The owner's 07:09 final choice replaces
+`groupRoster` adjacency with busy-first turn recency; team identity remains in
+hover/ARIA. The single-line/no-state-word cards can expand in place as a
+height-bounded list, with project-owned persistence through `hubPrefs`.
+Hub's existing `withReadingAnchor` encloses each expand/collapse mutation;
+neither the list nor its height gets a second reading or motion mechanism.
 Secondary card actions, including filtering and restart, use only ContextMenu.
 The fixed tap menu and double-click filter shortcut no longer exist.
 
@@ -342,7 +347,8 @@ Back floor, ContextMenu action construction, confirmations and RPCs; callbacks
 carry the clicked row identity. No wrapper, per-project key or copied shared
 style atom is introduced.
 
-**Roster grouping ownership** (board #132, 2026-09-09): `roster.ts` owns the
+**Historical roster grouping ownership** (board #132, 2026-09-09; retired by
+the owner's 07:09 choice in #168): `roster.ts` owned the
 existing team-tree construction. Solo agents and groups keep first-appearance
 order at each level; full team paths distinguish nested groups with the same
 leaf name. Agent objects retain identity. This is a mechanical extraction,

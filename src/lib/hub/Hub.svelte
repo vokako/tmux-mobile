@@ -774,6 +774,16 @@
   const busyNames = $derived(busyTargetsFor(ALL_TARGET, agents));
   const interruptible = $derived(busyTargetsFor(recipient, agents).length > 0
     && !busyTargetsFor(recipient, agents).some((name) => interrupting.includes(name)));
+  const rosterExpanded = $derived(hubPrefs.rosterExpanded(selected));
+
+  async function toggleRoster() {
+    const session = selected;
+    if (!session) return;
+    const next = !rosterExpanded;
+    await withReadingAnchor(() => {
+      if (selected === session) hubPrefs.setRosterExpanded(session, next);
+    });
+  }
 
   async function interrupt(target, session = selected) {
     if (!session || session !== selected) return;
@@ -1575,6 +1585,7 @@
       <Roster {selected} {compact} {managedAgents} {stopped} {selectedRow}
         {recipient} {composerText} {managedNames} {busyNames} {interrupting}
         {unread} {acting} {tick} {roomReady} {justLoaded} {rosterBase}
+        expanded={rosterExpanded} onexpand={toggleRoster}
         {stateLabel} {stateTone} onselect={setRecipient} oninterrupt={interrupt}
         onadd={() => openPicker('add')}
         oncontext={(at, name) => openCtx(at, name, agentItems(name))} />

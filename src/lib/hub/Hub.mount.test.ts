@@ -41,6 +41,7 @@ test('saved all restores through a fresh mount and room revisit without deliveri
     const app = await fixture.mount(context, {
       props: { visible: true },
       setup(window) {
+        window.Element.prototype.getAnimations = () => [];
         window.localStorage.setItem('tmux_hub_project', 'fixture');
         window.localStorage.setItem('tmux_hub_lead', saved);
       },
@@ -488,7 +489,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-async function composerFixture(context: TestContext, extra: Record<string, (...args: any[]) => unknown> = {}, mobile = false) {
+async function composerFixture(context: TestContext, extra: Record<string, (...args: any[]) => unknown> = {}, mobile = false, storage: Record<string, string> = {}) {
   const fixture = await compiledHub();
   const { rpc } = roomFixture();
   const app = await fixture.mount(context, {
@@ -496,6 +497,7 @@ async function composerFixture(context: TestContext, extra: Record<string, (...a
     setup(window) {
       window.Element.prototype.getAnimations = () => [];
       Object.defineProperty(window.performance, 'now', { value: () => window.Date.now() });
+      for (const [key, value] of Object.entries(storage)) window.localStorage.setItem(key, value);
     },
     modules: [{
       ...rpc,
@@ -616,6 +618,134 @@ test('body mentions mark cards without replacing the selected delivery target (#
     await app.wait(() => posts.length === 2);
     assert.equal(posts[1], '@all Report progress.');
   } finally { await app.close(); }
+});
+
+test('roster disclosure keeps its cards, remembers each room, and holds order during interaction (#168)', { timeout: 60000 }, async (context) => {
+  const agents = [
+    { name: 'alice', window: 0, managed: true, agent: 'kiro', state: 'idle', since: 1000 },
+    { name: 'bob', window: 1, managed: true, agent: 'codex', state: 'running', since: 10, team: 'review' },
+    { name: 'charlie', window: 2, managed: true, agent: 'codex', state: 'waiting', since: 20, team: 'review/backend' },
+  ];
+  const interrupts: string[] = [];
+  const app = await composerFixture(context, {
+    hubAgents: async () => ({ agents }),
+    hubAgentInterrupt: async (_session: string, name: string) => { interrupts.push(name); return {}; },
+  });
+  const order = () => [...app.document.querySelectorAll<HTMLElement>('.acard[data-agent]')].map((node) => node.dataset.agent);
+  const toggle = () => app.document.querySelector<HTMLButtonElement>('.roster-toggle button')!;
+  try {
+    assert.deepEqual(order(), ['all', 'charlie', 'bob', 'alice']);
+    const alice = stripCard(app.document, 'alice');
+    const list = app.document.querySelector('.cards')!;
+    assert.doesNotMatch(list.textContent!, /running|waiting|idle/u);
+    assert.equal(toggle().getAttribute('aria-expanded'), 'false');
+    toggle().click(); await app.flush();
+    assert.equal(toggle().getAttribute('aria-expanded'), 'true');
+    assert.equal(stripCard(app.document, 'alice'), alice, 'expansion does not remount cards');
+    assert.equal(app.document.querySelector('.cards'), list);
+    await app.room('other');
+    assert.equal(toggle().getAttribute('aria-expanded'), 'false');
+    await app.room('fixture');
+    assert.equal(toggle().getAttribute('aria-expanded'), 'true', 'each room restores its own disclosure');
+
+    agents[0]!.state = 'running'; agents[0]!.since = 5000;
+    agents[2]!.state = 'idle'; agents[2]!.since = 6000;
+    await app.advance(5000);
+    assert.deepEqual(order(), ['all', 'alice', 'bob', 'charlie'], 'an idle expanded monitor follows new turn order');
+    assert.ok(stripCard(app.document, 'alice').querySelector('.agent-stop button'));
+    assert.equal(stripCard(app.document, 'charlie').querySelector('.agent-stop'), null,
+      'new turn state updates Stop availability');
+    toggle().click(); await app.flush();
+    assert.deepEqual(order(), ['all', 'alice', 'bob', 'charlie'], 'collapse adopts the new turn order');
+
+    const bobStop = stripCard(app.document, 'bob').querySelector<HTMLButtonElement>('.agent-stop button')!;
+    bobStop.dispatchEvent(new app.window.Event('pointerdown', { bubbles: true }));
+    agents[1]!.since = 10000;
+    await app.advance(5000);
+    assert.deepEqual(order(), ['all', 'alice', 'bob', 'charlie'], 'a pressed Stop cannot move to another card');
+    bobStop.click(); await app.flush();
+    assert.deepEqual(interrupts, ['bob']);
+    assert.equal(selectedCard(app.document), 'alice');
+    assert.deepEqual(order(), ['all', 'bob', 'alice', 'charlie']);
+  } finally { await app.close(); }
+});
+
+test('a restored expanded roster reorders live unless a pointer or focus holds it (#168)', { timeout: 60000 }, async (context) => {
+  const agents = [
+    { name: 'alice', window: 0, managed: true, agent: 'kiro', state: 'running', since: 10 },
+    { name: 'bob', window: 1, managed: true, agent: 'codex', state: 'running', since: 20 },
+  ];
+  const app = await composerFixture(context, { hubAgents: async () => ({ agents }) }, false,
+    { tmux_hub_roster_expanded: JSON.stringify({ fixture: true }) });
+  const order = () => [...app.document.querySelectorAll<HTMLElement>('.acard[data-agent]')].map((node) => node.dataset.agent);
+  try {
+    assert.equal(app.document.querySelector('.roster-toggle button')!.getAttribute('aria-expanded'), 'true');
+    assert.deepEqual(order(), ['all', 'bob', 'alice']);
+    agents[0]!.since = 40;
+    await app.advance(5000);
+    assert.deepEqual(order(), ['all', 'alice', 'bob']);
+    const list = app.document.querySelector('.cards')!;
+    list.dispatchEvent(new app.window.Event('pointerenter'));
+    agents.push({ name: 'new', window: 2, managed: true, agent: 'codex', state: 'running', since: 50 });
+    await app.advance(5000);
+    assert.deepEqual(order(), ['all', 'alice', 'bob', 'new'], 'new members append without moving a pointed-at target');
+    list.dispatchEvent(new app.window.Event('pointerleave'));
+    await app.flush();
+    assert.deepEqual(order(), ['all', 'new', 'alice', 'bob'], 'pointerleave releases order without a timer');
+    stripCard(app.document, 'alice').querySelector<HTMLButtonElement>('.agent-select')!.focus();
+    agents[1]!.since = 60;
+    await app.advance(5000);
+    assert.deepEqual(order(), ['all', 'new', 'alice', 'bob'], 'keyboard focus holds its target');
+    app.input.focus(); await app.flush();
+    assert.deepEqual(order(), ['all', 'bob', 'new', 'alice'], 'blur releases the new turn order immediately');
+  } finally { await app.close(); }
+});
+
+test('roster releases a touch press without click and reconciles focus after a control disappears (#168)', { timeout: 60000 }, async (context) => {
+  const agents = [
+    { name: 'alice', window: 0, managed: true, agent: 'kiro', state: 'running', since: 10 },
+    { name: 'bob', window: 1, managed: true, agent: 'codex', state: 'running', since: 20 },
+  ];
+  const job = deferred<object>();
+  const app = await composerFixture(context, {
+    hubAgents: async () => ({ agents }),
+    hubAgentInterrupt: () => job.promise,
+  });
+  const order = () => [...app.document.querySelectorAll<HTMLElement>('.acard[data-agent]')].map((node) => node.dataset.agent);
+  const pointer = (element: Element, type: string) => {
+    const event = new app.window.Event(type, { bubbles: true });
+    Object.defineProperty(event, 'pointerType', { value: 'touch' });
+    element.dispatchEvent(event);
+  };
+  try {
+    const stop = stripCard(app.document, 'bob').querySelector<HTMLButtonElement>('.agent-stop button')!;
+    stop.click(); await app.flush();
+    assert.equal(stop.disabled, true);
+    pointer(stop, 'pointerdown');
+    agents[0]!.since = 40;
+    await app.advance(5000);
+    assert.deepEqual(order(), ['all', 'bob', 'alice']);
+    pointer(stop, 'pointerup');
+    await app.flush();
+    assert.deepEqual(order(), ['all', 'alice', 'bob'], 'disabled touch targets may release without any click');
+    job.resolve({}); await app.flush();
+
+    stop.focus(); await app.flush();
+    agents[1]!.since = 50;
+    await app.advance(5000);
+    assert.deepEqual(order(), ['all', 'alice', 'bob'], 'focused controls keep their location');
+    agents[0]!.state = 'idle'; agents[0]!.since = 80;
+    agents[1]!.state = 'idle'; agents[1]!.since = 90;
+    await app.advance(5000);
+    assert.equal(stop.isConnected, false);
+    assert.deepEqual(order(), ['all', 'bob', 'alice'], 'DOM removal does not guarantee focusout');
+    stripCard(app.document, 'alice').querySelector<HTMLButtonElement>('.agent-select')!.focus();
+    agents.splice(0, 1);
+    await app.advance(5000);
+    agents.push({ name: 'new', window: 2, managed: true, agent: 'codex', state: 'running', since: 100 });
+    await app.advance(5000);
+    assert.deepEqual(order(), ['all', 'new', 'bob'], 'removing a focused member does not leave order locked');
+  } finally { job.resolve({}); await app.close(); }
 });
 
 test('send never interrupts; double Ctrl+C mirrors only the selected busy card (#168)', { timeout: 60000 }, async (context) => {

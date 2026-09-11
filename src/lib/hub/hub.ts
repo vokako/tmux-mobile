@@ -1,7 +1,7 @@
 // Pure display logic for the Hub view — testable with node --test, no Svelte.
 import type { HubAgent, HubActivityEvent } from '../core/ws.ts';
 import { backendColorToken } from '../core/agents.ts';
-import { ALL_TARGET } from './hub-composer.ts';
+import { ALL_TARGET, busyTargetsFor } from './hub-composer.ts';
 
 /**
  * THE status colour language — one progression, read at a glance (owner,
@@ -190,6 +190,15 @@ export function pickLead(
   const lead = managed.find((a) => canHire.has(a.name));
   if (lead) return lead.name;
   return managed.slice().sort((a, b) => a.window - b.window)[0]!.name;
+}
+
+/** Busy first, then newest state edge; window order breaks ties (#168). */
+export function sortAgentsForRoster(agents: readonly HubAgent[]): HubAgent[] {
+  const busy = new Set(busyTargetsFor(ALL_TARGET, agents));
+  return agents.slice().sort((a, b) =>
+    Number(busy.has(b.name)) - Number(busy.has(a.name))
+    || (b.since ?? 0) - (a.since ?? 0)
+    || a.window - b.window);
 }
 
 /** The body to post for `text` addressed at `to`. `''` means everyone (the

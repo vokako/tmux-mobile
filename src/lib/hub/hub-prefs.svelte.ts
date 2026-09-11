@@ -31,6 +31,8 @@ const STEPS_ROWS_KEY = 'tmux_hub_steps_rows';
 // switching projects and returning restores the same partition, and a room
 // where it was closed comes back closed.
 const DRAWER_KEY = 'tmux_hub_drawer';
+// Roster disclosure belongs to the project, like its drawer view (#168).
+const ROSTER_EXPANDED_KEY = 'tmux_hub_roster_expanded';
 export type FeedLevel = 'chat' | 'status' | 'tools';
 const drawerValid = (v: string) => v === 'term' || v === 'files' || v === 'board';
 
@@ -59,6 +61,7 @@ const state = $state({
   drafts: readMap<string>(DRAFT_KEY),
   // Per project: the drawer partition that was open ('' / absent = closed).
   drawers: readMap<string>(DRAWER_KEY),
+  rosterExpanded: readMap<boolean>(ROSTER_EXPANDED_KEY),
   // Tool-lane cap in rows; the stored value passes the same clamp as the
   // setter so an old or hand-edited entry cannot render a broken lane.
   stepsRows: clampStepsRows(localStorage.getItem(STEPS_ROWS_KEY) ?? STEPS_ROWS),
@@ -89,7 +92,7 @@ export const hubPrefs = {
    * lead and its read marker. */
   renameSession(from: string, to: string) {
     if (!from || !to || from === to) return;
-    for (const map of [state.leads, state.seen, state.drafts, state.drawers] as Record<string, unknown>[]) {
+    for (const map of [state.leads, state.seen, state.drafts, state.drawers, state.rosterExpanded] as Record<string, unknown>[]) {
       if (from in map) {
         map[to] = map[from];
         delete map[from];
@@ -99,6 +102,7 @@ export const hubPrefs = {
     localStorage.setItem(SEEN_KEY, JSON.stringify(state.seen));
     localStorage.setItem(DRAFT_KEY, JSON.stringify(state.drafts));
     localStorage.setItem(DRAWER_KEY, JSON.stringify(state.drawers));
+    localStorage.setItem(ROSTER_EXPANDED_KEY, JSON.stringify(state.rosterExpanded));
     if (state.project === from) this.setProject(to);
   },
   /** The remembered recipient for a project: an agent's name, ALL_TARGET
@@ -137,6 +141,14 @@ export const hubPrefs = {
     if (view) state.drawers[session] = view;
     else delete state.drawers[session];   // closed leaves no row behind
     localStorage.setItem(DRAWER_KEY, JSON.stringify(state.drawers));
+  },
+  /** Missing entries retain the compact roster; only an explicit true expands it. */
+  rosterExpanded(session: string): boolean { return !!session && state.rosterExpanded[session] === true; },
+  setRosterExpanded(session: string, expanded: boolean): void {
+    if (!session) return;
+    if (expanded) state.rosterExpanded[session] = true;
+    else delete state.rosterExpanded[session];
+    localStorage.setItem(ROSTER_EXPANDED_KEY, JSON.stringify(state.rosterExpanded));
   },
   /** The unsent message for a project, '' when there is none. */
   draft(session: string) { return state.drafts[session] ?? ''; },

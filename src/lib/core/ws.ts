@@ -806,7 +806,8 @@ export interface HubAgent {
    * hand) exist in the terminal drawer only. */
   managed: boolean;
   /** The configured team this window was started as part of (board #74);
-   * null for a solo agent. The roster groups same-team cards on it. */
+   * null for a solo agent. Roster hover/ARIA retain this identity independently
+   * of the global activity order. */
   team?: string | null;
   state: string;
   detail: string;

@@ -23,6 +23,7 @@
   const compact = $derived(iconOnly || variant === 'icon');
   const solid = $derived(variant === 'primary' || (variant === 'danger' && destructiveConfirm));
   const engaged = $derived(variant === 'icon' && (pressed === true || expanded === true));
+  const disclosure = $derived(!pending && expanded !== undefined && (icon === 'chevron-up' || icon === 'chevron-down'));
 </script>
 
 <button type="button" class="command-button"
@@ -34,7 +35,7 @@
   use:hoverInfo={() => compact ? { title: label } : null}
   onclick={(event) => { if (!disabled && !pending) onclick(event); }}>
   {#if icon}
-    <span class="command-icon" class:spinning={pending} aria-hidden="true">
+    <span class="command-icon" class:spinning={pending} class:flip={disclosure} class:on={disclosure && expanded} aria-hidden="true">
       <Icon name={pending ? 'refresh' : icon} />
     </span>
   {/if}
