@@ -7,6 +7,13 @@ const source = await readFile(new URL('./Hub.svelte', import.meta.url), 'utf8');
 const rule = (selector: string) =>
   source.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
 
+test('Watch always selects the terminal view and shares one route between menu and card (#173)', () => {
+  assert.match(source, /function watchAgent\(agent\) \{\s*drawerView = 'term';\s*openDrawer\(agent\);/u);
+  assert.match(source, /onwatch=\{watchAgent\}/u);
+  assert.match(source, /if \(a\) watchAgent\(a\)/u);
+  assert.match(source, /if \(mobile \|\| \(compact && drawerView === 'term'\)\)/u,
+    'a narrow desktop cannot open an invisible terminal drawer');
+});
 test('open drawer tracks yield to the container without overwriting requested widths (#158, #154)', () => {
   // Fixed tracks overflowed a 1000px desktop: 46 rail + 240 sidebar +
   // 280 chat + 520 drawer = 1086, hiding maximize/close. Both side tracks

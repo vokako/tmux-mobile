@@ -69,6 +69,10 @@ test('Roster renders the controlled destination strip (#168)', { timeout: 60000 
       assert.equal(stop(root, 'runner')?.parentElement?.parentElement, card(root, 'runner'));
       assert.equal(stop(root, 'runner')?.getAttribute('aria-label'), 'Interrupt runner');
       assert.equal(stop(root, 'all')?.getAttribute('aria-label'), 'Interrupt everyone');
+      assert.ok(stop(root, 'runner')?.classList.contains('warn'));
+      assert.equal(stop(root, 'runner')?.classList.contains('secondary'), false);
+      assert.equal(card(root, 'solo').querySelector('.agent-watch button')?.getAttribute('aria-label'), 'Watch in terminal solo');
+      assert.equal(card(root, 'all').querySelector('.agent-watch'), null);
       assert.equal(select(root, 'runner').querySelector('button'), null);
       assert.equal(root.querySelector('.a-menu, [role="menu"], [role="button"]'), null);
     });

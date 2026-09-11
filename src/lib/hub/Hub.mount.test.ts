@@ -664,6 +664,53 @@ test('stopped-card double-click only filters and closes its click menu (#173)', 
   } finally { await app.close(); }
 });
 
+test('Watch routes the clicked agent on phone and narrow desktop without selecting it (#173)', { timeout: 60000 }, async (context) => {
+  for (const mobile of [true, false]) {
+    const routes: unknown[][] = [];
+    const { rpc } = roomFixture();
+    const panes = [
+      { session: 'fixture', window: 0, pane: 0, active: true, current_command: 'kiro', window_name: 'alice', pane_title: 'alice', current_path: '/fixture', width: 80, height: 24 },
+      { session: 'fixture', window: 1, pane: 0, active: true, current_command: 'codex', window_name: 'bob', pane_title: 'bob', current_path: '/fixture', width: 80, height: 24 },
+    ];
+    const app = await (await compiledHub()).mount(context, {
+      props: { visible: true, mobile, openTerminal: (...args: unknown[]) => routes.push(args) },
+      setup(window) {
+        window.Element.prototype.getAnimations = () => [];
+        const media = window.matchMedia.bind(window);
+        window.matchMedia = query => Object.assign(media(query), { matches: query === '(max-width: 760px)' || (mobile && query === '(any-pointer: coarse)') });
+      },
+      modules: [{
+        ...rpc,
+        listSessionsWithPanes: async () => ({ panes }),
+      }],
+    });
+    try {
+      for (let i = 0; i < 12 && selectedCard(app.document) !== 'alice'; i++) await app.flush();
+      if (mobile) {
+        stripCard(app.document, 'bob').querySelector('.agent-select')!.dispatchEvent(new app.window.MouseEvent('contextmenu', { bubbles: true }));
+        await app.flush();
+        const watch = [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')].find(button => button.textContent?.includes('Watch in terminal'))!;
+        assert.ok(watch); watch.click();
+      } else {
+        const watch = stripCard(app.document, 'bob').querySelector<HTMLButtonElement>('.agent-watch button');
+        assert.ok(watch); watch.click();
+      }
+      await app.flush();
+      assert.deepEqual(routes, [['fixture', 'fixture:1.0', 'codex']]);
+      assert.equal(selectedCard(app.document), 'alice');
+      panes.splice(0, 1);
+      await app.advance(20000);
+      if (mobile) {
+        stripCard(app.document, 'alice').querySelector('.agent-select')!.dispatchEvent(new app.window.MouseEvent('contextmenu', { bubbles: true }));
+        await app.flush();
+        [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')].find(button => button.textContent?.includes('Watch in terminal'))!.click();
+      } else stripCard(app.document, 'alice').querySelector<HTMLButtonElement>('.agent-watch button')!.click();
+      await app.flush();
+      assert.equal(routes.length, 1, 'a missing pane must not reuse the previously watched agent');
+    } finally { await app.close(); }
+  }
+});
+
 test('roster disclosure keeps its cards, remembers each room, and holds order during interaction (#168)', { timeout: 60000 }, async (context) => {
   const agents = [
     { name: 'alice', window: 0, managed: true, agent: 'kiro', state: 'idle', since: 1000 },

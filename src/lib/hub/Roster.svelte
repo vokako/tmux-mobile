@@ -18,7 +18,7 @@
     roomReady = false, justLoaded = false, rosterBase = null,
     composerText = '', managedNames = [], busyNames = [], interrupting = [],
     stateLabel = (state) => state, stateTone = () => undefined,
-    onselect: setRecipient = () => {}, oninterrupt: interrupt = () => {}, onfilter = () => {},
+    onselect: setRecipient = () => {}, oninterrupt: interrupt = () => {}, onfilter = () => {}, onwatch = () => {},
     expanded = false, onexpand = () => {}, onadd = () => {}, oncontext = () => {},
   } = $props();
 
@@ -86,7 +86,7 @@
   function stoppedMenu(event, name) {
     if (!coarsePointer() && event.detail > 1) return;
     const trigger = event.currentTarget;
-    oncontext({ anchor: anchorOf(trigger), align: 'left', trigger }, name);
+    oncontext({ anchor: anchorOf(trigger), align: 'left', trigger, keepTriggerClear: true }, name);
   }
 
   function destinationNote(name) {
@@ -165,8 +165,8 @@
             </span>
           </button>
           {#if busyNames.length}
-            <span class="agent-stop">
-              <CommandButton label={`${t('hubInterrupt')} ${t('hubEveryone')}`} icon="stop" variant="secondary" iconOnly
+            <span class="agent-stop card-quick" class:pending={allPending}>
+              <CommandButton label={`${t('hubInterrupt')} ${t('hubEveryone')}`} icon="stop" variant="warn" iconOnly
                 pending={allPending} disabled={allPending}
                 onclick={(e) => { e.stopPropagation(); interrupt(ALL_TARGET); }} />
             </span>
@@ -198,12 +198,16 @@
             </span>
           </button>
           {#if busyNames.includes(a.name)}
-            <span class="agent-stop">
-              <CommandButton label={`${t('hubInterrupt')} ${a.name}`} icon="stop" variant="secondary" iconOnly
+            <span class="agent-stop card-quick" class:pending>
+              <CommandButton label={`${t('hubInterrupt')} ${a.name}`} icon="stop" variant="warn" iconOnly
                 {pending} disabled={pending}
                 onclick={(e) => { e.stopPropagation(); interrupt(a.name); }} />
             </span>
           {/if}
+          <span class="agent-watch card-quick">
+            <CommandButton label={`${t('hubWatch')} ${a.name}`} icon="terminal" variant="icon"
+              onclick={(e) => { e.stopPropagation(); onwatch(a); }} />
+          </span>
           {#if a.vitals?.context_pct != null}
             {@const pct = Math.max(0, Math.min(100, a.vitals.context_pct))}
             <div class="ac-bar" role="meter" aria-label={t('hubCtxUsed')}
@@ -274,6 +278,7 @@
     box-shadow: inset 0 0 0 1px var(--border); color: var(--text);
     transition: background var(--t-fast), box-shadow var(--t-fast);
   }
+  .acard:not(.all):not(.off) { grid-template-columns: minmax(0, 1fr) var(--control-height) var(--control-height); }
   .acard:hover { box-shadow: inset 0 0 0 1px var(--input-border); }
   .acard.sel { background: var(--accent-bg); box-shadow: inset 0 0 0 1px var(--accent-line); }
   .acard.filtered::after {
@@ -294,7 +299,7 @@
   @media (prefers-reduced-motion: reduce) { .ac-bar > i { transition: none; } }
   .cards.expanded .acard { width: auto; }
   .agent-select {
-    display: flex; align-items: center; gap: var(--roster-control-gap);
+    display: flex; align-items: center; gap: var(--roster-control-gap); grid-row: 1;
     min-height: var(--control-height); min-width: var(--control-height);
     border: 0; border-radius: var(--ui-radius-row); background: transparent; color: inherit;
     padding: 0 6px; text-align: left; cursor: pointer; font-size: var(--fs-ui);
@@ -302,13 +307,23 @@
   }
   .agent-select:focus-visible { outline-color: var(--accent-ink); outline-offset: -2px; }
   .acard:not(.has-stop):not(.off) .agent-select { grid-column: 1 / -1; padding-right: calc(6px + var(--control-height)); }
+  .acard:not(.all):not(.off):not(.has-stop) .agent-select { grid-column: 1 / 3; }
   .a-name { font-family: var(--font-display); font-size: var(--fs-ui); font-weight: 600; white-space: nowrap; }
   .cards.expanded .a-name { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
   .ac-top { display: inline-flex; flex: none; }
   .agent-marks { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-width: 1em; flex: none; }
   .cards.expanded .agent-marks.unmarked { display: none; }
   .agent-mention { color: var(--accent-ink); font-family: var(--font-mono); font-size: var(--fs-meta); font-weight: 600; }
-  .agent-stop { display: flex; align-items: center; justify-self: end; }
+  .agent-stop { display: flex; align-items: center; justify-self: end; grid-column: 2; grid-row: 1; }
+  .agent-watch { display: flex; align-items: center; justify-self: end; grid-column: 3; grid-row: 1; }
+  .card-quick { opacity: 0; pointer-events: none; transition: opacity var(--t-fast); }
+  .acard:hover .card-quick, .acard:focus-within .card-quick, .card-quick.pending { opacity: 1; pointer-events: auto; }
+  @media (any-pointer: coarse) {
+    .acard:not(.all):not(.off) { grid-template-columns: minmax(0, 1fr) var(--control-height); }
+    .agent-watch { display: none; }
+    .agent-stop { opacity: 1; pointer-events: auto; }
+  }
+  @media (prefers-reduced-motion: reduce) { .card-quick { transition: none; } }
   .ava { width: var(--roster-avatar-size); height: var(--roster-avatar-size); flex: none; }
   .broadcast-glyph { display: grid; place-items: center; width: var(--roster-avatar-size); height: var(--roster-avatar-size); flex: none; }
   .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--status-danger); flex: none; }

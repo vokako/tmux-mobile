@@ -847,6 +847,11 @@
     return feedView.withReadingAnchor(mutate);
   }
 
+  function watchAgent(agent) {
+    drawerView = 'term';
+    openDrawer(agent);
+  }
+
   async function openDrawer(a = null) {
     // No explicit agent → the one you are TALKING TO (board #76: "应该优先跳转到
     // 当前所选的 agent 的 terminal window"), then the first managed, then anything.
@@ -860,10 +865,13 @@
       if (p) {
         termTarget = `${p.session}:${p.window}.${p.pane}`;
         termCommand = p.current_command || '';
+      } else {
+        termTarget = '';
+        termCommand = '';
       }
     }
-    if (mobile) {
-      // The phone has a whole Terminal tab — jump there instead of a drawer.
+    if (mobile || (compact && drawerView === 'term')) {
+      // Compact layouts have no terminal drawer; use the whole Terminal tab.
       const m = /^(.+):(\d+)\.(\d+)$/.exec(termTarget);
       if (m) openTerminal(selected, termTarget, termCommand);
       return;
@@ -1281,7 +1289,7 @@
     const a = managedAgents.find((x) => x.name === name);
     return [
       { label: t('hubTalkTo'), icon: 'chat', onselect: () => setRecipient(name) },
-      { label: t('hubWatch'), icon: 'terminal', onselect: () => { if (a) openDrawer(a); } },
+      { label: t('hubWatch'), icon: 'terminal', onselect: () => { if (a) watchAgent(a); } },
       filterItem(name),
       ...config,
       ...(busyTargetsFor(name, agents).length
@@ -1661,6 +1669,7 @@
         {unread} {acting} {tick} {roomReady} {justLoaded} {rosterBase}
         expanded={rosterExpanded} onexpand={toggleRoster}
         {stateLabel} {stateTone} onselect={setRecipient} oninterrupt={interrupt}
+        onwatch={watchAgent}
         onfilter={(name) => { closeCtx(); toggleFilter(name); }}
         onadd={() => openPicker('add')}
         oncontext={(at, name) => openCtx(at, name, agentItems(name))} />

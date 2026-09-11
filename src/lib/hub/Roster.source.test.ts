@@ -25,6 +25,14 @@ test('everyone is a broadcast capsule while selection keeps the shared accent vo
   assert.match(css, /\.hub-root \.acard\.all \{ corner-shape: round; \}/u);
 });
 
+test('quick actions reveal in their reserved slots and coarse pointers retain only Stop (#173)', () => {
+  assert.match(source, /onwatch=\{\(a\)|onwatch\(a\)/u);
+  assert.match(rule('.card-quick'), /opacity: 0/u);
+  assert.match(source, /\.acard:hover \.card-quick, \.acard:focus-within \.card-quick/u);
+  assert.match(source, /@media \(any-pointer: coarse\)[\s\S]*?\.agent-watch \{ display: none; \}/u);
+  assert.match(source, /icon="stop" variant="warn" iconOnly/u);
+});
+
 test('one controlled roster replaces the delayed tap menu whole (#168)', () => {
   assert.match(source, /import \{ ALL_TARGET \} from '\.\/hub-composer\.ts'/u);
   assert.match(source, /const ranked = \$derived\(sortAgentsForRoster\(managedAgents\)\)/u,
@@ -36,7 +44,8 @@ test('one controlled roster replaces the delayed tap menu whole (#168)', () => {
   assert.doesNotMatch(source.slice(source.indexOf('} = $props();')), /\brecipient\s*=(?!=)/u,
     'selection emits intent without locally committing recipient');
   assert.doesNotMatch(source, /menuFor|bind:cardsEl|cardTimer|cardDbl|cardClick|toggleAgentMenu|menuAnchor|menuPos|vitalsFor|menuAgent|a-menu|am-who|am-vitals|groupRoster|tgroup/u);
-  assert.doesNotMatch(source, /onwatch|onstart|onrestart|onaction|onconfigure|setTimeout|addEventListener|popstate|history\./u);
+  // Owner 08:41 (#173) adds Watch as a direct intent, not a local action menu.
+  assert.doesNotMatch(source, /onstart|onrestart|onaction|onconfigure|setTimeout|addEventListener|popstate|history\./u);
 });
 
 test('Stop consumes parent busy and pending sets through the shared command', () => {
@@ -47,8 +56,7 @@ test('Stop consumes parent busy and pending sets through the shared command', ()
     'pending contains captured member names, never a second all-job sentinel');
   assert.match(source, /busyNames\.some\(\(name\) => interrupting\.includes\(name\)\)/u);
   assert.match(source, /interrupting\.includes\(a\.name\)/u);
-  assert.equal([...source.matchAll(/<CommandButton label=/gu)].length, 2);
-  assert.equal([...source.matchAll(/icon="stop" variant="secondary" iconOnly/gu)].length, 2);
+  assert.equal([...source.matchAll(/icon="stop" variant="warn" iconOnly/gu)].length, 2);
   assert.equal([...source.matchAll(/e\.stopPropagation\(\); interrupt\(/gu)].length, 2);
   assert.doesNotMatch(source, /hubAgentStop|hubAgentInterrupt|busyTargetsFor|\.state\s*===\s*'(?:running|working|waiting|blocked)'/u,
     'the parent owns target membership and dispatch, not a second local busy classifier');
@@ -84,7 +92,7 @@ test('double-click focuses live agents without delay and uses the existing filte
   assert.match(source, /if \(!coarsePointer\(\) && event\.detail > 1\) return;/u);
   assert.match(source, /if \(!stopped && recipient !== name\) setRecipient\(name\);/u);
   assert.match(source, /onfilter\(name\);/u);
-  assert.match(source, /anchor: anchorOf\(trigger\), align: 'left', trigger/u);
+  assert.match(source, /anchor: anchorOf\(trigger\), align: 'left', trigger, keepTriggerClear: true/u);
   assert.match(source, /class:filtered=\{filterAgent === a\.name\}/u);
   assert.match(rule('.acard.filtered::after'), /border: 1px dashed var\(--text2\)/u);
   assert.doesNotMatch(source, /setTimeout|clearTimeout/u);
@@ -148,4 +156,7 @@ test('idle cards keep their width but give the vacant Stop track back to selecti
   assert.match(idle, /grid-column: 1 \/ -1/u);
   assert.match(idle, /padding-right: calc\(6px \+ var\(--control-height\)\)/u,
     'the hit box spans the object while the content budget stays stable');
+  assert.match(rule('.acard:not(.all):not(.off):not(.has-stop) .agent-select'), /grid-column: 1 \/ 3/u,
+    'fine pointers retain the separate Watch slot');
+  assert.match(rule('.agent-watch'), /grid-column: 3/u);
 });

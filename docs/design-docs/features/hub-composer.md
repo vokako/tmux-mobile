@@ -31,8 +31,11 @@ single-click delay or rollback: clicks act immediately, and a fine-pointer
 double-click explicitly selects the live agent and toggles the existing feed
 filter. The second click in that native sequence does not toggle selection
 off. Another double-click clears the filter and leaves the agent selected.
-Stopped slots only filter; their click menu uses the existing trigger-rect
-placement outside the card so it cannot intercept the second click.
+Stopped slots only filter; their click menu opts into the shared
+`menuHeightLimit` cap before `menuPlacement` measures/flips it. A viewport-only
+clamp could cover the trigger when neither side fits the full menu; limiting
+height to the larger side keeps the second click reachable and scrolls the
+menu internally. Other menu callers retain their existing placement.
 Coarse pointers and keyboard users retain the ContextMenu filter command,
 which remains a reading-only choice. A filtered card carries a neutral dashed
 inner outline and an accessible label; recipient selection keeps its
@@ -40,6 +43,27 @@ separate accent fill/border. The feed's existing filter indicator remains.
 Tests execute the complete click/click/dblclick sequence, not a lone
 synthetic dblclick. Chromium also verifies repeat-to-clear, stopped-card
 menu exclusion and the coarse-pointer long-press filter path.
+
+Owner, 08:41: "还有我觉得交互可以优化，比如应该打断方块可以不一直显示，可以鼠标移到卡片上后，可以显示打断按钮，还有 show terminal 的快捷按钮也要显示"
+
+Fine-pointer cards reveal Stop (busy only) and Watch on hover/focus-within,
+without moving their reserved native targets. Pending Stop remains visible
+so the existing keyboard interrupt has feedback. On coarse pointers Stop
+stays visible while busy and Watch stays in the long-press menu. Stop uses
+the shared plain `warn` command: the same glyph, amber mixed with foreground
+ink to meet the 3:1 glyph floor, no circular ground/shadow. Watch and the menu
+share one parent adapter that selects the Terminal view before using the
+existing pane resolver; a compact terminal
+request uses the existing full-page Terminal callback. A missing requested
+pane clears the stale terminal target rather than watching the previous agent.
+Neither action changes the recipient. The Watch slot stays fixed; an idle
+selection reclaims the
+vacant Stop slot, keeping target regions separate. Chromium 152 verifies
+18 desktop/390px, light/dark action states, stable reveal boxes, keyboard
+reach/pending feedback and coarse fallback. Mounted tests exercise phone
+and compact desktop routing including a vanished pane; the wide-browser
+Files-to-Watch check stubs only the two renderer boundaries, proving routing
+and identity rather than either renderer's internals.
 
 ### One roster above the input, one Stop operation (board #168, 2026-09-11)
 
