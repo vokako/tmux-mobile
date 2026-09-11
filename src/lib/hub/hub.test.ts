@@ -104,6 +104,21 @@ test('feedBlocks respects the feed level and collapses duplicate tool lines', ()
   assert.deepEqual(tools.map((i) => i.ts), [100, 150, 200], 'sorted by ts, group carries its first ts');
 });
 
+test("a codex sub-agent brief is a tool step, never an input row (board #169)", () => {
+  // The server records a child thread's UserPromptSubmit as a tool row
+  // {tool: 'Subagent', text: <brief>} instead of a prompt (owner 2026-09-11:
+  // INPUT rows nobody typed). The feed treats it like any other step.
+  const feed = [{ ts: 100, from: 'claude', body: '@codex review #164' }];
+  const activity = [
+    ev({ ts: 150, kind: 'tool', tool: 'Subagent', text: 'Please adversarial-review the in-progress #164 diff' }),
+  ];
+  assert.deepEqual(feedBlocks(feed, activity, 'chat').map((b) => b.type), ['msg'], 'chat level: the brief is not a message');
+  const tools = feedBlocks(feed, activity, 'tools');
+  assert.deepEqual(tools.map((b) => b.type), ['msg', 'steps'], 'tools level: one step group');
+  const steps = tools.find((b) => b.type === 'steps');
+  assert.deepEqual(steps?.events.map((e) => toolEventParts(e)), [{ tool: 'Subagent', text: 'Please adversarial-review the in-progress #164 diff' }]);
+});
+
 test('a finished turn is not a row — the reply already is', () => {
   const feed = [{ ts: 200, from: 'dev', body: 'done' }];
   const completed = [ev({ ts: 210, kind: 'notif', text: 'completed' })];

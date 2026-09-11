@@ -304,6 +304,35 @@ pub(crate) fn normalize_kind(
     }
 }
 
+/// Sub-agent threads (board #169). codex 0.153.4 runs `spawn_agent` children
+/// as threads INSIDE the same process, and the managed hooks.json fires for
+/// every thread. Measured with a scratch CODEX_HOME whose hooks dumped every
+/// stdin payload (parent asked to spawn one child, wait, close — 13 hooks):
+///
+/// * every event, parent and child alike, carries `session_id` = the ROOT
+///   thread id and the parent's `turn_id`; the child's own id never appears
+///   as `session_id`, so the conversation map was never corrupted;
+/// * child events carry `agent_id` (the child thread id) and `agent_type`
+///   ("default"); parent events carry NEITHER — that pair is the discriminator;
+/// * the child's brief arrives as `UserPromptSubmit` {agent_id, agent_type,
+///   prompt} — the event this consumer used to read as keyboard input;
+/// * the child's end arrives as `SubagentStop` {agent_id, agent_transcript_path,
+///   stop_hook_active} (which the managed hooks do not subscribe to), never as
+///   `Stop`; `SubagentStart` {agent_id, agent_type} precedes the brief;
+/// * the parent's `Stop` DOES carry `last_assistant_message` (the final
+///   answer), so a lost codex reply edge is the child's prompt having reset
+///   the turn, not a bodiless Stop;
+/// * the parent's own `PreToolUse`/`PostToolUse` name the delegation tools:
+///   `spawn_agent` {message}, `multi_agent_v1wait_agent` {targets, timeout_ms},
+///   `multi_agent_v1close_agent` {target}.
+///
+/// Returns the child thread id when the payload comes from a sub-agent
+/// thread. A sub-agent event is the agent's OWN work — like a tool call — and
+/// must never open or close the window's turn.
+pub(crate) fn subagent_thread(payload: &Value) -> Option<&str> {
+    payload.get("agent_id").and_then(Value::as_str).filter(|id| !id.is_empty())
+}
+
 /// codex speaks kiro's spelling here (measured on codex-cli 0.148.0 — the
 /// payload also carries `prompt` + `session_id`, same as kiro/claude). Same
 /// sticky-dedup incident as claude's when this arm was missing.
@@ -312,4 +341,48 @@ pub(crate) fn is_user_prompt_submit(payload: &Value) -> bool {
         .get("hook_event_name")
         .and_then(Value::as_str)
         .is_some_and(|e| e.eq_ignore_ascii_case("userpromptsubmit"))
+
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The measured 0.153.4 sub-agent shapes (board #169): a child's event is
+    /// told apart by `agent_id`; the parent's identical-looking prompt has no
+    /// such field; a child's end is `SubagentStop`, which is NOT a completion
+    /// of the window's turn; the parent's `Stop` carries the reply body.
+    #[test]
+    fn subagent_threads_are_recognised_by_agent_id_and_never_end_the_turn() {
+        let child = serde_json::json!({
+            "session_id": "01a08e9b-b7d8-root", "turn_id": "01a08e9b-c9d1",
+            "hook_event_name": "UserPromptSubmit",
+            "agent_id": "01a08e9b-c9b0-7aa0-b09d-74139bb08191", "agent_type": "default",
+            "prompt": "Reply with exactly the word PONG and nothing else."
+        });
+        assert_eq!(subagent_thread(&child), Some("01a08e9b-c9b0-7aa0-b09d-74139bb08191"));
+        assert!(is_user_prompt_submit(&child), "still a prompt event — the door decides what to do with it");
+
+        let parent = serde_json::json!({
+            "session_id": "01a08e9b-b7d8-root", "turn_id": "01a08e9b-b801",
+            "hook_event_name": "UserPromptSubmit",
+            "prompt": "Use the spawn_agent tool …"
+        });
+        assert_eq!(subagent_thread(&parent), None);
+
+        let stop = serde_json::json!({
+            "session_id": "01a08e9b-b7d8-root", "hook_event_name": "SubagentStop",
+            "agent_id": "01a08e9b-c9b0-7aa0-b09d-74139bb08191", "agent_type": "default",
+            "agent_transcript_path": "/x/sessions/…/rollout-…-c9b0….jsonl", "stop_hook_active": false
+        });
+        assert_eq!(subagent_thread(&stop), Some("01a08e9b-c9b0-7aa0-b09d-74139bb08191"));
+        assert!(normalize_kind(stop.as_object().unwrap()).is_err(), "a child's stop is not the window's turn end");
+
+        let parent_stop = serde_json::json!({
+            "session_id": "01a08e9b-b7d8-root", "hook_event_name": "Stop",
+            "stop_hook_active": false, "last_assistant_message": "PONG"
+        });
+        assert_eq!(subagent_thread(&parent_stop), None);
+        assert_eq!(normalize_kind(parent_stop.as_object().unwrap()), Ok("completed"));
+    }
 }

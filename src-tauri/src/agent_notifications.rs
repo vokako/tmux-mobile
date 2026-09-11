@@ -174,6 +174,41 @@ impl AgentNotificationHub {
         let envelope: InboxEnvelope =
             serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?)
                 .map_err(|e| format!("invalid envelope: {e}"))?;
+        // A SUB-AGENT thread's event is the agent's own work, like a tool call
+        // (board #169; codex 0.153.4 runs spawn_agent children in-process and
+        // the managed hooks fire for every thread — see backends/codex.rs for
+        // the measured payloads). Classified here, at the door: the child's
+        // brief becomes a `Subagent` step in the tool lane; nothing from a
+        // child ever opens or closes the WINDOW's turn, becomes its prompt,
+        // auto-posts, or writes its conversation id. Read as keyboard input,
+        // the brief rendered as an INPUT row nobody typed and — worse —
+        // start_turn replaced the reply edge with nobody, so codex's real
+        // final reply reached no one (owner 2026-09-11 03:46; `tmm log` held
+        // not one codex `[reply]` line).
+        if let Some(_child) = crate::backends::Backend::parse(&envelope.backend)
+            .and_then(|b| b.subagent_thread(&envelope.payload))
+        {
+            if tool_event_parts(&envelope).is_none() {
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                if is_user_prompt_submit(&envelope) {
+                    if let Some(brief) = envelope.payload.get("prompt").and_then(Value::as_str) {
+                        if !brief.trim().is_empty() {
+                            let (session, window, _) = tmux::resolve_pane_id(&envelope.pane_id)?;
+                            crate::projects::telemetry::record_tool(
+                                &session,
+                                &window,
+                                "Subagent",
+                                &truncate(brief, MAX_TOOL_DETAIL_CHARS),
+                            );
+                        }
+                    }
+                }
+                // SubagentStart/SubagentStop and any other child lifecycle
+                // event: not a turn edge of this window — dropped.
+                return Ok(());
+            }
+            // A child's own tool calls fall through to the tool lane below.
+        }
         // Tool events (pre/postToolUse from isolated-home agents, Phase B+)
         // are TELEMETRY, not notifications: record the live activity line and
         // stop — no unread dot, no dedupe, no persistence.
@@ -1272,6 +1307,91 @@ mod tests {
         assert_eq!(prompt.via, "app", "and the receipt for the line we typed");
         // A consumed envelope is removed.
         assert!(!root.join("inbox").join("1-prompt.json").exists(), "envelope consumed");
+
+        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A codex SUB-AGENT's brief is the agent's own work, not keyboard input
+    /// (board #169; owner 2026-09-11: the feed showed codex INPUT rows nobody
+    /// typed — the parent's briefs to its children). Measured on codex-cli
+    /// 0.153.4: the child's `UserPromptSubmit` carries `agent_id`/`agent_type`
+    /// and the PARENT's `session_id`. Such an event must (1) not open a turn —
+    /// the reply edge the requester's delivery set stays, so the parent's final
+    /// reply still reaches its sender; (2) not become the window's prompt;
+    /// (3) land in the tool lane as a `Subagent` step carrying the brief.
+    #[test]
+    fn a_subagent_brief_is_a_tool_row_and_leaves_the_turn_alone() {
+        let session = format!("tmm-subagent-{}", std::process::id());
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "sleep 30"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        let panes = crate::tmux::list_panes(&session).unwrap_or_default();
+        let pane = panes.first().expect("the new session has a pane").clone();
+        let pane_id = String::from_utf8(
+            std::process::Command::new("tmux")
+                .args(["display-message", "-p", "-t", &session, "#{pane_id}"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
+        let root = std::env::temp_dir().join(format!("tmm-subagent-hub-{}", uuid::Uuid::new_v4()));
+        let hub = AgentNotificationHub::load_at(root.clone());
+        std::fs::create_dir_all(root.join("inbox")).unwrap();
+        let write = |name: &str, payload: Value| {
+            let envelope = json!({ "backend": "codex", "pane_id": pane_id, "payload": payload });
+            std::fs::write(root.join("inbox").join(name), serde_json::to_vec(&envelope).unwrap()).unwrap();
+        };
+
+        // Another agent opens the parent's turn with an addressed line (a human
+        // sender carries no reply edge by design — the Hub shows the room).
+        let line = "[tmm chat] claude: @codex review #164";
+        crate::projects::telemetry::record_delivery(&session, &pane.window_name, line);
+        write("1-parent.json", json!({
+            "hook_event_name": "UserPromptSubmit", "session_id": "01a08e9b-root", "turn_id": "t1",
+            "prompt": line,
+        }));
+        hub.consume_inbox();
+        assert_eq!(hub.state.lock().unwrap().reply_targets.get(&window_key(&session, &pane.window_name)).cloned(), Some(vec!["claude".to_string()]));
+
+        // The parent briefs a child: the child's UserPromptSubmit fires on the
+        // same pane, with the measured discriminator fields.
+        let brief = "Please adversarial-review the in-progress #164 diff";
+        write("2-child.json", json!({
+            "hook_event_name": "UserPromptSubmit", "session_id": "01a08e9b-root", "turn_id": "t1",
+            "agent_id": "01a08e9b-c9b0-child", "agent_type": "default",
+            "prompt": brief,
+        }));
+        hub.consume_inbox();
+
+        let st = hub.state.lock().unwrap();
+        assert_eq!(
+            st.reply_targets.get(&window_key(&session, &pane.window_name)).cloned(),
+            Some(vec!["claude".to_string()]),
+            "the child's brief must not replace the parent's reply edge"
+        );
+        assert!(!st.sessions.contains_key(&window_key(&session, &pane.window_name)) || st.sessions[&window_key(&session, &pane.window_name)] == "01a08e9b-root");
+        drop(st);
+        let events = crate::projects::telemetry::recent_events(&session, 0);
+        let prompts: Vec<_> = events.iter().filter(|e| e.kind == "prompt").collect();
+        assert_eq!(prompts.len(), 1, "one keyboard/delivery prompt, not two: {events:?}");
+        assert_eq!(prompts[0].text, line);
+        assert_eq!(
+            crate::projects::telemetry::current_turn_prompt(&session, &pane.window_name).as_deref(),
+            Some(line),
+            "the window's prompt is still the human's line"
+        );
+        let tool = events.iter().find(|e| e.kind == "tool" && e.tool == "Subagent").expect("the brief lands in the tool lane");
+        assert!(tool.text.contains("adversarial-review"), "{}", tool.text);
 
         let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
         let _ = std::fs::remove_dir_all(root);

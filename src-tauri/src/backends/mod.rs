@@ -133,6 +133,17 @@ impl Backend {
         }
     }
 
+    /// The child thread id when a hook payload comes from a SUB-AGENT thread
+    /// of this window's agent rather than the agent itself (board #169). Only
+    /// codex spawns in-process sub-agents whose hooks fire on the parent's
+    /// pane; the other backends never report one.
+    pub fn subagent_thread<'a>(self, payload: &'a serde_json::Value) -> Option<&'a str> {
+        match self {
+            Backend::Codex => codex::subagent_thread(payload),
+            _ => None,
+        }
+    }
+
     /// True for claude's idle reminder — an event that must never read as an
     /// ask (board #75). Only claude has one.
     pub fn is_idle_nudge(self, payload: &serde_json::Value) -> bool {

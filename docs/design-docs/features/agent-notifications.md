@@ -61,7 +61,9 @@ runtime worker it stalled every RPC sharing that thread for the duration.
 - Claude Code: `Notification` maps permission/input/completion notification
   types precisely; `Stop` provides a completion fallback.
 - Codex CLI: `PermissionRequest` maps to permission-required and `Stop` maps to
-  completed.
+  completed. A payload carrying `agent_id` comes from a sub-agent thread and
+  is the agent's own work (board #169): its `UserPromptSubmit` is a `Subagent`
+  tool row, its `SubagentStop` is not a turn end — see agent-status.md.
 - Kiro CLI: `stop` maps to completed. Current Kiro hooks do not expose a
   permission-wait event with the same precision as Claude or Codex. For Kiro
   2.x, installation asks Kiro itself to materialize an editable `kiro_default`
