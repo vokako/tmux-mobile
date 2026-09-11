@@ -81,6 +81,45 @@ test('icon commands expose a name without a competing native title', async conte
   } finally { await app.close(); }
 });
 
+test('warn icons retain native command, pending and controlled ARIA semantics (#173)', async context => {
+  for (const state of [{}, { disabled: true }, { pending: true }]) {
+    let calls = 0;
+    const app = await (await compiled).mount(context, {
+      props: {
+        label: 'Interrupt alice', variant: 'warn', iconOnly: true, icon: 'stop',
+        pressed: false, expanded: true, controls: 'agent-actions',
+        ...state, onclick: () => { calls++; },
+      },
+      modules: [],
+    });
+    try {
+      const button = app.document.querySelector('button')!;
+      assert.equal(button.classList.contains('warn'), true);
+      assert.equal(button.classList.contains('icon-only'), true);
+      for (const name of ['primary', 'secondary', 'danger', 'solid', 'engaged']) {
+        assert.equal(button.classList.contains(name), false, name);
+      }
+      assert.equal(button.getAttribute('type'), 'button');
+      assert.equal(button.getAttribute('aria-label'), 'Interrupt alice');
+      assert.equal(button.getAttribute('title'), null);
+      assert.equal(button.getAttribute('aria-pressed'), 'false');
+      assert.equal(button.getAttribute('aria-expanded'), 'true');
+      assert.equal(button.getAttribute('aria-controls'), 'agent-actions');
+      assert.equal(button.getAttribute('aria-busy'), state.pending ? 'true' : null);
+      assert.equal(button.disabled, !!(state.pending || state.disabled));
+      assert.equal(button.querySelector('.command-icon')?.classList.contains('spinning'), !!state.pending);
+      assert.equal(button.querySelector('.command-label'), null);
+      if (!button.disabled) {
+        button.focus();
+        assert.equal(app.document.activeElement, button);
+      }
+      button.click();
+      button.dispatchEvent(new app.window.MouseEvent('click', { bubbles: true }));
+      assert.equal(calls, state.pending || state.disabled ? 0 : 2);
+    } finally { await app.close(); }
+  }
+});
+
 test('tool ARIA distinguishes explicit false from absent state (#157)', async context => {
   const states = [
     {}, { pressed: false }, { pressed: true },

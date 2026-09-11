@@ -43,3 +43,20 @@ test('command paint is inset inside the native target, with a visible keyboard r
   assert.match(style, /\.icon-only::before \{ inset: var\(--control-paint-inset\); \}/u);
   assert.match(style, /\.command-button:focus-visible::before \{ outline: 2px solid var\(--accent-ink\); outline-offset: 2px; \}/u);
 });
+
+test('warn interruption has token ink and no ground without removing the focus layer (#173)', () => {
+  assert.match(source, /variant\?: 'primary' \| 'secondary' \| 'icon' \| 'danger' \| 'warn'/u);
+  assert.match(source, /class:warn=\{variant === 'warn'\}/u);
+  const warn = style.match(/\.warn \{([^}]+)\}/u)?.[1] ?? '';
+  assert.match(warn, /color: var\(--status-warn\)/u);
+  assert.doesNotMatch(warn, /height|width|padding|border-radius/u,
+    'warning semantics do not create a second target geometry');
+  // Hover/press change --command-paint. This more-specific pseudo rule must
+  // ignore that variable, not merely make the resting paint transparent.
+  const paint = style.match(/\.command-button\.warn::before \{([^}]+)\}/u)?.[1] ?? '';
+  assert.match(paint, /background: none/u);
+  assert.match(paint, /box-shadow: none/u);
+  assert.doesNotMatch(paint, /content|display|visibility|opacity|outline/u,
+    'the pseudo remains available to the existing keyboard focus ring');
+  assert.match(style, /\.command-button:focus-visible::before \{ outline: 2px solid var\(--accent-ink\); outline-offset: 2px; \}/u);
+});
