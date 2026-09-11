@@ -324,7 +324,13 @@ pub(crate) fn normalize_kind(
 ///   the turn, not a bodiless Stop;
 /// * the parent's own `PreToolUse`/`PostToolUse` name the delegation tools:
 ///   `spawn_agent` {message}, `multi_agent_v1wait_agent` {targets, timeout_ms},
-///   `multi_agent_v1close_agent` {target}.
+///   `multi_agent_v1close_agent` {target};
+/// * a child's approval (board #170; `-a on-request -s read-only`, child told
+///   to write a file) arrives as `PermissionRequest` {agent_id, agent_type,
+///   tool_name: "Bash", tool_input: {command, description}} and is SHOWN in
+///   the parent's TUI as a blocking modal ("Would you like to run the
+///   following command? Thread: Agent (01a08eab)…") until the human answers
+///   — so, unlike the child's prompt and stop, it IS the window's ask.
 ///
 /// Returns the child thread id when the payload comes from a sub-agent
 /// thread. A sub-agent event is the agent's OWN work — like a tool call — and

@@ -185,10 +185,22 @@ impl AgentNotificationHub {
         // start_turn replaced the reply edge with nobody, so codex's real
         // final reply reached no one (owner 2026-09-11 03:46; `tmm log` held
         // not one codex `[reply]` line).
-        if let Some(_child) = crate::backends::Backend::parse(&envelope.backend)
-            .and_then(|b| b.subagent_thread(&envelope.payload))
+        if let Some((backend, _child)) = crate::backends::Backend::parse(&envelope.backend)
+            .and_then(|b| b.subagent_thread(&envelope.payload).map(|c| (b, c)))
         {
-            if tool_event_parts(&envelope).is_none() {
+            // A child's ASK is the exception (board #170, measured on 0.153.4):
+            // codex surfaces the child's approval modal in the PARENT's TUI
+            // ("Would you like to run the following command? Thread: Agent
+            // (…)") and blocks the pane until the human answers — so it is
+            // this window's ask, and it falls through to the normal path
+            // that derives `permission_required`. Everything else a child
+            // sends is classified here.
+            let child_ask = envelope
+                .payload
+                .as_object()
+                .and_then(|p| backend.normalize_kind(p).ok())
+                .is_some_and(|k| k == "permission_required");
+            if tool_event_parts(&envelope).is_none() && !child_ask {
                 #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 if is_user_prompt_submit(&envelope) {
                     if let Some(brief) = envelope.payload.get("prompt").and_then(Value::as_str) {
@@ -1392,6 +1404,63 @@ mod tests {
         );
         let tool = events.iter().find(|e| e.kind == "tool" && e.tool == "Subagent").expect("the brief lands in the tool lane");
         assert!(tool.text.contains("adversarial-review"), "{}", tool.text);
+
+        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A codex sub-agent's PermissionRequest IS the window's ask (board #170).
+    /// Measured on codex-cli 0.153.4 (scratch CODEX_HOME, -a on-request
+    /// -s read-only, child told to write a file): the parent TUI shows the
+    /// modal "Would you like to run the following command? Thread: Agent
+    /// (01a08eab)…" and blocks the pane until the human answers, and the hook
+    /// payload is PermissionRequest {agent_id, agent_type, tool_name: "Bash",
+    /// tool_input: {command, description}}. So it must derive
+    /// permission_required exactly like the parent's own ask — the door must
+    /// not drop it with the other child lifecycle events.
+    #[test]
+    fn a_subagent_permission_request_is_the_windows_ask() {
+        let session = format!("tmm-subask-{}", std::process::id());
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "sleep 30"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        let panes = crate::tmux::list_panes(&session).unwrap_or_default();
+        let pane = panes.first().expect("the new session has a pane").clone();
+        let pane_id = String::from_utf8(
+            std::process::Command::new("tmux")
+                .args(["display-message", "-p", "-t", &session, "#{pane_id}"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
+        let root = std::env::temp_dir().join(format!("tmm-subask-hub-{}", uuid::Uuid::new_v4()));
+        let hub = AgentNotificationHub::load_at(root.clone());
+        std::fs::create_dir_all(root.join("inbox")).unwrap();
+        let envelope = json!({ "backend": "codex", "pane_id": pane_id, "payload": {
+            "session_id": "01a08eaa-6d19-root", "turn_id": "01a08eab-3cdc",
+            "agent_id": "01a08eab-3cb8-7753-a4fc-a98a33e39728", "agent_type": "default",
+            "hook_event_name": "PermissionRequest", "permission_mode": "default",
+            "tool_name": "Bash",
+            "tool_input": { "command": "echo child-wrote > /tmp/x/child.txt",
+                            "description": "Do you approve running the exact command outside the read-only sandbox to write child.txt?" }
+        }});
+        std::fs::write(root.join("inbox").join("1-ask.json"), serde_json::to_vec(&envelope).unwrap()).unwrap();
+        hub.consume_inbox();
+
+        let events = crate::projects::telemetry::recent_events(&session, 0);
+        assert!(
+            events.iter().any(|e| e.kind == "notif" && e.text == "permission_required"),
+            "the child's ask blocks the parent's pane, so it is the window's ask: {events:?}"
+        );
 
         let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
         let _ = std::fs::remove_dir_all(root);
