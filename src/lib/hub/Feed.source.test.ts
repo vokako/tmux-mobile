@@ -443,3 +443,23 @@ test('feed-lane identity comparisons match the window NAME, never the pane index
   // The numeric index may not creep back into either lookup.
   assert.doesNotMatch(source, /a\.window === b\.window/u, 'no index-vs-name comparison in the feed lanes');
 });
+
+test('a prompt row folds through the ONE message mechanism — never a silent clip (board #172)', async () => {
+  const source = await readFile(new URL('./Feed.svelte', import.meta.url), 'utf8');
+  // Owner, 2026-09-11 ("有消息没有渲染"): the input row for a 601-char board
+  // notice stopped mid-sentence after ~6 lines. `.p-body` carried its own
+  // `max-height: 7.5em; overflow: hidden` — a second, SILENT fold beside
+  // foldLines/elideTail, with no marker and no way to the rest. The row
+  // now folds the TEXT like a user bubble and shows the same unfold control.
+  const pBody = /\.p-body \{[^}]*\}/u.exec(source)?.[0] ?? '';
+  assert.ok(pBody, 'the prompt body rule exists');
+  assert.doesNotMatch(pBody, /max-height/u, 'no height cap on the prompt body');
+  assert.doesNotMatch(pBody, /overflow: hidden/u, 'no clip on the prompt body');
+  assert.match(source, /\{folded \? foldBody\(pp\.text\) : pp\.text\}/u,
+    'the prompt text is cut by elideTail before render, and rendered WHOLE once unfolded');
+  // One unfold control, rendered from ONE snippet in both the bubble and
+  // the prompt row — a second button markup would be a second mechanism.
+  assert.equal((source.match(/class="m-unfold"/gu) ?? []).length, 1, 'the unfold button markup exists once');
+  assert.equal((source.match(/\{@render unfold\(key, folded\)\}/gu) ?? []).length, 2,
+    'the bubble and the prompt row both render it');
+});

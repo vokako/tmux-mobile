@@ -584,6 +584,19 @@
       <span class="skel sk-msg"></span>
     </div>
   {/if}
+  <!-- The way to the whole text and back — ONE control for the user bubble
+       and the prompt row (board #172: the prompt row used to clip silently
+       at 7.5em beside this mechanism). A button, because this is the one
+       thing you might want from a folded text — the surrounding row is
+       inert prose. ONE button for both directions so its caret can TURN
+       (motion.md principle 4) — the body itself is a cut, never a slide
+       (principle 10: the feed owns its scroll). stopPropagation keeps the
+       bubble's own click (the action row) from firing on it. -->
+  {#snippet unfold(key, folded)}
+    <button class="m-unfold" onclick={(e) => { e.stopPropagation(); if (folded) expandMsg(key); else { const { [key]: _gone, ...rest } = expanded; expanded = rest; } }}>
+      <span class="flip" class:on={!folded}><Icon name="chevron-down" size={11} /></span>{folded ? t('hubUnfold') : t('hubRefold')}
+    </button>
+  {/snippet}
   {#each blocks as b, i (blockKey(b, i))}
     <!-- A new calendar day gets a centred date pill before its first
          block — the times alone never said WHICH day a message was from
@@ -724,17 +737,7 @@
                        Raw view and agent messages render in full. -->
                   {@html markLeadingMention(renderMarkdown(folded ? foldBody(parts.text) : parts.text))}
                 {/if}
-                {#if foldable}
-                  <!-- The way to the whole message and back. A button, because
-                       this is the one thing you might want from a folded
-                       message — the bubble itself is inert prose.
-                       ONE button for both directions so its caret can TURN
-                       (motion.md principle 4) — the body itself is a cut,
-                       never a slide (principle 10: the feed owns its scroll). -->
-                  <button class="m-unfold" onclick={(e) => { e.stopPropagation(); if (folded) expandMsg(key); else { const { [key]: _gone, ...rest } = expanded; expanded = rest; } }}>
-                    <span class="flip" class:on={!folded}><Icon name="chevron-down" size={11} /></span>{folded ? t('hubUnfold') : t('hubRefold')}
-                  </button>
-                {/if}
+                {#if foldable}{@render unfold(key, folded)}{/if}
               {/if}
               {#if parts.images.length}
                 <!-- Inside the bubble (owner, 2026-08-26): part of the
@@ -786,6 +789,14 @@
       <!-- The input half: what this agent was asked, which only the
            userPromptSubmit hook can tell us. -->
       {@const pp = promptParts(b.text)}
+      {@const key = blockKey(b, i)}
+      <!-- A long prompt folds its TEXT through the same budget as a user
+           bubble and shows the same control (board #172, owner 2026-09-11
+           "有消息没有渲染": a 601-char board notice stopped mid-sentence —
+           `.p-body` had its own `max-height: 7.5em; overflow: hidden`, a
+           second, SILENT fold that lied about what was delivered). -->
+      {@const foldable = foldBody(pp.text) !== pp.text}
+      {@const folded = foldable && !expanded[key]}
       <div class="prompt" class:appear-rise={b.ts > openedAt}>
         <!-- The machine stamp comes OFF (owner, 2026-08-30): the sender
              joins the head, and a board delivery wears the board
@@ -793,8 +804,9 @@
              log text. -->
         <div class="p-head"><span class="p-who">{windowName(b.window)}</span><span class="p-tag">{t('hubPromptIn')}</span>{#if pp.from}<span class="p-from">{pp.from}</span>{/if}<span>{fmtTime(b.ts)}</span></div>
         <div class="p-body">
-          {#if pp.board}<span class="p-chip">#{pp.board.id}</span>{#if pp.board.review}<span class="p-badge" style:color={boardStatusColor('review')}><span class="pb-dot" aria-hidden="true"></span>{t('boardStatus_review')}</span>{/if}{/if}{pp.text}
+          {#if pp.board}<span class="p-chip">#{pp.board.id}</span>{#if pp.board.review}<span class="p-badge" style:color={boardStatusColor('review')}><span class="pb-dot" aria-hidden="true"></span>{t('boardStatus_review')}</span>{/if}{/if}{folded ? foldBody(pp.text) : pp.text}
         </div>
+        {#if foldable}{@render unfold(key, folded)}{/if}
       </div>
     {:else if b.type === 'progress'}
       <!-- What the agent says it is doing (`tmm status <state> "note"`).
@@ -1150,7 +1162,7 @@
   .p-head { display: flex; align-items: baseline; gap: 7px; font-size: var(--fs-meta); color: var(--text3); margin-bottom: 2px; }
   .p-head .p-who { font-family: var(--font-mono); font-weight: 600; color: var(--text2); }
   .p-tag { text-transform: uppercase; letter-spacing: 0.8px; font-size: var(--fs-micro); color: var(--text3); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
-  .p-body { font-size: var(--fs-ui); color: var(--text2); white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; max-height: 7.5em; overflow: hidden; }
+  .p-body { font-size: var(--fs-ui); color: var(--text2); white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
 
   /* A single observed fact: status declaration, lifecycle hook, warning. */
   .note {

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
-import { feedBlocks } from './hub.ts';
+import { feedBlocks, ELIDE } from './hub.ts';
+import type { HubActivityEvent } from '../core/ws.ts';
 
 const noop = () => {};
 (globalThis as Record<string, unknown>).localStorage ??= { getItem: () => null, setItem: noop, removeItem: noop };
@@ -36,10 +37,17 @@ test('Feed renders direct rows, safe rich content, complete capped tools and the
         body: '**Result** $x^2$ [source](/source.ts) [bad](javascript:alert(1))\n\n![chart](/chart.png)' },
       { id: 'board', ts: 4, from: 'alice', body: '[tmm] board #7 todo → doing — Feed extraction' },
     ];
-    const events = Array.from({ length: 26 }, (_, i) => ({
+    const events: HubActivityEvent[] = Array.from({ length: 26 }, (_, i) => ({
       id: i + 1, ts: 10 + i, window: i % 2 ? 'bob' : 'alice',
       kind: 'tool' as const, tool: 'Read', text: `source-${i}.ts`,
     }));
+    // The input half (board #172): the 601-char notice that stopped
+    // mid-sentence in the owner's screenshot, and a short delivery that fits.
+    const longNotice = '[tmm chat 2026-09-11 08:00] claude: [board #168 reply] Composer agent strip — ' + 'the strip replaces the chip. '.repeat(20).trimEnd() + '. Reply on the issue with `tmm board note 168 "..."`.';
+    events.push(
+      { id: 90, ts: 40, window: 'bob', kind: 'prompt', text: longNotice },
+      { id: 91, ts: 41, window: 'alice', kind: 'prompt', text: '[tmm chat 2026-09-11 08:01] human: [board #7] Feed extraction: status todo → doing' },
+    );
     const blocks = feedBlocks(messages, events, 'tools', (name) => name);
     const emptyFeed = createRawSnippet(() => ({ render: () => '<div class="empty">Empty fixture</div>' }));
     const view = (props: Record<string, unknown> = {}) => JSDOM.fragment(render(Feed, { props: {
@@ -52,7 +60,19 @@ test('Feed renders direct rows, safe rich content, complete capped tools and the
     const feed = tree.querySelector('.feed')!;
     for (const row of tree.querySelectorAll('.msg,.steps,.sysline,.day-sep')) assert.equal(row.parentElement, feed);
     assert.equal(tree.querySelectorAll('[data-ask]').length, 2);
-    assert.equal(tree.querySelectorAll('.m-unfold').length, 1);
+    assert.equal(tree.querySelectorAll('.m-unfold').length, 2, 'the long ask and the long prompt fold; nothing else does');
+    // A prompt row folds its TEXT through elideTail — a visible `……` and the
+    // same unfold control as a bubble — instead of clipping silently.
+    const prompts = tree.querySelectorAll('.prompt');
+    assert.equal(prompts.length, 2);
+    const longRow = prompts[0]!;
+    const longBody = longRow.querySelector('.p-body')!.textContent ?? '';
+    assert.ok(longBody.endsWith(ELIDE), `the folded prompt ends with the marker: ${longBody.slice(-20)}`);
+    assert.ok(longBody.length < longNotice.length, 'folded means shorter');
+    assert.ok(longRow.querySelector('.m-unfold'), 'the way to the whole prompt');
+    const shortBody = prompts[1]!.querySelector('.p-body')!.textContent ?? '';
+    assert.ok(shortBody.includes('Feed extraction: status todo → doing'), 'a short prompt renders whole');
+    assert.equal(prompts[1]!.querySelector('.m-unfold'), null, 'nothing to unfold when it fits');
     assert.ok(tree.querySelector('.m-state.note .note-dot'));
     assert.ok(tree.querySelector('.katex'));
     assert.ok(tree.querySelector('.m-body strong'));
