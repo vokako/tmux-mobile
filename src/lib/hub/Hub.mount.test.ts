@@ -33,6 +33,44 @@ function roomFixture() {
   };
 }
 
+test('saved all restores through a fresh mount and room revisit without delivering (#171)', { timeout: 60000 }, async (context) => {
+  const fixture = await compiledHub();
+  const { rpc } = roomFixture();
+  let saved = JSON.stringify({ fixture: 'all', other: '' });
+  for (let reload = 0; reload < 2; reload++) {
+    const app = await fixture.mount(context, {
+      props: { visible: true },
+      setup(window) {
+        window.localStorage.setItem('tmux_hub_project', 'fixture');
+        window.localStorage.setItem('tmux_hub_lead', saved);
+      },
+      modules: [{
+        ...rpc,
+        projectList: async () => ({ projects: ['fixture', 'other'].map((session) => ({
+          project: { id: session, name: session, session, path: `/${session}` }, live: true, slots: [],
+        })) }),
+        hubPost: () => assert.fail('restoring a destination must not post'),
+        hubCommand: () => assert.fail('restoring a destination must not execute a command'),
+        hubAgentInterrupt: () => assert.fail('restoring a destination must not interrupt'),
+      }],
+    });
+    try {
+      for (let i = 0; i < 12 && app.document.querySelectorAll('.acard:not(.add)').length < 2; i++) await app.flush();
+      const input = app.document.querySelector<HTMLTextAreaElement>('.c-input')!;
+      assert.equal(input.placeholder, 'Message every agent…', 'a fresh client restores broadcast');
+      for (const room of ['other', 'fixture']) {
+        app.document.querySelector<HTMLElement>(`[aria-label="${room}"] .proj-pick`)!.click();
+        for (let i = 0; i < 12 && app.document.querySelector('.h1-text')?.textContent !== room; i++) await app.flush();
+      }
+      assert.equal(input.placeholder, 'Message every agent…', 'cached room restore keeps broadcast');
+      await app.advance(10000);
+      assert.equal(input.placeholder, 'Message every agent…', 'roster polling does not reseat a lead');
+      saved = app.window.localStorage.getItem('tmux_hub_lead')!;
+      assert.deepEqual(JSON.parse(saved), { fixture: 'all', other: '' });
+    } finally { await app.close(); }
+  }
+});
+
 async function characterize(context: TestContext, fixture: Awaited<ReturnType<typeof compileMount>>) {
   const { pushed, rpc } = roomFixture();
   const app = await fixture.mount(context, {

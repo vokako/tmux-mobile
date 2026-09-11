@@ -101,7 +101,8 @@ export const hubPrefs = {
     localStorage.setItem(DRAWER_KEY, JSON.stringify(state.drawers));
     if (state.project === from) this.setProject(to);
   },
-  /** The remembered recipient for a project: an agent's name, `''` when the
+  /** The remembered recipient for a project: an agent's name, ALL_TARGET
+   * for every managed agent, `''` when the
    * user chose the ROOM (no recipient — record only), `null` when nobody has
    * chosen yet and `pickLead` should seat a lead. The empty string is a real
    * choice here, not "unset" (review C, 2026-09-03): storing it as an absent

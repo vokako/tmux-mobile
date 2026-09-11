@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { ALL_TARGET } from './hub-composer.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
@@ -390,6 +391,16 @@ test('pickLead: an explicit ROOM choice is kept; only "nobody chose" seats a lea
   assert.equal(pickLead(agents, [], null), 'dev', 'nobody chose → the rule seats a lead');
   assert.equal(pickLead(agents, []), 'dev', 'absent is the same as null');
   assert.equal(pickLead([ag({ name: 'solo' })], [], ''), '', 'even a one-agent room, once the user said so');
+});
+
+test('pickLead: a saved all choice survives roster changes, including an empty roster (#171)', () => {
+  const agents = [ag({ name: 'dev', window: 1 }), ag({ name: 'qa', window: 2 })];
+  for (const current of [agents, agents.slice(0, 1), [], [ag({ managed: false })]]) {
+    assert.equal(pickLead(current, [], ALL_TARGET), ALL_TARGET);
+    assert.equal(pickLead(current, [], ''), '');
+  }
+  assert.equal(pickLead(agents, [], null), 'dev');
+  assert.equal(pickLead([], [], null), '', 'no preference plus no recipient remains record-only');
 });
 
 test('pickLead: one agent needs no rule, several prefer the one that can hire', () => {
