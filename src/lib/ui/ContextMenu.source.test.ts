@@ -12,3 +12,10 @@ test('context menu touch targets follow input capability, not viewport width (#1
   assert.match(source, /max-height: calc\(100vh \/ var\(--ui-zoom, 1\) - 16px\); overflow-y: auto/u,
     'a full directory menu must stay within the same8px inset on a short viewport');
 });
+
+test('keeping a click trigger clear opts into the shared geometry cap, not another placement path (#173)', () => {
+  assert.match(source, /at\?\.keepTriggerClear && at\.anchor\s*\? menuHeightLimit\(at\.anchor, viewBox\(\)\)/u);
+  assert.match(source, /style:max-height=\{heightLimit === undefined \? undefined : `\$\{heightLimit\}px`\}/u);
+  assert.match(source, /menuPlacement\(at\.anchor \?\? pointAnchor\(at\.x, at\.y\), \{ w, h \}/u,
+    'placement consumes the measured capped border box');
+});

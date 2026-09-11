@@ -8,7 +8,7 @@
   // second menu language would read as a second kind of menu. The only difference
   // is what it is anchored to: a pointer instead of a trigger's rect.
   import Icon from './Icon.svelte';
-  import { menuPlacement, pointAnchor, popOrigin, viewBox } from './placement.ts';
+  import { menuHeightLimit, menuPlacement, pointAnchor, popOrigin, viewBox } from './placement.ts';
   import { activeModal } from './modal.ts';
   const menuId = $props.id();
 
@@ -31,7 +31,9 @@
      * default: left-aligned at the pointer.
      * An optional `trigger` (the element whose click opened the menu) is not
      * "outside": its pointerdown is left alone so the trigger's own click
-     * can TOGGLE the menu closed instead of closing-and-reopening it. */
+     * can TOGGLE the menu closed instead of closing-and-reopening it.
+     * `keepTriggerClear` with an anchor caps the menu to one side of the
+     * trigger, keeping a native second click reachable on short viewports. */
     at = null,
     /** @type {MenuItem[]} */ items = [],
     /** Optional heading — usually the name of what was clicked. */
@@ -61,6 +63,8 @@
   // 的都是点击点位是选项卡的右上点…应该都为左上角点"). A caller may still
   // say `align` explicitly either way.
   const align = $derived(at ? (at.align ?? (at.anchor ? 'right' : 'left')) : 'right');
+  const heightLimit = $derived(at?.keepTriggerClear && at.anchor
+    ? menuHeightLimit(at.anchor, viewBox()) : undefined);
   const pos = $derived(at
     ? menuPlacement(at.anchor ?? pointAnchor(at.x, at.y), { w, h }, viewBox(), 6, 8, align)
     : { x: 0, y: 0 });
@@ -145,6 +149,7 @@
   <div class="ctx pop-layer" class:ready={h > 0} bind:this={el} role="menu" tabindex="-1" {id} aria-label={who || undefined}
     aria-activedescendant={cursor >= 0 && items[cursor] ? `${id}-${cursor}` : undefined}
     style:left="{pos.x}px" style:top="{pos.y}px"
+    style:max-height={heightLimit === undefined ? undefined : `${heightLimit}px`}
     style:--pop-origin={at ? popOrigin(at.anchor ?? pointAnchor(at.x, at.y), pos, align) : undefined}
     bind:offsetWidth={w} bind:offsetHeight={h}>
     {#if who}<div class="ctx-who">{who}</div>{/if}

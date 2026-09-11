@@ -6,6 +6,21 @@
 
 export interface AnchorRect { left: number; right: number; top: number; bottom: number }
 
+/** Opt-in cap for menus whose trigger must remain clickable (e.g. dblclick).
+ * The menu scrolls on whichever side has room; menuPlacement still owns the flip. */
+export function menuHeightLimit(
+  anchor: AnchorRect,
+  view: { h: number },
+  gap = 6,
+  edge = 8,
+): number {
+  // offsetHeight rounds to integer CSS pixels; never round into the trigger.
+  return Math.floor(Math.min(
+    Math.max(0, view.h - 2 * edge),
+    Math.max(0, anchor.top - gap - edge, view.h - anchor.bottom - gap - edge),
+  ));
+}
+
 /**
  * Right-aligned to the trigger and below it, because the triggers are dot menus
  * and field-width buttons whose right edge is where the chevron sits; flipped

@@ -1,7 +1,29 @@
 // The popover placement contract — pure geometry, no browser.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { menuPlacement, pointAnchor, popOrigin } from './placement.ts';
+import { menuHeightLimit, menuPlacement, pointAnchor, popOrigin } from './placement.ts';
+
+test('an opt-in trigger-clear cap keeps a tall menu on one side even in a short viewport (#173)', () => {
+  for (const [top, bottom, height, expected] of [
+    [90, 118, 200, 76], [20, 48, 200, 138], [164, 192, 200, 150],
+    [300, 328, 800, 458], [0, 200, 200, 0],
+    [20.25, 48.25, 200, 137],
+  ]) {
+    const anchor = { left: 40, right: 150, top: top!, bottom: bottom! };
+    const view = { w: 390, h: height! };
+    const limit = menuHeightLimit(anchor, view);
+    assert.equal(limit, expected);
+    if (!limit) continue; // No room on either side is physically unsatisfiable.
+    const h = Math.round(Math.min(500, limit)); // offsetHeight reports integer CSS pixels.
+    const pos = menuPlacement(anchor, { w: 180, h }, view);
+    assert.ok(pos.y + h <= anchor.top - 6 || pos.y >= anchor.bottom + 6);
+    assert.ok(pos.y >= 8 && pos.y + h <= view.h - 8);
+  }
+  const anchor = { left: 40, right: 150, top: 90, bottom: 118 };
+  const legacy = menuPlacement(anchor, { w: 180, h: 184 }, { w: 390, h: 200 });
+  assert.ok(legacy.y < anchor.bottom && legacy.y + 184 > anchor.top,
+    'negative control: viewport-only clamping covers the second click');
+});
 
 test('menuPlacement puts a context menu beside its trigger, inside the viewport', () => {
   const view = { w: 1200, h: 800 };

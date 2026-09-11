@@ -527,6 +527,15 @@ press-scale/brightness details below do not override it.
   window, which also hears the layer's own list scrolling — each layer spares
   itself (a long Select closed the moment it was scrolled; review 2026-09-03;
   `ui/popover.source.test.ts`).
+- **A click trigger may opt into staying clear (2026-09-11, #173).**
+  `ContextMenu` accepts `at.keepTriggerClear` with a rect anchor. The shared
+  `menuHeightLimit` caps height to the larger space above/below, rounded down
+  for integer `offsetHeight`; existing `menuPlacement` still owns the flip.
+  This preserves the stopped card's native second click even when a full
+  menu fits on neither side. Point menus and other callers are unchanged.
+  Pure vectors include fractional anchors; Chromium at 1440x240 measured a
+  100px internally scrolling menu ending 6px above its trigger. Without the
+  cap the viewport-only clamp can cover the trigger again.
 - A pick-one over a control that is NOT a field (an icon toggle, a header
   pill) is `ui/ContextMenu` with `checked` on the current row — Select's own
   trailing check, so a menu and a dropdown say "you are here" in one glyph;
