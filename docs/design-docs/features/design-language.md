@@ -49,11 +49,14 @@ expanded grid cells already have stable widths and release that space to names.
 
 **Plain interruption commands (2026-09-11, #173).** The owner rejected the
 card's black Stop square and circular ground: "还有终止按钮，不要圆形的阴影了，还有这个黑方块看着不知道是停止的意思，是不是换个颜色？让我能更容易够理解这个按钮的含义。"
-`CommandButton`'s `warn` variant uses the existing `--status-warn` ink, with
+`CommandButton`'s `warn` variant mixes existing `--status-warn` (80%) with
+`--text` (20%): raw amber failed the 3:1 glyph floor on selected light cards,
+so the source test pins the corrected contrast in both themes. There is
 no painted ground or shadow at rest, hover or press. Its native 28/44px
 target, keyboard focus ring, controlled ARIA and pending/disabled contract
 remain. This is a scoped exception to icon hover paint, not a new colour or
 button renderer. Interruption is recoverable; kill/remove keep danger semantics.
+Chromium 152 measured 3.42:1 (light) and 10.26:1 (dark) on a selected card.
 
 - **Type scale, six chrome steps**: `--fs-micro 9 · --fs-meta 10.5 · --fs-sub
   11.5 · --fs-ui 12.5 · --fs-body 13.5 · --fs-title 15`. Connect card only:

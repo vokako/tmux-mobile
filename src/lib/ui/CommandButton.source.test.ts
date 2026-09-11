@@ -48,7 +48,9 @@ test('warn interruption has token ink and no ground without removing the focus l
   assert.match(source, /variant\?: 'primary' \| 'secondary' \| 'icon' \| 'danger' \| 'warn'/u);
   assert.match(source, /class:warn=\{variant === 'warn'\}/u);
   const warn = style.match(/\.warn \{([^}]+)\}/u)?.[1] ?? '';
-  assert.match(warn, /color: var\(--status-warn\)/u);
+  // Raw status amber failed the glyph floor on a selected light card. Keep
+  // the hue family, but mix existing foreground ink instead of adding a token.
+  assert.match(warn, /color: color-mix\(in srgb, var\(--status-warn\) 80%, var\(--text\)\)/u);
   assert.doesNotMatch(warn, /height|width|padding|border-radius/u,
     'warning semantics do not create a second target geometry');
   // Hover/press change --command-paint. This more-specific pseudo rule must
@@ -59,4 +61,39 @@ test('warn interruption has token ink and no ground without removing the focus l
   assert.doesNotMatch(paint, /content|display|visibility|opacity|outline/u,
     'the pseudo remains available to the existing keyboard focus ring');
   assert.match(style, /\.command-button:focus-visible::before \{ outline: 2px solid var\(--accent-ink\); outline-offset: 2px; \}/u);
+});
+
+test('warning command glyphs clear 3:1 on normal and selected cards in both themes (#173)', async () => {
+  const css = await readFile(new URL('../../app.css', import.meta.url), 'utf8');
+  const rgb = (body: string, name: string) => {
+    const value = new RegExp(`${name}:\\s*([^;]+)`, 'u').exec(body)?.[1] ?? '';
+    if (value.startsWith('#')) return [1, 3, 5].map(i => parseInt(value.slice(i, i + 2), 16));
+    assert.match(value, /^rgba\(/u);
+    return value.slice(5, -1).split(',').map(Number);
+  };
+  const mix = (a: number[], b: number[], weight: number) => a.slice(0, 3).map((n, i) => n * weight + b[i]! * (1 - weight));
+  const luminance = (c: number[]) => c.map(n => {
+    n /= 255;
+    return n <= 0.04045 ? n / 12.92 : ((n + 0.055) / 1.055) ** 2.4;
+  }).reduce((sum, n, i) => sum + n * [0.2126, 0.7152, 0.0722][i]!, 0);
+  const contrast = (a: number[], b: number[]) => {
+    const x = luminance(a), y = luminance(b);
+    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+  };
+  for (const theme of ['light', 'dark']) {
+    const body = new RegExp(`html\\[data-theme="${theme}"\\] \\{([\\s\\S]*?)\\n\\}`, 'u').exec(css)?.[1];
+    assert.ok(body);
+    const warn = rgb(body, '--status-warn'), ink = mix(warn, rgb(body, '--text'), 0.8);
+    for (const base of ['--bg', '--bg2']) {
+      for (const paint of ['--surface', '--accent-bg']) {
+        const overlay = rgb(body, paint);
+        const surface = mix(overlay, rgb(body, base), overlay[3]!);
+        const ratio = contrast(ink, surface);
+        assert.ok(ratio >= 3, `${theme} ${base}/${paint}: ${ratio.toFixed(2)}:1`);
+        if (theme === 'light' && paint === '--accent-bg') {
+          assert.ok(contrast(warn, surface) < 3, 'negative control: raw amber is insufficient');
+        }
+      }
+    }
+  }
 });

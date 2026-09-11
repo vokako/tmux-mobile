@@ -69,7 +69,7 @@
   .icon-only { width: var(--control-height); padding: 0; }
   .icon-only::before { inset: var(--control-paint-inset); }
   .danger { color: var(--danger-ink); }
-  .warn { color: var(--status-warn); }
+  .warn { color: color-mix(in srgb, var(--status-warn) 80%, var(--text)); }
   .command-button.warn::before { background: none; box-shadow: none; }
   .solid { --command-paint: var(--accent-fill); color: var(--accent-fill-ink); }
   .solid.danger { --command-paint: var(--danger-fill); }
