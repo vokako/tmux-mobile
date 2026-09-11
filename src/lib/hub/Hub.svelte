@@ -1657,10 +1657,11 @@
         registerActions={registerFeedActions} />
 
       <Roster {selected} {compact} {managedAgents} {stopped} {selectedRow}
-        {recipient} {composerText} {managedNames} {busyNames} {interrupting}
+        {recipient} {filterAgent} {composerText} {managedNames} {busyNames} {interrupting}
         {unread} {acting} {tick} {roomReady} {justLoaded} {rosterBase}
         expanded={rosterExpanded} onexpand={toggleRoster}
         {stateLabel} {stateTone} onselect={setRecipient} oninterrupt={interrupt}
+        onfilter={(name) => { closeCtx(); toggleFilter(name); }}
         onadd={() => openPicker('add')}
         oncontext={(at, name) => openCtx(at, name, agentItems(name))} />
 

@@ -8,16 +8,17 @@
   import { backendColor, stateDotColor, stateIsLive, chipExtras, ctxColor, fmtElapsed, modelLabel, sortAgentsForRoster } from './hub.ts';
   import { hoverInfo } from '../ui/hover.ts';
   import { longpress } from '../ui/longpress.ts';
+  import { anchorOf } from '../ui/placement.ts';
   import { flip } from 'svelte/animate';
   import { moveMs } from '../ui/motion.ts';
 
   let {
     selected = '', compact = false, managedAgents = [], stopped = [], selectedRow = null,
-    recipient = '', unread = new Set(), acting = false, tick = Date.now(),
+    recipient = '', filterAgent = '', unread = new Set(), acting = false, tick = Date.now(),
     roomReady = false, justLoaded = false, rosterBase = null,
     composerText = '', managedNames = [], busyNames = [], interrupting = [],
     stateLabel = (state) => state, stateTone = () => undefined,
-    onselect: setRecipient = () => {}, oninterrupt: interrupt = () => {},
+    onselect: setRecipient = () => {}, oninterrupt: interrupt = () => {}, onfilter = () => {},
     expanded = false, onexpand = () => {}, onadd = () => {}, oncontext = () => {},
   } = $props();
 
@@ -70,6 +71,22 @@
 
   function selectTarget(name) {
     setRecipient(recipient === name ? '' : name);
+  }
+  const coarsePointer = () => window.matchMedia('(any-pointer: coarse)').matches;
+  function clickAgent(event, name) {
+    if (!coarsePointer() && event.detail > 1) return;
+    selectTarget(name);
+  }
+  function focusAgent(event, name, stopped = false) {
+    if (coarsePointer() || event.detail < 2) return;
+    event.preventDefault();
+    if (!stopped && recipient !== name) setRecipient(name);
+    onfilter(name);
+  }
+  function stoppedMenu(event, name) {
+    if (!coarsePointer() && event.detail > 1) return;
+    const trigger = event.currentTarget;
+    oncontext({ anchor: anchorOf(trigger), align: 'left', trigger }, name);
   }
 
   function destinationNote(name) {
@@ -161,13 +178,13 @@
         {@const mentioned = extras.includes(a.name) || extras.includes(ALL_TARGET)}
         {@const pending = interrupting.includes(a.name)}
         <!-- Selection and interruption are sibling native targets, never nested buttons. -->
-        <div class="acard" data-agent={a.name} class:sel={recipient === a.name} class:has-stop={busyNames.includes(a.name)}
+        <div class="acard" data-agent={a.name} class:sel={recipient === a.name} class:filtered={filterAgent === a.name} class:has-stop={busyNames.includes(a.name)}
           class:appear-pop={!!rosterBase && !rosterBase.has(a.name)} animate:flip={{ duration: moveMs() }}>
           <button type="button" class="agent-select"
             aria-pressed={recipient === a.name}
-            aria-label={[`${a.name} · ${stateLabel(a.state)}`, a.team, a.detail, vitalsLine(a.vitals), unread.has(a.name) ? t('hubUnread') : '', mentioned ? t('hubToAlsoHint').replace('{names}', `@${a.name}`) : ''].filter(Boolean).join(' · ')}
+            aria-label={[`${a.name} · ${stateLabel(a.state)}`, a.team, a.detail, vitalsLine(a.vitals), unread.has(a.name) ? t('hubUnread') : '', mentioned ? t('hubToAlsoHint').replace('{names}', `@${a.name}`) : '', filterAgent === a.name ? t('hubFilterItem') : ''].filter(Boolean).join(' · ')}
             use:hoverInfo={() => cardInfo(a)}
-            onclick={() => selectTarget(a.name)}
+            onclick={(e) => clickAgent(e, a.name)} ondblclick={(e) => focusAgent(e, a.name)}
             oncontextmenu={(e) => { e.preventDefault(); oncontext(pointOf(e), a.name); }}
             use:longpress={{ onlongpress: (pt) => oncontext(pt, a.name) }}>
             {#if backendIcon(a.agent)}<img class="ava" src={backendIcon(a.agent)} alt={a.agent} />{:else}<span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>{/if}
@@ -200,12 +217,12 @@
         {@const backend = slotBackend(name)}
         <!-- A stopped identity offers context actions, never a card-wide restart.
              Owner, 2026-09-05: "头像应该使用我们正常设定的 Agent 头像，并且变成灰色". -->
-        <div class="acard off" data-agent={name} class:appear-pop={!!rosterBase && !rosterBase.has(name)}
+        <div class="acard off" data-agent={name} class:filtered={filterAgent === name} class:appear-pop={!!rosterBase && !rosterBase.has(name)}
           animate:flip={{ duration: moveMs() }}>
           <button type="button" class="agent-select" disabled={acting}
-            aria-label={`${name} · ${t('hubStopped')}`} aria-haspopup="menu"
+            aria-label={[name, t('hubStopped'), filterAgent === name ? t('hubFilterItem') : ''].filter(Boolean).join(' · ')} aria-haspopup="menu"
             use:hoverInfo={() => offCardInfo(name)}
-            onclick={(e) => oncontext(pointOf(e), name)}
+            onclick={(e) => stoppedMenu(e, name)} ondblclick={(e) => focusAgent(e, name, true)}
             oncontextmenu={(e) => { e.preventDefault(); oncontext(pointOf(e), name); }}
             use:longpress={{ onlongpress: (pt) => oncontext(pt, name) }}>
             {#if backendIcon(backend)}<img class="ava dim" src={backendIcon(backend)} alt={backend} />{:else}<span class="ava dim">{name.slice(0, 1).toUpperCase()}</span>{/if}
@@ -259,6 +276,10 @@
   }
   .acard:hover { box-shadow: inset 0 0 0 1px var(--input-border); }
   .acard.sel { background: var(--accent-bg); box-shadow: inset 0 0 0 1px var(--accent-line); }
+  .acard.filtered::after {
+    content: ''; position: absolute; inset: 2px; border: 1px dashed var(--text2);
+    border-radius: calc(var(--ui-radius-row) - 2px); pointer-events: none;
+  }
   .acard.all {
     border-radius: var(--ui-radius-pill); background: transparent; color: var(--accent-ink);
     box-shadow: inset 0 0 0 1px var(--accent-line);

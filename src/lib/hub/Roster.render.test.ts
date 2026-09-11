@@ -125,6 +125,14 @@ test('Roster renders the controlled destination strip (#168)', { timeout: 60000 
       assert.equal(view().querySelector('.ac-bar'), null, 'unknown is absent, not a guessed zero');
     });
 
+    await ctx.test('reading filter and delivery selection have independent card states (#173)', () => {
+      const root = view({ filterAgent: 'waiting' });
+      assert.ok(card(root, 'waiting').classList.contains('filtered'));
+      assert.equal(select(root, 'waiting').getAttribute('aria-pressed'), 'false');
+      assert.equal(card(root, 'runner').classList.contains('filtered'), false);
+      assert.equal(select(root, 'runner').getAttribute('aria-pressed'), 'true');
+    });
+
     await ctx.test('one controlled disclosure targets the same single list in either mode', () => {
       for (const expanded of [false, true]) {
         const root = view({ expanded });

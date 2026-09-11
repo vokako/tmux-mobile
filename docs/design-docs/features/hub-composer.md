@@ -26,6 +26,21 @@ and accent-ink label, with the same accent fill/border for selected state.
 It is deliberately distinct from a named partner, not another agent. Its
 round-corner exception stays in app.css, the existing corner-policy owner.
 
+**Double-click focuses an agent** (lead clarification, 08:48). There is no
+single-click delay or rollback: clicks act immediately, and a fine-pointer
+double-click explicitly selects the live agent and toggles the existing feed
+filter. The second click in that native sequence does not toggle selection
+off. Another double-click clears the filter and leaves the agent selected.
+Stopped slots only filter; their click menu uses the existing trigger-rect
+placement outside the card so it cannot intercept the second click.
+Coarse pointers and keyboard users retain the ContextMenu filter command,
+which remains a reading-only choice. A filtered card carries a neutral dashed
+inner outline and an accessible label; recipient selection keeps its
+separate accent fill/border. The feed's existing filter indicator remains.
+Tests execute the complete click/click/dblclick sequence, not a lone
+synthetic dblclick. Chromium also verifies repeat-to-clear, stopped-card
+menu exclusion and the coarse-pointer long-press filter path.
+
 ### One roster above the input, one Stop operation (board #168, 2026-09-11)
 
 Owner, 03:32: "我看到这个设计挺好看的，因为我们有多个 agent，可以在上边去展示哪些agent 在工作，并且我可以对某一个 agent 单独点停止。可以把原来我们的 agent 擦片就放到发送框上边的位置，然后我们消息输入框里，就不用 to 谁了"

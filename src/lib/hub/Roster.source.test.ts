@@ -32,11 +32,11 @@ test('one controlled roster replaces the delayed tap menu whole (#168)', () => {
   assert.match(source, /onselect: setRecipient = \(\) => \{\}/u);
   assert.match(source, /setRecipient\(recipient === name \? '' : name\)/u);
   assert.match(source, /onclick=\{\(\) => selectTarget\(ALL_TARGET\)\}/u);
-  assert.match(source, /onclick=\{\(\) => selectTarget\(a\.name\)\}/u);
+  assert.match(source, /onclick=\{\(e\) => clickAgent\(e, a\.name\)\}/u);
   assert.doesNotMatch(source.slice(source.indexOf('} = $props();')), /\brecipient\s*=(?!=)/u,
     'selection emits intent without locally committing recipient');
   assert.doesNotMatch(source, /menuFor|bind:cardsEl|cardTimer|cardDbl|cardClick|toggleAgentMenu|menuAnchor|menuPos|vitalsFor|menuAgent|a-menu|am-who|am-vitals|groupRoster|tgroup/u);
-  assert.doesNotMatch(source, /onfilter|onwatch|onstart|onrestart|onaction|onconfigure|ondblclick|setTimeout|addEventListener|popstate|history\./u);
+  assert.doesNotMatch(source, /onwatch|onstart|onrestart|onaction|onconfigure|setTimeout|addEventListener|popstate|history\./u);
 });
 
 test('Stop consumes parent busy and pending sets through the shared command', () => {
@@ -59,7 +59,9 @@ test('body mentions use chipExtras, separate from selected state and Stop', () =
   assert.match(source, /extras\.includes\(ALL_TARGET\)/u);
   assert.match(source, /extras\.includes\(a\.name\)/u);
   assert.match(source, /class="agent-mention"[^>]*>@<\/span>/u);
-  assert.doesNotMatch(source, /mentionTokens|new RegExp|\.split\(['"]@|name="check"|border[^;\n]*dashed/u);
+  assert.doesNotMatch(source, /mentionTokens|new RegExp|\.split\(['"]@|name="check"/u);
+  assert.doesNotMatch(rule('.agent-mention'), /border[^;\n]*dashed/u,
+    '#173 permits a reading-filter outline, never a mention outline');
 });
 
 test('native selection owns hover and context; stopped slots never select or resume', () => {
@@ -69,13 +71,23 @@ test('native selection owns hover and context; stopped slots never select or res
   assert.match(source, /oncontextmenu=\{\(e\) => \{ e\.preventDefault\(\); oncontext\(pointOf\(e\), a\.name\); \}\}/u);
   assert.match(source, /use:longpress=\{\{ onlongpress: \(pt\) => oncontext\(pt, a\.name\) \}\}/u);
   const off = source.slice(source.indexOf('class="acard off"'), source.indexOf('{/each}', source.indexOf('class="acard off"')));
-  assert.match(off, /onclick=\{\(e\) => oncontext\(pointOf\(e\), name\)\}/u);
+  assert.match(off, /onclick=\{\(e\) => stoppedMenu\(e, name\)\}/u);
   assert.match(off, /disabled=\{acting\}/u);
   assert.doesNotMatch(off, /selectTarget|interrupt\(|startAgent|a-start|aria-pressed/u);
   assert.doesNotMatch(source, /role="button"|onkeydown|position:\s*fixed/u);
   for (const fact of ['modelLabel(a.vitals.model)', 'fmtElapsed(a.since, tick)', 'stateTone(a.state)', "t('hubHoverTarget')", "t('hubHoverPath')", "t('hubToDmLong')", "t('hubToAllLong')", "t('hubToAlsoHint')"]) {
     assert.ok(source.includes(fact), `retained hover fact: ${fact}`);
   }
+});
+
+test('double-click focuses live agents without delay and uses the existing filter intent (#173)', () => {
+  assert.match(source, /if \(!coarsePointer\(\) && event\.detail > 1\) return;/u);
+  assert.match(source, /if \(!stopped && recipient !== name\) setRecipient\(name\);/u);
+  assert.match(source, /onfilter\(name\);/u);
+  assert.match(source, /anchor: anchorOf\(trigger\), align: 'left', trigger/u);
+  assert.match(source, /class:filtered=\{filterAgent === a\.name\}/u);
+  assert.match(rule('.acard.filtered::after'), /border: 1px dashed var\(--text2\)/u);
+  assert.doesNotMatch(source, /setTimeout|clearTimeout/u);
 });
 
 test('identity, readiness and motion retain their existing authorities', () => {

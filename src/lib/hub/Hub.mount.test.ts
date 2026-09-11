@@ -620,6 +620,50 @@ test('body mentions mark cards without replacing the selected delivery target (#
   } finally { await app.close(); }
 });
 
+test('desktop double-click focuses an agent and toggles its reading filter without a delay (#173)', { timeout: 60000 }, async (context) => {
+  const app = await composerFixture(context);
+  const double = async () => {
+    const button = stripCard(app.document, 'bob').querySelector<HTMLButtonElement>('.agent-select')!;
+    for (const [type, detail] of [['click', 1], ['click', 2], ['dblclick', 2]] as const) {
+      button.dispatchEvent(new app.window.MouseEvent(type, { detail, bubbles: true, cancelable: true }));
+      await app.flush();
+    }
+  };
+  try {
+    assert.equal(selectedCard(app.document), 'alice');
+    await double();
+    assert.equal(selectedCard(app.document), 'bob');
+    assert.ok(app.document.querySelector('.filter-pill'));
+    assert.ok(stripCard(app.document, 'bob').classList.contains('filtered'));
+    await double();
+    assert.equal(selectedCard(app.document), 'bob');
+    assert.equal(app.document.querySelector('.filter-pill'), null);
+    assert.equal(stripCard(app.document, 'bob').classList.contains('filtered'), false);
+  } finally { await app.close(); }
+});
+
+test('stopped-card double-click only filters and closes its click menu (#173)', { timeout: 60000 }, async (context) => {
+  const app = await composerFixture(context, {
+    projectList: async () => ({ projects: [{
+      project: { id: 'fixture', name: 'fixture', session: 'fixture', path: '/fixture' },
+      live: true, slots: [{ window_name: 'paused', kind: 'agent', command: 'codex' }],
+    }] }),
+  });
+  try {
+    const button = stripCard(app.document, 'paused').querySelector<HTMLButtonElement>('.agent-select')!;
+    button.dispatchEvent(new app.window.MouseEvent('click', { detail: 1, bubbles: true }));
+    await app.flush();
+    assert.ok(app.document.querySelector('.ctx'));
+    button.dispatchEvent(new app.window.MouseEvent('click', { detail: 2, bubbles: true }));
+    button.dispatchEvent(new app.window.MouseEvent('dblclick', { detail: 2, bubbles: true }));
+    await app.flush();
+    assert.equal(selectedCard(app.document), 'alice');
+    assert.equal(app.document.querySelector('.ctx'), null);
+    assert.ok(app.document.querySelector('.filter-pill'));
+    assert.ok(stripCard(app.document, 'paused').classList.contains('filtered'));
+  } finally { await app.close(); }
+});
+
 test('roster disclosure keeps its cards, remembers each room, and holds order during interaction (#168)', { timeout: 60000 }, async (context) => {
   const agents = [
     { name: 'alice', window: 0, managed: true, agent: 'kiro', state: 'idle', since: 1000 },
