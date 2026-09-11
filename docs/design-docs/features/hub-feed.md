@@ -209,8 +209,12 @@ maximize and close were outside the viewport. Both side tracks now use
 remaining space. CSS allocates the available container width, without a
 second sizing controller, breakpoint change or resize-triggered navigation.
 
-The existing SideHandle still writes the requested 320-900px drawer width
-(default 520); the actual track can be smaller. Neither saved preference
+Since board #174 the three tracks are always declared and each side track is
+`minmax(0, requested × open factor)` — the factor (`--side-open`,
+`--drawer-open`, registered `@property` numbers) is what the partition motion
+animates, so the yield formula is the same at rest and mid-move; see
+motion.md principle 8. The existing SideHandle still writes the requested
+320-900px drawer width (default 520); the actual track can be smaller. Neither saved preference
 is clamped by layout, so widening restores it. Both side tracks must yield:
 at 761px with a 420px sidebar, yielding only the drawer leaves it 15px wide
 and still loses its actions. The bounded grid gives each side 217.5px.

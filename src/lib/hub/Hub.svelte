@@ -43,6 +43,7 @@
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { revealMs } from '../ui/motion.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
+  import { pinTrack, moveTrack } from './reveal.ts';
   import CreateProjectDialog from '../projects/CreateProjectDialog.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import { activeModal } from '../ui/modal.ts';
@@ -100,6 +101,15 @@
 
   // Terminal drawer (closed by default — the whole point).
   let termOpen = $state(false);
+  // The drawer REVEALS and withdraws instead of appearing (board #174; the
+  // technique is reveal.ts): while it closes, the Drawer stays mounted at its
+  // pinned width and the grid track shrinks over it, so `drawerShown` — the
+  // mount gate — is the intent OR a close in flight. `.drawer-open`, the rest
+  // class the track factor follows, is the intent alone.
+  let drawerClosing = $state(false);
+  const drawerShown = $derived(termOpen || drawerClosing);
+  let colsEl = $state(null);
+  let drawerTrackEl = $state(null);
   // What the drawer SHOWS: the terminal, or the file browser (owner,
   // 2026-08-28: "右侧边栏，可以展开文件浏览器的分区，类似展示 terminal 面板
   // 一样的逻辑"). One drawer, one width handle, two bodies — the hidden one
@@ -811,7 +821,7 @@
     return feedView.withReadingAnchor(mutate);
   }
 
-  function openDrawer(a = null) {
+  async function openDrawer(a = null) {
     // No explicit agent → the one you are TALKING TO (board #76: "应该优先跳转到
     // 当前所选的 agent 的 terminal window"), then the first managed, then anything.
     const pick = a
@@ -832,16 +842,38 @@
       if (m) openTerminal(selected, termTarget, termCommand);
       return;
     }
-    withReadingAnchor(() => { termOpen = true; });
-    // The drawer follows the project (board #23): remember which partition
-    // this room has open, so returning to it restores the same view.
+    if (termOpen) return; // switching partitions while open is a content swap, not a move
+    // Placed first, then revealed (reveal.ts): the rest state lands and the
+    // reader is re-anchored at the FINAL layout, all before a paint; only
+    // then is the content pinned at that width and the track moved from 0.
+    await withReadingAnchor(() => { termOpen = true; });
     hubPrefs.setDrawer(selected, drawerView);
+    await revealDrawer(0);
   }
 
-  /** The one close path, so every trigger keeps the reader's place. */
-  function closeDrawer() {
-    withReadingAnchor(() => { termOpen = false; });
+  /** Move the drawer track between 0 and its rest value with the Drawer's
+   * content pinned at the width it has now (the measured final width on
+   * open, the current width on close) — xterm sees ONE size. */
+  async function revealDrawer(from) {
+    if (!colsEl || !drawerTrackEl) return;
+    const unpin = pinTrack(drawerTrackEl, 'start');
+    await moveTrack(colsEl, '--drawer-open', from);
+    unpin();
+  }
+
+  /** The one close path, so every trigger keeps the reader's place. The close
+   * moves too (lead, #174: a cut beside an animated open reads as a stutter):
+   * pinned at its current width, the Drawer withdraws under the shrinking
+   * track and unmounts after the move — one size until the end. */
+  async function closeDrawer() {
+    if (!termOpen) return;
+    const unpin = drawerTrackEl ? pinTrack(drawerTrackEl, 'start') : null;
+    drawerClosing = true;
+    await withReadingAnchor(() => { termOpen = false; });
     hubPrefs.setDrawer(selected, '');
+    if (colsEl) await moveTrack(colsEl, '--drawer-open', 1);
+    drawerClosing = false;
+    unpin?.();
   }
 
   function pickWindow(a) {
@@ -1393,7 +1425,7 @@
 </script>
 
 <div class="hub-root" class:compact class:drawer-open={termOpen && !compact}>
-  <div class="cols">
+  <div class="cols" bind:this={colsEl}>
     <Sidebar {compact} open={sideOpen} {rows} {trash} {rowsBase} {selected}
       {panes} {agentStates} {talkMap} {tick} unreadCount={unread.size}
       onselect={(session) => { selectProject(session); sideOpen = false; }}
@@ -1599,8 +1631,11 @@
         registerBack={onGoBack ? backLayers.register : null} />
     </main>
 
-    {#if termOpen && !compact}
-    <!-- ── Terminal drawer: where terminal things live ── -->
+    {#if drawerShown && !compact}
+    <!-- ── Terminal drawer: where terminal things live. The .track is the
+         grid item the reveal pins; the Drawer inside never changes size
+         while the track moves (board #174). ── -->
+    <div class="track drawer-track" bind:this={drawerTrackEl}>
     <Drawer {compact} {visible} {fontSize} {selected} {termTarget} {termCommand}
       {drawerView} {drawerFilesReq} {drawerIssueReq} {drawerBoardNew}
       {agents} {panes} {managedAgents} {winsExpanded} {stateLabel} {stateTone}
@@ -1611,6 +1646,7 @@
       onboard={() => openBoardTab?.(selected)}
       onnewissue={() => (drawerBoardNew = { n: (drawerBoardNew?.n ?? 0) + 1 })}
       onfilesback={(back) => { drawerFilesBack = back; }} />
+    </div>
     {/if}
   </div>
 
@@ -1711,8 +1747,30 @@
     /* Design tokens (--fs-*, --meta-ink, --t-*) come from :root in app.css —
        promoted app-wide 2026-08-18. Contract: tmm-cli.md "Design tokens". */
   }
-  .cols { flex: 1; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 0; }
+  /* REVEAL, DO NOT RESIZE (board #174; the helpers and the reasoning are in
+     reveal.ts). Each side track is its requested width times an OPEN FACTOR
+     — a registered numeric custom property, so it interpolates — and the
+     three tracks are always declared (a closed side is a 0 track). The
+     factor is the only thing that ever transitions, and only under the
+     `.moving` gate the helper raises for the duration of one move; the
+     content inside a `.track` is pinned at its final width (inline, by
+     pinTrack) and anchored to the edge that stays put, so the track merely
+     uncovers it and an xterm inside is fitted once. What the track has not
+     uncovered yet is clipped by the grid. Engines without @property
+     interpolation fall back to the cut this always was. */
+  @property --side-open { syntax: '<number>'; inherits: false; initial-value: 1; }
+  @property --drawer-open { syntax: '<number>'; inherits: false; initial-value: 0; }
+  .cols { flex: 1; display: grid; min-height: 0; --side-open: 1; --drawer-open: 0; }
+  .hub-root:not(.compact) .cols { grid-template-columns: minmax(0, calc(var(--sidebar-w) * var(--side-open))) minmax(280px, 1fr) minmax(0, calc(var(--hub-drawer-w, 520px) * var(--drawer-open))); overflow: hidden; }
   .hub-root.compact .cols { grid-template-columns: minmax(0, 1fr); }
+  /* :global — these classes are raised by reveal.ts, not by the markup. */
+  .cols:global(.moving) { transition: --side-open var(--t-move) ease-out, --drawer-open var(--t-move) ease-out; }
+  /* A track is a single-cell grid so its partition stretches to it at rest;
+     pinned, it keeps the inline width and hugs the edge that does not move. */
+  .track { display: grid; min-width: 0; min-height: 0; }
+  .track:global(.pin-start) { justify-self: start; }
+  .track:global(.pin-end) { justify-self: end; }
+  .hub-root.compact .track { display: contents; }
   /* Phone shape: tighter gutters, thumb-sized controls, no horizontal
      overflow. The page head wraps instead of pushing the chips off-screen. */
   /* ONE row, always: the app-wide phone rule lets a busy page-head wrap under
@@ -1733,7 +1791,7 @@
   /* SideHandle widths are requested maxima: both side tracks yield when the
      container cannot fit them, without rewriting the saved preferences.
      Chat keeps its reading floor and takes any remaining space. */
-  .hub-root.drawer-open .cols { grid-template-columns: minmax(0, var(--sidebar-w)) minmax(280px, 1fr) minmax(0, var(--hub-drawer-w, 520px)); }
+  .hub-root.drawer-open .cols { --drawer-open: 1; }
   /* The project title, in its two states. The idle one carries a visible pencil
      and only underlines on hover — a permanent box would make the header look
      like a form, but relying on hover ALONE hid the feature (no hover on a
@@ -1840,7 +1898,7 @@
        transform is none, so the intro can own it. Exit is a cut. */
     animation: sheet-up var(--t-move) ease-out;
   }
-  @media (prefers-reduced-motion: reduce) { .dlg-backdrop, .dlg.sheet { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .dlg-backdrop, .dlg.sheet { animation: none; } .cols:global(.moving) { transition: none; } }
   .dlg.sheet .dlg-agents { max-height: calc(46vh / var(--ui-zoom, 1)); overflow-y: auto; }
   .dlg.sheet .agent-pick, .dlg.sheet input, .dlg.sheet .dlg-actions button { min-height: 44px; }
   .dlg input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: var(--ui-radius-control); color: var(--text); padding: 8px 12px; font-size: var(--fs-ui); outline: none; }

@@ -50,7 +50,11 @@ release. Tool-call detail or poll time does not reorder cards.
    should be faster than enter, and the fastest exit is none — an outro keeps
    a dead element in flow while the list under it has already moved, and it
    doubles a grid cell for a beat. The rule frees every `{#if}` from needing
-   a matching `out:`.
+   a matching `out:`. The cut is for LIST ITEMS and popovers — a thing whose
+   place is taken by what is under it. A PARTITION that moved in moves out
+   the same way (the desktop Hub's sidebar and drawer, board #174): a cut
+   beside an animated open reads as a stutter, and nothing is under it to
+   take its place.
 6. **Arrive decelerating, spin linear.** `ease-out` for anything that enters
    or settles; `linear` for constant-rate rotation (spinners) and for the
    navigation slide (owner rule). No springs and no bounces: the app's
@@ -69,8 +73,34 @@ release. Tool-call detail or poll time does not reorder cards.
    still feels like it came from where you clicked (owner, 2026-09-04 #86:
    "右键或者长按出来的选项卡出现什么的，都可以加动效" — this replaces the
    earlier "popovers do not animate"). Its exit is a cut. Page-level slides
-   are touch-only. Desktop rails and sidebars have no motion behind them —
-   but the HIGHLIGHT that marks the chosen tab glides (principle 14).
+   are touch-only. Desktop rails have no motion behind them — but the
+   HIGHLIGHT that marks the chosen tab glides (principle 14). EXCEPTION
+   (owner, 2026-09-11, board #174: "现在左侧侧边栏可以加一个折叠展开的按钮 …
+   折叠展开最好是有动画，不是直接跳。另外右侧侧边栏，比如文件 board terminal
+   的侧边栏，点击展开最好也是有动画展开。这些要更丝滑一些"): the desktop
+   Hub's two PARTITIONS — the project sidebar and the files/board/terminal
+   drawer — open and close on `--t-move`, ease-out both ways. They do it by
+   REVEAL, NOT RESIZE, which is how principles 3 and 9 stay true: the
+   partition's content is laid out at its FINAL width and pinned there
+   (`pinTrack`, inline width, anchored to the edge that stays put), and only
+   the grid TRACK moves — an animatable `@property` open factor in
+   `grid-template-columns` (`--side-open`/`--drawer-open`, transitioned only
+   under the `.moving` gate `moveTrack` raises) uncovers content that never
+   changes size, the grid clips the rest. xterm inside the drawer is fitted
+   once, to the final width (measured at 1440: the `.drawer` box is one value
+   for every frame of the open and the close; the only xterm width change is
+   its own estimated→real metric settling, present with the transition
+   disabled too). The chat column in the middle does reflow during the move;
+   it owns width changes already (ResizeObserver + retained reading anchor,
+   #135). The order is "placed first, then grows" (this principle's popover
+   rule): rest state → Svelte flush → measure → pin → move from the start
+   value, all before a paint, so the final layout is never seen early and
+   the last frame of the move IS the committed layout (the transition's
+   target is the rest formula). Engines that do not interpolate `@property`
+   get the cut this always was. Switching the drawer's partition while open
+   is a content swap, not a move; SideHandle drags stay finger-driven with
+   no transition (principle 7). Source: `src/lib/hub/reveal.ts`,
+   `Hub.svelte` (the grid), `Hub.source.test.ts` + `reveal.test.ts`.
 9. **Never touch the terminal's box.** No transform, transition or animation
    on `.term-wrap`, `.xterm-wrap`, a split `.cell`, or any ancestor of an
    xterm instance: a resting transform turns it into a containing block and
@@ -167,6 +197,7 @@ and terminal ancestor restrictions remain unchanged.
 | `.slide-pill` (+ `.soft` no ring) + `use:slideIndicator` | the one travelling highlight of a rail / segmented control — the WASH behind the item glides; the bar variant is retired (owner, 2026-09-04), and the phone tab bar's `.inset` wash with it (owner, 2026-09-05: the tab bar selects by ink alone). `--ind-x/y/w/h` are written by the action from LAYOUT OFFSETS (`boxFromOffsets`, the `offsetParent` chain from both ends), never client rects: a rect carries the tab's press `scale(0.95)`, a slot's mid-flip transform and the root zoom, and a marker measured through them glided wrong and then corrected itself (the phone's "乱滑"). `.ready` after the first measure so it is born in place; `hidden: true` collapses it while the container is being rearranged. A segmented row is `ui/Segmented`, which carries its own pill | `--t-move` |
 | `.reveal` / `.reveal-tail` on a container, dropped after `revealMs()` | a loaded list unfolds, rows staggered 30ms from the top / from the newest at the bottom; backwards fill only; the class is cleared after one move + the longest stagger so a row that mounts later does not rise (`ui/motion.ts` `revealMs()`) | `--t-move` + stagger |
 | `.skel` (+ `.skel-wrap`) | a loading placeholder of the coming shape with a slow shimmer, invisible for the first 150ms | 1.4s loop, stilled |
+| `pinTrack(track, edge)` + `moveTrack(cols, factor, from)` (`hub/reveal.ts`), `.cols.moving`, `.track.pin-start/.pin-end` | a desktop Hub partition is REVEALED: content pinned at its final width, the grid track's `@property` open factor moves; release on that track's own `transitionend` (safety net `moveMs()+100`, instant under reduced motion) | `--t-move` ease-out |
 | `use:hoverInfo={() => info}` + `ui/HoverCard` | the one hover card (title / text / label→value rows / note), 380ms dwell, 60ms hop, pointer + keyboard focus only | `--t-fast` intro |
 
 Usage: wrap the `<Icon>` in `<span class="chev" class:open={x}>`; put `.appear*`

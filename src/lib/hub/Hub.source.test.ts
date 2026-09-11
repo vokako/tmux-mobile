@@ -12,8 +12,12 @@ test('open drawer tracks yield to the container without overwriting requested wi
   // 280 chat + 520 drawer = 1086, hiding maximize/close. Both side tracks
   // must yield: shrinking only the drawer fails with a wide saved sidebar.
   // CSS owns this geometry; a unit helper would duplicate the grid algorithm.
-  assert.match(rule('.hub-root.drawer-open .cols'),
-    /grid-template-columns:\s*minmax\(0,\s*var\(--sidebar-w\)\)\s+minmax\(280px,\s*1fr\)\s+minmax\(0,\s*var\(--hub-drawer-w,\s*520px\)\)/u);
+  // Since board #174 the three tracks are ALWAYS declared and each side track
+  // is the requested width times an animatable open factor (0 = closed): the
+  // same minmax yield, one formula for rest and motion.
+  assert.match(rule('.hub-root:not(.compact) .cols'),
+    /grid-template-columns:\s*minmax\(0,\s*calc\(var\(--sidebar-w\) \* var\(--side-open\)\)\)\s+minmax\(280px,\s*1fr\)\s+minmax\(0,\s*calc\(var\(--hub-drawer-w,\s*520px\) \* var\(--drawer-open\)\)\)/u);
+  assert.match(rule('.hub-root.drawer-open .cols'), /^\s*--drawer-open:\s*1;\s*$/u, 'open = factor 1, nothing else');
   assert.match(rule('.hub-root.compact .cols'), /grid-template-columns:\s*minmax\(0,\s*1fr\)/u,
     'compact keeps its existing single column');
   assert.equal([...source.matchAll(/style\.setProperty\('--hub-drawer-w'/g)].length, 1,
@@ -23,7 +27,9 @@ test('open drawer tracks yield to the container without overwriting requested wi
 });
 
 test('Hub keeps the Drawer mount gate, durable state and navigation authority (#136)', () => {
-  assert.match(source, /\{#if termOpen && !compact\}\s*<!--[^]*?-->\s*<Drawer/u);
+  // #174: the Drawer stays mounted while its track shrinks (drawerShown =
+  // open OR closing) — the gate is that, and still desktop-only.
+  assert.match(source, /\{#if drawerShown && !compact\}\s*<!--[^]*?-->\s*<div class="track drawer-track" bind:this=\{drawerTrackEl\}>\s*<Drawer/u);
   assert.match(source, /bind:drawerFilesDir onpick=\{pickWindow\} onclose=\{closeDrawer\}/u);
   assert.match(source, /onfilesback=\{\(back\) => \{ drawerFilesBack = back; \}\}/u);
   assert.match(source, /onexpand=\{\(\) => \(winsExpanded = !winsExpanded\)\}/u);
@@ -603,4 +609,33 @@ test('a path reference in a bubble opens the file preview, not the void (board #
   assert.match(source, /\{drawerFilesReq\}/u, 'the drawer view receives the original file request');
   // A relative path resolves against the project's cwd before it travels.
   assert.match(source, /fsCwd\(/u, 'relative refs resolve against the project cwd');
+});
+
+test('the drawer REVEALS, it never resizes: pinned content, one moving gate, no transition on an xterm ancestor (board #174)', () => {
+  // Owner, 2026-09-11: "右侧边栏 … 点击展开最好也是有动画展开". motion.md 3 and 9
+  // stay true by technique: the track moves through an animatable @property
+  // factor; the content is pinned at its final width for the whole move.
+  assert.match(source, /@property --side-open \{\s*syntax: '<number>';\s*inherits: false;\s*initial-value: 1;\s*\}/u);
+  assert.match(source, /@property --drawer-open \{\s*syntax: '<number>';\s*inherits: false;\s*initial-value: 0;\s*\}/u);
+  // The transition exists in ONE place, gated, and names only the two factors.
+  const moving = rule('.cols:global(.moving)');
+  assert.match(moving, /^\s*transition:\s*--side-open var\(--t-move\) ease-out,\s*--drawer-open var\(--t-move\) ease-out;\s*$/u,
+    'the gate carries the only transition, on the factors, on --t-move');
+  assert.equal([...source.matchAll(/transition:[^;]*(?:grid-template-columns|width)/gu)].length, 0, 'no width or track-list transition anywhere');
+  for (const sel of ['.track', '.track:global(.pin-start)', '.track:global(.pin-end)']) {
+    assert.doesNotMatch(rule(sel), /transition|transform|animation/u, `${sel}: an xterm ancestor never moves itself`);
+  }
+  assert.match(rule('.track:global(.pin-start)'), /justify-self:\s*start/u);
+  assert.match(rule('.track:global(.pin-end)'), /justify-self:\s*end/u);
+  assert.match(rule('.hub-root:not(.compact) .cols'), /overflow:\s*hidden/u, 'the grid clips what the moving track has not uncovered yet');
+  assert.match(source, /@media \(prefers-reduced-motion: reduce\) \{[^\n]*\.cols:global\(\.moving\) \{ transition: none; \}/u, 'reduced motion = a cut');
+  // Open: rest state first (through the reading anchor), flush, pin at the
+  // FINAL width, then move from 0. Close: pin at the CURRENT width, rest
+  // state, move from 1, unmount after the move (the lead's amendment: a cut
+  // beside an animated open reads as a stutter).
+  assert.match(source, /await withReadingAnchor\(\(\) => \{ termOpen = true; \}\);\s*\n\s*hubPrefs\.setDrawer\(selected, drawerView\);\s*\n\s*await revealDrawer\(0\);/u, 'open: anchor → pin → move from 0');
+  assert.match(source, /const unpin = drawerTrackEl \? pinTrack\(drawerTrackEl, 'start'\) : null;\s*\n\s*drawerClosing = true;\s*\n\s*await withReadingAnchor\(\(\) => \{ termOpen = false; \}\);/u, 'close: pin first, then the rest state');
+  assert.match(source, /await moveTrack\(colsEl, '--drawer-open', 1\);\s*\n\s*drawerClosing = false;\s*\n\s*unpin\?\.\(\);/u, 'close: unmount only after the move');
+  assert.match(source, /const drawerShown = \$derived\(termOpen \|\| drawerClosing\);/u);
+  assert.match(source, /class:drawer-open=\{termOpen && !compact\}/u, 'the rest class follows the intent, not the mount');
 });
