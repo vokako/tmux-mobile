@@ -358,3 +358,33 @@ test('an image preview opens the one Lightbox; Back closes it; a trackpad pinch 
     assert.ok(app.document.querySelector('.lb'), 'the viewer takes the gesture');
   } finally { await app.close(); }
 });
+
+test('Back/Forward: the browser pair heads the path row, disabled at the ends (board #187)', async context => {
+  // Owner 2026-09-12: "文件夹浏览的能不能加一个类似浏览器后退前进的按钮，方便我跳转位置后快速回来".
+  const listed: string[] = [];
+  const app = await (await compiled).mount(context, { props: { visible: true, session: 'fixture' }, modules: [rpc({
+    fsList: async (path: string) => { listed.push(path); return { path, entries: path === '/fixture'
+      ? [{ name: 'docs', path: '/fixture/docs', type: 'dir', size: 0 }] : [] }; },
+  })] });
+  try {
+    await settle(app);
+    const back = () => button(app, 'Back'), fwd = () => button(app, 'Forward');
+    assert.ok(back().closest('.bc-path-row') && fwd().closest('.bc-path-row'), 'the pair lives at the head of the path row, not in the tools bar (#164 overflow)');
+    assert.equal(app.document.querySelectorAll('.toolbar button').length, 9, 'the tools bar is untouched');
+    assert.equal(back().disabled, true, 'nothing behind at the entry point');
+    assert.equal(fwd().disabled, true, 'nothing ahead');
+    app.document.querySelector<HTMLButtonElement>('.file-row .file-main')!.click();
+    await settle(app);
+    assert.equal(listed.at(-1), '/fixture/docs');
+    assert.equal(back().disabled, false, 'a step to retrace');
+    assert.equal(fwd().disabled, true);
+    back().click(); await settle(app);
+    assert.equal(listed.at(-1), '/fixture', 'Back retraces the step');
+    assert.equal(back().disabled, true);
+    assert.equal(fwd().disabled, false, 'the place we left is ahead');
+    fwd().click(); await settle(app);
+    assert.equal(listed.at(-1), '/fixture/docs', 'Forward returns there');
+    assert.equal(fwd().disabled, true);
+    assert.equal(back().disabled, false);
+  } finally { await app.close(); }
+});

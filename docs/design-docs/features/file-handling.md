@@ -350,6 +350,20 @@ share these stacks. `file-view-state.ts` still owns editor-exit and cwd-follow
 decisions. Files applies the results through its existing RPC, confirmation,
 motion, browser-history and DOM-scroll code.
 
+**Back has a Forward** (board #187, owner 2026-09-12: "文件夹浏览的能不能加一个
+类似浏览器后退前进的按钮，方便我跳转位置后快速回来"). The browser model, in
+`file-nav.ts`: `popDirectory(from)` pushes the place you leave onto a forward
+stack, `forwardDirectory(from)` pops it and makes that place a Back step
+again, `rememberDirectory` (any fresh navigation) clears Forward, and the
+resets clear both. The pair sits at the HEAD OF THE PATH ROW, beside the
+address as a browser keeps them — not in the tools bar, which already
+overflows at 390 (#164 measured nine tools; two more would push real tools
+into More) — as 28/44 CommandButtons disabled at their ends (`navTick` lets
+the reactive row follow the plain-state history); the crumbs scroll in their
+own strip (`.bc-scroll`) so the pair stays put. The shared Back (gesture,
+drawer, hardware) keeps calling the same `popDir`, so there is one history,
+not a second copy of it.
+
 This is a behavior-preserving extraction of the #106 implementation, not a
 new navigation model: linked origins precede Git/parent fallback, loaded text
 info first returns to its preview, directory Back retraces visits, and only

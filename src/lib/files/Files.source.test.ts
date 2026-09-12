@@ -23,7 +23,10 @@ test('back retraces the USER\u2019s steps — a history, not a parent walk (boar
   assert.ok(!source.includes('if (cwd !== \'/\') { goUp(); return true; }'),
     'the UNGATED history-pushing parent walk stays retired (goUp/navTo would bounce)');
   // External moves are new ENTRY POINTS, not steps: they reset the history.
-  const resets = source.split('fileNav.resetDirectories()').length - 1;
+  // (#187: the host's resetDirectories() wrapper is the one call into
+  // fileNav — it also ticks the toolbar's Back/Forward enablement.)
+  assert.equal(source.split('fileNav.resetDirectories()').length - 1, 1, 'one definition of the reset');
+  const resets = source.split('\n').filter(line => /^\s*resetDirectories\(\);/u.test(line)).length;
   assert.equal(resets, 3, 'session switch, cwd follow and directory handoff reset; a file reference keeps its origin (#106)');
   assert.doesNotMatch(source, /let (?:dirHist|fileHist|fileSeq)\b/u, 'history and request state live only in file-nav.ts');
 });
@@ -215,5 +218,5 @@ test('the path row scrolls; its segments never squash (board #185)', () => {
   // other. A segment keeps its width; the ROW is what moves.
   const seg = source.match(/\.bc-seg \{[^}]*\}/u)?.[0] ?? '';
   assert.match(seg, /flex-shrink: 0;/u, 'a breadcrumb segment never shrinks below its text');
-  assert.match(source, /\.bc-path-row \{[^}]*overflow-x: auto;/u, 'the row scrolls instead');
+  assert.match(source, /\.bc-scroll \{[^}]*overflow-x: auto;/u, 'the crumb strip scrolls instead');
 });

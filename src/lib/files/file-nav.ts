@@ -35,6 +35,9 @@ export function directoryBackFloor(cwd: string, jumped: boolean): string {
  * The host owns RPCs, confirmation, animation and applying DOM scroll offsets. */
 export function createFileNavigation<F extends FileReference = FileReference, E = unknown>() {
   let dirHist: string[] = [];
+  // The browser model (board #187): Back pushes where you WERE here; Forward
+  // pops it; any fresh navigation throws it away.
+  let dirFwd: string[] = [];
   let fileHist: FileLocation<F, E>[] = [];
   let fileSeq = 0;
 
@@ -47,10 +50,24 @@ export function createFileNavigation<F extends FileReference = FileReference, E 
 
   return {
     rememberDirectory(cwd: string, path: string): void {
-      if (cwd && path !== cwd) dirHist.push(cwd);
+      if (cwd && path !== cwd) { dirHist.push(cwd); dirFwd = []; }
     },
-    popDirectory(): string | undefined { return dirHist.pop(); },
-    resetDirectories(): void { dirHist = []; },
+    /** Back: the previous directory, or undefined at the start. `from` (where
+     * the user is now) becomes the Forward step. */
+    popDirectory(from = ''): string | undefined {
+      const prev = dirHist.pop();
+      if (prev != null && from) dirFwd.push(from);
+      return prev;
+    },
+    /** Forward: undoes the last Back; `from` becomes a Back step again. */
+    forwardDirectory(from = ''): string | undefined {
+      const next = dirFwd.pop();
+      if (next != null && from) dirHist.push(from);
+      return next;
+    },
+    canGoBack(): boolean { return dirHist.length > 0; },
+    canGoForward(): boolean { return dirFwd.length > 0; },
+    resetDirectories(): void { dirHist = []; dirFwd = []; },
     rememberFile(location: FileLocation<F, E>): void { fileHist.push(location); },
     resetFiles(): void { fileHist = []; },
     nextFile(): number { return ++fileSeq; },

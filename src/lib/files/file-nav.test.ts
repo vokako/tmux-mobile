@@ -108,3 +108,34 @@ test('two Files instances never share histories or request generations', () => {
   assert.equal(second.popDirectory(), undefined);
   assert.equal(second.nextFile(), 1);
 });
+
+test('Forward retraces a Back, and a new navigation clears it (board #187)', () => {
+  // Owner 2026-09-12: "文件夹浏览的能不能加一个类似浏览器后退前进的按钮，方便我跳转
+  // 位置后快速回来" — the browser model: Back pushes where you WERE onto a
+  // forward stack; Forward pops it (and the place you leave becomes Back
+  // again); any fresh navigation throws the forward stack away.
+  const nav = createFileNavigation();
+  assert.equal(nav.canGoBack(), false);
+  assert.equal(nav.canGoForward(), false);
+  nav.rememberDirectory('/a', '/b');
+  nav.rememberDirectory('/b', '/c');
+  assert.equal(nav.canGoBack(), true);
+  assert.equal(nav.canGoForward(), false);
+  assert.equal(nav.popDirectory('/c'), '/b', 'back from /c lands on /b');
+  assert.equal(nav.canGoForward(), true);
+  assert.equal(nav.forwardDirectory('/b'), '/c', 'forward returns to /c');
+  assert.equal(nav.canGoForward(), false);
+  assert.equal(nav.popDirectory('/c'), '/b', 'and /c is a Back step again');
+  assert.equal(nav.popDirectory('/b'), '/a');
+  assert.equal(nav.canGoBack(), false);
+  assert.equal(nav.forwardDirectory('/a'), '/b');
+  // A fresh navigation from the middle of the history discards forward.
+  nav.rememberDirectory('/b', '/x');
+  assert.equal(nav.canGoForward(), false);
+  assert.equal(nav.forwardDirectory('/x'), undefined);
+  assert.equal(nav.popDirectory('/x'), '/b');
+  // Resets clear both directions (a session switch is a new entry point).
+  nav.resetDirectories();
+  assert.equal(nav.canGoBack(), false);
+  assert.equal(nav.canGoForward(), false);
+});

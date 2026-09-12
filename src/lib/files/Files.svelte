@@ -538,16 +538,34 @@
       if (htmlPreviewEl?.contentDocument?.scrollingElement) htmlPreviewEl.contentDocument.scrollingElement.scrollTop = previous.frameScroll;
     });
   }
+  // fileNav is plain state; this tick lets the toolbar's Back/Forward
+  // enablement follow it (board #187).
+  let navTick = $state(0);
+  const canGoBack = $derived.by(() => { void navTick; return fileNav.canGoBack(); });
+  const canGoForward = $derived.by(() => { void navTick; return fileNav.canGoForward(); });
+  function resetDirectories() { fileNav.resetDirectories(); navTick++; }
   function navTo(path, slide = '') {
     fileNav.rememberDirectory(cwd, path);
+    navTick++;
     pendingSlide = slide;
     loadDir(path);
   }
   function popDir() {
-    const prev = fileNav.popDirectory();
+    const prev = fileNav.popDirectory(cwd);
+    navTick++;
     if (prev == null) return false;
     pendingSlide = 'back';
     loadDir(prev);
+    return true;
+  }
+  /** Forward undoes the last Back — the browser pair (board #187, owner:
+   * "类似浏览器后退前进的按钮，方便我跳转位置后快速回来"). */
+  function fwdDir() {
+    const next = fileNav.forwardDirectory(cwd);
+    navTick++;
+    if (next == null) return false;
+    pendingSlide = 'fwd';
+    loadDir(next);
     return true;
   }
 
@@ -622,7 +640,7 @@
       prevSession = session;
       const parked = browsed.get(session);
       lastSourceDir = parked?.sourceDir ?? '';
-      fileNav.resetDirectories(); // a session switch is a new entry point, not a step
+      resetDirectories(); // a session switch is a new entry point, not a step
       if (parked?.cwd) {
         // An unsaved editor holds the switch behind the discard dialog
         // (leaveEditor); the parked position is a hint, the text is not.
@@ -655,7 +673,7 @@
       leaveEditor(() => {
         cwd = r.path;
         view = 'list';
-        fileNav.resetDirectories(); // the follow rule moved us — a new entry point
+        resetDirectories(); // the follow rule moved us — a new entry point
         loadDir(r.path);
       });
     }).catch(() => {
@@ -689,7 +707,7 @@
       const to = navRequest.path;
       leaveEditor(() => {
         view = 'list';
-        fileNav.resetDirectories(); // a drawer/see-here handoff is a new entry point
+        resetDirectories(); // a drawer/see-here handoff is a new entry point
         loadDir(to);
       });
     }
@@ -1517,7 +1535,7 @@
       oncontextmenu={(event) => contextFile(event)}
       use:longpress={{ onlongpress: (point) => openFileMenu(point, 'directory') }}>
       {#each toolbarActions.slice(0, toolCount) as action (action.key)}
-        <CommandButton variant="icon" icon={action.icon} label={action.label} pending={!!action.pending}
+        <CommandButton variant="icon" icon={action.icon} label={action.label} pending={!!action.pending} disabled={!!action.disabled}
           pressed={action.pressed} expanded={action.expanded} controls={action.controls} onclick={action.run} />
       {/each}
       {#if toolCount < toolbarActions.length}
@@ -1528,14 +1546,23 @@
       {/if}
     </div>
 
-    <!-- Path -->
-    <div class="bc-path-row" bind:this={bcPathEl}>
+    <!-- Path. The browser pair sits at its head, beside the address as a
+         browser keeps them (board #187, owner: "类似浏览器后退前进的按钮，方便我
+         跳转位置后快速回来") — not in the tools bar, which already overflows at
+         390 (#164). Back retraces the user's steps (#17), Forward undoes a
+         Back; both rest disabled at their end. The crumbs scroll in their own
+         strip so the pair stays put. -->
+    <div class="bc-path-row">
+      <CommandButton variant="icon" icon="arrow-left" label={t('back')} disabled={!canGoBack} onclick={popDir} />
+      <CommandButton variant="icon" icon="arrow-right" label={t('forward')} disabled={!canGoForward} onclick={fwdDir} />
+      <div class="bc-scroll" bind:this={bcPathEl}>
       <button class="bc-seg" onclick={() => navTo('/', 'back')}>/</button>
       {#each breadcrumbs as bc, i (bc.path)}
         <button class="bc-seg" class:appear={i === breadcrumbs.length - 1} onclick={() => navTo(bc.path, 'back')}
           use:hoverInfo={() => ({ title: bc.name, text: bc.path })}>{bc.name}</button>
         <span class="bc-sep">/</span>
       {/each}
+      </div>
     </div>
 
     {#if showBookmarks}
@@ -1909,11 +1936,17 @@
 
   /* Path row */
   .bc-path-row {
-    display: flex; align-items: center; gap: 1px; padding: 4px 10px;
-    overflow-x: auto; font-size: var(--fs-ui); font-family: var(--font-mono);
-    scrollbar-width: none; border-bottom: 1px solid var(--border2); flex-shrink: 0;
+    display: flex; align-items: center; gap: 4px; padding: 4px 10px;
+    font-size: var(--fs-ui); font-family: var(--font-mono);
+    border-bottom: 1px solid var(--border2); flex-shrink: 0;
   }
-  .bc-path-row::-webkit-scrollbar { display: none; }
+  /* The crumbs' own strip: it scrolls (to its tail after every navigation);
+     the Back/Forward pair before it stays put. */
+  .bc-scroll {
+    display: flex; align-items: center; gap: 1px; flex: 1; min-width: 0;
+    overflow-x: auto; scrollbar-width: none;
+  }
+  .bc-scroll::-webkit-scrollbar { display: none; }
   /* A segment keeps its width — the ROW scrolls (to its tail, see the
      breadcrumbs effect). An explicit min-width replaces a flex item's
      automatic min-content floor, so without flex-shrink: 0 every segment
