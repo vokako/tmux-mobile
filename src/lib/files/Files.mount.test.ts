@@ -259,6 +259,127 @@ function menuAction(app: App, label: string) {
   assert.ok(element, `context action: ${label}`); return element;
 }
 
+async function copyRow(app: App, index = 0) {
+  contextMenu(app, app.document.querySelectorAll('.file-row')[index]!);
+  await app.flush();
+  menuAction(app, 'Copy path').click();
+  await settle(app);
+}
+const copySuccess = (app: App) => [...app.document.querySelectorAll('.copy-toast, [role=status]')]
+  .some(node => node.textContent?.trim() === 'Copied');
+
+for (const copied of [true, false]) {
+  test(`Files copy ${copied ? 'success has no actions' : 'error has a working Close'} (#167 review)`, async context => {
+    const app = await (await compiled).mount(context, {
+      props: { visible: true, session: 'fixture' }, modules: [rpc()],
+      setup(window) {
+        window.document.execCommand = () => false;
+        Object.defineProperty(window.navigator, 'clipboard', { value: {
+          writeText: async () => { if (!copied) throw Error('denied'); },
+        } });
+      },
+    });
+    try {
+      await settle(app); await copyRow(app);
+      const feedback = app.document.querySelector('.operation-feedback')!;
+      assert.ok(feedback);
+      assert.equal(feedback.querySelectorAll('.feedback-actions').length, copied ? 0 : 1);
+      if (!copied) {
+        button(app, 'Close').click(); await settle(app);
+        assert.equal(app.document.querySelector('.operation-feedback'), null);
+      }
+    } finally { await app.close(); }
+  });
+}
+
+test('Files download progress has no dismissal/action slot; failure has Close (#167 review)', async context => {
+  const pending = deferred<object>();
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, session: 'fixture' },
+    modules: [rpc({ fsDownloadHttp: () => pending.promise })],
+  });
+  try {
+    await settle(app); button(app, 'Download: AGENTS.md').click(); await settle(app);
+    assert.equal(app.document.querySelector('.operation-feedback .feedback-actions'), null,
+      'hiding progress is not cancellation and must not be offered');
+    pending.reject(Error('download failed')); await settle(app);
+    const feedback = app.document.querySelector('.operation-feedback');
+    assert.match(feedback?.textContent ?? '', /download failed/);
+    assert.equal(feedback?.querySelectorAll('button').length, 1, 'no empty Open action');
+    button(app, 'Close').click(); await settle(app);
+    assert.equal(app.document.querySelector('.operation-feedback'), null);
+  } finally { pending.reject(Error('fixture closed')); await app.close(); }
+});
+
+test('old copy completion cannot replace a newer failed copy (#167)', async context => {
+  const old = deferred<void>();
+  let calls = 0;
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, session: 'fixture' }, modules: [rpc()],
+    setup(window) {
+      window.document.execCommand = () => false;
+      Object.defineProperty(window.navigator, 'clipboard', { value: {
+        writeText: () => ++calls === 1 ? old.promise : Promise.reject(Error('denied')),
+      } });
+    },
+  });
+  try {
+    await settle(app);
+    await copyRow(app);
+    await copyRow(app, 1);
+    old.resolve(); await settle(app);
+    assert.equal(copySuccess(app), false, 'A success must not replace B failure');
+    assert.match(app.document.body.textContent ?? '', /Copy failed/);
+    await app.advance(10000);
+    assert.match(app.document.body.textContent ?? '', /Copy failed/, 'errors persist');
+  } finally { old.resolve(); await app.close(); }
+});
+
+test('copy success expires at 1500ms and its old expiry cannot clear a newer completion (#167)', async context => {
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, session: 'fixture' }, modules: [rpc()],
+    setup(window) {
+      Object.defineProperty(window.navigator, 'clipboard', { value: { writeText: async () => {} } });
+    },
+  });
+  try {
+    await settle(app);
+    await copyRow(app);
+    await app.advance(1000);
+    await copyRow(app, 1);
+    await app.advance(500);
+    assert.equal(copySuccess(app), true, 'A expiry leaves B visible');
+    await app.advance(999);
+    assert.equal(copySuccess(app), true, 'B retains the full completion lifetime');
+    await app.advance(1);
+    assert.equal(copySuccess(app), false);
+  } finally { await app.close(); }
+});
+
+for (const outcome of ['success', 'failure'] as const) {
+  test(`copy ${outcome} from a hidden Files context never reappears (#167)`, async context => {
+    const old = deferred<void>();
+    let update!: (next: Record<string, unknown>) => void;
+    const app = await (await compiled).mount(context, {
+      props: { visible: true, session: 'fixture', register: (fn: typeof update) => { update = fn; } },
+      modules: [rpc()],
+      setup(window) {
+        window.document.execCommand = () => false;
+        Object.defineProperty(window.navigator, 'clipboard', { value: { writeText: () => old.promise } });
+      },
+    });
+    try {
+      await settle(app); await copyRow(app);
+      update({ visible: false }); await settle(app);
+      update({ visible: true }); await settle(app);
+      if (outcome === 'success') old.resolve(); else old.reject(Error('denied'));
+      await settle(app);
+      assert.equal(copySuccess(app), false);
+      assert.doesNotMatch(app.document.body.textContent ?? '', /Copy failed/);
+    } finally { old.resolve(); await app.close(); }
+  });
+}
+
 test('measured overflow retains the same trailing disclosure action and controlled state (#164)', async context => {
   const app = await (await compiled).mount(context, {
     props: { visible: true, session: 'fixture' }, modules: [rpc()],
@@ -385,7 +506,7 @@ test('Copy path cannot report success when both clipboard paths fail (#164)', as
     await settle(app);
     contextMenu(app, app.document.querySelector('.file-row')!); await app.flush();
     menuAction(app, 'Copy path').click(); await settle(app);
-    assert.equal(app.document.querySelector('.copy-toast'), null);
+    assert.equal(copySuccess(app), false);
     assert.match(app.document.body.textContent ?? '', /Copy failed/);
   } finally { await app.close(); }
 });

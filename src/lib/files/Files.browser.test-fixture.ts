@@ -4,7 +4,9 @@ import '../../app.css';
 // Browser-only test fixture: real Files, editor/highlighter and ConfirmDialog; only transport boundaries
 // are fake. Every unlisted call throws. No compileMount guard is overridden.
 const scenario = new URLSearchParams(location.search).get('case') || 'dirty';
-if (scenario.includes('local')) Object.assign(window, { __TAURI_INTERNALS__: {} });
+const feedback = scenario.startsWith('feedback');
+if (scenario.includes('local') || (feedback && scenario !== 'feedback-browser')) Object.assign(window, { __TAURI_INTERNALS__: {} });
+if (scenario === 'feedback-android') Object.defineProperty(navigator, 'userAgent', { value: 'Android controlled fixture' });
 const entries = [
   { name: 'AGENTS.md', path: '/fixture/AGENTS.md', type: 'file', size: 100 },
   { name: 'next.md', path: '/fixture/next.md', type: 'file', size: 100 },
@@ -35,22 +37,61 @@ const rpc: Record<string, (...args: any[]) => unknown> = {
   gitCmd: async () => ({ code: 0, stdout: '.git' }),
   fsDelete: (path: string) => { deletes.push(path); return pending; },
 };
+const requests: { kind: string; args: unknown[]; resolve: (value: any) => void; reject: (error: Error) => void }[] = [];
+const streams = new Map<string, ReadableStreamDefaultController<Uint8Array>>();
+const gate = (kind: string, args: unknown[]) => new Promise((resolve, reject) => requests.push({ kind, args, resolve, reject }));
+let nativeOpenResult = 'ok';
+const opened: string[] = [];
+if (feedback) {
+  rpc.fsDownloadHttp = (...args) => gate('sign', args);
+  rpc.fsDownload = (...args) => gate('fallback', args);
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText: (...args: unknown[]) => gate('copy', args) } });
+  document.execCommand = () => false;
+  Object.assign(window, { AndroidFileOpener: {
+    ping: () => 'ok', openFile: (path: string) => { opened.push(path); return nativeOpenResult; },
+  } });
+}
 Object.assign(window, { filesFixture: {
   rpc(name: string, args: unknown[]) { return (rpc[name] ?? (() => fail(`Unexpected RPC: ${name}`)))(...args); },
   invoke(name: string, args?: { name: string }) {
     if (name === 'list_downloads') return Promise.resolve([{ name: 'copy.md', modified: 0 }]);
     if (name === 'delete_download') { deletes.push(args!.name); return pending; }
+    if (feedback && name === 'save_to_downloads') return gate('android-save', [args]);
     return fail(`Unexpected IPC: ${name}`);
   },
+  native(name: string, args: unknown[]) {
+    if (feedback && ['save', 'writeFile', 'openPath'].includes(name)) return gate(name, args);
+    return fail(`Unexpected native call: ${name}`);
+  },
+  get requests() { return requests.map(({ kind, args }) => ({ kind, args })); },
+  complete(index: number, value: unknown) { requests[index]!.resolve(value); },
+  reject(index: number, message: string) { requests[index]!.reject(Error(message)); },
+  chunk(url: string, bytes: number[] | null) {
+    const controller = streams.get(url);
+    check(controller, `Missing stream: ${url}`);
+    if (bytes === null) controller.close(); else controller.enqueue(new Uint8Array(bytes));
+  },
+  update(props: Record<string, unknown>) { update(props); },
+  setNativeOpen(result: string) { nativeOpenResult = result; },
+  opened,
+  settle,
   get result() { return result; }, errors,
 } });
 window.addEventListener('error', event => errors.push(String(event.error)));
 window.addEventListener('unhandledrejection', event => errors.push(String(event.reason)));
-window.fetch = () => fail('Unexpected fetch');
+window.fetch = feedback ? async input => {
+  const url = String(input);
+  check(url.startsWith('/controlled-download/'), `Unexpected fetch: ${url}`);
+  const total = new URL(url, location.href).searchParams.get('total');
+  return new Response(new ReadableStream<Uint8Array>({ start(controller) { streams.set(url, controller); } }),
+    { headers: total ? { 'Content-Length': total } : {} });
+} : () => fail('Unexpected fetch');
 if (scenario === 'dirty' || scenario === 'discard') localStorage.setItem('tmux_layout_mode', 'desktop');
 localStorage.setItem('tmux_locale', 'en');
 document.documentElement.dataset.theme = new URLSearchParams(location.search).get('theme') || 'dark';
 document.body.style.height = '100vh';
+document.body.style.display = 'flex';
+document.body.style.flexDirection = 'column';
 const { default: Files } = await import('./Files.test.svelte');
 const app = mount(Files, { target: document.body, props: {
   visible: true, session: 'fixture',
@@ -59,6 +100,7 @@ const app = mount(Files, { target: document.body, props: {
 } });
 async function run() {
   await settle();
+  if (feedback) return;
   if (scenario.includes('local')) {
     const downloads = document.querySelector<HTMLButtonElement>('[aria-label="Downloads"]');
     if (downloads) downloads.click();

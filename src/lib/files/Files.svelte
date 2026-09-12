@@ -14,6 +14,8 @@
   import CommandButton from '../ui/CommandButton.svelte';
   import Segmented from '../ui/Segmented.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
+  import OperationFeedback from '../ui/OperationFeedback.svelte';
+  import { createFeedbackLifetime } from '../ui/feedback-lifetime.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { longpress } from '../ui/longpress.ts';
   import Lightbox from '../ui/Lightbox.svelte';
@@ -351,7 +353,7 @@
   let toolbarBox = $state({ width: 0, target: 0, gap: 0 });
   const rowHandlers = {
     open: (entry) => { const target = { ...entry }; leaveEditor(() => openEntry(target)); },
-    copy: (path) => copyPath(path).catch(e => { error = e.message; }),
+    copy: copyPath,
     download: handleDownload,
     rename: (entry) => { renaming = entry.path; renameValue = entry.name; },
     remove: (path) => requestAct({ kind: 'file', path }),
@@ -1119,30 +1121,49 @@
     } catch (e) { error = e.message; }
   }
 
-  let downloadToast = $state('');
-  let downloadedPath = $state('');
-  let downloading = $state('');
-  // Real progress 0–100, driven by the byte counter in fetchBytes (0–95)
-  // and the final write step (95–100). No more synthetic timer that always
-  // hovered at 80% — that was the user-visible "stuck at 80%" bug.
-  let dlProgress = $state(0);
-  let displayedDlProgress = $derived(Math.max(0, Math.min(100, Math.round(dlProgress))));
+  let copyFeedback = $state(null);
+  let downloadFeedback = $state(null);
+  let downloadOperation = $state.raw(null);
+  let downloadOutput = $state(null);
+  const copyLifetime = createFeedbackLifetime(value => { copyFeedback = value; });
+  const downloadLifetime = createFeedbackLifetime(value => { downloadFeedback = value; });
 
-  async function openDownloaded() {
-    if (!downloadedPath) return;
+  function feedbackContext() {
+    const context = { session, root, cwd, view, file: currentFile?.path, request: navRequest };
+    return () => alive && visible && session === context.session && root === context.root
+      && cwd === context.cwd && view === context.view && currentFile?.path === context.file
+      && navRequest === context.request;
+  }
+  $effect(() => {
+    // Context exits invalidate pending callbacks even if the same path reopens.
+    session; root; cwd; view; currentFile?.path; navRequest; visible;
+    return () => { copyLifetime.clear(); dismissDownload(); };
+  });
+  $effect(() => () => { copyLifetime.dispose(); downloadLifetime.dispose(); });
+
+  async function openDownloaded(output) {
+    if (!output || output !== downloadOutput || !output.operation.current() || output.opening) return;
+    const { path, operation } = output;
+    output.opening = true;
     try {
       if (isAndroid) {
-        await openFileNative(downloadedPath);
+        await openFileNative(path);
       } else if (isTauri) {
         await tauriPlugins;
-        await tauriOpener.openPath(downloadedPath);
+        await tauriOpener.openPath(path);
       }
-      dismissDownload();
-    } catch (e) { error = t('openFailed') + (e.message || e); }
+      dismissDownload(operation);
+    } catch (e) {
+      if (operation.current()) downloadLifetime.update(operation.token,
+        { kind: 'error', message: t('openFailed') + (e.message || e), detail: path });
+    } finally { output.opening = false; }
   }
 
-  function dismissDownload() {
-    downloadToast = ''; downloadedPath = ''; downloading = ''; dlProgress = 0;
+  function dismissDownload(operation = null) {
+    if (operation && !operation.current()) return;
+    downloadLifetime.clear();
+    downloadOutput = null;
+    downloadOperation = null;
   }
 
   // Stream one HTTP response body into `chunks`, counting bytes. A stall
@@ -1260,9 +1281,23 @@
 
   async function handleDownload(path) {
     const name = path.split('/').pop();
+    const token = downloadLifetime.begin();
+    const contextCurrent = feedbackContext();
+    const operation = { token, current: () => downloadLifetime.current(token) && contextCurrent() };
+    downloadOperation = operation;
+    downloadOutput = null;
+    const progress = (fraction = null, message = t('downloading')) => {
+      if (operation.current()) downloadLifetime.update(token,
+        { kind: 'progress', message, detail: path,
+          progress: fraction == null ? null : fraction * 100 });
+    };
+    const completed = (savedPath) => {
+      if (!operation.current()) return;
+      downloadOutput = { path: savedPath, operation, opening: false };
+      downloadLifetime.update(token, { kind: 'result', message: t('saved'), detail: savedPath });
+    };
+    progress();
     try {
-      downloading = name;
-      dlProgress = 0;
       window.__dbg?.(`dl: start ${name}`);
       const t0 = Date.now();
       const dlInfo = await fsDownloadHttp(path);
@@ -1270,21 +1305,13 @@
 
       // Pull the bytes. Same shape regardless of platform; downstream code
       // either writes via Tauri fs/invoke or triggers a browser download.
-      // Progress 0..0.95 is reserved for fetch; 0.95..1.00 for write.
       let bytes;
       if (dlInfo.url) {
         // freshUrl re-signs on each retry: the /dl signature has a 60 s TTL,
         // so resuming a long transfer needs a new URL, not the original.
         const freshUrl = () => fsDownloadHttp(path).then(info => info.url);
         try {
-          bytes = await fetchWithResume(dlInfo.url, freshUrl, (frac) => {
-            if (frac == null) {
-              // Indeterminate: tick a slow ramp so the bar isn't motionless.
-              if (dlProgress < 90) dlProgress = Math.min(90, dlProgress + 1);
-            } else {
-              dlProgress = Math.round(frac * 95);
-            }
-          });
+          bytes = await fetchWithResume(dlInfo.url, freshUrl, progress);
         } catch (e) {
           if (e.code !== 'DL_HTTP_UNREACHABLE') throw e;
           // The WS connection demonstrably works (we just got the signed
@@ -1295,16 +1322,15 @@
           const r = await fsDownload(path);
           bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
         }
-        dlProgress = 95;
       } else {
         // wss:// fallback path: we got base64 over WS RPC. No progress to
-        // report mid-decode; jump straight to "fetched".
+        // report mid-decode.
         bytes = Uint8Array.from(atob(dlInfo.base64), c => c.charCodeAt(0));
-        dlProgress = 95;
       }
       window.__dbg?.(`dl: fetched ${(bytes.length/1024|0)}KB in ${Date.now()-t0}ms`);
 
-      // Write phase. dlProgress runs 95→100 as the write completes.
+      // There is no measured write fraction. Only transfer bytes report a percentage.
+      progress(null, t('saving'));
       if (isTauri && tauriFs) {
         await tauriPlugins;
         if (isAndroid) {
@@ -1313,30 +1339,18 @@
           // Rust base64-decode, which dominated download time on Android
           // (FileReader.readAsDataURL is a main-thread allocation of 4n/3
           // bytes in addition to the n raw bytes the response already used).
-          dlProgress = 96;
           const { invoke } = await import('@tauri-apps/api/core');
           const filePath = await invoke('save_to_downloads', { name, data: bytes });
           window.__dbg?.(`dl: saved → ${filePath}`);
-          dlProgress = 100;
-          await new Promise(r => setTimeout(r, 300));
-          downloading = '';
-          downloadedPath = filePath;
-          downloadToast = filePath;
-          setTimeout(() => { if (downloadToast === filePath) dismissDownload(); }, 10000);
+          completed(filePath);
           return;
         }
         // macOS / desktop: prompt for save location.
         const savePath = await tauriDialog.save({ defaultPath: name });
-        if (!savePath) { downloading = ''; dlProgress = 0; return; }
-        dlProgress = 96;
+        if (!savePath) { dismissDownload(operation); return; }
         await tauriFs.writeFile(savePath, bytes);
         window.__dbg?.(`dl: saved → ${savePath}`);
-        dlProgress = 100;
-        await new Promise(r => setTimeout(r, 300));
-        downloading = '';
-        downloadedPath = String(savePath);
-        downloadToast = downloadedPath;
-        setTimeout(() => { if (downloadToast === downloadedPath) dismissDownload(); }, 10000);
+        completed(String(savePath));
         return;
       }
       // Plain browser: trigger a tag-based download.
@@ -1347,15 +1361,12 @@
       document.body.appendChild(a);
       a.click();
       setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(blobUrl); }, 100);
-      dlProgress = 100;
-      await new Promise(r => setTimeout(r, 300));
-      downloading = '';
-      downloadToast = 'Downloaded';
-      setTimeout(() => downloadToast = '', 2000);
+      if (operation.current()) downloadLifetime.update(token,
+        { kind: 'success', message: t('downloadRequested'), detail: name });
     } catch (e) {
-      downloading = ''; dlProgress = 0;
       window.__dbg?.(`dl: FAILED ${e.message}`);
-      error = e.message;
+      if (operation.current()) downloadLifetime.update(token,
+        { kind: 'error', message: String(e.message || e), detail: path });
     }
   }
 
@@ -1520,13 +1531,14 @@
     return () => { dead = true; dragOver = false; unlisten?.(); };
   });
 
-  let copyToast = $state(false);
-  let copyTimer;
   async function copyPath(path) {
-    if (!await copyText(path)) { error = t('copyFailed'); return; }
-    clearTimeout(copyTimer);
-    copyToast = true;
-    copyTimer = setTimeout(() => copyToast = false, 1200);
+    const token = copyLifetime.begin();
+    const currentContext = feedbackContext();
+    const copied = await copyText(path);
+    if (!currentContext()) return;
+    copyLifetime.update(token, copied
+      ? { kind: 'success', message: t('copied') }
+      : { kind: 'error', message: t('copyFailed') });
   }
 
   function formatSize(bytes) {
@@ -1914,28 +1926,20 @@
     {:else if view === 'git'}<GitPanel bind:this={gitPanelRef} {cwd} {fontSize} onOpenFile={(entry) => { fromGit = true; openEntry(entry); }} onClose={() => { view = 'list'; }} />
     {/if}
   {/if}
-  {#if copyToast}
-    <div class="copy-toast flash">{t('copied')}</div>
-  {/if}
-  {#if downloading}
-    <div class="copy-toast download-toast appear-rise">
-      <svg class="dl-ring" width="28" height="28" viewBox="0 0 28 28">
-        <circle cx="14" cy="14" r="11" fill="none" stroke="var(--border)" stroke-width="2.5" />
-        <circle cx="14" cy="14" r="11" fill="none" stroke="var(--accent)" stroke-width="2.5"
-          transform="rotate(-90 14 14)"
-          stroke-dasharray={2 * Math.PI * 11}
-          stroke-dashoffset={2 * Math.PI * 11 * (1 - displayedDlProgress / 100)} />
-      </svg>
-      <span class="dl-pct">{displayedDlProgress}%</span>
-      <span class="dl-name">{downloading}</span>
-    </div>
-  {:else if downloadToast}
-    <div class="copy-toast download-toast appear-rise">
-      {t('saved')} <span class="dl-path">{downloadToast}</span>
-      {#if downloadedPath}
-        <CommandButton label={t('open')} onclick={openDownloaded} />
+  {#if copyFeedback || downloadFeedback}
+    {@const operation = downloadOperation}
+    {@const output = downloadOutput}
+    {#snippet downloadActions()}
+      {#if output}
+        <CommandButton icon="file" label={t('open')} pending={output.opening} onclick={() => openDownloaded(output)} />
       {/if}
-      <CommandButton variant="icon" icon="x" label={t('close')} onclick={dismissDownload} />
+    {/snippet}
+    <div class="files-feedback">
+      <OperationFeedback value={copyFeedback}
+        ondismiss={copyFeedback?.kind === 'error' ? copyLifetime.clear : undefined} />
+      <OperationFeedback value={downloadFeedback} actions={output ? downloadActions : undefined}
+        ondismiss={downloadFeedback?.kind === 'error' || downloadFeedback?.kind === 'result'
+          ? () => dismissDownload(operation) : undefined} />
     </div>
   {/if}
 </div>
@@ -2203,46 +2207,9 @@
   }
   .info-path:active { color: var(--accent); }
 
-  /* Copy / download toasts. Centred with auto margins, NOT a translateX(-50%):
-     the rise-in intro owns `transform`, and a resting transform here would
-     be overridden for the 200ms it plays. */
-  .copy-toast {
-    position: absolute; bottom: 80px; left: 0; right: 0; margin: 0 auto; width: max-content; max-width: 90%;
-    box-sizing: border-box;
-    background: var(--bg); border: 1px solid var(--border); color: var(--accent); padding: 8px 20px;
-    border-radius: var(--ui-radius-row); font-size: var(--fs-body); font-weight: 500;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.3); pointer-events: none;
-  }
-  /* The one-shot "Copied" flash fades in AND out — a local keyframe because it
-     is an in+out one-shot, not an intro atom. */
-  .copy-toast.flash { animation: toast-fade 1.2s ease forwards; }
-  .download-toast {
-    pointer-events: auto; display: flex; align-items: center; gap: 8px;
-    font-size: var(--fs-ui);
-  }
-  .dl-path {
-    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    direction: rtl; text-align: left; min-width: 0;
-    font-family: var(--font-mono); font-size: var(--fs-sub); color: var(--text2);
-  }
-  .dl-ring { flex-shrink: 0; }
-  /* No transition on the progress arc — it must track the displayed integer
-     percentage exactly. Square arc ends avoid the extra visual length that
-     rounded caps add at both ends, especially below 10%.
-     A `transition: stroke-dashoffset` made the arc lag the % number on fast
-     (LAN) downloads: the number would read 94% while the arc was still easing
-     through ~1/3. The two are now always in sync. */
-  .dl-pct {
-    font-family: var(--font-mono); font-size: var(--fs-sub);
-    font-weight: 600; color: var(--accent); min-width: 30px;
-  }
-  .dl-name {
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
-  }
-  @keyframes toast-fade {
-    0% { opacity: 0; }
-    10%, 60% { opacity: 1; }
-    100% { opacity: 0; }
+  .files-feedback {
+    display: flex; flex: none; flex-direction: column; gap: var(--ui-gap);
+    min-width: 0; padding: var(--ui-gap);
   }
   @media (prefers-reduced-motion: reduce) {
     .file-list { transition: none; }

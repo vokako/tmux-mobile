@@ -4,6 +4,16 @@ import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('./Files.svelte', import.meta.url), 'utf8');
 
+test('copy and download feedback share the UI owner and never restore private toast/ring chrome (#167)', () => {
+  // The slots may coexist, but two absolutely positioned toasts overlapped.
+  // OperationFeedback owns paint; Files only composes a single in-flow stack.
+  assert.match(source, /import OperationFeedback from '\.\.\/ui\/OperationFeedback\.svelte'/u);
+  assert.match(source, /import \{ createFeedbackLifetime \} from '\.\.\/ui\/feedback-lifetime\.ts'/u);
+  assert.equal(source.match(/<OperationFeedback /gu)?.length, 2);
+  assert.match(source, /\.files-feedback \{[^}]*flex-direction: column/u);
+  assert.doesNotMatch(source, /copyToast|copyTimer|downloadToast|downloadedPath|dlProgress|displayedDlProgress|copy-toast|download-toast|dl-ring|toast-fade/u);
+});
+
 test('back retraces the USER\u2019s steps — a history, not a parent walk (board #17)', () => {
   // Every user navigation pushes where they WERE…
   assert.match(source, /function navTo\(path, slide = ''\) \{\s*\n\s*fileNav\.rememberDirectory\(cwd, path\);/u,

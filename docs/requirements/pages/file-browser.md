@@ -122,10 +122,16 @@ Both rules are implemented once in `src/lib/files/persisted-list.ts`
   document, since iframe click events cannot reach App
 - Android downloads go to `/storage/emulated/0/Download/TmuxMobile/`, opened via FileProvider + Intent
 - Android's downloaded-files list is sorted by filesystem modification time descending (newest first)
-- Download progress ring and label use the same clamped integer percentage; the ring has exact, non-rounded endpoints
+- Download feedback uses the shared presentation; a measured transfer reports
+  an integer byte percentage, while unknown totals and writing are indeterminate
+  (#167, 2026-09-12). No synthetic percentage or delayed completion flash.
+- A native saved-file result keeps Open/Close until acted on or its context
+  exits; a browser download request uses the ordinary short completion notice
+  without claiming the file was saved.
 - Android file opening uses the `AndroidFileOpener` JS interface injected before initial page load by `onWebViewCreate`, NOT `tauri-plugin-opener`
 - Android reattaches and health-checks the file opener after app resume; a failed download-complete Open remains retryable
 - Filenames sanitized server-side (`sanitize_filename()`) to prevent path traversal
-- Error states (downloading, uploading) always reset in catch blocks
+- Failed transfers leave pending state and expose their error; a stale
+  completion cannot replace the feedback for a newer operation or context.
 - Git arguments are passed directly as argv, not through a shell; log format separators such as `|` are valid argument data
 - Every git verb (stage, unstage, add all, commit, push) reports its outcome in the same 3-second banner under the panel header; a failure shows `✗ ` + git's stderr (or the exit code when stderr is empty) — a failing stage never looks like a button that did nothing

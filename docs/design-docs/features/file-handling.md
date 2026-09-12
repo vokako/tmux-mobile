@@ -8,6 +8,68 @@ Base64 encoding for small file transfer (previews), streaming HTTP for large-fil
 
 ## Key Decisions
 
+### Copy and download feedback belongs to its attempt (#167 batch 2, 2026-09-12)
+
+The old Files copy completion had no context or attempt identity. A late
+success could replace a newer failure or appear after Files reopened.
+Downloads shared mutable progress/result fields: A's completion or expiry
+could clear B, and an awaited Open used the live output path. Two absolute
+toast boxes occupied the same space.
+
+Files now owns two `createFeedbackLifetime` slots in ONE unframed, in-flow
+vertical stack of `OperationFeedback`. Copy cannot displace a download's
+Open action. Only `success` expires, using the shared
+`COMPLETION_FEEDBACK_MS` (1500ms); copy still checks the clipboard helper's
+boolean. Pending/error states persist. A saved native file is `result`, not
+an expiring success: Open/Close or context exit consumes it. Failed Open
+retains that exact output path and remains retryable.
+
+Review correction: `Copied`, ordinary browser download success and progress
+have no Close action or empty action slot. Hiding progress without cancelling
+its transfer would misrepresent an operation that is still running.
+Copy errors offer Close; download errors/results offer Close, and only an
+actual saved output supplies Open. Open's per-output `opening` state is
+reactive and drives the shared command's pending/disabled affordance.
+An older Open's completion, error or `finally` cannot dismiss a newer result
+or clear that output's pending state. Byte transfer reads `Downloading`;
+once bytes are ready, the indeterminate picker/write phase reads `Saving`.
+The browser's `a.click()` only requests a download, so its expiring success
+notice reads `Download requested`, never `Saved`. Only a confirmed native
+write earns `Saved` and the persistent Open/Close result.
+
+Each attempt captures session, declared root, directory, view, file path
+and navigation request. Context exit clears both slots; hidden/reopened
+contexts cannot revive an old attempt. Progress, completion, expiry and
+Open callbacks may update only their current slot. The path passed at the
+download gesture and the output passed at the Open gesture remain fixed
+through awaits. A new feedback owner does NOT cancel any requested download:
+all byte transfer and save operations still finish independently.
+
+Numeric progress means actual received bytes divided by known total bytes.
+Unknown Content-Length and the write/picker phase are indeterminate, with
+no synthetic ramp, 95/96% allocation, 300ms visual wait or 10s/2s expiry.
+The existing stall/retry/signature refresh, Range handling, HTTP fallback,
+base64 decoding and native byte-write paths are unchanged. Android still
+uses `save_to_downloads` and `AndroidFileOpener`, never the desktop opener.
+The old private toast, progress ring and `toast-fade` keyframe are removed.
+
+Verification: seven new strict mount cases reproduce copy ordering, full
+1500ms expiry, hidden-context success/failure and dismissal/action-slot
+policy; the existing false-copy case checks the live shared success surface.
+Chromium 152.0.7977.64 passes 21 controlled scenarios in each of 1280x800 pointer and 390x844
+touch, light/dark (the light touch run also uses reduced motion). These
+cover stale download progress/failure/completion, cancelled old save,
+result persistence, unknown/measured/write progress, stale Open success
+and failure, context exit, both copy races, nonoverlapping slots, real phase
+labels, action-slot policy, visible Open pending/retry and old Open
+success/failure settling while the newer output is itself pending.
+Desktop write and Android save/Open are transport mocks with byte/path
+assertions, not native device or system-clipboard acceptance. Replacing
+the captured copy token with a new token at completion makes the
+old-success/new-failure mount case fail; restoring only `$state.raw` for
+the output makes the Open-pending browser case fail. The transport
+functions remain byte-for-byte equal to `bb565308`.
+
 ### Confirmation owns the operation, not the refresh (#167 batch 1, 2026-09-12)
 
 Files' deletion helpers caught RPC/IPC errors and resolved normally, so the
@@ -461,19 +523,16 @@ rows on screen and dims them (`.file-list.busy`, opacity 0.55) only after a
 "Loading…" placeholder appears only for the very first answer; GitPanel's
 lists do the same. Things that enter animate: the bookmarks/recent panel, the
 new-item/rename rows and the commit row `.appear-rise`; the drop hint, the
-error banners and the push-result banner `.appear`; the download toasts rise
-in, and the "Copied" flash is one local in+out keyframe (`toast-fade`, fade in
-over 10%, hold, fade out) because it is a one-shot, not an intro atom. The
-toasts centre with auto margins rather than `translateX(-50%)` so the intro
-owns `transform`. The bookmark star changes its glyph and shared pressed-state
+error banners and the push-result banner `.appear`. Copy/download feedback
+uses the shared `OperationFeedback` surface and lifetime; Files declares no
+private feedback animation. The bookmark star changes its glyph and shared pressed-state
 paint without the former private pop animation (#157); its box never changes.
 Breadcrumbs are keyed by path
 and only the tip fades in. Git status rows are keyed by file and flip on
 `moveMs()`; the git diff drills in from the right and the list back from the
 left under 760px with the app.css `drill-in-*` keyframe pair (one copy: a
 component references a global keyframe by name; only a LOCAL `@keyframes`
-gets scoped). The progress arc is still not transitioned (it
-tracks the integer). Exits everywhere are cuts.
+gets scoped). Exits everywhere are cuts.
 
 Hover / unfold / highlight (#86, 2026-09-04): a file row's hover card
 (`use:hoverInfo` on `.file-main`, principle 16) shows kind (folder / file /
@@ -501,6 +560,6 @@ the ONE travelling highlight (`use:slideIndicator` + `.slide-pill`): the pill
 glides, the buttons only change colour.
 
 ## Lessons Learned
-- Always reset loading/spinner states in catch blocks (e.g., `downloading = ''`)
+- A failed operation replaces only its own pending feedback with a persistent error.
 - Android `gen/` files need backup before `tauri android init`
 - When wrapping a stream in `BufStream` for peek-then-dispatch, flush before returning — `BufStream`'s write buffer is discarded on drop, so the tail of the response would otherwise be lost.
