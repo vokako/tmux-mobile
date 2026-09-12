@@ -376,6 +376,12 @@ sizes (owner declined).
   with a reduced-motion rule. No private opacity gate, layout animation or
   delayed style correction is added. Intrinsic width is resolved before
   placement instead of repairing a width/position loop with another frame.
+- **A picker edit is not a delayed click** (2026-09-12, #165). Server choice
+  runs immediately and rename has an explicit command. Existing popup
+  readiness/origin still govern the dialog. While its name input owns the
+  keyboard, a viewport resize remeasures the same anchor without dismissing
+  the edit; this is layout, not a new motion or timer. Other resize/outside
+  dismissal and guarded focus return keep their existing owners.
 - **Compact controls change paint, not motion or hit geometry** (2026-09-10,
   #160/#161): the owner's 14:19/14:58 words are recorded verbatim in
   [design-language.md](design-language.md#compact-paint-does-not-shrink-the-input-target-2026-09-10-160161).

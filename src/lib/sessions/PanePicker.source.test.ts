@@ -24,3 +24,10 @@ test('the picker is the one popover mechanism, not a backdrop panel (2026-09-03)
   }
   assert.match(source, /if \(!\(scroller instanceof Node\) \|\| !opener \|\| !scroller\.contains\(opener\)\) return;/u);
 });
+
+test('picker border boxes include chrome and its Escape yields to an active modal (#165)', () => {
+  assert.match(source, /bind:offsetWidth=\{w\} bind:offsetHeight=\{h\}/u);
+  assert.doesNotMatch(source, /bind:clientWidth|bind:clientHeight/u);
+  assert.match(source, /const modal = activeModal\(document\);/u);
+  assert.match(source, /if \(modal && !modal\.contains\(el\)\) return;/u);
+});

@@ -153,6 +153,37 @@ doc already describes. Design decisions, in the order they bit:
   The timer, delayed-click functions and double-click handler are removed
   whole. No alternate switch path, storage format or reconnect behavior is
   introduced.
+- **The server chooser is a non-modal picker dialog** (2026-09-12, #165).
+  It contains selection, rename and removal controls, so it follows the
+  PanePicker family and native Tab order, not action-menu arrow navigation.
+  Rail and Settings openers name the same dialog through haspopup/controls.
+  It shares popup chrome but keeps two-line identity rows and sibling
+  commands; the row budget remains stable while a name becomes an input.
+  Measurements include borders, width is intrinsic before clamping, and
+  the panel scrolls inside the zoom-corrected viewport inset.
+  Outside pointer and opener-ancestor scroll close it; its own scroll and
+  background terminal output stay open. Resize closes
+  an ordinary picker, but an active rename remeasures the existing anchor
+  instead: a soft keyboard must not destroy the input it just opened.
+  Escape ownership is modal, then rename, then picker. Cancelling rename
+  clears the draft state before focus restoration can fire blur; Enter and
+  blur never commit during composition. An outside dismissal during composition
+  records the current editor/menu identity and waits for the final native
+  input before committing and closing, never deleting the unfinished draft.
+  The same composition token gates blur and repeated close through the ending
+  update; only afterward is the final native input value read and the captured
+  commit/close intent completed. A replaced input or cancelled edit is ignored.
+  Normal blur/outside dismissal keeps the existing rename commit behavior.
+  Focus returns to the pencil or opener
+  only if that origin is still connected and another control/modal has not
+  taken ownership; a removed row falls back to the surviving picker after
+  the existing confirmation. Application navigation shortcuts leave keys
+  to focused menus/dialogs. No global Back/popstate mechanism is introduced.
+  Chromium 152.0.7977.64 verifies 42 real-App picker checks on desktop and
+  coarse input, including native CDP composition and adversarial ending/blur
+  ordering, both openers, confirmation focus, resizing and ancestor scrolling.
+  This is a controlled connection fixture, not OS-IME or APK acceptance;
+  the Tauri-only navigation shortcut path is source-guarded in this run.
 - **An address switch shows on the row that was tapped** (review, 2026-09-03):
   App keeps `pendingAddress` from the moment `onAddress` dials until the
   connect settles either way (`.finally`, guarded so a second tap's pending

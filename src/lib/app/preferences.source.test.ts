@@ -130,7 +130,9 @@ test('the phone reaches the server registry from the top of Settings (2026-09-03
   // The row exists only when App hands over the opener (touch layout); it is a
   // .side-row like the categories, not a new species, and it opens the SAME
   // registry popover the desktop rail opens.
-  assert.match(source, /\{#if onServers\}\s*<button class="side-row server-row"[^>]*aria-haspopup="menu"/u);
+  // #165 classifies the editable registry as a non-modal picker dialog.
+  assert.match(source, /\{#if onServers\}\s*<button class="side-row server-row"[^>]*aria-haspopup="dialog"/u);
+  assert.match(source, /aria-controls=\{serversOpen \? serversControls : undefined\}/u);
   assert.match(source, /onclick=\{\(e\) => onServers\?\.\(e\)\}/u);
   assert.match(source, /<span class="quarter-turn" class:on=\{serversOpen\}><Icon name="swap-h" size=\{14\} \/><\/span>/u,
     'the symmetric swap glyph turns 90°, not an invisible 180°');

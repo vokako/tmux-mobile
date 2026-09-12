@@ -11,7 +11,7 @@ test('server switching is immediate and rename has its own sibling command (#165
   assert.doesNotMatch(picker, /ondblclick/u);
   assert.match(picker, /onclick=\{\(\) => \{ serverMenuOpen = false; doServerSwitch\(s\.id\); \}\}/u);
   assert.match(picker, /<CommandButton variant="icon" icon="edit"/u);
-  assert.match(picker, /disabled=\{serverRenaming === s\.id\} onclick=\{\(\) => serverRenameStart\(s\)\}/u,
+  assert.match(picker, /disabled=\{serverRenaming === s\.id\} onclick=\{\(e\) => serverRenameStart\(s, e\.currentTarget\)\}/u,
     'the pencil captures its own row, and cannot restart an in-progress edit');
   assert.match(source, /reconnectMachine\.cancel\(\);\s*disconnect\(\);\s*if \(applySwitch\(localStorage, id\)\) location\.reload\(\);/u,
     'switch transport and storage ordering remains unchanged');

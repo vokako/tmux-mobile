@@ -75,7 +75,7 @@ test('every placed popover wears .pop-layer and no component keeps a private opa
   // #168 removes Roster's private tap menu; its actions use ContextMenu above.
   for (const rel of ['src/App.svelte']) {
     const src = readFileSync(join(root, rel), 'utf8');
-    assert.match(src, /class="(a-menu|server-menu) pop-layer" class:ready=/u, `${rel}: its menu wears .pop-layer`);
+    assert.match(src, /class="server-menu menu-surface menu-list pop-layer" class:ready=/u, `${rel}: its picker keeps .pop-layer while adopting shared chrome (#165)`);
   }
   assert.doesNotMatch(readFileSync(join(root, 'src/lib/hub/Roster.svelte'), 'utf8'), /class="a-menu/u);
   for (const file of components) {

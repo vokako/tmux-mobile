@@ -11,6 +11,7 @@
   // near the viewport edge clipped it, and Escape did nothing.
   import AgentChip from '../ui/AgentChip.svelte';
   import Icon from '../ui/Icon.svelte';
+  import { activeModal } from '../ui/modal.ts';
   import { anchorOf, menuPlacement, popOrigin, viewBox, type AnchorRect } from '../ui/placement.ts';
   import { t } from '../core/i18n.svelte.ts';
   import { listSessionsWithPanes, newWindow } from '../core/ws.ts';
@@ -66,6 +67,8 @@
       onClose();
     };
     const onKey = (e: KeyboardEvent) => {
+      const modal = activeModal(document);
+      if (modal && !modal.contains(el)) return;
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); }
     };
     const onScroll = (e: Event) => {
@@ -137,7 +140,7 @@
 <div class="picker menu-surface pop-layer" class:ready={h > 0} role="dialog" aria-label={t('pickPane')} tabindex="-1"
   style:--pop-origin={anchorRect ? popOrigin(anchorRect, pos, align) : undefined}
   style:left="{pos.x}px" style:top="{pos.y}px"
-  bind:this={el} bind:clientWidth={w} bind:clientHeight={h}>
+  bind:this={el} bind:offsetWidth={w} bind:offsetHeight={h}>
   {#if loading}
     <div class="picker-empty">…</div>
   {:else if sessions.length === 0}
@@ -183,7 +186,8 @@
   .picker {
     position: fixed;
     z-index: 40;
-    min-width: 200px;
+    width: max-content;
+    min-width: min(200px, calc(100vw / var(--ui-zoom, 1) - 16px));
     max-width: min(360px, calc(100vw / var(--ui-zoom, 1) - 16px));
     max-height: calc(60vh / var(--ui-zoom, 1));
     overflow-y: auto;

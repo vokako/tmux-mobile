@@ -1,4 +1,5 @@
 <script>
+  import { tick } from 'svelte';
   import { activeModal } from './lib/ui/modal.ts';
   import Settings from './lib/app/Settings.svelte';
   import Sessions from './lib/sessions/Sessions.svelte';
@@ -761,6 +762,8 @@
   // path is the ONE way up against a server, so nothing in-memory can leak
   // across (Hub room cache, mounted terminals, Files parked cwds).
   let serverMenuOpen = $state(false);
+  const serverPickerId = $props.id();
+  let serverMenuEl = $state(null);
   let serverList = $state([]);
   let serverCurId = $state('');
   let serverMenuAnchor = $state(null); // read by the menu's --pop-origin in the template
@@ -769,6 +772,9 @@
   let serverMenuH = $state(0);
   let serverRenaming = $state('');   // entry id whose name is an input
   let serverRenameDraft = $state('');
+  let serverRenameComposing = null;
+  let serverRenameTrigger = null;
+  let serverRenamePending = null;
   // The current connected HOSTNAME, for the rail hover card and the phone's
   // Settings row. The registry's user-editable name is not the connection
   // identity this control switches; before auth, hostLabel still strips the
@@ -782,13 +788,28 @@
   }
 
   function toggleServerMenu(e) {
-    if (serverMenuOpen) { serverMenuOpen = false; return; }
+    if (serverMenuOpen) { closeServerPicker(); return; }
     loadServerRegistry();
     serverMenuAnchor = anchorOf(e.currentTarget);
     serverMenuTrigger = e.currentTarget;
     serverMenuW = 0; serverMenuH = 0;
     serverRenaming = '';
+    serverRenameComposing = null;
+    serverRenameTrigger = null;
+    serverRenamePending = null;
     serverMenuOpen = true;
+  }
+  function closeServerPicker() {
+    if (serverRenameComposing) {
+      serverRenamePending = { id: serverRenaming, menu: serverMenuEl, close: true };
+      return;
+    }
+    serverRenameCommit();
+    serverRenaming = '';
+    serverRenameComposing = null;
+    serverRenameTrigger = null;
+    serverRenamePending = null;
+    serverMenuOpen = false;
   }
   const serverMenuPos = $derived.by(() =>
     serverMenuOpen && serverMenuAnchor
@@ -796,20 +817,55 @@
       : { x: 0, y: 0 },
   );
   $effect(() => {
-    if (!serverMenuOpen) return;
-    const close = () => { serverMenuOpen = false; };
-    const onDown = (e) => {
-      if (e.target?.closest?.('.server-menu') || serverMenuTrigger?.contains?.(e.target)) return;
-      close();
+    if (!serverMenuOpen || !serverMenuEl) return;
+    const menu = serverMenuEl;
+    const origin = serverMenuTrigger;
+    const modal = activeModal(document);
+    if (!modal || modal.contains(menu)) menu.focus({ preventScroll: true });
+    const modalOwnsInteraction = () => {
+      const modal = activeModal(document);
+      return !!modal && !modal.contains(menu);
     };
-    const onKey = (e) => { if (e.key === 'Escape') { close(); e.stopPropagation(); } };
+    const onDown = (e) => {
+      if (modalOwnsInteraction()) return;
+      if (menu.contains(e.target) || serverMenuTrigger?.contains?.(e.target)) return;
+      closeServerPicker();
+    };
+    const onKey = (e) => {
+      if (modalOwnsInteraction()) return;
+      if (!menu.contains(document.activeElement)) return;
+      if (e.isComposing || e.keyCode === 229 || serverRenameComposing) return;
+      if (e.key === 'Escape') {
+        e.preventDefault(); e.stopPropagation();
+        if (serverRenaming) cancelServerRename();
+        else closeServerPicker();
+      }
+    };
+    const onScroll = (e) => {
+      if (modalOwnsInteraction()) return;
+      if (serverMenuEl && e.target instanceof Node && serverMenuEl.contains(e.target)) return;
+      const scroller = e.target === document ? document.documentElement : e.target;
+      if (!(scroller instanceof Node) || !origin || !scroller.contains(origin)) return;
+      closeServerPicker();
+    };
+    const onResize = () => {
+      // The soft keyboard resizes a dialog containing its own editable field.
+      if ((serverRenaming || modalOwnsInteraction()) && origin?.isConnected) serverMenuAnchor = anchorOf(origin);
+      else closeServerPicker();
+    };
     window.addEventListener('pointerdown', onDown, true);
     window.addEventListener('keydown', onKey, true);
-    window.addEventListener('resize', close);
+    window.addEventListener('resize', onResize);
+    window.addEventListener('scroll', onScroll, true);
     return () => {
       window.removeEventListener('pointerdown', onDown, true);
       window.removeEventListener('keydown', onKey, true);
-      window.removeEventListener('resize', close);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('scroll', onScroll, true);
+      const modal = activeModal(document);
+      if (origin instanceof HTMLElement && origin.isConnected
+        && (document.activeElement === document.body || menu.contains(document.activeElement))
+        && (!modal || modal.contains(origin))) origin.focus({ preventScroll: true });
     };
   });
 
@@ -818,7 +874,7 @@
    *  plan, reload. `tmux_disconnected` is cleared by the plan, so the boot
    *  auto-connect brings the app up against the target. */
   function doServerSwitch(id) {
-    if (id === serverCurId) return; // "you are here" — the row is a fact, not an action
+    if (id === serverCurId) return; // already connected: no reconnect
     reconnectMachine.cancel();
     disconnect();
     if (applySwitch(localStorage, id)) location.reload();
@@ -836,16 +892,62 @@
   }
   function serverRemoveConfirm() {
     const victim = pendingServerRemove;
+    const menu = serverMenuEl;
     pendingServerRemove = null;
     if (!victim) return;
     // removeServer's own guards keep a stale confirm harmless: the current
     // entry is refused, an id that no longer exists filters to a no-op.
     serverList = removeServer(localStorage, victim.id);
     serverCurId = currentServerId(localStorage);
+    void restoreServerPickerFocus(null, menu);
   }
-  function serverRenameStart(s) {
+  function serverRenameStart(s, trigger) {
+    serverRenameTrigger = trigger;
+    serverRenameComposing = null;
+    serverRenamePending = null;
     serverRenaming = s.id;
     serverRenameDraft = s.name;
+  }
+  async function restoreServerPickerFocus(target, menu) {
+    await tick();
+    if (!serverMenuOpen || menu !== serverMenuEl || !menu?.isConnected || activeModal(document)) return;
+    if (document.activeElement !== document.body && !menu.contains(document.activeElement)) return;
+    (target?.isConnected ? target : menu).focus({ preventScroll: true });
+  }
+  function cancelServerRename() {
+    const trigger = serverRenameTrigger, menu = serverMenuEl;
+    serverRenaming = '';
+    serverRenameComposing = null;
+    serverRenameTrigger = null;
+    serverRenamePending = null;
+    void restoreServerPickerFocus(trigger, menu);
+  }
+  function serverRenameKey(e) {
+    if (e.isComposing || e.keyCode === 229 || serverRenameComposing) return;
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const trigger = serverRenameTrigger, menu = serverMenuEl;
+      serverRenameCommit();
+      void restoreServerPickerFocus(trigger, menu);
+    }
+  }
+  function serverRenameCompositionStart(e) {
+    serverRenameComposing = { id: serverRenaming, menu: serverMenuEl, input: e.currentTarget };
+  }
+  async function serverRenameCompositionEnd(e) {
+    const composition = serverRenameComposing;
+    if (!composition || composition.input !== e.currentTarget) return;
+    await tick(); // Keep every commit entry gated until the final native input lands.
+    if (serverRenameComposing !== composition || composition.menu !== serverMenuEl
+      || composition.id !== serverRenaming || !composition.input.isConnected) return;
+    serverRenameDraft = composition.input.value;
+    serverRenameComposing = null;
+    const request = serverRenamePending;
+    if (request && request.menu === serverMenuEl && request.id === serverRenaming) {
+      if (request.close) closeServerPicker();
+      else serverRenameCommit();
+    }
   }
   /** svelte action: focus + select the rename input the moment it mounts. */
   function focusOnMount(el) {
@@ -853,8 +955,19 @@
     el.select?.();
   }
   function serverRenameCommit() {
+    if (serverRenameComposing) {
+      serverRenamePending ??= { id: serverRenaming, menu: serverMenuEl, close: false };
+      return;
+    }
+    const id = serverRenaming;
+    const request = serverRenamePending;
     if (serverRenaming) serverList = renameServer(localStorage, serverRenaming, serverRenameDraft);
     serverRenaming = '';
+    serverRenameTrigger = null;
+    serverRenamePending = null;
+    if (request && request.id === id && request.menu === serverMenuEl && request.close) {
+      serverMenuOpen = false;
+    }
   }
   /** The `+` row: the Settings connect form IS the add flow (it upserts by
    *  address on success), so the row only takes you there. No disconnect —
@@ -1516,8 +1629,9 @@
             class:open={serverMenuOpen}
             aria-label={t('serversTitle')}
             use:hoverInfo={serverCardInfo}
-            aria-haspopup="menu"
+            aria-haspopup="dialog"
             aria-expanded={serverMenuOpen}
+            aria-controls={serverMenuOpen ? serverPickerId : undefined}
             onclick={(e) => toggleServerMenu(e)}
           ><span class="quarter-turn" class:on={serverMenuOpen}><Icon name="swap-h" size={17} /></span></button>
         {:else}
@@ -1556,37 +1670,39 @@
   {/if}
 
   {#if serverMenuOpen}
-    <!-- The server registry popover (board #55). Same popover mechanics as the
-         Hub's agent menu: fixed layer, menuPlacement from the trigger's rect,
-         invisible until measured, outside-pointerdown/Escape/resize dismiss. -->
-    <div class="server-menu pop-layer" class:ready={serverMenuH > 0} role="menu" tabindex="-1"
+    <!-- Inline editing makes this a non-modal picker, not an action menu. -->
+    <div class="server-menu menu-surface menu-list pop-layer" class:ready={serverMenuH > 0}
+      role="dialog" aria-modal="false" aria-label={t('serversTitle')} tabindex="-1" id={serverPickerId}
       style:left="{serverMenuPos.x}px" style:top="{serverMenuPos.y}px"
       style:--pop-origin={serverMenuAnchor ? popOrigin(serverMenuAnchor, serverMenuPos) : undefined}
-      bind:clientWidth={serverMenuW} bind:clientHeight={serverMenuH}>
-      <div class="sm-title">{t('serversTitle')}</div>
+      bind:this={serverMenuEl} bind:offsetWidth={serverMenuW} bind:offsetHeight={serverMenuH}>
+      <div class="menu-heading">{t('serversTitle')}</div>
       {#each serverList as s (s.id)}
         <div class="sm-row" class:cur={s.id === serverCurId}>
           {#if serverRenaming === s.id}
-            <input class="sm-rename" bind:value={serverRenameDraft} use:focusOnMount
-              onkeydown={(e) => { e.stopPropagation(); if (e.key === 'Enter') serverRenameCommit(); else if (e.key === 'Escape') serverRenaming = ''; }}
+            <input class="sm-rename config-input" bind:value={serverRenameDraft} use:focusOnMount
+              aria-label={`${t('serverRename')} ${s.name}`}
+              onkeydown={serverRenameKey}
+              oncompositionstart={serverRenameCompositionStart}
+              oncompositionend={serverRenameCompositionEnd}
               onblur={serverRenameCommit} />
           {:else}
-            <button class="sm-pick" role="menuitem" title={s.address}
+            <button class="sm-pick menu-item" type="button" title={s.address} aria-current={s.id === serverCurId ? 'true' : undefined}
               onclick={() => { serverMenuOpen = false; doServerSwitch(s.id); }}>
               <span class="sm-name">{s.name}</span>
               <span class="sm-addr">{s.address}</span>
             </button>
           {/if}
           <CommandButton variant="icon" icon="edit" label={`${t('serverRename')} ${s.name}`}
-            disabled={serverRenaming === s.id} onclick={() => serverRenameStart(s)} />
+            disabled={serverRenaming === s.id} onclick={(e) => serverRenameStart(s, e.currentTarget)} />
           {#if s.id === serverCurId}
             <span class="sm-check" title={t('serverCurrent')}><Icon name="check" size={13} /></span>
           {:else}
-            <button class="sm-del" title={t('serverRemove')} onclick={() => serverRemoveAsk(s)}><Icon name="x" size={12} /></button>
+            <CommandButton variant="danger" iconOnly icon="x" label={`${t('serverRemove')} ${s.name}`} onclick={() => serverRemoveAsk(s)} />
           {/if}
         </div>
       {/each}
-      <button class="sm-add" onclick={serverAddRow}><Icon name="plus" size={13} /><span>{t('serverAdd')}</span></button>
+      <button class="sm-add menu-item" type="button" onclick={serverAddRow}><Icon name="plus" size={13} /><span>{t('serverAdd')}</span></button>
     </div>
   {/if}
 
@@ -1633,7 +1749,7 @@
     {#if page === 'prefs'}
     <div class="page-layer">
     <Preferences {connected} {theme} {fontSize} {debugMode} {serverInfo} {activeAddress} {pendingAddress} addresses={prefAddresses}
-      {serverName} onServers={connected && layout.isTouchDevice ? toggleServerMenu : null} serversOpen={serverMenuOpen}
+      {serverName} onServers={connected && layout.isTouchDevice ? toggleServerMenu : null} serversOpen={serverMenuOpen} serversControls={serverPickerId}
       {optimizing} {linkCopied}
       onClose={togglePrefs}
       onTheme={setTheme}
@@ -1944,56 +2060,29 @@
   .rail-btn.active { color: var(--accent); }
   .rail-spacer { flex: 1; }
 
-  /* Server switcher (board #55): the rail entry is an ordinary rail-btn (a
-     control, never .active — no page answers to it), separated a touch from
-     the configure group below. The popover follows the app's ONE menu recipe
-     (the Hub .a-menu dialect: fixed layer, measured-then-shown, panel radius,
-     row hover in the surface wash). */
+  /* Server picker geometry and two-line rows are local; shared atoms own paint. */
   .rail-server { margin-bottom: 4px; }
   .server-menu {
-    position: fixed; z-index: 24; min-width: 220px; max-width: min(76vw, 320px);
-    background: var(--bg); border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
-    box-shadow: 0 12px 34px rgba(0,0,0,0.45); padding: 5px;
-    display: flex; flex-direction: column; gap: 2px;
+    position: fixed; z-index: 24; width: max-content;
+    min-width: min(220px, calc(100vw / var(--ui-zoom, 1) - 16px));
+    max-width: min(320px, calc(100vw / var(--ui-zoom, 1) - 16px));
+    max-height: calc(100vh / var(--ui-zoom, 1) - 16px); overflow-y: auto;
     /* Visibility and the intro are the shared .pop-layer atom (app.css). */
   }
-  .sm-title {
-    font-family: var(--font-display); font-weight: 600; font-size: var(--fs-micro);
-    color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em;
-    padding: 4px 8px 2px;
+  .sm-row {
+    --menu-row-height: calc(2 * var(--control-line-height) + 2 * var(--menu-item-padding-y));
+    display: flex; align-items: center; gap: var(--menu-gap); min-width: 0;
+    min-height: var(--menu-row-height); flex: none;
   }
-  .sm-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
   .sm-pick {
-    flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
-    background: none; border: none; border-radius: var(--ui-radius-control);
-    padding: 5px 8px; cursor: pointer; text-align: left;
-    transition: background var(--t-fast);
+    flex: 1; min-width: 0; flex-direction: column; align-items: flex-start; gap: 0;
   }
-  .sm-pick:hover { background: var(--surface2); }
-  .sm-name { font-size: var(--fs-ui); color: var(--text); font-weight: 550; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sm-addr { font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--text3); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sm-row.cur .sm-name { color: var(--accent); }
-  .sm-check { color: var(--accent); display: grid; place-items: center; padding: 0 6px; flex: none; }
-  .sm-del {
-    background: none; border: none; border-radius: var(--ui-radius-control);
-    color: var(--text3); cursor: pointer; display: grid; place-items: center;
-    padding: 4px 6px; flex: none; transition: color var(--t-fast), background var(--t-fast);
-  }
-  .sm-del:hover { color: var(--status-danger); background: var(--surface2); }
-  .sm-rename {
-    flex: 1; min-width: 0; font-size: var(--fs-ui); color: var(--text);
-    background: var(--surface); border: 1px solid var(--accent-line, var(--accent));
-    border-radius: var(--ui-radius-control); padding: 4px 7px; outline: none;
-  }
-  .sm-add {
-    display: flex; align-items: center; gap: 6px;
-    background: none; border: none; border-top: 1px solid var(--border);
-    border-radius: 0 0 var(--ui-radius-control) var(--ui-radius-control);
-    margin-top: 3px; padding: 6px 8px; cursor: pointer;
-    color: var(--text2); font-size: var(--fs-ui); text-align: left;
-    transition: background var(--t-fast), color var(--t-fast);
-  }
-  .sm-add:hover { background: var(--surface2); color: var(--text); }
+  .sm-name { font-weight: 500; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sm-addr { font-family: var(--font-mono); font-size: var(--fs-meta); line-height: var(--control-line-height); color: var(--text2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sm-row.cur .sm-name { color: var(--accent-ink); }
+  .sm-check { color: var(--accent-ink); display: grid; place-items: center; width: var(--control-height); flex: none; }
+  .sm-rename { flex: 1; min-width: 0; }
+  .sm-add { border-top: 1px solid var(--border); margin-top: var(--menu-gap); }
 
   /* Reordering the rail. Two cues, because one is not enough to say both WHAT
      is moving and WHERE it lands: the pressed icon is CARRIED (it follows the

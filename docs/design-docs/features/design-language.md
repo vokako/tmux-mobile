@@ -574,6 +574,15 @@ press-scale/brightness details below do not override it.
   and ignores keys owned by a foreign field. Select focuses its native
   trigger on opening and likewise ignores foreign focus. Existing IME,
   disabled, modal and activation gates remain; no global navigation trap.
+- **Rich picker boundaries (#165, 2026-09-12).** The server chooser is a
+  non-modal dialog with native Tab-navigable controls, not a menu with nested
+  editing controls. Its explicit switch/rename decision and focus/IME rules
+  live in websocket-client.md. It adopts the same frame/list paint, with a
+  two-line row budget derived from two control line boxes and padding.
+  PanePicker and HoverCard also measure border boxes and constrain width in
+  zoom-corrected viewport space. The tooltip remains non-interactive: no
+  scrollable clipping is added to hide facts. PanePicker preserves its
+  terminal-aware ancestor-scroll rule and yields Escape to an active modal.
 - **ContextMenu activation contract (#164, 2026-09-11):** checked view/tool
   choices announce `menuitemcheckbox` and `aria-checked`; ordinary verbs remain
   `menuitem`. Disabled entries reject queued activation too. Its dimensions

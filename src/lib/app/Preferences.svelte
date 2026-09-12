@@ -54,6 +54,7 @@
     serverName = '',
     onServers = null,
     serversOpen = false,
+    serversControls = undefined,
   }: {
     connected?: boolean;
     theme?: string;
@@ -101,6 +102,7 @@
     /** The symmetric swap glyph turns 90° while the popover is open; 180°
      *  would leave the icon looking unchanged. */
     serversOpen?: boolean;
+    serversControls?: string;
   } = $props();
 
   const TAB_KEY = 'tmux_settings_tab';
@@ -463,8 +465,8 @@
            they matter most. A .side-row like the categories — swap icon, the
            current server's NAME — opening the same popover the rail opens. -->
       {#if onServers}
-        <button class="side-row server-row" class:open={serversOpen} title={t('serversTitle')} aria-haspopup="menu"
-          aria-expanded={serversOpen} onclick={(e) => onServers?.(e)}>
+        <button class="side-row server-row" class:open={serversOpen} title={t('serversTitle')} aria-haspopup="dialog"
+          aria-expanded={serversOpen} aria-controls={serversOpen ? serversControls : undefined} onclick={(e) => onServers?.(e)}>
           <span class="quarter-turn" class:on={serversOpen}><Icon name="swap-h" size={14} /></span>
           <span class="r-label">{serverName}</span>
         </button>

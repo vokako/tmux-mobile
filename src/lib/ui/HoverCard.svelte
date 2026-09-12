@@ -30,7 +30,7 @@
 {#if cur}
   <div class="hover-card menu-surface pop-layer" class:ready={h > 0} role="tooltip"
     style:left="{pos.x}px" style:top="{pos.y}px" style:--pop-origin={origin}
-    bind:clientWidth={w} bind:clientHeight={h}>
+    bind:offsetWidth={w} bind:offsetHeight={h}>
     {#if cur.info.title}<div class="hc-title">{cur.info.title}</div>{/if}
     {#if cur.info.text}<div class="hc-text">{cur.info.text}</div>{/if}
     {#if cur.info.lines?.length}
@@ -46,7 +46,9 @@
 
 <style>
   .hover-card {
-    position: fixed; z-index: 70; max-width: 300px; min-width: 120px;
+    position: fixed; z-index: 70; width: max-content;
+    max-width: min(300px, calc(100vw / var(--ui-zoom, 1) - 16px));
+    min-width: min(120px, calc(100vw / var(--ui-zoom, 1) - 16px));
     padding: 8px 10px;
     display: flex; flex-direction: column; gap: 4px;
     font-size: var(--fs-ui); color: var(--text2);
