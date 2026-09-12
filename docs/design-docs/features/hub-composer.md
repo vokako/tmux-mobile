@@ -7,6 +7,18 @@ per-agent interruption. The feed is `hub-feed.md`.
 
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
 
+### One roster centre line (#186, 2026-09-12)
+
+Owner, 15:39: "agent 卡片和展开按钮不在上下居中的线上。"
+The disclosure wrapper now matches the card's painted height plus its
+vertical inset and the scrollport's two 2px insets. Its native button is
+centred inside that wrapper; the cards and Add align on their row centre.
+There is no new size token or glyph offset. The wrapper remains bottom-aligned
+when the list expands upward, keeping collapse at the same reachable position.
+Chromium 152.0.7977.64 measured the old disclosure 3px below the card centre
+on desktop and 1px below on 390px coarse input, in both themes. Both offsets
+are now zero; restoring the old wrapper CSS reproduces the mismatch.
+
 ### One input row and one All command (#180, 2026-09-12)
 
 Owner, 14:22, verbatim (the subsequent 14:26 correction replaces only the

@@ -246,7 +246,7 @@
   }
   .roster.compact { padding-inline: 10px; }
   .cards {
-    display: flex; align-items: start; gap: var(--roster-gap); overflow-x: auto; scrollbar-width: none;
+    display: flex; align-items: center; gap: var(--roster-gap); overflow-x: auto; scrollbar-width: none;
     min-width: 0; min-height: 0; padding: 2px;
   }
   .cards:not(.expanded)::-webkit-scrollbar { display: none; }
@@ -318,5 +318,5 @@
   .ava.dim { background: var(--surface2); color: var(--text3); }
   img.ava.dim { background: none !important; filter: grayscale(1); opacity: 0.55; }
   .roster-add { display: flex; align-items: center; flex: none; min-height: var(--control-height); }
-  .roster-toggle { display: flex; align-self: end; padding-block-end: 2px; }
+  .roster-toggle { display: flex; align-self: end; align-items: center; height: calc(var(--roster-paint-height) + 2 * var(--control-paint-inset) + 4px); }
 </style>

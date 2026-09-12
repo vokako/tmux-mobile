@@ -6,6 +6,16 @@ const source = await readFile(new URL('./Roster.svelte', import.meta.url), 'utf8
 const rule = (selector: string) =>
   source.match(new RegExp(`(?:^|\\n)\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
 
+test('cards, Add and disclosure share the strip centre without moving the expanded control (#186)', () => {
+  assert.match(rule('.cards'), /align-items: center/u);
+  const toggle = rule('.roster-toggle');
+  assert.match(toggle, /align-items: center/u);
+  assert.match(toggle, /height: calc\(var\(--roster-paint-height\) \+ 2 \* var\(--control-paint-inset\) \+ 4px\)/u,
+    'the disclosure wrapper matches card height plus the scrollport insets');
+  assert.match(toggle, /align-self: end/u, 'expanding upward keeps the collapse control reachable in place');
+  assert.doesNotMatch(toggle, /padding-block-end/u);
+});
+
 test('context meters surround equal circular avatars with room inside the card (#180)', () => {
   assert.match(source, /style:--ctx-color=\{ctxColor\(a\.vitals\.context_pct\)\}/u);
   assert.match(rule('.acard'), /position: relative/u);
