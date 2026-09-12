@@ -6,6 +6,23 @@ The `issues`/`issue_notes` board: fixed columns, per-project numbering, dispatch
 
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
 
+### Delete failure remains in its confirmation (#167, 2026-09-12)
+
+The old executor cleared `pendingDelete` after both success and failure;
+Back could also dismiss it during the write. A failed mutation now remains
+on its captured session/issue with an alert inside the same ConfirmDialog.
+Pending Back is consumed without dismissing it or peeling the detail view,
+and duplicate activation remains blocked by the synchronous busy guard.
+Room generation and intent identity gate late completions. Only successful
+deletion closes the matching detail; refresh errors use the existing board
+read-error path and polling, never another destructive retry. Discard remains
+neutral and explicitly offers Keep editing/Discard.
+
+Real Board mount tests reproduce the old pending-Back failure and Cancel
+wording, then verify retry, duplicate protection and successful-delete/
+failed-refresh separation. The latter was already correct and is retained
+as a regression guard, not claimed as a new repair.
+
 ### The project has ONE task board, and both species keep it
 
 schema v12 `issues`/`issue_notes`, session-scoped like the chat room; schema v16 makes every PUBLIC `#N` a per-project durable sequence starting at 1 (deletes leave gaps and never reuse), while the database-wide `issues.id` is hidden and retained only as the issue_notes FK; every single-row read/write resolves `session + project_number`, so different projects can both have `#1` safely; project rename moves Board rows + sequence in the same transaction, archive retains them, and permanent project delete removes issues + notes + sequence before releasing the session name (board #41); four FIXED columns (`projects::BOARD_STATUSES` = todo/doing/review/done — free text would fork the vocabulary per agent). The human writes issues on the BOARD PAGE (`hub/Board.svelte` — its own tab between Files and Agents, desktop-server-gated like Hub; owner 2026-08-29: "board单独作为一个独立的功能的页面，不用都塞到hub里"; it carries the shared project SIDEBAR (every project has its own board; a pick overrides the followed last-touched session until that moves again; compact drills list⇄board; its four fixed count chips wear the Board-only `.side-wins.grid` plus a hidden natural-width mirror so `chipCols` chooses only 4×1/2×2/1×4 from available width, localized labels and the widest count — never a 3+1 orphan, same-column dots align, and two columns are the pre-measure fallback — while Chat's variable agent chips keep the bare flex layout), polls while visible, back gesture peels detail→list then lifts the project drawer as the compact floor — never falls to the terminal; a chat-jump entry returns to the conversation instead (board #47) — and the Hub header's layout icon jumps there); agents read and update THE SAME rows via `tmm board list|show|add|take|move|note|delete` (`hub_board_*` RPCs; `take` = assignee+doing in one move; identity = TMM_AGENT else "human"). Updates PATCH field-by-field (COALESCE) so an agent's `move` cannot erase a body the human edited meanwhile; notes are the issue's own thread and bump `updated_at`; every write is session-gated in SQL so a guessed id cannot cross boards. Cards name the REPORTER (`created_by`), and UI assignment is a DISPATCH: picking a managed agent saves the field AND posts an @message (hub_post delivery types it into the pane with take/note/move instructions); that assignment brief reads as a handoff — the assigner SUBJECT leads, then the ENTIRE original title/body (never a preview excerpt: this is the agent's task input, and the bracketed-paste delivery path has no 400-character transport ceiling), then `assignNotes()`'s chronological authored note thread under its own 1200-character budget (any cut pointing to `tmm board show <id>`), and the take/note/move instructions ride LAST (board #42, #51, #79) — "Assign 给某个 Agent 去做" means the agent starts with the complete original issue plus bounded discussion context, not that a label changed (owner, 2026-08-29). `build_prompt` teaches it in one bullet and the tmm-cli skill carries the conventions (take before you start, note decisions ON the issue, only the acceptor moves to done).

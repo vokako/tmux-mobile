@@ -619,7 +619,8 @@ test('every destructive/discarding path confirms through the SHARED dialog (boar
     'Escape asks before dropping create data');
   assert.match(source, /if \(creating && createDirty\) \{ pendingDiscard = \(\) => \{ creating = false; \}; return true; \}/u,
     'the back gesture asks too');
-  assert.match(source, /if \(pendingDelete\) \{ pendingDelete = null; return true; \}/u, 'back DISMISSES an open delete dialog, never confirms');
+  assert.match(source, /if \(pendingDelete\) \{ if \(!busy\) pendingDelete = null; return true; \}/u,
+    '#167: pending Back is consumed; only an idle confirmation can dismiss');
   assert.match(source, /pendingDiscard = null; draft = \{ \.\.\.draftBase \}; nTitle = ''; nBody = ''; nAssignee = '';/u,
     'a confirmed discard actually clears the create fields');
   assert.match(source, /<ConfirmDialog open=\{!!pendingDiscard\} danger=\{false\} compact=\{narrowVp\}/u,

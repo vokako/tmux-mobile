@@ -12,7 +12,7 @@
   import { boardStatusColor } from './hub.ts';
   import type { ProjectRow } from '../projects/projects.ts';
   import { t, hanLang } from '../core/i18n.svelte.ts';
-  import { untrack } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import Icon from '../ui/Icon.svelte';
   import Select from '../ui/Select.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
@@ -33,6 +33,8 @@
   // FOLLOW default — the last-touched session, same as Files — and a pick
   // here overrides it until the prop moves again.
   let cur = $state('');
+  let viewGeneration = 0;
+  onDestroy(() => { viewGeneration++; });
   let picked = $state(false);      // a manual pick overrides the session follow
   // The Board sheet's own condition (≤760px — the old media gate, expressed
   // where the class is applied; see app.css .side-sheet).
@@ -131,7 +133,7 @@
   // the same contract every page registers via onGoBack (Files defined it).
   $effect(() => {
     onGoBack?.(() => {
-      if (pendingDelete) { pendingDelete = null; return true; } // back dismisses, never confirms
+      if (pendingDelete) { if (!busy) pendingDelete = null; return true; } // pending Back is consumed, not dismissed
       if (pendingDiscard) { pendingDiscard = null; return true; }
       if (sel && dirty) { pendingDiscard = () => { sel = null; }; return true; }
       if (creating && createDirty) { pendingDiscard = () => { creating = false; }; return true; }
@@ -262,6 +264,7 @@
   // Switching projects resets the view to the new board's list.
   $effect(() => {
     void cur;
+    viewGeneration++;
     sel = null; creating = false; ready = false; issues = []; noteText = ''; nTitle = ''; nBody = ''; nAssignee = ''; pendingDiscard = null; pendingDelete = null;
     if (justLoadedTimer) clearTimeout(justLoadedTimer); justLoaded = false; // the unfold belongs to the board that loaded
     // untrack: this effect runs on `cur` — reading acts to bump its gen
@@ -436,27 +439,32 @@
   // switch while the dialog stands open cannot redirect the delete. Nothing
   // destructive runs before the confirm; busy blocks a double confirm.
   let pendingDelete = $state<null | { session: string; id: number; title: string }>(null);
+  let deleteError = $state('');
   function requestDelete() {
     if (!sel || busy) return;
+    deleteError = '';
     pendingDelete = { session: cur, id: sel.id, title: issueRef(sel) };
   }
   async function confirmDelete() {
     const cap = pendingDelete;
     if (!cap || busy) return;
+    const generation = viewGeneration;
     busy = true;
+    deleteError = '';
     try {
       await boardDelete(cap.session, cap.id);
-      // Only the MATCHING view is cleaned: if the user moved to another
-      // project meanwhile, that board is not ours to touch.
-      if (cur === cap.session) {
-        if (sel?.id === cap.id) sel = null;
-        await load();
-      }
     } catch (e) {
-      if (cur === cap.session) err = String((e as Error)?.message ?? e);
-    }
-    busy = false;
+      if (generation === viewGeneration && pendingDelete === cap) deleteError = String((e as Error)?.message ?? e);
+      return;
+    } finally { busy = false; }
+    if (generation !== viewGeneration || pendingDelete !== cap) return;
+    // The mutation is complete. A later read error belongs to load(), not
+    // to another destructive retry, and cannot close another room's view.
     pendingDelete = null;
+    if (cur === cap.session) {
+      if (sel?.id === cap.id) sel = null;
+      await load();
+    }
   }
 
   // ── Note actions (board #46: "点击中间 Agent 或人回复的消息…出现一个 copy
@@ -890,14 +898,16 @@
   </div>
   </div>
   <ConfirmDialog open={!!pendingDiscard} danger={false} compact={narrowVp}
+    confirmIcon="check"
     title={t('confirmDiscardTitle')} note={creating ? t('boardCreateDiscardNote') : t('boardDiscardNote')}
-    confirmLabel={t('confirmDiscard')} cancelLabel={t('cancel')}
+    confirmLabel={t('confirmDiscard')} cancelLabel={t('configKeepEditing')}
     onconfirm={() => { const go = pendingDiscard; pendingDiscard = null; draft = { ...draftBase }; nTitle = ''; nBody = ''; nAssignee = ''; go?.(); }}
     oncancel={() => (pendingDiscard = null)} />
   <!-- Deleting is the DANGER confirmation (board #29): the dialog names the
        captured issue, nothing reaches boardDelete before the confirm, and
        busy holds the button through the RPC. -->
   <ConfirmDialog open={!!pendingDelete} danger compact={narrowVp} {busy}
+    confirmIcon="trash" error={deleteError}
     title={t('boardDeleteConfirmTitle').replace('{title}', pendingDelete?.title ?? '')}
     note={t('boardDeleteConfirmNote')}
     confirmLabel={t('boardDeleteIssue')} cancelLabel={t('cancel')}
