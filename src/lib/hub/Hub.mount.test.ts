@@ -933,6 +933,32 @@ test('an open All menu follows live busy membership without reopening (#180)', {
   } finally { await app.close(); }
 });
 
+test('All addresses every managed card visually, and choosing one narrows the destination (#186)', { timeout: 60000 }, async context => {
+  const app = await composerFixture(context, {
+    projectList: async () => ({ projects: [{
+      project: { id: 'fixture', name: 'fixture', session: 'fixture', path: '/fixture' }, live: true,
+      slots: [{ kind: 'agent', window_name: 'paused', command: 'codex' }],
+    }] }),
+  });
+  try {
+    await app.to('everyone');
+    for (const name of ['alice', 'bob']) {
+      const card = stripCard(app.document, name);
+      assert.ok(card.classList.contains('sel'), `${name} has the aggregate selection paint`);
+      assert.equal(card.querySelector('.agent-select')?.getAttribute('aria-pressed'), 'true');
+    }
+    const stopped = stripCard(app.document, 'paused');
+    assert.ok(stopped);
+    assert.equal(stopped.classList.contains('sel'), false);
+    assert.equal(stopped.querySelector('.agent-select')?.getAttribute('aria-pressed'), null);
+    await app.to('bob');
+    assert.equal(selectedCard(app.document), 'bob');
+    assert.equal(stripCard(app.document, 'alice').classList.contains('sel'), false);
+    assert.equal(stripCard(app.document, 'bob').classList.contains('sel'), true);
+    assert.equal(app.document.querySelector('.all-choice button')?.getAttribute('aria-pressed'), 'false');
+  } finally { await app.close(); }
+});
+
 test('send never interrupts; double Ctrl+C mirrors only the selected busy card (#168)', { timeout: 60000 }, async (context) => {
   const interrupts: Array<[string, string]> = [];
   const app = await composerFixture(context, {

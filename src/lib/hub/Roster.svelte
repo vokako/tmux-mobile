@@ -76,6 +76,7 @@
   function selectTarget(name) {
     setRecipient(recipient === name ? '' : name);
   }
+  const isAddressed = (name) => recipient === ALL_TARGET || recipient === name;
   const coarsePointer = () => window.matchMedia('(any-pointer: coarse)').matches;
   function clickAgent(event, name) {
     if (!coarsePointer() && event.detail > 1) return;
@@ -94,8 +95,8 @@
   }
 
   function destinationNote(name) {
-    if (recipient !== name) return '';
-    const destination = t('hubToDmLong').replace('{name}', `@${name}`);
+    if (!isAddressed(name)) return '';
+    const destination = recipient === ALL_TARGET ? t('hubToAllLong') : t('hubToDmLong').replace('{name}', `@${name}`);
     const also = extras.length ? t('hubToAlsoHint').replace('{names}', extras.map((n) => `@${n}`).join(', ')) : '';
     return [destination, also].filter(Boolean).join('\n');
   }
@@ -162,10 +163,10 @@
         {@const mentioned = extras.includes(a.name) || extras.includes(ALL_TARGET)}
         {@const pending = interrupting.includes(a.name)}
         <!-- Selection and interruption are sibling native targets, never nested buttons. -->
-        <div class="acard" data-agent={a.name} class:sel={recipient === a.name} class:filtered={filterAgent === a.name} class:has-stop={busyNames.includes(a.name)}
+        <div class="acard" data-agent={a.name} class:sel={isAddressed(a.name)} class:filtered={filterAgent === a.name} class:has-stop={busyNames.includes(a.name)}
           class:appear-pop={!!rosterBase && !rosterBase.has(a.name)} animate:flip={{ duration: moveMs() }}>
           <button type="button" class="agent-select"
-            aria-pressed={recipient === a.name}
+            aria-pressed={isAddressed(a.name)}
             aria-label={[`${a.name} · ${stateLabel(a.state)}`, a.team, a.detail, vitalsLine(a.vitals), unread.has(a.name) ? t('hubUnread') : '', mentioned ? t('hubToAlsoHint').replace('{names}', `@${a.name}`) : '', filterAgent === a.name ? t('hubFilterItem') : ''].filter(Boolean).join(' · ')}
             use:hoverInfo={() => cardInfo(a)}
             onclick={(e) => clickAgent(e, a.name)} ondblclick={(e) => focusAgent(e, a.name)}

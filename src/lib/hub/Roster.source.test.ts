@@ -93,7 +93,9 @@ test('body mentions use chipExtras, separate from selected state and Stop', () =
 });
 
 test('native selection owns hover and context; stopped slots never select or resume', () => {
-  assert.match(source, /<button type="button" class="agent-select"\s+aria-pressed=\{recipient === a\.name\}/u);
+  assert.match(source, /<button type="button" class="agent-select"\s+aria-pressed=\{isAddressed\(a\.name\)\}/u);
+  assert.match(source, /const isAddressed = \(name\) => recipient === ALL_TARGET \|\| recipient === name/u);
+  assert.match(source, /class:sel=\{isAddressed\(a\.name\)\}/u, '#186: paint and accessibility read the same aggregate selection');
   assert.match(source, /use:hoverInfo=\{\(\) => cardInfo\(a\)\}/u);
   assert.match(source, /use:hoverInfo=\{\(\) => offCardInfo\(name\)\}/u);
   assert.match(source, /oncontextmenu=\{\(e\) => \{ e\.preventDefault\(\); oncontext\(pointOf\(e\), a\.name\); \}\}/u);

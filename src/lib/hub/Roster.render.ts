@@ -86,7 +86,9 @@ test('Roster renders the controlled destination strip (#168)', { timeout: RENDER
     assert.equal(select(extra, 'waiting').getAttribute('aria-pressed'), 'false');
     assert.deepEqual(marked(view({ composerText: '@all' })), ['waiting', 'runner', 'solo']);
     assert.deepEqual(marked(view({ recipient: 'all', composerText: '@waiting' })), []);
-    assert.equal(view({ recipient: 'all' }).querySelector('[aria-pressed="true"]'), null, 'All is selected outside this list');
+    assert.equal(view({ recipient: 'all' }).querySelectorAll('.acard:not(.off) [aria-pressed="true"]').length, agents.length,
+      '#186: the All command addresses every managed card');
+    assert.equal(view({ recipient: 'all' }).querySelector('.acard.off.sel'), null);
     const none = view({ recipient: '', composerText: '@waiting' });
     assert.equal(none.querySelector('[aria-pressed="true"]'), null);
     assert.deepEqual(marked(none), ['waiting']);

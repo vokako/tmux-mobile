@@ -19,6 +19,20 @@ Chromium 152.0.7977.64 measured the old disclosure 3px below the card centre
 on desktop and 1px below on 390px coarse input, in both themes. Both offsets
 are now zero; restoring the old wrapper CSS reproduces the mismatch.
 
+### All selects the addressed cards (#186, 2026-09-12)
+
+Owner, 15:39: "点击 everyone 图标，应该上方展示好像所有 agent 都被选中了一样。"
+The existing All command remains the single broadcast entry; it now also
+selects every managed card's paint and `aria-pressed` through one `isAddressed`
+predicate. Stopped slots remain unselected. A named card click still calls
+the existing recipient setter, narrowing All to that agent; no membership
+store or new destination is added. Hover wording names the aggregate
+destination while All is selected. Body mention marks and reading filters
+retain their separate meanings.
+The real Hub mount test pins All -> every managed card -> one named card;
+the single-name-only predicate fails as a negative control. Chromium
+152.0.7977.64 verifies the same paint/ARIA states in both layouts and themes.
+
 ### One input row and one All command (#180, 2026-09-12)
 
 Owner, 14:22, verbatim (the subsequent 14:26 correction replaces only the
