@@ -933,6 +933,38 @@ test('an open All menu follows live busy membership without reopening (#180)', {
   } finally { await app.close(); }
 });
 
+test('late font completion remeasures the composer and releases its listener on unmount (#186)', { timeout: 60000 }, async context => {
+  let reads = 0;
+  let signal!: EventTarget;
+  let event!: Event;
+  const { rpc } = roomFixture();
+  const app = await (await compiledHub()).mount(context, {
+    props: { visible: true },
+    setup(window) {
+      const fontSet = new window.EventTarget();
+      Object.assign(fontSet, { ready: Promise.resolve(fontSet) });
+      Object.defineProperty(window.document, 'fonts', { value: fontSet });
+      // No fabricated layout: a hidden/zero-width field only records entry to
+      // the measurement owner; actual line geometry is tested in Chromium.
+      Object.defineProperty(window.HTMLTextAreaElement.prototype, 'clientWidth', {
+        get() { reads++; return 0; }, configurable: true,
+      });
+      signal = fontSet;
+      event = new window.Event('loadingdone');
+    },
+    modules: [rpc],
+  });
+  try {
+    await app.flush();
+    const before = reads;
+    signal.dispatchEvent(event);
+    assert.equal(reads, before + 1);
+  } finally { await app.close(); }
+  const closed = reads;
+  signal.dispatchEvent(event);
+  assert.equal(reads, closed, 'the disposed composer receives no late font event');
+});
+
 test('All addresses every managed card visually, and choosing one narrows the destination (#186)', { timeout: 60000 }, async context => {
   const app = await composerFixture(context, {
     projectList: async () => ({ projects: [{

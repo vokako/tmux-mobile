@@ -340,10 +340,18 @@ sizes (owner declined).
 
 ## Rules and their reasons
 
+- **Signature allocation does not animate layout** (#186, 2026-09-12):
+  the owner's 15:39 correction restores a measured native-text mirror, not
+  the retired send-arm controls or hardcoded avoidance zone. Full-width text
+  shares its final clear rectangle with All/Attach/Send; a real collision or
+  scroll ceiling reserves a bottom action band. Input/font/width changes
+  reuse the same synchronous height transaction and existing notification,
+  with no timer, new tempo or animated padding.
 - **Inline composer growth is layout, not animation** (#180, 2026-09-12):
   All/Attach/Send share the textarea's row and stay bottom-aligned. Natural
   textarea measurement drives the existing shell-height notification;
-  neither width nor height is animated and no mirror is restored. All uses
+  neither width nor height is animated. The no-mirror layout is superseded
+  by #186 above; All uses
   the existing command pressed feedback and Hub ContextMenu `.pop-layer`;
   there is no resident All Stop or second popup/history mechanism.
 

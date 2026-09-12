@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ALL_TARGET, attachmentBody, attachToken, busyTargetsFor, paletteBackendFor } from './hub-composer.ts';
+import { ALL_TARGET, attachmentBody, attachToken, busyTargetsFor, paletteBackendFor, signatureLayout } from './hub-composer.ts';
 import { addressed, commandPalette } from './hub.ts';
 
 const roster = [
@@ -8,6 +8,33 @@ const roster = [
   { name: 'bob', managed: true, agent: 'codex' },
   { name: 'shell', managed: false, agent: 'grok' },
 ];
+
+test('signature controls share clear text space, not a permanent right column (#186)', () => {
+  const box = {
+    width: 320, naturalHeight: 104, maxHeight: 240, controlsWidth: 136, controlsHeight: 44, gap: 2,
+    textRects: [{ left: 0, right: 300, top: 5, bottom: 21 }, { left: 0, right: 100, top: 75, bottom: 91 }],
+  };
+  assert.deepEqual(signatureLayout(box), { inputHeight: 104, reserved: 0, overflow: false, collision: false });
+  assert.deepEqual(signatureLayout({ ...box, empty: true }),
+    { inputHeight: 44, reserved: 0, overflow: false, collision: false });
+  assert.equal(signatureLayout({ ...box, textRects: [{ left: 0, right: 182, top: 75, bottom: 91 }] }).reserved, 0);
+  assert.equal(signatureLayout({ ...box, textRects: [{ left: 0, right: 182.1, top: 75, bottom: 91 }] }).reserved, 44);
+});
+
+test('a tall touch target checks the previous line too (#186)', () => {
+  assert.deepEqual(signatureLayout({
+    width: 320, naturalHeight: 84, maxHeight: 240, controlsWidth: 136, controlsHeight: 44, gap: 2,
+    textRects: [{ left: 0, right: 310, top: 32, bottom: 50 }, { left: 0, right: 40, top: 52, bottom: 70 }],
+  }), { inputHeight: 84, reserved: 44, overflow: false, collision: true });
+});
+
+test('scroll-capped drafts keep full width and a separate bottom action band (#186)', () => {
+  const layout = signatureLayout({
+    width: 320, naturalHeight: 600, maxHeight: 240, controlsWidth: 136, controlsHeight: 44, gap: 2,
+    textRects: [],
+  });
+  assert.deepEqual(layout, { inputHeight: 196, reserved: 44, overflow: true, collision: false });
+});
 
 // #168: card Stop and double Ctrl+C share exactly this target boundary.
 test('interrupt targets include only busy managed members of the selected card', () => {

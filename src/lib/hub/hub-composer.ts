@@ -1,4 +1,27 @@
+import type { AnchorRect } from '../ui/placement.ts';
+
 export const ALL_TARGET = 'all';
+
+/** Boxes are measured by the browser in textarea-local CSS pixels. A tall
+ * touch target can hit the preceding line even when the final line is short. */
+export function signatureLayout({
+  width, naturalHeight, maxHeight, controlsWidth, controlsHeight, gap, textRects, empty = false,
+}: {
+  width: number; naturalHeight: number; maxHeight: number;
+  controlsWidth: number; controlsHeight: number; gap: number;
+  textRects: readonly AnchorRect[]; empty?: boolean;
+}): { inputHeight: number; reserved: number; overflow: boolean; collision: boolean } {
+  if (empty) return { inputHeight: controlsHeight, reserved: 0, overflow: false, collision: false };
+  const natural = Math.max(controlsHeight, naturalHeight);
+  const limit = Math.max(controlsHeight, maxHeight);
+  const left = width - controlsWidth;
+  const top = natural - controlsHeight;
+  const collision = textRects.some(rect => rect.right > rect.left && rect.bottom > rect.top
+    && rect.right + gap > left && rect.left < width && rect.bottom > top && rect.top < natural);
+  const reserved = collision || natural > limit + 1 ? controlsHeight : 0;
+  const inputHeight = Math.min(natural, Math.max(controlsHeight, limit - reserved));
+  return { inputHeight, reserved, overflow: natural > inputHeight + 1, collision };
+}
 
 interface InterruptAgent {
   name: string;

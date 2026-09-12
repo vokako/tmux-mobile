@@ -6,14 +6,17 @@ const source = await readFile(new URL('./Composer.svelte', import.meta.url), 'ut
 const rule = (selector: string) =>
   source.match(new RegExp(`(?:^|\\n)\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
 
-test('All, attachment and Send share the naturally growing input row (#180)', () => {
+test('All, attachment and Send are a measured last-line signature (#186)', () => {
   assert.match(source, /class="compose-line"/u);
-  assert.match(rule('.compose-line'), /display: flex/u);
-  assert.match(rule('.compose-line'), /align-items: flex-end/u);
+  assert.match(rule('.compose-line'), /position: relative/u);
+  assert.doesNotMatch(rule('.compose-line'), /display: flex/u);
+  assert.match(rule('.composer-actions'), /position: absolute/u);
+  assert.match(rule('.c-input'), /width: 100%/u);
   assert.match(rule('.c-input'), /min-width: 0/u);
   assert.match(source, /class="all-choice"/u);
   assert.ok(source.indexOf("label={t('hubEveryone')}") < source.indexOf("label={t('hubAttach')}"));
   assert.doesNotMatch(source, /justify-content: space-between/u, 'no separate footer distributes the controls');
+  assert.match(source, /signatureLayout\(/u);
 });
 
 test('composer measurement observes available geometry, not the textarea it resizes (#180)', () => {
@@ -21,20 +24,24 @@ test('composer measurement observes available geometry, not the textarea it resi
   assert.match(source, /observer\.observe\(available\)/u);
   assert.match(source, /observer\.observe\(actionsEl\)/u);
   assert.match(source, /style\.maxHeight/u, 'a height-only viewport change refreshes the scroll ceiling');
+  const observer = source.slice(source.indexOf("let measured = ''"), source.indexOf('observer.observe(available)'));
+  assert.match(observer, /actionsEl\.offsetWidth/u, '#186: action-only changes cannot be deduplicated away');
+  assert.match(observer, /actionsEl\.offsetHeight/u);
+  assert.match(observer, /columnGap/u);
 });
 
 test('natural textarea measurement cannot transiently expand the Feed (#180)', () => {
   const grow = source.slice(source.indexOf('function growComposer()'), source.indexOf('let lastShellH'));
   assert.match(grow, /row\.style\.minHeight = `\$\{row\.offsetHeight\}px`/u);
   assert.ok(grow.indexOf('row.style.minHeight = `${row.offsetHeight}px`') < grow.indexOf("el.style.height = 'auto'"));
-  assert.match(grow, /finally \{\s*if \(row\) row\.style\.minHeight = previousMin;/u);
+  assert.match(grow, /finally \{\s*row\.style\.minHeight = previousMin;/u);
   assert.ok(grow.indexOf('row.style.minHeight = previousMin') < grow.indexOf('const shellH'));
 });
 
-test('Composer retires inline recipient and send-arm mechanisms whole (#168)', () => {
+test('retired recipient and send-arm mechanisms stay removed when measurement returns (#186)', () => {
   assert.doesNotMatch(source, /recipientOpen|toChipW|toExtras|toChipInfo|toMenuH|managedAgents|managedNames|setRecipient/u);
   assert.doesNotMatch(source, /closeRecipient|recipientChanged|intArm|intTimer|intTargets|intWho|recipientBusy|armInterrupt|fireInterrupt/u);
-  assert.doesNotMatch(source, /mirrorEl|SEND_ZONE|lastLineCollides|text-indent|c-mirror|ss-ring|stop-spin|int-pill/u);
+  assert.doesNotMatch(source, /SEND_ZONE|lastLineCollides|c-mirror|ss-ring|stop-spin|int-pill/u);
   assert.doesNotMatch(source, /setTimeout|clearTimeout/u,
     'the keyboard-only sequence expires by elapsed time, not a hidden send-button timer');
 });
@@ -51,7 +58,8 @@ test('Composer retains its stacking context around the one remaining palette (#1
 
 test('Composer owns local UI state, while transport and capture ordering stay outside (#133)', () => {
   assert.match(source, /composerText = \$bindable\(''\)/u, 'one explicit draft binding');
-  assert.doesNotMatch(source, /feedEl|cardsEl|hubPrefs|core\/ws|addEventListener|popstate|pushState/u);
+  assert.doesNotMatch(source, /feedEl|cardsEl|hubPrefs|core\/ws|window\.addEventListener|popstate|pushState/u,
+    '#186 font-face completion is a measurement signal, not an input-capture listener');
   assert.match(source, /const paletteBackend = \$derived\(paletteBackendFor\(composerText, recipient, agents\)\);/u);
   assert.match(source, /onmodels: modelsList/u, 'models use the explicit transport command');
   assert.match(source, /if \(shellH !== lastShellH\) \{\s*lastShellH = shellH;\s*onheightchange\(\);/u,
@@ -89,7 +97,7 @@ test('the remaining command palette keeps its measured upward placement (#168)',
   assert.match(rule('.cmd-menu'), /position: absolute; bottom: calc\(100% \+ 6px\)/u, 'the palette keeps its own placement');
 });
 
-test('a command-shaped draft retains its machine-text role without a layout mirror (#168)', () => {
+test('the signature mirror reads the actual prose or command font (#186)', () => {
   // The look mirrors send()'s own branch (slashCommand + a target), so the
   // capsule never promises a command that send() would deliver as prose.
   assert.match(source, /class:cmd=\{composerIsCmd\}/u);
@@ -97,6 +105,13 @@ test('a command-shaped draft retains its machine-text role without a layout mirr
   assert.match(rule('.compose-shell.cmd .c-input'), /font-family: var\(--font-mono\)/u);
   // And the height re-measures when the font flips, not just when text changes.
   assert.match(source, /void composerIsCmd;/u);
+  assert.match(source, /getComputedStyle\(el\)/u);
+  assert.match(source, /measureText\.style\.setProperty\(property, style\.getPropertyValue\(property\)\)/u);
+  assert.match(source, /void fonts\.custom; void uiFont\.custom/u);
+  assert.match(source, /fontSet\.ready\.then\(remeasure\)/u);
+  assert.match(source, /fontSet\.addEventListener\('loadingdone', remeasure\)/u);
+  assert.match(source, /fontSet\.removeEventListener\('loadingdone', remeasure\)/u);
+  assert.match(source, /onDestroy\(\(\) => measureRoot\?\.remove\(\)\)/u);
 });
 
 test('paste and the + button stage attachments through ONE pipeline (board #25)', () => {
@@ -127,8 +142,8 @@ test('the composer scrollbar follows measured overflow and the placeholder names
   // same `scrollHeight > maxH + 1` verdict that drives the padding — so a
   // shrink or the post-send reset (growComposer re-runs on composerText)
   // lands back on hidden immediately.
-  assert.match(source, /const overflowing = el\.scrollHeight > maxH \+ 1;/u, 'the existing overflow threshold stays measured');
-  assert.match(source, /el\.style\.overflowY = overflowing \? 'auto' : 'hidden';/u, 'the toggle rides that verdict');
+  assert.match(source, /naturalHeight: el\.scrollHeight/u, 'natural height comes from the native field');
+  assert.match(source, /el\.style\.overflowY = layout\.overflow \? 'auto' : 'hidden';/u, 'the measured layout owns the scroll verdict');
   assert.match(source, /resize: none; overflow-y: hidden;/u, 'the base state is hidden');
   // Not hidden PERMANENTLY: a long message must really scroll — the .c-input
   // block declares overflow-y exactly once (the hidden base; auto comes only
@@ -144,16 +159,22 @@ test('the composer scrollbar follows measured overflow and the placeholder names
     'destination labels need no explanatory subtitle');
 });
 
-test('normal-flow actions use the existing shared commands without corner hit overlays (#168)', async () => {
+test('measured signature actions reuse shared commands without hardcoded avoidance (#186)', async () => {
   assert.match(source, /import CommandButton from '\.\.\/ui\/CommandButton\.svelte';/u);
   assert.match(source, /<div class="composer-actions" bind:this=\{actionsEl\}>/u);
   assert.match(rule('.composer-actions'), /display: flex/u);
-  assert.doesNotMatch(rule('.composer-actions'), /position:\s*absolute/u);
+  assert.match(rule('.composer-actions'), /position: absolute; right: 0; bottom: 0/u);
   assert.match(rule('.compose-shell'), /border-radius: 16px/u);
   const appCss = await readFile(new URL('../../app.css', import.meta.url), 'utf8');
   assert.doesNotMatch(appCss, /\.compose-shell\b/u, 'native round corners do not opt into the shared squircle list');
   assert.doesNotMatch(source, /corner-shape:/u, 'this property stays in its shared owner; the Svelte CSS service does not support it yet');
-  assert.doesNotMatch(source, /\.send-btn|\.attach-btn|backdrop-filter|paddingRight|paddingBottom/u);
+  assert.doesNotMatch(source, /\.send-btn|\.attach-btn|backdrop-filter|SEND_ZONE/u);
+  assert.match(source, /if \(empty\) el\.style\.paddingRight = `\$\{controlsWidth \+ gap\}px`/u,
+    'only an empty placeholder gives width to the controls, never a typed line');
+  assert.match(source, /row\.style\.paddingBottom = layout\.reserved \? `\$\{layout\.reserved\}px` : ''/u);
+  assert.match(rule('.compose-line :global(.composer-measure)'), /height: 0/u);
+  assert.match(rule('.compose-line :global(.composer-measure)'), /overflow: hidden; visibility: hidden; pointer-events: none/u,
+    'the mirror neither paints, handles input nor adds scrollable space');
 });
 
 test('double Ctrl+C has only a timestamp and asks the parent about the current recipient (#168)', () => {

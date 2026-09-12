@@ -7,6 +7,58 @@ per-agent interruption. The feed is `hub-feed.md`.
 
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
 
+### Controls are the paragraph's signature (#186, 2026-09-12)
+
+Owner, 15:39, verbatim:
+> 还是有一些问题，agent 卡片和展开按钮不在上下居中的线上。点击 everyone 图标，应该上方展示好像所有 agent 都被选中了一样。还有文字消息，应该能存在于按钮的上方，不是完全左右分列的，就应该像是发送这几个按钮是文字段落的最后一行的右对齐的落款一样。
+
+The native textarea takes the full input width. All/Attach/Send remain the
+same shared commands, positioned at its bottom-right. A real DOM measurement
+mirror copies the textarea's computed font, spacing, wrapping and padding;
+text is assigned as a text node, never HTML. Native Range line rectangles
+are made local to that mirror with CSS zoom removed. This is text-layout
+measurement, not viewport/popover positioning or character-count estimation.
+The mirror is clipped to zero layout height, invisible, non-interactive and
+ARIA-hidden; it cannot add scrollable space and is removed on unmount.
+
+`signatureLayout` in hub-composer.ts owns the allocation decision from those
+measured boxes and the actual command cluster dimensions. If the bottom-right
+command rectangle is clear, it shares the last line. A real intersection
+reserves one command-height band below the textarea. Check the whole rectangle:
+a 44px touch target can hit a long preceding line even when the last line is
+short. At the scroll ceiling the commands keep their own bottom band outside
+the scrolling text; no typed line loses a permanent right column. Only an
+empty placeholder gives width to the controls, and the empty field stays
+one native control high.
+
+This explicitly reverses the #168/#180 no-mirror/side-column layout rule:
+the mirror was unnecessary for a separate row, but is necessary for the
+owner's signature layout. The old hardcoded SEND_ZONE, inline recipient
+popup and send/interrupt arming are not restored. Existing width/height
+observation (including changes to the command cluster alone), native input
+events, font-preference changes, initial font readiness and subsequent
+font-load completion all call the same growth owner. The font listener is
+removed on unmount. Measurement retains #180's
+synchronous row-height hold and notifies the parent only after the final
+shell height changes. No value/caret rewriting, timer or layout animation
+is added; draft, paste, IME, menu and transport owners are unchanged.
+
+Verification: Chromium 152.0.7977.64 with the real Hub and isolated RPC
+fixtures covers desktop, 390px coarse, 360px and wide-touch layouts, both
+themes, reduced motion, long/short final lines, the preceding-line collision,
+scroll ceilings, width/height changes and native CDP composition. The layout
+matrix passes 810 checks, reduced motion 250, and deliberate missing-band/
+wrong-font negative controls 41. A final source-hash-matched build passes
+29 focused checks including command-only resize and font-completion wiring;
+removing the font listener breaks parity, restoring it restores parity.
+Unit vectors pin allocation; the real Hub mount pins late font events and
+unmount cleanup. This is not an Android OS-IME acceptance pass.
+
+The final global-font comparison also reproduced a pre-existing Feed issue,
+recorded separately as #189: changing the UI font to DejaVu Sans Mono leaves
+a 457px tail gap on the 390px fixture in both main `23e090fb` and #186,
+while desktop remains at zero. It is not repaired by the composer change.
+
 ### One roster centre line (#186, 2026-09-12)
 
 Owner, 15:39: "agent 卡片和展开按钮不在上下居中的线上。"
@@ -34,6 +86,9 @@ the single-name-only predicate fails as a negative control. Chromium
 152.0.7977.64 verifies the same paint/ARIA states in both layouts and themes.
 
 ### One input row and one All command (#180, 2026-09-12)
+
+Historical layout: #186 above supersedes the side-by-side row and no-mirror
+rule. The All command, guarded live menu and measurement safety rules remain.
 
 Owner, 14:22, verbatim (the subsequent 14:26 correction replaces only the
 card's capacity encoding):

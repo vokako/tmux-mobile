@@ -1,10 +1,11 @@
 <script>
-  import { tick as settled } from 'svelte';
+  import { onDestroy, tick as settled } from 'svelte';
   import Icon from '../ui/Icon.svelte';
   import CommandButton from '../ui/CommandButton.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import { slashCommand, commandPalette, readlineEdit, pastedFiles, textIsThePaste } from './hub.ts';
-  import { ALL_TARGET, paletteBackendFor } from './hub-composer.ts';
+  import { ALL_TARGET, paletteBackendFor, signatureLayout } from './hub-composer.ts';
+  import { fonts, uiFont } from '../app/fonts.svelte.ts';
 
   let {
     selected = '', compact = false, recipient = '', composerText = $bindable(''),
@@ -36,25 +37,81 @@
   let shellEl = $state(null);
   let actionsEl = $state(null);
   let ctrlCTapAt = null;
+  let measureRoot = null;
+  let measureText = null;
+  let measureValue = null;
 
-  /** Natural textarea growth is the only height calculation; the controls
-   * share its row and the whole shell includes any attachment rows. */
+  function textBoxes(el, style) {
+    if (!measureRoot) {
+      const doc = el.ownerDocument;
+      measureRoot = doc.createElement('div');
+      measureRoot.className = 'composer-measure';
+      measureRoot.setAttribute('aria-hidden', 'true');
+      measureText = doc.createElement('div');
+      measureValue = doc.createTextNode('');
+      const end = doc.createElement('span');
+      end.textContent = '\u200b'; // Preserve a final empty line, like the textarea caret.
+      measureText.append(measureValue, end);
+      measureRoot.append(measureText);
+      el.parentElement.append(measureRoot);
+    }
+    // Copy computed metrics, not a guessed character width or another font stack.
+    for (const property of [
+      'font-family', 'font-size', 'font-weight', 'font-style', 'font-stretch', 'font-variant',
+      'font-variant-alternates', 'font-variant-ligatures', 'font-variant-numeric',
+      'font-variation-settings',
+      'font-kerning', 'line-height', 'letter-spacing', 'word-spacing', 'text-indent',
+      'text-transform', 'text-align', 'direction', 'tab-size', 'white-space',
+      'overflow-wrap', 'word-break', 'line-break', 'padding-top', 'padding-right',
+      'padding-bottom', 'padding-left', 'box-sizing',
+    ]) measureText.style.setProperty(property, style.getPropertyValue(property));
+    const width = (parseFloat(style.width) || el.offsetWidth) - (el.offsetWidth - el.clientWidth);
+    measureText.style.width = `${width}px`;
+    measureValue.data = el.value;
+    const range = el.ownerDocument.createRange();
+    range.selectNodeContents(measureText);
+    const origin = measureText.getBoundingClientRect();
+    // Range rectangles include CSS zoom; local differences remove page slides.
+    const scale = origin.width / width || 1;
+    return [...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0).map(rect => ({
+      left: (rect.left - origin.left) / scale, right: (rect.right - origin.left) / scale,
+      top: (rect.top - origin.top) / scale, bottom: (rect.bottom - origin.top) / scale,
+    }));
+  }
+  onDestroy(() => measureRoot?.remove());
+
+  /** One measurement transaction owns natural height and the signature band. */
   function growComposer() {
     const el = composerEl;
-    if (!el) return;
-    const row = el.parentElement;
-    const previousMin = row?.style.minHeight ?? '';
+    const row = el?.parentElement;
+    if (!el || !row || !actionsEl || !el.clientWidth) return;
+    const previousMin = row.style.minHeight;
     // Measuring a shorter textarea must not transiently expand the Feed and
     // clamp its scrollTop. Keep the row in place until the real height is ready.
-    if (row) row.style.minHeight = `${row.offsetHeight}px`;
+    row.style.minHeight = `${row.offsetHeight}px`;
     try {
+      row.style.paddingBottom = '';
+      el.style.paddingRight = '';
       el.style.height = 'auto';
-      const maxH = parseFloat(getComputedStyle(el).maxHeight) || Infinity;
-      const overflowing = el.scrollHeight > maxH + 1;
-      el.style.overflowY = overflowing ? 'auto' : 'hidden';
-      el.style.height = `${Math.min(el.scrollHeight, maxH)}px`;
+      el.style.overflowY = 'hidden';
+      const style = getComputedStyle(el);
+      const controlsWidth = actionsEl.offsetWidth, controlsHeight = actionsEl.offsetHeight;
+      const gap = parseFloat(getComputedStyle(actionsEl).columnGap) || 0;
+      const empty = !el.value;
+      if (empty && measureValue) measureValue.data = '';
+      const layout = signatureLayout({
+        width: parseFloat(style.width) || el.clientWidth, naturalHeight: el.scrollHeight,
+        maxHeight: parseFloat(style.maxHeight) || Infinity,
+        controlsWidth, controlsHeight, gap, empty,
+        textRects: empty ? [] : textBoxes(el, style),
+      });
+      if (empty) el.style.paddingRight = `${controlsWidth + gap}px`;
+      row.style.paddingBottom = layout.reserved ? `${layout.reserved}px` : '';
+      el.style.overflowY = layout.overflow ? 'auto' : 'hidden';
+      el.style.height = `${layout.inputHeight}px`;
+      if (layout.overflow) textBoxes(el, getComputedStyle(el)); // Match the native scrollbar gutter too.
     } finally {
-      if (row) row.style.minHeight = previousMin;
+      row.style.minHeight = previousMin;
     }
     // Attachments and actions count toward the shell; unchanged height must
     // not re-park the feed on every keystroke.
@@ -70,17 +127,31 @@
     void pending;
     void compact;
     void composerIsCmd;
+    void fonts.custom; void uiFont.custom;
     growComposer();
+  });
+  $effect(() => {
+    const fontSet = document.fonts;
+    if (!fontSet) return;
+    let live = true;
+    const remeasure = () => { if (live) growComposer(); };
+    fontSet.ready.then(remeasure);
+    fontSet.addEventListener('loadingdone', remeasure);
+    return () => {
+      live = false;
+      fontSet.removeEventListener('loadingdone', remeasure);
+    };
   });
   $effect(() => {
     const available = shellEl?.parentElement?.parentElement;
     if (!composerEl || !actionsEl || !available) return;
     let measured = '';
-    // The chat column supplies space; commands supply the text inset. Observing
+    // The chat column supplies space; commands supply the signature box. Observing
     // the textarea itself would observe our own height writes and form a loop.
     const observer = new ResizeObserver(() => {
       const style = getComputedStyle(composerEl);
-      const next = `${composerEl.clientWidth}:${style.maxHeight}:${style.minHeight}`;
+      const next = `${composerEl.clientWidth}:${style.maxHeight}:${style.minHeight}:${style.font}:`
+        + `${actionsEl.offsetWidth}:${actionsEl.offsetHeight}:${getComputedStyle(actionsEl).columnGap}`;
       if (next === measured) return;
       measured = next;
       growComposer();
@@ -231,6 +302,7 @@
   <div class="compose-line">
   <textarea class="c-input" rows="1" bind:this={composerEl} bind:value={composerText}
     aria-label={composerLabel} placeholder={composerLabel}
+    oninput={growComposer}
     onkeydown={onComposerKey}
     onpaste={onComposerPaste}
     onfocus={onfocus}
@@ -302,16 +374,20 @@
   .compose-shell:focus-within { border-color: var(--accent-line); }
   .compose-shell.cmd { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 6%, var(--bubble-in)); }
   .compose-shell.cmd .c-input { font-family: var(--font-mono); }
-  .compose-line { display: flex; align-items: flex-end; gap: var(--tool-gap); min-width: 0; }
+  .compose-line { position: relative; min-width: 0; box-sizing: border-box; }
   .c-input {
-    display: block; flex: 1; min-width: 0; width: 100%; box-sizing: border-box; min-height: var(--control-height);
+    display: block; min-width: 0; width: 100%; box-sizing: border-box; min-height: var(--control-height);
     max-height: calc(30vh / var(--ui-zoom, 1)); padding: max(2px, calc((var(--control-height) - 1.5em) / 2)) 0;
     border: 0; outline: none; background: transparent; color: var(--text);
-    font: var(--fs-body)/1.5 var(--font-ui); resize: none; overflow-y: hidden;
+    font: var(--fs-body)/1.5 var(--font-ui); resize: none; overflow-y: hidden; overflow-x: hidden;
   }
   .c-input::placeholder { color: var(--text3); }
-  .composer-actions { display: flex; align-items: center; flex: none; gap: var(--tool-gap); }
+  .composer-actions { position: absolute; right: 0; bottom: 0; display: flex; align-items: center; gap: var(--tool-gap); }
   .all-choice { display: flex; flex: none; }
+  .compose-line :global(.composer-measure) {
+    position: absolute; top: 0; left: 0; width: 100%; height: 0;
+    overflow: hidden; visibility: hidden; pointer-events: none;
+  }
   .pend-row { display: flex; flex-wrap: wrap; gap: 6px; padding-block: 5px; }
   .pend-chip {
     display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 3px 7px;
