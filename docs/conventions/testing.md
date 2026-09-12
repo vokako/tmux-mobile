@@ -41,11 +41,39 @@ or which cell owns overflow. These assertions do not execute handlers.
   an importable module — source regexes are a last resort, and each one
   should explain WHY the invariant matters.
 
-`<Component>.render.test.ts` compiles the real component through Vite SSR
-and asserts its emitted markup (`Board.render.test.ts` was the first).
-Prefer it over source regexes for rendered branches and attributes.
-SSR does not run client effects or event handlers; it cannot establish
-timing, listener order or reactive behavior after a click.
+`<Component>.render.ts` compiles the real component through Vite SSR and
+asserts its emitted markup (`Board.render.ts` was the first, as
+`Board.render.test.ts`). A suite is a plain module of `test()` calls beside
+its component that loads it through the ONE warm harness —
+`const h = await renderHarness()` from `src/lib/test/ssr.ts`, then
+`h.load('/src/lib/hub/X.svelte')`, `h.render`, `h.fragment(html)` — and it is
+collected by `src/lib/test/render.test.ts`, the tier's single process. Every
+suite runs under `{ timeout: RENDER_TIMEOUT_MS }`; the harness installs the
+one browser-like environment (a jsdom window), so a suite sets no globals
+and closes nothing. Prefer it over source regexes for rendered branches and
+attributes. SSR does not run client effects or event handlers; it cannot
+establish timing, listener order or reactive behavior after a click.
+
+**The render tier is one process with a measured budget** (board #178, lead
+2026-09-12: in three review runs every render test — seven of them — timed
+out at 60 s together while reruns passed; passing runs showed 35–42 s each).
+Measured on this host (16 cores, load ~20) a render process paid, before its
+one test could start: import jsdom 1.1 s CPU, import vite 0.3 s,
+createServer 0.7–0.9 s, the component graph 1.9–2.6 s (56 of Feed's 80
+modules are the svelte runtime, recompiled identically in every process),
+render + parse 0.25 s — 5.1 s CPU per file, 44 s CPU for seven files that
+ran 2.5–5.4 s alone and 8 s inside the parallel suite; a host at load 54
+(leaked headless browsers) stretched that to 35–42 s, and 60 s was 1.5× the
+typical, not a budget. The tier is now one process behind one warm server:
+the fixed cost is paid once at import, outside any test's timer, and each
+suite's timer sees only its own component files. After: 5.9 s wall / 9.8 s
+CPU for the whole tier alone; inside the suite the slowest suites are Drawer
+3.4 s (xterm through `noExternal`) and Board 2.6 s, the rest 0.04–0.5 s.
+`RENDER_TYPICAL_MS` (4 s, that slowest typical) and `RENDER_TIMEOUT_MS`
+(20 s, 5× it; the rule is ≥ 3×) are the harness's contract;
+`harness.source.test.ts` pins the ratio, that no `*.render.test.ts` process
+creeps back, that every `*.render.ts` is on the collector's list, uses the
+harness, sets no literal timeout and reaches for neither vite nor jsdom.
 
 **A test harness holds no fixed port** (board #177, lead 2026-09-12). Several
 agents share this host, so two `npm test` runs at once — the launch checkout
@@ -55,8 +83,8 @@ mount case in one run timed out at 60 s behind "WebSocket server error: Port
 `createServer` in middleware mode opens its OWN http server for the HMR
 websocket on the fixed default 24678 even with `server.hmr: false` — that
 flag only stops the update messages; `server.ws: false` is what opens no
-socket (Vite 6.4.2, `if (config.server.ws === false)`). Every render test
-therefore obtains its server from the ONE helper, `src/lib/test/ssr.ts`
+socket (Vite 6.4.2, `if (config.server.ws === false)`). The render tier
+therefore obtains its one server from the ONE helper, `src/lib/test/ssr.ts`
 (`ssrServer({ cacheDir, … })`: middleware mode, `hmr: false`, `ws: false`,
 no port), and the mount tier builds without serving.
 `src/lib/test/harness.source.test.ts` pins both and that `createServer(`

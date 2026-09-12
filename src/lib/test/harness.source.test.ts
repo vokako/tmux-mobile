@@ -24,16 +24,37 @@ test('the ONE Vite SSR helper opens no socket: ws:false, hmr:false, no port', as
   assert.match(ssr, /appType:\s*'custom'/u);
 });
 
-test('every render harness goes through the helper; nothing else in the test tree creates a Vite server', () => {
+test('the render tier is ONE process: every *.render.ts suite is collected by render.test.ts and shares the harness (board #178)', async () => {
+  // Seven files were seven processes, each paying ~2.5 s CPU of fixed cost
+  // (jsdom import, vite import, server start) plus the svelte runtime graph
+  // — 44 s CPU for the tier, which a busy host stretched to 35–42 s per test
+  // against a 60 s budget. The suites now run in one process behind one
+  // warm server; the fixed cost is paid once, outside any test's timer.
   const creators = listed('createServer\\(');
   assert.deepEqual(creators, ['src/lib/test/ssr.ts'], 'createServer( exists once, in the helper');
-  const renderTests = listed('\\.render\\.test\\.ts|ssrLoadModule').filter((f) => f.endsWith('.render.test.ts'));
-  assert.ok(renderTests.length >= 7, `render tests found: ${renderTests.length}`);
-  for (const f of renderTests) {
-    const src = execFileSync('cat', [f], { cwd: root, encoding: 'utf8' });
-    assert.match(src, /import \{ ssrServer \} from '[./]*lib\/test\/ssr\.ts'|import \{ ssrServer \} from '\.\.\/test\/ssr\.ts'/u, `${f} uses the helper`);
-    assert.doesNotMatch(src, /from 'vite'/u, `${f} does not reach for vite itself`);
+  // rg exits 1 when nothing matches — which is the pass here.
+  let strays = '';
+  try { strays = execFileSync('rg', ['--files', 'src', 'scripts', '-g', '*.render.test.ts'], { cwd: root, encoding: 'utf8' }).trim(); } catch (e) { if ((e as { status?: number }).status !== 1) throw e; }
+  assert.equal(strays, '', 'no component owns a render PROCESS of its own — a *.render.test.ts is a stray');
+  const suites = execFileSync('rg', ['--files', 'src', '-g', '*.render.ts'], { cwd: root, encoding: 'utf8' }).split('\n').filter(Boolean).sort();
+  assert.ok(suites.length >= 7, `render suites found: ${suites.length}`);
+  const collector = await readFile(new URL('./render.test.ts', import.meta.url), 'utf8');
+  for (const f of suites) {
+    const rel = f.replace(/^src\/lib\//u, '../').replace(/\.ts$/u, '.ts');
+    assert.ok(collector.includes(`import '${rel}';`), `${f} is collected by render.test.ts`);
+    const src = await readFile(new URL(`../../../${f}`, import.meta.url), 'utf8');
+    assert.match(src, /import \{ (?:[^}]*, )?renderHarness(?:, [^}]*)? \} from '\.\.\/test\/ssr\.ts'/u, `${f} uses the shared harness`);
+    assert.doesNotMatch(src, /from '(?:vite|jsdom)'/u, `${f} does not reach for vite or jsdom itself`);
+    assert.doesNotMatch(src, /timeout:\s*\d/u, `${f}: the budget is the harness constant, not a literal`);
+    assert.match(src, /timeout: RENDER_TIMEOUT_MS/u, `${f} runs under the one render budget`);
+    assert.doesNotMatch(src, /globalThis|\.close\(\)/u, `${f} installs no globals and closes nothing — the harness owns the environment`);
   }
+});
+
+test('the render budget is the harness constant, at least 3x the measured typical', async () => {
+  const { RENDER_TIMEOUT_MS, RENDER_TYPICAL_MS } = await import('./ssr.ts');
+  assert.ok(RENDER_TIMEOUT_MS >= 3 * RENDER_TYPICAL_MS, `${RENDER_TIMEOUT_MS} >= 3 × ${RENDER_TYPICAL_MS}`);
+  assert.ok(RENDER_TIMEOUT_MS <= 60_000, 'no bigger than the budget the incident proved was not one');
 });
 
 test('the mount harness builds; it never serves', async () => {
