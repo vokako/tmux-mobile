@@ -17,7 +17,8 @@
   import Select from '../ui/Select.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
-  import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, countsOf, applyCounts, visibleBoards, boardTitle, assignNotes, chipCols, noteActsSet, noteActsCopyLanded, noteActsExpired, NOTE_ACTS_IDLE, type NoteActsState } from './board.ts';
+  import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, countsOf, applyCounts, visibleBoards, boardTitle, assignNotes, chipCols } from './board.ts';
+  import { messageActsSet, messageActsCopyLanded, messageActsExpired, MESSAGE_ACTS_IDLE, type MessageActsState } from './message-actions.ts';
   import { scrollFade } from '../core/scrollFade.ts';
   import { flip } from 'svelte/animate';
   import { moveMs, revealMs } from '../ui/motion.ts';
@@ -272,7 +273,7 @@
     // untrack: this effect runs on `cur` — reading acts to bump its gen
     // would ALSO subscribe the effect to acts, and writing it back loops
     // the effect to death (caught live: effect_update_depth_exceeded).
-    acts = noteActsSet(untrack(() => acts), -1);
+    acts = messageActsSet(untrack(() => acts), -1);
   });
 
   /** The editor boxes ADAPT to their content (owner, 2026-08-29: "有的框很大
@@ -313,7 +314,7 @@
       notesBase = Array.isArray(sel.notes) ? sel.notes.length : 0;
       draft = draftOf(sel);
       draftBase = draftOf(sel);
-      acts = noteActsSet(acts, -1); // a different issue, a fresh slate (board #46)
+      acts = messageActsSet(acts, -1); // a different issue, a fresh slate (board #46)
       err = '';
     } catch (e) { err = String((e as Error)?.message ?? e); }
   }
@@ -477,17 +478,17 @@
   // from app.css (a scoped copy is dialect drift). acts.open is the single
   // source of WHICH row is open; another note's tap switches, the same
   // note's tap closes, outside/Escape/issue-switch put it away. Every
-  // transition is a pure board.ts function over ONE state triple, and
+  // transition is a pure message-actions.ts function over ONE state triple, and
   // acts.gen makes the Copy beat's timeout self-scoped (review blocker:
   // a global boolean let Copy A's stale timeout close Copy B's row).
-  let acts = $state<NoteActsState>(NOTE_ACTS_IDLE);
+  let acts = $state<MessageActsState>(MESSAGE_ACTS_IDLE);
   const noteSelectionClicks = selectionClickGuard();
   function toggleNoteActs(i: number) {
     if (noteSelectionClicks.consume(i)) return;
     // A drag-selection's tail click must not steal the selection — the note
     // text is swipe-selectable (#43); the action row is for a plain tap.
     if (typeof getSelection === 'function' && !(getSelection()?.isCollapsed ?? true)) return;
-    acts = noteActsSet(acts, acts.open === i ? -1 : i);
+    acts = messageActsSet(acts, acts.open === i ? -1 : i);
   }
   async function copyNote(body: string) {
     // The attempt's identity, captured BEFORE the await (second blocker):
@@ -497,14 +498,14 @@
     const attempt = acts.gen;
     try {
       await navigator.clipboard.writeText(body ?? '');
-      const next = noteActsCopyLanded(acts, attempt);
+      const next = messageActsCopyLanded(acts, attempt);
       if (next === acts) return; // the context moved mid-flight; the resolve is orphaned
       acts = next;
       // The Copied beat, then the row puts itself away — copying IS what the
       // row was opened for (Chat's own 1.5 s). The timeout captures ITS gen:
       // it may expire only the copy it belongs to.
       const gen = next.gen;
-      setTimeout(() => { acts = noteActsExpired(acts, gen); }, 1500);
+      setTimeout(() => { acts = messageActsExpired(acts, gen); }, 1500);
     } catch (e) { console.warn('copy failed', e); }
   }
   // Outside pointerdown / Escape close the open row — the transient-layer
@@ -516,11 +517,11 @@
     if (acts.open < 0) return;
     const onDown = (e: PointerEvent) => {
       const el = e.target as HTMLElement | null;
-      if (!el?.closest?.('.m-acts, .n-wrap, .n-at')) acts = noteActsSet(acts, -1);
+      if (!el?.closest?.('.m-acts, .n-wrap, .n-at')) acts = messageActsSet(acts, -1);
     };
     const onEsc = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || pendingDiscard || pendingDelete) return;
-      acts = noteActsSet(acts, -1); e.stopPropagation();
+      acts = messageActsSet(acts, -1); e.stopPropagation();
     };
     window.addEventListener('pointerdown', onDown, true);
     window.addEventListener('keydown', onEsc, true);
@@ -790,7 +791,7 @@
                      bubble — so the time is a real borderless button, Chat's
                      meta-trailer pattern. -->
                 <button class="n-at" aria-label={t('hubMsgActions')}
-                  onclick={(e) => { e.stopPropagation(); acts = noteActsSet(acts, acts.open === i ? -1 : i); }}>{ago(n.at)}</button>
+                  onclick={(e) => { e.stopPropagation(); acts = messageActsSet(acts, acts.open === i ? -1 : i); }}>{ago(n.at)}</button>
               </div>
               <!-- fit-content relative wrapper: the overlay anchors to the
                    BUBBLE's corner, never the full row's far right. -->
