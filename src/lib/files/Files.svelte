@@ -21,7 +21,7 @@
   import Lightbox from '../ui/Lightbox.svelte';
   import { anchorOf } from '../ui/placement.ts';
   import { systemOwnsContextMenu } from '../ui/native-context-menu.ts';
-  import { entryToolActions, visibleToolCount } from './file-tools.ts';
+  import { copyActions, entryToolActions, visibleToolCount } from './file-tools.ts';
   import SideHandle from '../ui/SideHandle.svelte';
   import GitPanel from './GitPanel.svelte';
   import { hoverInfo } from '../ui/hover.ts';
@@ -384,9 +384,10 @@
   const menuActions = $derived.by(() => {
     const menu = fileMenu;
     if (!menu) return [];
-    // A path crumb offers its path (board #187); a row its file; the rest the tools.
+    // A path crumb offers its name and its path (board #187/#191); a row its
+    // file; the rest the tools.
     const actions = menu.kind === 'path'
-      ? [{ key: 'copy', label: t('filesCopyPath'), icon: 'copy', run: () => rowHandlers.copy(menu.entry.path) }]
+      ? copyActions(menu.entry, t, rowHandlers.copy)
       : menu.entry ? rowActions(menu.entry)
       : menu.kind === 'overflow' ? toolbarActions.slice(toolCount) : toolbarActions;
     return actions.map(action => ({

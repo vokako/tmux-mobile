@@ -20,12 +20,12 @@ test('entry menus and inline tools share callbacks and the captured entry (#164)
     download: path => calls.push(['download', path]), rename: target => calls.push(['rename', target.name]),
     remove: path => calls.push(['remove', path]),
   });
-  assert.deepEqual(actions.map(a => a.key), ['open', 'copy', 'download', 'rename', 'delete']);
+  assert.deepEqual(actions.map(a => a.key), ['open', 'copyName', 'copy', 'download', 'rename', 'delete']);
   assert.deepEqual(actions.filter(a => a.inline).map(a => a.key), ['download', 'rename', 'delete']);
   entry.path = '/different'; entry.name = 'different';
   for (const action of actions) action.run();
   assert.deepEqual(calls, [
-    ['open', '/a/notes.md'], ['copy', '/a/notes.md'], ['download', '/a/notes.md'],
+    ['open', '/a/notes.md'], ['copy', 'notes.md'], ['copy', '/a/notes.md'], ['download', '/a/notes.md'],
     ['rename', 'notes.md'], ['remove', '/a/notes.md'],
   ]);
   assert.equal(actions.at(-1)?.danger, true, 'destruction is last, with its semantic tone');
@@ -38,4 +38,20 @@ test('folders and broken links do not offer file download (#164)', () => {
     assert.deepEqual(actions.filter(a => a.inline).map(a => a.key), ['rename', 'delete']);
     assert.equal(actions[0]?.disabled, type === 'broken');
   }
+});
+
+test('a thing with a path offers its NAME and its full PATH to copy (board #191)', () => {
+  // Owner 2026-09-12: "复制文件路径最好是可以…我可以复制文件名或者整个完整的路径".
+  const copied: string[] = [];
+  const t = (key: string) => key;
+  const actions = entryToolActions({ name: 'readme.md', path: '/srv/docs/readme.md', type: 'file' }, t, {
+    open() {}, copy: (text) => copied.push(text), download() {}, rename() {}, remove() {},
+  });
+  const keys = actions.map(a => a.key);
+  assert.deepEqual(keys.slice(0, 3), ['open', 'copyName', 'copy'], 'name before path, both beside open');
+  actions.find(a => a.key === 'copyName')!.run();
+  actions.find(a => a.key === 'copy')!.run();
+  assert.deepEqual(copied, ['readme.md', '/srv/docs/readme.md']);
+  assert.equal(actions.find(a => a.key === 'copyName')!.label, 'filesCopyName');
+  assert.ok(!actions.find(a => a.key === 'copyName')!.inline, 'a menu action, not a row tool');
 });

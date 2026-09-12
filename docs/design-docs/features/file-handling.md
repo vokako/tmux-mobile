@@ -139,8 +139,11 @@ a crumb's width is its name's. `Files.source.test.ts` pins both.
 A crumb is a THING WITH A PATH, so it gets the one context-menu mechanism
 (board #187, owner: "这个路径最好可以复制，包括文件夹文件的名字我也可以选中复制"):
 right-click / long-press a segment (root included) → `ContextMenu` with Copy
-path of THAT segment, through the same `openFileMenu`/`copyPath` a row uses
-(`kind: 'path'`). Crumb and file-name text are `user-select: text`; a tap
+name and Copy path of THAT segment, through the same `openFileMenu`/`copyPath`
+a row uses (`kind: 'path'`). Both offers come from ONE definition,
+`copyActions` in `file-tools.ts`, shared by rows and crumbs (board #191, owner
+2026-09-12: "复制文件路径最好是可以…我可以复制文件名或者整个完整的路径" — a
+"Copy path" that only knew the full path left the name to be retyped). Crumb and file-name text are `user-select: text`; a tap
 that ends a text selection is a copy gesture, not a navigation — the crumb
 and row `onclick` skip when the selection is not collapsed, Feed's guard.
 Measured with a real Chromium mouse drag: the file name selects and no

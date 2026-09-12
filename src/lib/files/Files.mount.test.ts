@@ -663,3 +663,25 @@ test('a path segment has the one context menu (Copy path) and a text selection d
     assert.equal(listed.length, before + 1, 'without a selection the crumb navigates');
   } finally { await app.close(); }
 });
+
+test('crumb and row menus copy the NAME or the full PATH (board #191)', async context => {
+  const copied: string[] = [];
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, session: 'fixture' }, modules: [rpc()],
+    setup(window) {
+      window.localStorage.setItem('tmux_layout_mode', 'desktop');
+      Object.defineProperty(window.navigator, 'clipboard', { value: { writeText: async (text: string) => { copied.push(text); } } });
+    },
+  });
+  try {
+    await settle(app);
+    const crumb = app.document.querySelectorAll<HTMLButtonElement>('.bc-path-row .bc-seg')[1]!;
+    contextMenu(app, crumb); await app.flush();
+    menuAction(app, 'Copy name').click(); await settle(app);
+    contextMenu(app, crumb); await app.flush();
+    menuAction(app, 'Copy path').click(); await settle(app);
+    contextMenu(app, app.document.querySelector('.file-row')!); await app.flush();
+    menuAction(app, 'Copy name').click(); await settle(app);
+    assert.deepEqual(copied, ['fixture', '/fixture', 'AGENTS.md']);
+  } finally { await app.close(); }
+});

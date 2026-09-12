@@ -28,12 +28,22 @@ export function visibleToolCount(total: number, available: number, target: numbe
   return total <= slots ? total : slots - 1;
 }
 
+/** What a thing with a path offers to copy: its NAME or its full PATH
+ * (board #191, owner: "我可以复制文件名或者整个完整的路径") — one definition for
+ * rows and crumbs alike. */
+export function copyActions(target: { name: string; path: string }, t: (key: string) => string, copy: (text: string) => unknown): FileToolAction[] {
+  return [
+    { key: 'copyName', label: t('filesCopyName'), icon: 'copy', run: () => copy(target.name) },
+    { key: 'copy', label: t('filesCopyPath'), icon: 'copy', run: () => copy(target.path) },
+  ];
+}
+
 /** Inline tools and context menus are views of these same captured actions. */
 export function entryToolActions(entry: Entry, t: (key: string) => string, handlers: EntryHandlers): FileToolAction[] {
   const target = { ...entry };
   return [
     { key: 'open', label: t('open'), icon: 'arrow-right', disabled: target.type === 'broken', run: () => handlers.open(target) },
-    { key: 'copy', label: t('filesCopyPath'), icon: 'copy', run: () => handlers.copy(target.path) },
+    ...copyActions(target, t, handlers.copy),
     ...(target.type !== 'dir' && target.type !== 'broken'
       ? [{ key: 'download', label: t('filesDownload'), icon: 'download', inline: true, run: () => handlers.download(target.path) }] : []),
     { key: 'rename', label: t('filesRename'), icon: 'edit', inline: true, run: () => handlers.rename(target) },
