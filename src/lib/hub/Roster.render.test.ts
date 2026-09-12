@@ -46,7 +46,7 @@ test('Roster renders the controlled destination strip (#168)', { timeout: 60000 
       assert.equal(root.querySelectorAll('.roster').length, 1);
       assert.equal(root.querySelectorAll('.tgroup').length, 0);
       assert.deepEqual([...root.querySelectorAll('.acard[data-agent]')].map((node) => node.getAttribute('data-agent')),
-        ['all', 'waiting', 'runner', 'solo', 'paused']);
+        ['waiting', 'runner', 'solo', 'paused', 'all']);
       assert.match(select(root, 'waiting').getAttribute('aria-label')!, /dev\/review/u);
       assert.doesNotMatch(root.textContent!, /State:|stopped|@all/u, 'state words live only in hover/ARIA');
       assert.equal(select(root, 'runner').getAttribute('aria-pressed'), 'true');
@@ -105,7 +105,7 @@ test('Roster renders the controlled destination strip (#168)', { timeout: 60000 
       assert.deepEqual(marked(extra), ['waiting']);
       assert.equal(select(extra, 'runner').getAttribute('aria-pressed'), 'true');
       assert.equal(select(extra, 'waiting').getAttribute('aria-pressed'), 'false');
-      assert.deepEqual(marked(view({ composerText: '@all' })), ['all', 'waiting', 'runner', 'solo']);
+      assert.deepEqual(marked(view({ composerText: '@all' })), ['waiting', 'runner', 'solo', 'all']);
       assert.deepEqual(marked(view({ recipient: 'all', composerText: '@waiting' })), []);
       assert.equal(select(view({ recipient: 'all' }), 'all').getAttribute('aria-pressed'), 'true');
       const none = view({ recipient: '', composerText: '@waiting' });

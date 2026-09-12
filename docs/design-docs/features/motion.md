@@ -362,6 +362,13 @@ sizes (owner declined).
   layout animation, timer, listener or alternative easing is added; the
   existing draft guard still commits navigation, and the shared Select
   remains viewport-anchored. Textarea sizing is layout, not moving paint.
+- **Roster density changes paint, not interaction timing** (2026-09-12,
+  #176): card paint takes the shared command inset; its hover/selection
+  transition stays `--t-fast` and its existing context fill stays `--t-move`.
+  Reduced motion stills both. Measured horizontal edge cues follow native
+  scrolling without a timer, animated overlay or new scroll engine; fitting
+  and expanded lists have no mask. Keyed recency motion, input-held ordering
+  and the parent reading-anchor transaction remain unchanged.
 - **Compact controls change paint, not motion or hit geometry** (2026-09-10,
   #160/#161): the owner's 14:19/14:58 words are recorded verbatim in
   [design-language.md](design-language.md#compact-paint-does-not-shrink-the-input-target-2026-09-10-160161).

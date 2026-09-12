@@ -7,11 +7,52 @@ per-agent interruption. The feed is `hub-feed.md`.
 
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
 
+### Compact card paint and secondary All (board #176, 2026-09-12)
+
+Owner, 00:02 (repeating the 2026-09-11 screenshot report), verbatim:
+> 这个card行太高了，看着太难看，你要做的精致一点，还有类似检查一下，很多卡片按钮什么的，不要这么傻大的，上下文的进度条稍微粗一点明显一些。还有这个展开箭头和卡片，中间直接硬截断了，不好看，要融合完整一些。
+> 还有everyone按钮太大了，而且占据了主要位置，不好用
+
+The strip had kept full-height card backgrounds after commands adopted inset
+paint. Cards now use the same `--control-paint-inset`: 24px pointer / 32px
+coarse paint inside unchanged 28/44px native targets. Remove the extra 4px
+outer vertical padding; the ordinary strip becomes 32/48px, including its
+2px scrollport padding. Skeletons use the same paint inset. Selection and
+filter outlines follow the painted boundary rather than crossing the
+20px avatar in the compact interior; focus and sibling Stop/Watch targets
+remain separate. The existing `ctxColor` meter becomes 3px and straddles
+the painted lower edge by 1px to clear the avatar, with rounded ends; percentage/ARIA and
+missing-versus-zero semantics are unchanged.
+Expanded names retain wrapping, with padding for the paint inset and meter.
+This leaves ordinary single-line geometry unchanged while letting long names
+grow their row instead of crossing the 3px meter.
+
+All is secondary, after the named and stopped identities, before Add. It is
+an icon-only choice in the collapsed strip, labelled in the expanded list
+and always named in hover/ARIA and the selected-destination placeholder.
+Its resting paint is neutral/unframed, not a permanently accented first
+card; selected All retains the accent capsule. This deliberately supersedes
+the first-position/broadcast-emphasis treatment from #168/#173, not their
+selection or interruption contracts. The same busy-only All Stop remains,
+including the double-Ctrl+C equivalence; no new destination sentinel.
+
+The single native horizontal scroller meets the disclosure without an extra
+gap. `ui/scroll-edges.ts` measures which physical ends still hide content;
+the shared `.edge-fade` alpha mask softens only those ends. It is an overflow
+cue, not an overlay covering actions or a substitute for fitting controls.
+At an end, that end is fully visible; a fitting or expanded list has no
+horizontal mask. Keyboard focus also suspends the mask: native Tab and
+menu focus return otherwise leave an edge glyph/focus ring visibly faded.
+One action observes scrollport/items and direct-child
+changes, cleans up on unmount and adds no timer, custom scrolling or
+selection listener. The same keyed list, recency hold, disclosure preference
+and parent reading transaction remain authoritative.
+
 ### Card refinements (board #173, 2026-09-11)
 
 Owner, 08:39: "卡片显示优化，context 长度比例还是直接帮我可视化出来，还有 everyon 可以换一个样式，不然我以为还是和 agent 会话一样。还有终止按钮，不要圆形的阴影了，还有这个黑方块看着不知道是停止的意思，是不是换个颜色？让我能更容易够理解这个按钮的含义。还有缺少了双击show 单独过滤某个 agent 消息的能力，是不是可以双击后，卡片样式给我一些改变。"
 
-Context usage is visible again as the existing 2px `.ac-bar` at the card's
+Originally 2px (strengthened by #176 above), `.ac-bar` restores context usage at the card's
 bottom edge, in both strip and expanded views. It uses `ctxColor`, not a new
 threshold or colour family; zero is a reading, missing data has no bar, and
 over-capacity readings saturate the fill while hover/ARIA retain the exact

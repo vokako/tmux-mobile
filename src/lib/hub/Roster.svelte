@@ -11,6 +11,7 @@
   import { anchorOf } from '../ui/placement.ts';
   import { flip } from 'svelte/animate';
   import { moveMs } from '../ui/motion.ts';
+  import { scrollEdges } from '../ui/scroll-edges.ts';
 
   let {
     selected = '', compact = false, managedAgents = [], stopped = [], selectedRow = null,
@@ -140,7 +141,7 @@
 
 {#if selected}
   <div class="roster" class:compact>
-    <div class="cards" class:expanded class:reveal={justLoaded} id={cardsId} bind:this={cardsEl}
+    <div class="cards edge-fade" class:expanded class:reveal={justLoaded} id={cardsId} bind:this={cardsEl} use:scrollEdges={!expanded}
       role="group" aria-label={t('agentsTitle')}
       onpointerenter={(e) => { hovering = e.pointerType !== 'touch'; }}
       onpointerleave={() => { hovering = false; clearPress(); }}
@@ -151,26 +152,6 @@
       {#if !roomReady}
         <div class="skel-wrap sk-cards" aria-hidden="true">
           <span class="skel sk-card"></span><span class="skel sk-card"></span><span class="skel sk-card"></span>
-        </div>
-      {:else}
-        <div class="acard all" data-agent={ALL_TARGET} class:sel={recipient === ALL_TARGET} class:has-stop={busyNames.length > 0}>
-          <button type="button" class="agent-select" aria-pressed={recipient === ALL_TARGET}
-            aria-label={[t('hubEveryone'), '@all', extras.includes(ALL_TARGET) ? t('hubToAlsoHint').replace('{names}', '@all') : ''].filter(Boolean).join(' · ')}
-            use:hoverInfo={() => ({ title: t('hubEveryone'), note: destinationNote(ALL_TARGET) })}
-            onclick={() => selectTarget(ALL_TARGET)}>
-            <span class="broadcast-glyph"><Icon name="collab" size={18} /></span>
-            <span class="a-name">{t('hubEveryone')}</span>
-            <span class="agent-marks" class:unmarked={!extras.includes(ALL_TARGET)}>
-              {#if extras.includes(ALL_TARGET)}<span class="agent-mention" aria-hidden="true">@</span>{/if}
-            </span>
-          </button>
-          {#if busyNames.length}
-            <span class="agent-stop card-quick" class:pending={allPending}>
-              <CommandButton label={`${t('hubInterrupt')} ${t('hubEveryone')}`} icon="stop" variant="warn" iconOnly
-                pending={allPending} disabled={allPending}
-                onclick={(e) => { e.stopPropagation(); interrupt(ALL_TARGET); }} />
-            </span>
-          {/if}
         </div>
       {/if}
 
@@ -234,6 +215,27 @@
           </button>
         </div>
       {/each}
+      {#if roomReady}
+        <div class="acard all" data-agent={ALL_TARGET} class:sel={recipient === ALL_TARGET} class:has-stop={busyNames.length > 0}>
+          <button type="button" class="agent-select" aria-pressed={recipient === ALL_TARGET}
+            aria-label={[t('hubEveryone'), '@all', extras.includes(ALL_TARGET) ? t('hubToAlsoHint').replace('{names}', '@all') : ''].filter(Boolean).join(' · ')}
+            use:hoverInfo={() => ({ title: t('hubEveryone'), note: destinationNote(ALL_TARGET) })}
+            onclick={() => selectTarget(ALL_TARGET)}>
+            <span class="broadcast-glyph"><Icon name="collab" size={18} /></span>
+            <span class="a-name">{t('hubEveryone')}</span>
+            <span class="agent-marks" class:unmarked={!extras.includes(ALL_TARGET)}>
+              {#if extras.includes(ALL_TARGET)}<span class="agent-mention" aria-hidden="true">@</span>{/if}
+            </span>
+          </button>
+          {#if busyNames.length}
+            <span class="agent-stop card-quick" class:pending={allPending}>
+              <CommandButton label={`${t('hubInterrupt')} ${t('hubEveryone')}`} icon="stop" variant="warn" iconOnly
+                pending={allPending} disabled={allPending}
+                onclick={(e) => { e.stopPropagation(); interrupt(ALL_TARGET); }} />
+            </span>
+          {/if}
+        </div>
+      {/if}
       <!-- Spawning opens a closed project too; keep its entry even in an empty room. -->
       <div class="roster-add">
         <CommandButton icon="plus" variant="icon" label={t('hubSpawn')} onclick={onadd} />
@@ -251,9 +253,10 @@
     --roster-avatar-size: 20px;
     --roster-gap: 6px;
     --roster-control-gap: 4px;
+    --roster-meter-height: 3px;
     --roster-expanded-max: min(240px, calc(32dvh / var(--ui-zoom, 1)));
     display: grid; grid-template-columns: minmax(0, 1fr) var(--control-height);
-    gap: var(--roster-gap); flex: 0 1 auto; min-width: 0; min-height: 0; padding: 4px 14px;
+    gap: 0; flex: 0 1 auto; min-width: 0; min-height: 0; padding: 0 14px;
     container: roster / inline-size;
   }
   .roster.compact { padding-inline: 10px; }
@@ -269,36 +272,50 @@
   @container roster (min-width: 360px) { .cards.expanded { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   @container roster (min-width: 720px) { .cards.expanded { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
   .sk-cards { display: flex; gap: var(--roster-gap); flex: none; grid-column: 1 / -1; }
-  .sk-card { width: calc(3 * var(--control-height)); height: var(--control-height); border-radius: var(--ui-radius-row); }
+  .sk-card {
+    width: calc(3 * var(--control-height)); height: calc(var(--control-height) - 2 * var(--control-paint-inset));
+    margin-block: var(--control-paint-inset); border-radius: var(--ui-radius-row);
+  }
   .acard {
+    --card-paint: var(--surface); --card-line: var(--border);
     position: relative;
     display: grid; grid-template-columns: minmax(0, 1fr) var(--control-height);
     align-items: center; flex: none; width: max-content; min-width: 0;
-    border: 0; border-radius: var(--ui-radius-row); background: var(--surface);
-    box-shadow: inset 0 0 0 1px var(--border); color: var(--text);
+    border: 0; border-radius: var(--ui-radius-row); color: var(--text);
+  }
+  .acard::before {
+    content: ''; position: absolute; inset: var(--control-paint-inset) 0;
+    border-radius: inherit; pointer-events: none;
+    background: var(--card-paint); box-shadow: inset 0 0 0 1px var(--card-line);
     transition: background var(--t-fast), box-shadow var(--t-fast);
   }
   .acard:not(.all):not(.off) { grid-template-columns: minmax(0, 1fr) var(--control-height) var(--control-height); }
-  .acard:hover { box-shadow: inset 0 0 0 1px var(--input-border); }
-  .acard.sel { background: var(--accent-bg); box-shadow: inset 0 0 0 1px var(--accent-line); }
+  .acard:hover { --card-line: var(--input-border); }
+  .acard.sel { --card-paint: var(--accent-bg); --card-line: var(--accent-line); }
   .acard.filtered::after {
-    content: ''; position: absolute; inset: 2px; border: 1px dashed var(--text2);
-    border-radius: calc(var(--ui-radius-row) - 2px); pointer-events: none;
+    content: ''; position: absolute; inset: var(--control-paint-inset) 0; border: 1px dashed var(--text2);
+    border-radius: inherit; pointer-events: none;
   }
   .acard.all {
-    border-radius: var(--ui-radius-pill); background: transparent; color: var(--accent-ink);
-    box-shadow: inset 0 0 0 1px var(--accent-line);
+    border-radius: var(--ui-radius-pill); color: var(--text2);
+    --card-paint: transparent; --card-line: transparent;
   }
-  .acard.all.sel { background: var(--accent-bg); }
+  .acard.all:hover { --card-paint: var(--surface2); --card-line: transparent; }
+  .acard.all.sel { --card-paint: var(--accent-bg); --card-line: var(--accent-line); color: var(--accent-ink); }
+  .cards:not(.expanded) .all .a-name { display: none; }
   .acard.all .agent-select { border-radius: inherit; }
   .ac-bar {
-    position: absolute; left: var(--ui-radius-row); right: var(--ui-radius-row); bottom: 0; height: 2px;
+    position: absolute; left: var(--ui-radius-row); right: var(--ui-radius-row);
+    bottom: calc(var(--control-paint-inset) - 1px); height: var(--roster-meter-height);
+    border-radius: var(--ui-radius-pill); z-index: 1;
     background: var(--pill-bg); overflow: hidden; pointer-events: none;
   }
-  .ac-bar > i { display: block; height: 100%; transition: width var(--t-move), background var(--t-move); }
+  .ac-bar > i { display: block; height: 100%; border-radius: inherit; transition: width var(--t-move), background var(--t-move); }
   @media (prefers-reduced-motion: reduce) { .ac-bar > i { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .acard::before { transition: none; } }
   .cards.expanded .acard { width: auto; }
   .agent-select {
+    position: relative;
     display: flex; align-items: center; gap: var(--roster-control-gap); grid-row: 1;
     min-height: var(--control-height); min-width: var(--control-height);
     border: 0; border-radius: var(--ui-radius-row); background: transparent; color: inherit;
@@ -309,14 +326,17 @@
   .acard:not(.has-stop):not(.off) .agent-select { grid-column: 1 / -1; padding-right: calc(6px + var(--control-height)); }
   .acard:not(.all):not(.off):not(.has-stop) .agent-select { grid-column: 1 / 3; }
   .a-name { font-family: var(--font-display); font-size: var(--fs-ui); font-weight: 600; white-space: nowrap; }
-  .cards.expanded .a-name { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+  .cards.expanded .a-name {
+    min-width: 0; white-space: normal; overflow-wrap: anywhere;
+    padding-block: calc(var(--control-paint-inset) + var(--roster-meter-height));
+  }
   .ac-top { display: inline-flex; flex: none; }
   .agent-marks { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-width: 1em; flex: none; }
   .cards.expanded .agent-marks.unmarked { display: none; }
   .agent-mention { color: var(--accent-ink); font-family: var(--font-mono); font-size: var(--fs-meta); font-weight: 600; }
   .agent-stop { display: flex; align-items: center; justify-self: end; grid-column: 2; grid-row: 1; }
   .agent-watch { display: flex; align-items: center; justify-self: end; grid-column: 3; grid-row: 1; }
-  .card-quick { opacity: 0; pointer-events: none; transition: opacity var(--t-fast); }
+  .card-quick { position: relative; opacity: 0; pointer-events: none; transition: opacity var(--t-fast); }
   .acard:hover .card-quick, .acard:focus-within .card-quick, .card-quick.pending { opacity: 1; pointer-events: auto; }
   @media (any-pointer: coarse) {
     .acard:not(.all):not(.off) { grid-template-columns: minmax(0, 1fr) var(--control-height); }

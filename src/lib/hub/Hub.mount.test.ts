@@ -725,7 +725,8 @@ test('roster disclosure keeps its cards, remembers each room, and holds order du
   const order = () => [...app.document.querySelectorAll<HTMLElement>('.acard[data-agent]')].map((node) => node.dataset.agent);
   const toggle = () => app.document.querySelector<HTMLButtonElement>('.roster-toggle button')!;
   try {
-    assert.deepEqual(order(), ['all', 'charlie', 'bob', 'alice']);
+    // Owner #176 moves the bulk destination after identities, not ahead of them.
+    assert.deepEqual(order(), ['charlie', 'bob', 'alice', 'all']);
     const alice = stripCard(app.document, 'alice');
     const list = app.document.querySelector('.cards')!;
     assert.doesNotMatch(list.textContent!, /running|waiting|idle/u);
@@ -742,22 +743,22 @@ test('roster disclosure keeps its cards, remembers each room, and holds order du
     agents[0]!.state = 'running'; agents[0]!.since = 5000;
     agents[2]!.state = 'idle'; agents[2]!.since = 6000;
     await app.advance(5000);
-    assert.deepEqual(order(), ['all', 'alice', 'bob', 'charlie'], 'an idle expanded monitor follows new turn order');
+    assert.deepEqual(order(), ['alice', 'bob', 'charlie', 'all'], 'an idle expanded monitor follows new turn order');
     assert.ok(stripCard(app.document, 'alice').querySelector('.agent-stop button'));
     assert.equal(stripCard(app.document, 'charlie').querySelector('.agent-stop'), null,
       'new turn state updates Stop availability');
     toggle().click(); await app.flush();
-    assert.deepEqual(order(), ['all', 'alice', 'bob', 'charlie'], 'collapse adopts the new turn order');
+    assert.deepEqual(order(), ['alice', 'bob', 'charlie', 'all'], 'collapse adopts the new turn order');
 
     const bobStop = stripCard(app.document, 'bob').querySelector<HTMLButtonElement>('.agent-stop button')!;
     bobStop.dispatchEvent(new app.window.Event('pointerdown', { bubbles: true }));
     agents[1]!.since = 10000;
     await app.advance(5000);
-    assert.deepEqual(order(), ['all', 'alice', 'bob', 'charlie'], 'a pressed Stop cannot move to another card');
+    assert.deepEqual(order(), ['alice', 'bob', 'charlie', 'all'], 'a pressed Stop cannot move to another card');
     bobStop.click(); await app.flush();
     assert.deepEqual(interrupts, ['bob']);
     assert.equal(selectedCard(app.document), 'alice');
-    assert.deepEqual(order(), ['all', 'bob', 'alice', 'charlie']);
+    assert.deepEqual(order(), ['bob', 'alice', 'charlie', 'all']);
   } finally { await app.close(); }
 });
 
@@ -771,24 +772,24 @@ test('a restored expanded roster reorders live unless a pointer or focus holds i
   const order = () => [...app.document.querySelectorAll<HTMLElement>('.acard[data-agent]')].map((node) => node.dataset.agent);
   try {
     assert.equal(app.document.querySelector('.roster-toggle button')!.getAttribute('aria-expanded'), 'true');
-    assert.deepEqual(order(), ['all', 'bob', 'alice']);
+    assert.deepEqual(order(), ['bob', 'alice', 'all']);
     agents[0]!.since = 40;
     await app.advance(5000);
-    assert.deepEqual(order(), ['all', 'alice', 'bob']);
+    assert.deepEqual(order(), ['alice', 'bob', 'all']);
     const list = app.document.querySelector('.cards')!;
     list.dispatchEvent(new app.window.Event('pointerenter'));
     agents.push({ name: 'new', window: 2, managed: true, agent: 'codex', state: 'running', since: 50 });
     await app.advance(5000);
-    assert.deepEqual(order(), ['all', 'alice', 'bob', 'new'], 'new members append without moving a pointed-at target');
+    assert.deepEqual(order(), ['alice', 'bob', 'new', 'all'], 'new members append without moving a pointed-at target');
     list.dispatchEvent(new app.window.Event('pointerleave'));
     await app.flush();
-    assert.deepEqual(order(), ['all', 'new', 'alice', 'bob'], 'pointerleave releases order without a timer');
+    assert.deepEqual(order(), ['new', 'alice', 'bob', 'all'], 'pointerleave releases order without a timer');
     stripCard(app.document, 'alice').querySelector<HTMLButtonElement>('.agent-select')!.focus();
     agents[1]!.since = 60;
     await app.advance(5000);
-    assert.deepEqual(order(), ['all', 'new', 'alice', 'bob'], 'keyboard focus holds its target');
+    assert.deepEqual(order(), ['new', 'alice', 'bob', 'all'], 'keyboard focus holds its target');
     app.input.focus(); await app.flush();
-    assert.deepEqual(order(), ['all', 'bob', 'new', 'alice'], 'blur releases the new turn order immediately');
+    assert.deepEqual(order(), ['bob', 'new', 'alice', 'all'], 'blur releases the new turn order immediately');
   } finally { await app.close(); }
 });
 
@@ -815,27 +816,27 @@ test('roster releases a touch press without click and reconciles focus after a c
     pointer(stop, 'pointerdown');
     agents[0]!.since = 40;
     await app.advance(5000);
-    assert.deepEqual(order(), ['all', 'bob', 'alice']);
+    assert.deepEqual(order(), ['bob', 'alice', 'all']);
     pointer(stop, 'pointerup');
     await app.flush();
-    assert.deepEqual(order(), ['all', 'alice', 'bob'], 'disabled touch targets may release without any click');
+    assert.deepEqual(order(), ['alice', 'bob', 'all'], 'disabled touch targets may release without any click');
     job.resolve({}); await app.flush();
 
     stop.focus(); await app.flush();
     agents[1]!.since = 50;
     await app.advance(5000);
-    assert.deepEqual(order(), ['all', 'alice', 'bob'], 'focused controls keep their location');
+    assert.deepEqual(order(), ['alice', 'bob', 'all'], 'focused controls keep their location');
     agents[0]!.state = 'idle'; agents[0]!.since = 80;
     agents[1]!.state = 'idle'; agents[1]!.since = 90;
     await app.advance(5000);
     assert.equal(stop.isConnected, false);
-    assert.deepEqual(order(), ['all', 'bob', 'alice'], 'DOM removal does not guarantee focusout');
+    assert.deepEqual(order(), ['bob', 'alice', 'all'], 'DOM removal does not guarantee focusout');
     stripCard(app.document, 'alice').querySelector<HTMLButtonElement>('.agent-select')!.focus();
     agents.splice(0, 1);
     await app.advance(5000);
     agents.push({ name: 'new', window: 2, managed: true, agent: 'codex', state: 'running', since: 100 });
     await app.advance(5000);
-    assert.deepEqual(order(), ['all', 'new', 'bob'], 'removing a focused member does not leave order locked');
+    assert.deepEqual(order(), ['new', 'bob', 'all'], 'removing a focused member does not leave order locked');
   } finally { job.resolve({}); await app.close(); }
 });
 

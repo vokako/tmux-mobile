@@ -11,7 +11,11 @@ test('context meters reuse ctxColor at the card edge without adding a row (#173)
   assert.match(rule('.acard'), /position: relative/u);
   const bar = rule('.ac-bar');
   assert.match(bar, /position: absolute/u);
-  assert.match(bar, /height: 2px/u);
+  // Owner #176: the 2px meter was too faint beside full-height card paint.
+  assert.match(bar, /height: var\(--roster-meter-height\)/u);
+  assert.match(rule('.roster'), /--roster-meter-height: 3px/u);
+  assert.match(bar, /bottom: calc\(var\(--control-paint-inset\) - 1px\)/u,
+    '3px meter must clear the 20px avatar inside 24px pointer paint');
   assert.match(bar, /pointer-events: none/u);
   assert.match(bar, /var\(--pill-bg\)/u);
 });
@@ -19,10 +23,20 @@ test('context meters reuse ctxColor at the card edge without adding a row (#173)
 test('everyone is a broadcast capsule while selection keeps the shared accent vocabulary (#173)', async () => {
   assert.doesNotMatch(source, /all-ava/u);
   assert.match(rule('.acard.all'), /border-radius: var\(--ui-radius-pill\)/u);
-  assert.match(rule('.acard.all'), /color: var\(--accent-ink\)/u);
-  assert.match(rule('.acard.all.sel'), /background: var\(--accent-bg\)/u);
+  assert.match(rule('.acard.all'), /color: var\(--text2\)/u);
+  assert.match(rule('.acard.all.sel'), /--card-paint: var\(--accent-bg\)/u);
   const css = await readFile(new URL('../../app.css', import.meta.url), 'utf8');
   assert.match(css, /\.hub-root \.acard\.all \{ corner-shape: round; \}/u);
+});
+
+test('card paint is compact inside native targets and All is a trailing secondary choice (#176)', () => {
+  assert.match(rule('.acard::before'), /inset: var\(--control-paint-inset\) 0/u);
+  assert.match(rule('.acard::before'), /pointer-events: none/u);
+  assert.match(rule('.roster'), /padding: 0 14px/u);
+  assert.match(rule('.roster'), /gap: 0/u);
+  assert.ok(source.indexOf('class="acard all"') > source.indexOf('class="acard off"'));
+  assert.match(rule('.cards:not(.expanded) .all .a-name'), /display: none/u);
+  assert.match(source, /class="cards edge-fade"[^>]*use:scrollEdges=\{!expanded\}/u);
 });
 
 test('quick actions reveal in their reserved slots and coarse pointers retain only Stop (#173)', () => {
@@ -95,6 +109,8 @@ test('double-click focuses live agents without delay and uses the existing filte
   assert.match(source, /anchor: anchorOf\(trigger\), align: 'left', trigger, keepTriggerClear: true/u);
   assert.match(source, /class:filtered=\{filterAgent === a\.name\}/u);
   assert.match(rule('.acard.filtered::after'), /border: 1px dashed var\(--text2\)/u);
+  assert.match(rule('.acard.filtered::after'), /inset: var\(--control-paint-inset\) 0/u,
+    'the compact filter border must stay outside the avatar instead of crossing its lower pixels');
   assert.doesNotMatch(source, /setTimeout|clearTimeout/u);
 });
 
@@ -128,6 +144,8 @@ test('density lives in local tokens; full names and native targets do not shrink
   assert.match(source, /repeat\(2, minmax\(0, 1fr\)\)/u);
   assert.match(source, /repeat\(4, minmax\(0, 1fr\)\)/u);
   assert.match(rule('.cards.expanded .a-name'), /overflow-wrap: anywhere/u);
+  assert.match(rule('.cards.expanded .a-name'), /padding-block: calc\(var\(--control-paint-inset\) \+ var\(--roster-meter-height\)\)/u,
+    'wrapped names need room inside the inset paint and above the meter');
   assert.match(rule('.cards.expanded .agent-marks.unmarked'), /display: none/u);
   assert.doesNotMatch(source, /\.agent-marks:empty/u,
     'Svelte leaves conditional whitespace; CSS :empty kept 12.5px reserved and split ordinary phone names');
@@ -137,7 +155,7 @@ test('density lives in local tokens; full names and native targets do not shrink
 });
 
 test('one in-flow disclosure controls one list without remounting its cards', () => {
-  assert.equal([...source.matchAll(/class="cards"/gu)].length, 1);
+  assert.equal([...source.matchAll(/class="cards edge-fade"/gu)].length, 1);
   assert.match(source, /icon="chevron-up" variant="icon"/u);
   assert.match(source, /\{expanded\} controls=\{cardsId\} disabled=\{!roomReady\} onclick=\{onexpand\}/u);
   assert.match(source, /const holdOrder = \$derived\(hovering \|\| focused \|\| pressing\)/u);

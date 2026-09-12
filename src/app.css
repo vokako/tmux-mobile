@@ -307,6 +307,16 @@ button:disabled {
   height: 8px;
 }
 .subtle-scroll::-webkit-scrollbar-track { background: transparent; }
+/* Native horizontal overflow, not an overlay over a control or a hidden last item. */
+.edge-fade { --edge-fade-size: 16px; }
+.edge-fade.edge-before { --edge-fade-start: var(--edge-fade-size); }
+.edge-fade.edge-after { --edge-fade-end: var(--edge-fade-size); }
+.edge-fade:is(.edge-before, .edge-after) {
+  mask-mode: alpha;
+  mask-image: linear-gradient(to right, transparent, var(--text) var(--edge-fade-start, 0px),
+    var(--text) calc(100% - var(--edge-fade-end, 0px)), transparent);
+}
+.edge-fade:has(:focus-visible) { mask-image: none; }
 .subtle-scroll::-webkit-scrollbar-thumb {
   background: transparent;
   border-radius: 999px;
@@ -876,6 +886,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 .sessions .icon-btn { corner-shape: round; }
 /* #173: the broadcast choice is a capsule, not an agent avatar card. */
 .hub-root .acard.all { corner-shape: round; }
+.hub-root .acard::before, .hub-root .acard::after { corner-shape: inherit; }
 /* #161: compact controls use circular arcs; squircle would flatten their caps.
    The legacy list is zero-specificity so context selectors cannot defeat it. */
 :is(.command-button, .control-field, .config-input, .segmented, .segmented button,

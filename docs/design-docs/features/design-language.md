@@ -45,6 +45,23 @@ turn-level activity order, and long names may wrap in expanded cells.
 An empty mention/unread slot reserves width only in the horizontal strip;
 expanded grid cells already have stable widths and release that space to names.
 
+**Strip density correction (2026-09-12, #176).** The owner's screenshot and
+verbatim correction are in hub-composer.md. Card borders/backgrounds, not
+their native hit boxes, use the shared 2px pointer / 6px coarse paint inset;
+ordinary card paint is 24/32px and the strip is 32/48px. No global control
+height, font or avatar size is reduced. The context meter is 3px, retaining
+`ctxColor`. All moves after individual identities and uses neutral icon-only
+resting chrome when collapsed; its selected state and expanded label remain.
+The radius policy stays here in app.css, including the card paint's inherited
+corner shape.
+
+Actual horizontal overflow can use `.edge-fade` with `ui/scroll-edges.ts`.
+Its 16px alpha edge is present only where content remains outside the
+scrollport; it disappears at the corresponding end and is disabled for an
+expanded grid or while a descendant is `:focus-visible`. This specific scroll cue never replaces width constraints,
+intercepts input or shades fully visible final controls. Use native scroll,
+not an extra pagination menu, overlay or independent animation.
+
 ## 1 · Tokens (app.css `:root` — never restate a value)
 
 **Plain interruption commands (2026-09-11, #173).** The owner rejected the
