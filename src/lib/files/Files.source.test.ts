@@ -190,7 +190,7 @@ test('navRequest can ask for a FILE: land in its directory with the preview open
   // PREVIEWED FILE's directory, and the target opens through openEntry like
   // any row tap. Real URLs keep the browser's behaviour.
   assert.match(source, /handlePathLinkClick\(e, openPreviewRef\)/u, 'preview and chat share one path handler');
-  assert.match(source, /\{previewLinkClick\} \{attachHtmlPreviewLinks\} \/>/u, 'the body receives the same click/load handlers');
+  assert.match(source, /\{previewLinkClick\} \{attachHtmlPreviewLinks\} onview=/u, 'the body receives the same click/load handlers (and, #188, the image viewer)');
   assert.match(source, /resolvePathRef\(docDir, ref\)/u, 'relative refs resolve against the document');
   assert.match(source, /openPath: openPreviewRef,/u, 'iframe documents retain the same context-aware path callback');
   assert.match(source, /fileNav\.backFromPreview\(\{ cwd, currentFile, fromGit \}\)/u, 'the tested history owner chooses Back before the directory floor');

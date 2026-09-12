@@ -37,7 +37,11 @@ test('the extracted preview renders every existing branch and preserves the code
   const pdf = renderFile({ stat: { mime_hint: 'application/pdf' }, pdfData: 'bytes' });
   assert.match(pdf, /class="pdf-container/u);
   assert.ok(!pdf.includes('<iframe'));
-  assert.match(renderFile({ stat: { mime_hint: 'image/png' }, dataUrl: 'data:image/png;base64,eA==' }), /<img[^>]*src="data:image\/png;base64,eA=="/u);
+  const image = renderFile({ name: 'shot.png', stat: { mime_hint: 'image/png' }, dataUrl: 'data:image/png;base64,eA==' });
+  assert.match(image, /<img[^>]*src="data:image\/png;base64,eA=="/u);
+  // Board #188: the picture is a BUTTON that opens the one Lightbox (like a
+  // chat image) — never a bare <img> you can only look at.
+  assert.match(image, /<button class="image-open[^"]*"[^>]*aria-label="shot\.png"/u);
   assert.match(renderFile({ stat: { mime_hint: 'application/octet-stream' }, convertedHtml: '<h2>Slide</h2>' }), /<h2>Slide<\/h2>/u);
   // Board #182: a video is a <video> pointed at the signed stream URL — the
   // browser fetches ranges itself; no bytes pass through the RPC.

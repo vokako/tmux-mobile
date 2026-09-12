@@ -123,6 +123,24 @@ the preview; the initial listing uses all 1394px available. Every touch toolbar
 button measures 44px, not the former 24px. Native pickers/downloads and a full
 App/browser-history workflow remain owner/device acceptance, not fixture claims.
 
+### An image preview opens the one Lightbox (board #188, 2026-09-12)
+
+Owner: "预览图片的时候，要能够点击图片全屏放大，最好图片这种增加在图片上的触摸板两指放大
+手势，不是把整个页面放大". The app already owned ONE fullscreen viewer,
+`ui/Lightbox` (pinch, drag-pan, double-tap, wheel zoom, swipe-to-dismiss,
+Escape / ✕ / back) — chat images open it (`ChatImage .ci-link`); the Files
+preview showed a bare `<img>` you could only look at, and a trackpad pinch
+over it zoomed the PAGE (browsers deliver a pinch as ctrl+wheel). Now the
+picture is a button (`.image-open`, named by the file) that asks the host to
+view it; `Files` holds `imageView`, renders the same `Lightbox`, and closes it
+FIRST in its Back chain (the viewer is the topmost layer, above menus). A
+ctrl+wheel on the inline image is consumed by a non-passive listener
+(Svelte's own `onwheel` is passive, so it could not preventDefault) and
+answered with the viewer, where pinch and wheel zoom the image. Guards:
+`FilePreview.render.ts` pins the button; `Files.mount.test.ts` opens the
+viewer by click, closes it through the Back chain, and checks a ctrl+wheel is
+defaultPrevented and opens the viewer.
+
 ### Two Download Paths
 | Path | Used for | Size limit | Transport |
 |------|----------|-----------|-----------|

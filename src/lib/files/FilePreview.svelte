@@ -16,14 +16,24 @@
     previewEl: HTMLDivElement | null;
     htmlPreviewEl: HTMLIFrameElement | null;
     pdfContainer: HTMLDivElement | null;
+    /** Open the picture in the host's fullscreen viewer (board #188). */
+    onview?: (src: string) => void;
   }
   let {
-    currentFile, fontSize, wrapLines, hljs,
+    currentFile, fontSize, wrapLines, hljs, onview = () => {},
     showAllLines = $bindable(false),
     previewLinkClick, attachHtmlPreviewLinks,
     previewBodyEl = $bindable(null), previewEl = $bindable(null),
     htmlPreviewEl = $bindable(null), pdfContainer = $bindable(null),
   }: Props = $props();
+
+  /** A trackpad pinch reaches a page as ctrl+wheel; Svelte's `onwheel` is
+   * passive, so this listener is the one place that may preventDefault. */
+  function pinchOpens(node: HTMLElement, open: () => void) {
+    const onWheel = (event: WheelEvent) => { if (event.ctrlKey) { event.preventDefault(); open(); } };
+    node.addEventListener('wheel', onWheel, { passive: false });
+    return { destroy() { node.removeEventListener('wheel', onWheel); } };
+  }
 
   // Keep the cap state in Files so an editor round-trip does not reset it.
   const CODE_PREVIEW_MAX_LINES = 3000;
@@ -51,7 +61,17 @@
   {:else if mimeCategory(currentFile.stat?.mime_hint) === 'pdf'}
     <div class="pdf-container" bind:this={pdfContainer} style="margin: -12px; padding: 0;"></div>
   {:else if mimeCategory(currentFile.stat?.mime_hint) === 'image'}
-    <div class="image-preview"><img src={currentFile.dataUrl} alt={currentFile.name} /></div>
+    <!-- Board #188 (owner: "点击图片全屏放大…触摸板两指放大手势，不是把整个页面
+         放大"): the picture is a BUTTON into the one Lightbox, as a chat image
+         is (ChatImage .ci-link); and a trackpad pinch — ctrl+wheel in every
+         browser — is taken by the image (non-passive, so the page keeps its
+         zoom) and answered with the viewer, where pinch/wheel zoom the image. -->
+    <div class="image-preview">
+      <button class="image-open" aria-label={currentFile.name} onclick={() => onview(currentFile.dataUrl ?? '')}
+        use:pinchOpens={() => onview(currentFile.dataUrl ?? '')}>
+        <img src={currentFile.dataUrl} alt={currentFile.name} />
+      </button>
+    </div>
   {:else if mimeCategory(currentFile.stat?.mime_hint) === 'video'}
     <!-- Board #182: the browser's own player streams ranges from the signed
          /dl URL (206 + Accept-Ranges); preload=metadata costs the header, not
@@ -121,6 +141,7 @@
     flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 12px;
   }
   .image-preview img, .image-preview video { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; }
+  .image-open { display: block; max-width: 100%; max-height: 100%; padding: 0; margin: 0; border: 0; background: none; cursor: zoom-in; touch-action: none; }
   .md-render { font-size: var(--file-font-size, 14px); line-height: 1.6; color: var(--text); overflow-wrap: break-word; }
   .md-render :global(h1) { font-size: 1.55em; margin: 16px 0 8px; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 6px; }
   .md-render :global(h2) { font-size: 1.28em; margin: 14px 0 6px; color: var(--accent); }

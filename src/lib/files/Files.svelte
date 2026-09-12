@@ -16,6 +16,7 @@
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { longpress } from '../ui/longpress.ts';
+  import Lightbox from '../ui/Lightbox.svelte';
   import { anchorOf } from '../ui/placement.ts';
   import { systemOwnsContextMenu } from '../ui/native-context-menu.ts';
   import { entryToolActions, visibleToolCount } from './file-tools.ts';
@@ -96,6 +97,7 @@
   // Register goBack for Android back gesture
   $effect(() => {
     if (onGoBack) onGoBack(() => {
+      if (imageView) { imageView = ''; return true; } // the viewer is the topmost layer (board #188)
       if (fileMenu) { closeFileMenu(); return true; }
       // navAnim('back') rides only the branches that CHANGE the view — the
       // git panel's internal peel and the unsaved-changes dialog move
@@ -761,6 +763,8 @@
   }
 
   const PREVIEW_SIZE_LIMIT = 5 * 1024 * 1024;
+  /** The picture open in the one fullscreen viewer (ui/Lightbox), board #188. */
+  let imageView = $state('');
 
 
   async function loadPreviewContent(file, my = fileNav.nextFile()) {
@@ -1684,7 +1688,7 @@
     </div>
     <FilePreview {currentFile} {fontSize} {wrapLines} {hljs}
       bind:showAllLines bind:previewBodyEl bind:previewEl bind:htmlPreviewEl bind:pdfContainer
-      {previewLinkClick} {attachHtmlPreviewLinks} />
+      {previewLinkClick} {attachHtmlPreviewLinks} onview={(src) => { imageView = src; }} />
 {/snippet}
 
 {#snippet editPanel()}
@@ -1853,6 +1857,9 @@
   {/if}
 </div>
 
+{#if imageView}
+  <Lightbox src={imageView} alt={currentFile?.name ?? ''} onclose={() => { imageView = ''; }} />
+{/if}
 <ContextMenu at={fileMenu?.at} items={menuActions} who={fileMenu?.entry?.name || fileMenu?.cwd || t('filesTools')}
   id={`${panelId}-menu`} oncancel={closeFileMenu} />
 <ConfirmDialog open={!!pendingAct} busy={acting} compact={narrowViewport}

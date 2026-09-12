@@ -324,3 +324,37 @@ test('a video previews as a stream: one stream-signed /dl URL, no bytes through 
     assert.deepEqual(bytes, [], 'no fs_download / fs_read for a stream');
   } finally { await app.close(); }
 });
+
+test('an image preview opens the one Lightbox; Back closes it; a trackpad pinch zooms the image, not the page (board #188)', async context => {
+  // Owner 2026-09-12: "预览图片的时候，要能够点击图片全屏放大，最好图片这种增加在图片上的
+  // 触摸板两指放大手势，不是把整个页面放大".
+  const chain: { back: (() => boolean) | null } = { back: null };
+  const app = await (await compiled).mount(context, { props: { visible: true, session: 'fixture', onGoBack: (fn: () => boolean) => { chain.back = fn; } }, modules: [rpc({
+    fsList: async () => ({ path: '/fixture', entries: [{ name: 'shot.png', path: '/fixture/shot.png', type: 'file', size: 10 }] }),
+    fsStat: async (path: string) => ({ path, is_text: false, writable: true, readable: true, size: 10, mime_hint: 'image/png' }),
+    fsDownload: async () => ({ data: 'eA==' }),
+  })] });
+  try {
+    await settle(app);
+    app.document.querySelector<HTMLButtonElement>('.file-row .file-main')!.click();
+    await settle(app);
+    const open = app.document.querySelector<HTMLButtonElement>('.image-open')!;
+    assert.ok(open, 'the picture is a button');
+    assert.equal(app.document.querySelector('.lb'), null);
+    open.click(); await settle(app);
+    const lb = app.document.querySelector<HTMLImageElement>('.lb .lb-img');
+    assert.ok(lb, 'the Lightbox opened');
+    assert.equal(lb.getAttribute('src'), 'data:image/png;base64,eA==');
+    assert.ok(chain.back, 'Files registered its Back chain');
+    assert.equal(chain.back!(), true, 'Back closes the viewer first');
+    await settle(app);
+    assert.equal(app.document.querySelector('.lb'), null);
+    assert.ok(app.document.querySelector('.image-open'), 'and the preview is still there');
+    // A trackpad pinch arrives as ctrl+wheel: the image takes it, the page does not zoom.
+    const pinch = new app.window.WheelEvent('wheel', { deltaY: -40, ctrlKey: true, bubbles: true, cancelable: true });
+    app.document.querySelector('.image-open')!.dispatchEvent(pinch);
+    await settle(app);
+    assert.equal(pinch.defaultPrevented, true, 'the page keeps its zoom');
+    assert.ok(app.document.querySelector('.lb'), 'the viewer takes the gesture');
+  } finally { await app.close(); }
+});

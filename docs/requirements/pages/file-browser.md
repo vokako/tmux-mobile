@@ -23,7 +23,7 @@ directory, or the server's home directory when no session is open yet.
   names, on the same row; ordinary file and folder rows share a height.
 - Bookmark panel (star current dir, scrollable saved paths)
 - Recent files panel (last 20 opened files, scrollable, capped to 40vh)
-- File preview: Markdown (rendered through the shared safe renderer, `core/markdown.ts`, + mermaid + KaTeX), CSV (table), code (syntax highlighted; the lined view shows the first 3000 lines with a "Show all N lines" button), HTML (sandboxed iframe), PDF (pdf.js), images, video (the browser's own `<video>` player streaming ranges from the signed `/dl` URL — mp4/m4v/webm/mov/mkv/ogv, any size). pdf.js, mermaid and highlight.js load on first use, not at startup.
+- File preview: Markdown (rendered through the shared safe renderer, `core/markdown.ts`, + mermaid + KaTeX), CSV (table), code (syntax highlighted; the lined view shows the first 3000 lines with a "Show all N lines" button), HTML (sandboxed iframe), PDF (pdf.js), images (tap → the fullscreen Lightbox with pinch/wheel zoom; a trackpad pinch on the inline image opens it instead of zooming the page), video (the browser's own `<video>` player streaming ranges from the signed `/dl` URL — mp4/m4v/webm/mov/mkv/ogv, any size). pdf.js, mermaid and highlight.js load on first use, not at startup.
 - Text editor with syntax highlighting, undo stack, save button
 - File operations: create file/folder, rename, delete, upload, download
 - File info panel: path (tap to copy), type, size, modified, permissions
