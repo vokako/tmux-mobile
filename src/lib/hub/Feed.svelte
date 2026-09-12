@@ -1,11 +1,15 @@
 <script>
   import CommandButton from '../ui/CommandButton.svelte';
-  import { tick as settled } from 'svelte';
+  import { onDestroy, untrack, tick as settled } from 'svelte';
   import Icon from '../ui/Icon.svelte';
   import ChatImage from './ChatImage.svelte';
   import 'katex/dist/katex.min.css';
   import { t, i18n, hanLang } from '../core/i18n.svelte.ts';
   import { copyText } from '../core/clipboard.ts';
+  import OperationFeedback from '../ui/OperationFeedback.svelte';
+  import { feedbackPosition } from '../ui/feedback-position.ts';
+  import { scheduleCompletion } from '../ui/feedback-lifetime.ts';
+  import { MESSAGE_ACTS_IDLE, messageActsSet, messageActsCopyLanded, messageActsCopyFailed, messageActsExpired } from './message-actions.ts';
   import { renderMarkdown } from '../core/markdown.ts';
   import { handlePathLinkClick } from '../core/path-links.ts';
   import { selectionClickGuard } from '../ui/native-context-menu.ts';
@@ -30,7 +34,7 @@
   export function resetForRoom() {
     reading = null;
     expanded = {};
-    msgOpen = '';
+    setMessageActions(-1);
     rawOpen = '';
   }
 
@@ -40,9 +44,9 @@
     isOpen: () => !!msgOpen,
     outside: (e) => {
       const t = e.target;
-      if (msgOpen && !t?.closest?.('.m-acts, .bubble')) msgOpen = '';
+      if (msgOpen && !t?.closest?.('.m-acts, .bubble, .message-feedback')) setMessageActions(-1);
     },
-    escape: (e) => { if (msgOpen) { msgOpen = ''; e.stopPropagation(); } },
+    escape: (e) => { if (msgOpen) { setMessageActions(-1); e.stopPropagation(); } },
   }));
 
   let feedEl = $state(null);
@@ -481,22 +485,37 @@
   // group so re-renders can't lose it.
   let stepsChoice = $state({});
   let stepsAll = $state({});        // group key → lift the 10-row cap
-  let msgOpen = $state('');         // message key whose action row is open
+  let messageActs = $state(MESSAGE_ACTS_IDLE);
+  let copyTrigger = $state(null);
+  const msgOpen = $derived(messageActs.open === -1 ? '' : messageActs.open);
+  let cancelCopyExpiry = () => {};
+  function setMessageActions(key) {
+    cancelCopyExpiry(); cancelCopyExpiry = () => {};
+    copyTrigger = null;
+    messageActs = messageActsSet(messageActs, key);
+  }
+  $effect(() => { if (!visible) untrack(() => setMessageActions(-1)); });
+  onDestroy(() => setMessageActions(-1));
   // Native touch selection may emit a compatibility click after contextmenu.
   // Consume that one click per bubble before it can open the action row.
   const msgSelectionClicks = selectionClickGuard();
   let rawOpen = $state('');         // message key showing its raw source
-  let copied = $state('');          // body just copied, for the button label
-
   /** Copy a message as the agent wrote it — markdown, image refs and all.
    * copyText carries the insecure-context fallback (LAN http:// dev). */
-  async function copyMsg(body) {
-    if (!(await copyText(body ?? ''))) { console.warn('copy failed'); return; }
-    copied = body;
-    // Show the "Copied" confirmation, then put the row away — copying IS
-    // the operation the row was opened for, so it should not stay resident
-    // afterwards (owner, 2026-08-22: "在其他操作之后应该自动隐藏").
-    setTimeout(() => { if (copied === body) { copied = ''; msgOpen = ''; } }, 1500);
+  async function copyMsg(key, body, trigger) {
+    if (msgOpen !== key || !(trigger instanceof HTMLElement)) return;
+    setMessageActions(key);
+    copyTrigger = trigger;
+    const attempt = messageActs.gen;
+    const ok = await copyText(body ?? '');
+    const next = ok ? messageActsCopyLanded(messageActs, attempt)
+      : messageActsCopyFailed(messageActs, attempt, t('copyFailed'));
+    if (next === messageActs) return;
+    messageActs = next;
+    if (ok) {
+      const gen = next.gen;
+      cancelCopyExpiry = scheduleCompletion(() => { messageActs = messageActsExpired(messageActs, gen); });
+    }
   }
   const isRunning = (b) =>
     b.key === newestSteps[b.window] &&
@@ -727,7 +746,7 @@
           <div class="bubble md"
             oncontextmenu={(e) => { msgSelectionClicks.mark(e, key); }}
             onauxclick={openPathRef}
-            onclick={(e) => { if (openPathRef(e)) return; if (msgSelectionClicks.consume(key)) return; if (typeof getSelection === 'function' && !(getSelection()?.isCollapsed ?? true)) return; msgOpen = msgOpen === key ? '' : key; }}>
+            onclick={(e) => { if (openPathRef(e)) return; if (msgSelectionClicks.consume(key)) return; if (typeof getSelection === 'function' && !(getSelection()?.isCollapsed ?? true)) return; setMessageActions(msgOpen === key ? -1 : key); }}>
             {#if m.from !== 'human'}
               <!-- A status note keeps the ordinary bubble, but its header
                    says what the words are ABOUT. The first cut was
@@ -763,7 +782,7 @@
                 </div>
               {/if}
               <button class="m-meta" aria-label={t('hubMsgActions')} aria-expanded={msgOpen === key}
-                onclick={(e) => { e.stopPropagation(); msgOpen = msgOpen === key ? '' : key; }}>
+                onclick={(e) => { e.stopPropagation(); setMessageActions(msgOpen === key ? -1 : key); }}>
                 <span class="m-time">{fmtTime(m.ts)}</span>
                 {#if m.from === 'human'}
                   <!-- Three readings, not two (review, 2026-09-03). Filled:
@@ -788,8 +807,8 @@
           </div>
           {#if msgOpen === key}
             <div class="m-acts appear">
-              <CommandButton iconOnly icon={copied === m.body ? 'check' : 'copy'}
-                label={copied === m.body ? t('hubCopied') : t('hubCopy')} onclick={() => copyMsg(m.body)} />
+              <CommandButton iconOnly icon={messageActs.copied ? 'check' : 'copy'}
+                label={messageActs.copied ? t('hubCopied') : t('hubCopy')} onclick={(event) => copyMsg(key, m.body, event.currentTarget)} />
               <CommandButton iconOnly icon="command" label={t('hubRaw')} pressed={rawOpen === key}
                 onclick={() => { rawOpen = rawOpen === key ? '' : key; }} />
             </div>
@@ -906,6 +925,11 @@
     {@render emptyFeed?.()}
   {/if}
 </div>
+{#if messageActs.error}
+  <div class="message-feedback pop-layer" use:feedbackPosition={{ trigger: copyTrigger, bounds: feedEl, keepClear: copyTrigger?.closest('.msg')?.querySelector('.m-meta') }}>
+    <OperationFeedback value={{ kind: 'error', message: messageActs.error }} ondismiss={() => setMessageActions(messageActs.open)} />
+  </div>
+{/if}
 <!-- Parked away from the tail: one tap back, with a dot when something
      arrived while you were reading. -->
 {#if !following}
@@ -916,6 +940,7 @@
 </div>
 
 <style>
+  .message-feedback { position: fixed; z-index: 8; }
   /* Bottom padding tight against the composer: the capsule brings its own 8px
      (owner, 2026-08-21: "最后一个消息框，和发送框中间的高度也有点大"). */
   :global(.hub-root.compact) .feed { padding: 14px 10px max(6px, calc(var(--control-height) / 2)); gap: 9px; }

@@ -3,12 +3,12 @@
  * captures the gen of ITS OWN copy, so a stale timeout (anything happened
  * since: another copy, a switched row, a different issue, a project change)
  * is a no-op instead of closing somebody else's row or truncating their
- * Copied feedback. Pure transitions; Board.svelte holds one $state triple. */
-export interface MessageActsState { open: number; copied: boolean; gen: number }
+ * Copied feedback. Board and Feed each hold one local state record. */
+export interface MessageActsState { open: number | string; copied: boolean; gen: number; error?: string }
 export const MESSAGE_ACTS_IDLE: MessageActsState = { open: -1, copied: false, gen: 0 };
 /** Any context change — toggle/switch/outside/Escape/issue open/project
  * switch — sets which row is open (−1 = none) and orphans in-flight beats. */
-export function messageActsSet(s: MessageActsState, open: number): MessageActsState {
+export function messageActsSet(s: MessageActsState, open: number | string): MessageActsState {
   return { open, copied: false, gen: s.gen + 1 };
 }
 /** A copy ATTEMPT resolves (board #46, second blocker): the clipboard write
@@ -20,7 +20,11 @@ export function messageActsSet(s: MessageActsState, open: number): MessageActsSt
  * open/switch/reset — bumped gen). A stale resolve returns the SAME object,
  * which is also the caller's signal not to arm the dismiss timer. */
 export function messageActsCopyLanded(s: MessageActsState, attemptGen: number): MessageActsState {
-  return attemptGen === s.gen ? { ...s, copied: true, gen: s.gen + 1 } : s;
+  return attemptGen === s.gen ? { open: s.open, copied: true, gen: s.gen + 1 } : s;
+}
+/** Failure is local to the same attempt and has no completion expiry. */
+export function messageActsCopyFailed(s: MessageActsState, attemptGen: number, error: string): MessageActsState {
+  return attemptGen === s.gen ? { open: s.open, copied: false, gen: s.gen + 1, error } : s;
 }
 /** The beat's timeout fires: it may put away only ITS OWN copy — a stale
  * gen leaves the state exactly as it found it. */

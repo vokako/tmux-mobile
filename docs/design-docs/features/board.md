@@ -4,6 +4,22 @@ The `issues`/`issue_notes` board: fixed columns, per-project numbering, dispatch
 
 ## Rules and their reasons
 
+### Note-copy outcomes use the shared model and clipboard (#167 batch 2, 2026-09-12)
+
+After the mechanical move, the same message-action model also accepts Feed
+keys and records a failed attempt. Board calls `core/clipboard`, including its
+insecure-context fallback, instead of writing through a private navigator API.
+The raw note body is unchanged. A successful copy owns its 1500ms completion
+expiry; failure is a persistent, retryable local error. Context transitions
+cancel the scheduled expiry and invalidate an older clipboard completion.
+
+The error uses the shared OperationFeedback and the local positioning action,
+anchored to the live Copy button inside the notes scrollport. It cannot sit
+over the note input or the triggering action as the fixed-corner prototype did.
+Scroll/resize tracking is local and disposed; the existing outside/Escape
+owner includes the error's Close control. No row, footer, global listener,
+new clipboard writer or reading-layout change is introduced.
+
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
 
 ### Delete failure remains in its confirmation (#167, 2026-09-12)

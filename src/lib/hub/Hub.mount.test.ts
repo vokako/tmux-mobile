@@ -1483,6 +1483,72 @@ test('Feed keeps native selection, Copy/Raw dismissal, path intents and room-loc
   assert.equal(pushed.size, 0);
 });
 
+test('equal message bodies do not share Copied state or its expiry (#167 batch2)', async context => {
+  const { rpc } = roomFixture();
+  const app = await (await compiledHub()).mount(context, {
+    props: { visible: true },
+    setup(window) {
+      window.Element.prototype.getAnimations = () => [];
+      window.HTMLCanvasElement.prototype.getContext = () => null;
+      Object.defineProperty(window.navigator, 'clipboard', { value: { writeText: async () => {} } });
+    },
+    modules: [{ ...rpc, hubLog: async () => ({ messages: [1, 2].map(id => ({
+      id: `copy-${id}`, seq: id, ts: id * 100, from: 'alice', body: 'Same body',
+    })), has_more: false }) }],
+  });
+  try {
+    for (let i = 0; i < 12 && app.document.querySelectorAll('.msg').length < 2; i++) await app.flush();
+    const rows = app.document.querySelectorAll('.msg');
+    rows[0]!.querySelector<HTMLButtonElement>('.m-meta')!.click(); await app.flush();
+    rows[0]!.querySelector<HTMLButtonElement>('.m-acts button')!.click(); await app.flush();
+    await app.advance(750);
+    rows[1]!.querySelector<HTMLButtonElement>('.m-meta')!.click(); await app.flush();
+    assert.equal(rows[1]!.querySelector('.m-acts button')?.getAttribute('aria-label'), 'Copy',
+      'a different message with identical text has not been copied');
+    await app.advance(750);
+    assert.ok(rows[1]!.querySelector('.m-acts'), 'the previous message expiry cannot close this row');
+  } finally { await app.close(); }
+});
+
+test('failed message copy remains retryable and ignores an older clipboard completion (#167 batch2)', async context => {
+  const { rpc } = roomFixture();
+  const jobs: { resolve: () => void; reject: (error: Error) => void }[] = [];
+  const app = await (await compiledHub()).mount(context, {
+    props: { visible: true },
+    setup(window) {
+      window.Element.prototype.getAnimations = () => [];
+      window.HTMLCanvasElement.prototype.getContext = () => null;
+      window.document.execCommand = () => false;
+      Object.defineProperty(window.navigator, 'clipboard', { value: {
+        writeText: () => new Promise<void>((resolve, reject) => jobs.push({ resolve, reject })),
+      } });
+    },
+    modules: [{ ...rpc, hubLog: async () => ({ messages: [1, 2].map(id => ({
+      id: `copy-${id}`, seq: id, ts: id * 100, from: 'alice', body: `Body ${id}`,
+    })), has_more: false }) }],
+  });
+  try {
+    for (let i = 0; i < 12 && app.document.querySelectorAll('.msg').length < 2; i++) await app.flush();
+    const rows = app.document.querySelectorAll('.msg');
+    for (const row of rows) {
+      row.querySelector<HTMLButtonElement>('.m-meta')!.click(); await app.flush();
+      row.querySelector<HTMLButtonElement>('.m-acts button')!.click(); await app.flush();
+    }
+    jobs[1]!.reject(new Error('clipboard unavailable')); await app.flush();
+    assert.match(app.document.querySelector('.feed-wrap [role=alert]')?.textContent ?? '', /Copy failed/);
+    jobs[0]!.resolve(); await app.flush();
+    await app.advance(2000);
+    assert.match(app.document.querySelector('.feed-wrap [role=alert]')?.textContent ?? '', /Copy failed/);
+    assert.equal(rows[1]!.querySelector('.m-acts button')?.getAttribute('aria-label'), 'Copy');
+    rows[1]!.querySelector<HTMLButtonElement>('.m-acts button')!.click(); await app.flush();
+    jobs[2]!.resolve(); await app.flush();
+    assert.equal(app.document.querySelector('.feed-wrap [role=alert]'), null);
+    assert.equal(rows[1]!.querySelector('.m-acts button')?.getAttribute('aria-label'), 'Copied');
+    await app.advance(1500);
+    assert.equal(rows[1]!.querySelector('.m-acts'), null);
+  } finally { await app.close(); }
+});
+
 test('Chat header commands report drawer state and preserve compact navigation (#166)', { timeout: 60000 }, async context => {
   const fixture = await compiledHub();
   for (const compact of [false, true]) {

@@ -143,3 +143,57 @@ test('an older Board refresh cannot resurrect a subsequently deleted issue (#167
     assert.equal(app.document.querySelectorAll('.card').length, 0, 'old read cannot resurrect the deleted issue');
   } finally { await app.close(); }
 });
+
+test('Board note copy uses the shared insecure-context fallback and exact body (#167 batch2)', async context => {
+  const body = '  **Raw note**\n';
+  const written: string[] = [];
+  const app = await (await compiled).mount(context, {
+    props: { session: 'fixture', visible: true },
+    setup(window) {
+      window.Element.prototype.getAnimations = () => [];
+      window.document.execCommand = () => {
+        written.push((window.document.activeElement as HTMLTextAreaElement).value); return true;
+      };
+    },
+    modules: [rpc({ boardGet: async () => ({ ...issue, notes: [{ from: 'alice', at: 100, body }] }) })],
+  });
+  try {
+    await flush(app);
+    app.document.querySelector<HTMLButtonElement>('.card')!.click(); await flush(app);
+    app.document.querySelector<HTMLButtonElement>('.n-at')!.click(); await app.flush();
+    app.document.querySelector<HTMLButtonElement>('.m-acts button')!.click(); await flush(app);
+    assert.deepEqual(written, [body], 'only core/clipboard owns the fallback');
+    assert.equal(app.document.querySelector('.m-acts button')?.getAttribute('aria-label'), 'Copied');
+    await app.advance(1500);
+    assert.equal(app.document.querySelector('.m-acts'), null);
+  } finally { await app.close(); }
+});
+
+test('Board copy failure is persistent and retryable without a false Copied state (#167 batch2)', async context => {
+  let allowed = false;
+  const app = await (await compiled).mount(context, {
+    props: { session: 'fixture', visible: true },
+    setup(window) {
+      window.Element.prototype.getAnimations = () => [];
+      window.document.execCommand = () => false;
+      Object.defineProperty(window.navigator, 'clipboard', { value: {
+        writeText: async () => { if (!allowed) throw Error('denied'); },
+      } });
+    },
+    modules: [rpc({ boardGet: async () => ({ ...issue, notes: [{ from: 'alice', at: 100, body: 'Note' }] }) })],
+  });
+  try {
+    await flush(app);
+    app.document.querySelector<HTMLButtonElement>('.card')!.click(); await flush(app);
+    app.document.querySelector<HTMLButtonElement>('.n-at')!.click(); await app.flush();
+    app.document.querySelector<HTMLButtonElement>('.m-acts button')!.click(); await flush(app);
+    assert.match(app.document.querySelector('.note-feedback [role=alert]')?.textContent ?? '', /Copy failed/);
+    await app.advance(2000);
+    assert.ok(app.document.querySelector('.note-feedback [role=alert]'));
+    assert.equal(app.document.querySelector('.m-acts button')?.getAttribute('aria-label'), 'Copy');
+    allowed = true;
+    app.document.querySelector<HTMLButtonElement>('.m-acts button')!.click(); await flush(app);
+    assert.equal(app.document.querySelector('.note-feedback [role=alert]'), null);
+    assert.equal(app.document.querySelector('.m-acts button')?.getAttribute('aria-label'), 'Copied');
+  } finally { await app.close(); }
+});

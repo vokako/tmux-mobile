@@ -32,12 +32,13 @@ test('Feed exports three reading operations and owns its existing DOM lifecycle 
   assert.deepEqual([...source.matchAll(/export (?:async )?function (\w+)/gu)].map((m) => m[1]).sort(),
     ['resetForRoom', 'scrollToTail', 'withReadingAnchor']);
   assert.match(source, /following = \$bindable\(true\), newBelow = \$bindable\(false\)/u);
-  assert.match(source, /export function resetForRoom\(\) \{\s*reading = null;\s*expanded = \{\};\s*msgOpen = '';\s*rawOpen = '';\s*\}/u,
-    'the resize snapshot now clears with the original room-local choices (#135)');
+  assert.match(source, /export function resetForRoom\(\) \{\s*reading = null;\s*expanded = \{\};\s*setMessageActions\(-1\);\s*rawOpen = '';\s*\}/u,
+    '#167 also invalidates pending copy/expiry through the shared message model');
   assert.doesNotMatch(source, /hubPrefs|core\/ws|popstate|pushState|backLayers/u);
   assert.match(source, /registerActions\?\.\(\{\s*isOpen: \(\) => !!msgOpen,/u);
-  assert.match(source, /if \(msgOpen && !t\?\.closest\?\.\('\.m-acts, \.bubble'\)\) msgOpen = '';/u);
-  assert.match(source, /escape: \(e\) => \{ if \(msgOpen\) \{ msgOpen = ''; e\.stopPropagation\(\); \} \}/u);
+  assert.match(source, /if \(msgOpen && !t\?\.closest\?\.\('\.m-acts, \.bubble, \.message-feedback'\)\) setMessageActions\(-1\);/u,
+    '#167: feedback dismiss remains in the same pointer territory until its click');
+  assert.match(source, /escape: \(e\) => \{ if \(msgOpen\) \{ setMessageActions\(-1\); e\.stopPropagation\(\); \} \}/u);
   assert.doesNotMatch(source, /window\.addEventListener\('(?:keydown|pointerdown)'/u,
     'capture installation remains in Hub');
   assert.match(source, /<div class="feed-wrap">\s*<div class="feed subtle-scroll"/u);
@@ -362,7 +363,7 @@ test('a tapped bubble reveals Copy/Raw under it — and still never an app conte
   // one-shot compatibility-click guard (a long-press's echo click) and the
   // live-selection fallback.
   assert.match(bubble,
-    /onclick=\{\(e\) => \{ if \(openPathRef\(e\)\) return; if \(msgSelectionClicks\.consume\(key\)\) return; if \(typeof getSelection === 'function' && !\(getSelection\(\)\?\.isCollapsed \?\? true\)\) return; msgOpen = msgOpen === key \? '' : key; \}\}/u,
+    /onclick=\{\(e\) => \{ if \(openPathRef\(e\)\) return; if \(msgSelectionClicks\.consume\(key\)\) return; if \(typeof getSelection === 'function' && !\(getSelection\(\)\?\.isCollapsed \?\? true\)\) return; setMessageActions\(msgOpen === key \? -1 : key\); \}\}/u,
     'the synthetic click is consumed before the selection fallback and the row toggle');
   // The contextmenu handler only MARKS a touch-owned hold: no preventDefault,
   // no menu — native selection proceeds on touch, and a mouse right-click is
@@ -374,7 +375,7 @@ test('a tapped bubble reveals Copy/Raw under it — and still never an app conte
   // The row itself: the shared .m-acts atom with exactly Copy and Raw.
   assert.match(source, /\{#if msgOpen === key\}\n\s*<div class="m-acts appear">/u,
     'the action row is the shared .m-acts overlay, revealed per message');
-  assert.match(source, /copyMsg\(m\.body\)/u, 'Copy writes the raw body');
+  assert.match(source, /copyMsg\(key, m\.body, event\.currentTarget\)/u, '#167 captures identity, raw body and the live Copy trigger');
   assert.match(source, /rawOpen = rawOpen === key \? '' : key/u, 'Raw toggles the source view');
   assert.match(source, /<pre class="raw">\{m\.body\}<\/pre>/u, 'raw view shows the bytes as written');
   // For the system gesture to have anything to select, the message body must

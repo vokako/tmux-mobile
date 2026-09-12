@@ -715,45 +715,47 @@ test('locked issue text is static selectable prose; the workflow stays live (boa
 });
 
 test('a note bubble reveals ONE Copy action in Chat\u2019s own dialect (board #46)', async () => {
-  // ONE state triple answers "which row is open" — every transition is a
+  // ONE state record answers "which row is open" — every transition is a
   // pure message-actions.ts function, and the gen token self-scopes the Copy beat
   // (review blocker: a global boolean let Copy A's stale timeout close
   // Copy B's row — the race is replayed executable in message-actions.test.ts).
   assert.match(source, /let acts = \$state<MessageActsState>\(MESSAGE_ACTS_IDLE\);/u, 'one open-row state');
   assert.equal(source.split('{#if acts.open === i}').length - 1, 1, 'exactly one action-row render site');
-  assert.match(source, /acts = messageActsSet\(acts, acts\.open === i \? -1 : i\);/u, 'tap the same note to close, another to switch');
+  assert.match(source, /setNoteActions\(acts\.open === i \? -1 : i\);/u, 'tap the same note to close, another to switch');
 
   // The clipboard gets the RAW n.body — the display trims, the record does
   // not (the #43 verbatim rule, applied to what leaves the app).
-  assert.match(source, /onclick=\{\(\) => copyNote\(n\.body\)\}/u, 'copy carries the raw body');
+  assert.match(source, /onclick=\{\(event\) => copyNote\(i, n\.body, event\.currentTarget\)\}/u, 'copy carries identity, raw body and the live trigger');
   assert.ok(!source.includes('copyNote(n.body.trim()'), 'never the trimmed rendering');
-  assert.match(source, /navigator\.clipboard\.writeText\(body \?\? ''\)/u, 'the one clipboard write');
+  assert.match(source, /await copyText\(body \?\? ''\)/u, '#167 uses the shared fallback rather than a private writer');
+  assert.doesNotMatch(source, /navigator\.clipboard\.writeText/u);
   // The attempt's identity is captured BEFORE the clipboard await (second
   // blocker: a deferred resolve stamped Copied onto whatever was open by
   // then); the stamp lands only into its own context, and the dismiss timer
   // arms only on a landing.
-  assert.match(source, /const attempt = acts\.gen;[\s\S]{0,400}await navigator\.clipboard\.writeText/u,
+  assert.match(source, /const attempt = acts\.gen;[\s\S]{0,400}await copyText/u,
     'the attempt gen is read before the await');
-  assert.match(source, /const next = messageActsCopyLanded\(acts, attempt\);\n\s+if \(next === acts\) return; \/\/ the context moved mid-flight/u,
+  assert.match(source, /messageActsCopyFailed\(acts, attempt, t\('copyFailed'\)\);\s*if \(next === acts\) return;/u,
     'a stale resolve is orphaned — no stamp, no timer');
-  assert.match(source, /const gen = next\.gen;\n\s+setTimeout\(\(\) => \{ acts = messageActsExpired\(acts, gen\); \}, 1500\);/u,
-    'copied → the timeout puts away only the copy it belongs to');
+  assert.match(source, /if \(ok\) \{\s*const gen = next\.gen;\s*cancelCopyExpiry = scheduleCompletion\(\(\) => \{ acts = messageActsExpired\(acts, gen\); \}\);/u,
+    '#167: only success expires, through the one completion scheduler');
 
   // Close semantics: outside pointerdown, Escape as the topmost peel, and
   // every context switch (issue open, project change) resets.
-  assert.match(source, /if \(!el\?\.closest\?\.\('\.m-acts, \.n-wrap, \.n-at'\)\) acts = messageActsSet\(acts, -1\);/u,
+  assert.match(source, /if \(!el\?\.closest\?\.\('\.m-acts, \.n-wrap, \.n-at, \.note-feedback'\)\) setNoteActions\(-1\);/u,
     'outside pointerdown closes');
   // Escape closes via a WINDOW-capture listener (the note text is a div, so
   // focus stays on <body> and a .bmain-scoped handler never hears the key),
   // standing down for open dialogs and stopping the press it consumes.
-  assert.match(source, /if \(e\.key !== 'Escape' \|\| pendingDiscard \|\| pendingDelete\) return;\n\s+acts = messageActsSet\(acts, -1\); e\.stopPropagation\(\);/u,
+  assert.match(source, /if \(e\.key !== 'Escape' \|\| pendingDiscard \|\| pendingDelete\) return;\n\s+setNoteActions\(-1\); e\.stopPropagation\(\);/u,
     'Escape peels the action row before the board\u2019s other layers');
   assert.match(source, /window\.addEventListener\('keydown', onEsc, true\);/u, 'at window capture, while a row is open');
-  assert.match(source, /acts = messageActsSet\(acts, -1\); \/\/ a different issue, a fresh slate/u, 'openIssue resets');
+  assert.match(source, /setNoteActions\(-1\); \/\/ a different issue, a fresh slate/u, 'openIssue resets');
   // The project-switch effect must UNTRACK its acts read: the effect keys on
   // `cur`, and subscribing it to what it writes loops it to death (caught
   // live as effect_update_depth_exceeded).
-  assert.match(source, /acts = messageActsSet\(untrack\(\(\) => acts\), -1\);/u, 'a project switch resets, untracked');
+  assert.match(source, /untrack\(\(\) => setNoteActions\(-1\)\)/u,
+    '#167 resets state and cancels expiry together, still untracked');
 
   // #43 must survive: a drag-selection's tail click never toggles the row.
   assert.match(source, /if \(typeof getSelection === 'function' && !\(getSelection\(\)\?\.isCollapsed \?\? true\)\) return;/u,

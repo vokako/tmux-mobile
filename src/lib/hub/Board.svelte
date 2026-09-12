@@ -17,8 +17,12 @@
   import Select from '../ui/Select.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
+  import OperationFeedback from '../ui/OperationFeedback.svelte';
+  import { feedbackPosition } from '../ui/feedback-position.ts';
+  import { copyText } from '../core/clipboard.ts';
+  import { scheduleCompletion } from '../ui/feedback-lifetime.ts';
   import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, countsOf, applyCounts, visibleBoards, boardTitle, assignNotes, chipCols } from './board.ts';
-  import { messageActsSet, messageActsCopyLanded, messageActsExpired, MESSAGE_ACTS_IDLE, type MessageActsState } from './message-actions.ts';
+  import { messageActsSet, messageActsCopyLanded, messageActsCopyFailed, messageActsExpired, MESSAGE_ACTS_IDLE, type MessageActsState } from './message-actions.ts';
   import { scrollFade } from '../core/scrollFade.ts';
   import { flip } from 'svelte/animate';
   import { moveMs, revealMs } from '../ui/motion.ts';
@@ -35,7 +39,7 @@
   // here overrides it until the prop moves again.
   let cur = $state('');
   let viewGeneration = 0, readSequence = 0;
-  onDestroy(() => { viewGeneration++; readSequence++; });
+  onDestroy(() => { viewGeneration++; readSequence++; setNoteActions(-1); });
   let picked = $state(false);      // a manual pick overrides the session follow
   // The Board sheet's own condition (≤760px — the old media gate, expressed
   // where the class is applied; see app.css .side-sheet).
@@ -273,7 +277,7 @@
     // untrack: this effect runs on `cur` — reading acts to bump its gen
     // would ALSO subscribe the effect to acts, and writing it back loops
     // the effect to death (caught live: effect_update_depth_exceeded).
-    acts = messageActsSet(untrack(() => acts), -1);
+    untrack(() => setNoteActions(-1));
   });
 
   /** The editor boxes ADAPT to their content (owner, 2026-08-29: "有的框很大
@@ -314,7 +318,7 @@
       notesBase = Array.isArray(sel.notes) ? sel.notes.length : 0;
       draft = draftOf(sel);
       draftBase = draftOf(sel);
-      acts = messageActsSet(acts, -1); // a different issue, a fresh slate (board #46)
+      setNoteActions(-1); // a different issue, a fresh slate (board #46)
       err = '';
     } catch (e) { err = String((e as Error)?.message ?? e); }
   }
@@ -482,31 +486,42 @@
   // acts.gen makes the Copy beat's timeout self-scoped (review blocker:
   // a global boolean let Copy A's stale timeout close Copy B's row).
   let acts = $state<MessageActsState>(MESSAGE_ACTS_IDLE);
+  let copyTrigger = $state<HTMLElement | null>(null);
+  let notesEl = $state<HTMLElement | null>(null);
+  let detailEl = $state<HTMLElement | null>(null);
+  let cancelCopyExpiry = () => {};
+  function setNoteActions(open: number | string) {
+    cancelCopyExpiry(); cancelCopyExpiry = () => {};
+    copyTrigger = null;
+    acts = messageActsSet(acts, open);
+  }
+  $effect(() => { if (!visible || !sel) untrack(() => setNoteActions(-1)); });
   const noteSelectionClicks = selectionClickGuard();
   function toggleNoteActs(i: number) {
     if (noteSelectionClicks.consume(i)) return;
     // A drag-selection's tail click must not steal the selection — the note
     // text is swipe-selectable (#43); the action row is for a plain tap.
     if (typeof getSelection === 'function' && !(getSelection()?.isCollapsed ?? true)) return;
-    acts = messageActsSet(acts, acts.open === i ? -1 : i);
+    setNoteActions(acts.open === i ? -1 : i);
   }
-  async function copyNote(body: string) {
+  async function copyNote(i: number, body: string, trigger: EventTarget | null) {
+    if (acts.open !== i || !(trigger instanceof HTMLElement)) return;
+    setNoteActions(i);
+    copyTrigger = trigger;
     // The attempt's identity, captured BEFORE the await (second blocker):
     // the clipboard write is async, and by resolve time the user may be on
     // another note or another issue — that resolve must not stamp Copied
     // onto the new context, nor arm a timer against it.
     const attempt = acts.gen;
-    try {
-      await navigator.clipboard.writeText(body ?? '');
-      const next = messageActsCopyLanded(acts, attempt);
-      if (next === acts) return; // the context moved mid-flight; the resolve is orphaned
-      acts = next;
-      // The Copied beat, then the row puts itself away — copying IS what the
-      // row was opened for (Chat's own 1.5 s). The timeout captures ITS gen:
-      // it may expire only the copy it belongs to.
+    const ok = await copyText(body ?? '');
+    const next = ok ? messageActsCopyLanded(acts, attempt)
+      : messageActsCopyFailed(acts, attempt, t('copyFailed'));
+    if (next === acts) return;
+    acts = next;
+    if (ok) {
       const gen = next.gen;
-      setTimeout(() => { acts = messageActsExpired(acts, gen); }, 1500);
-    } catch (e) { console.warn('copy failed', e); }
+      cancelCopyExpiry = scheduleCompletion(() => { acts = messageActsExpired(acts, gen); });
+    }
   }
   // Outside pointerdown / Escape close the open row — the transient-layer
   // rule every popover follows. WINDOW-level capture, active only while a
@@ -514,14 +529,14 @@
   // and a .bmain-scoped key handler would never hear the Escape (measured —
   // the row survived it). Open dialogs keep their own Escape.
   $effect(() => {
-    if (acts.open < 0) return;
+    if (acts.open === -1) return;
     const onDown = (e: PointerEvent) => {
       const el = e.target as HTMLElement | null;
-      if (!el?.closest?.('.m-acts, .n-wrap, .n-at')) acts = messageActsSet(acts, -1);
+      if (!el?.closest?.('.m-acts, .n-wrap, .n-at, .note-feedback')) setNoteActions(-1);
     };
     const onEsc = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || pendingDiscard || pendingDelete) return;
-      acts = messageActsSet(acts, -1); e.stopPropagation();
+      setNoteActions(-1); e.stopPropagation();
     };
     window.addEventListener('pointerdown', onDown, true);
     window.addEventListener('keydown', onEsc, true);
@@ -698,7 +713,7 @@
     <div class="empty">…</div>
   {:else if sel}
     <!-- ── one issue: the note thread is the issue's own record ── -->
-    <div class="detail">
+    <div class="detail" bind:this={detailEl}>
       <div class="d-head">
         <button class="icon-btn" title={t('back')} aria-label={t('back')} onclick={() => guard(() => (sel = null))}>
           <Icon name="arrow-left" size={14} />
@@ -780,7 +795,7 @@
       <!-- The note thread as a TIMELINE (reopened #11): a header line — author
            in the accent ink, time right-aligned — and the content in its own
            box below, so ragged name lengths stop pushing the text around. -->
-      <div class="notes">
+      <div class="notes" bind:this={notesEl}>
         {#if Array.isArray(sel.notes)}
           {#each sel.notes as n, i (`${i}:${n.at}`)}
             <div class="note" class:appear={i >= notesBase}>
@@ -791,7 +806,7 @@
                      bubble — so the time is a real borderless button, Chat's
                      meta-trailer pattern. -->
                 <button class="n-at" aria-label={t('hubMsgActions')}
-                  onclick={(e) => { e.stopPropagation(); acts = messageActsSet(acts, acts.open === i ? -1 : i); }}>{ago(n.at)}</button>
+                  onclick={(e) => { e.stopPropagation(); setNoteActions(acts.open === i ? -1 : i); }}>{ago(n.at)}</button>
               </div>
               <!-- fit-content relative wrapper: the overlay anchors to the
                    BUBBLE's corner, never the full row's far right. -->
@@ -801,7 +816,7 @@
                 {#if acts.open === i}
                   <div class="m-acts appear">
                     <CommandButton iconOnly icon={acts.copied ? 'check' : 'copy'}
-                      label={acts.copied ? t('hubCopied') : t('hubCopy')} onclick={() => copyNote(n.body)} />
+                      label={acts.copied ? t('hubCopied') : t('hubCopy')} onclick={(event) => copyNote(i, n.body, event.currentTarget)} />
                   </div>
                 {/if}
               </div>
@@ -901,6 +916,11 @@
   {/if}
   {#if err}<div class="err appear">{err}</div>{/if}
   </div>
+  {#if visible && sel && acts.error}
+    <div class="note-feedback pop-layer" use:feedbackPosition={{ trigger: copyTrigger, bounds: notesEl, scrollport: detailEl }}>
+      <OperationFeedback value={{ kind: 'error', message: acts.error }} ondismiss={() => setNoteActions(acts.open)} />
+    </div>
+  {/if}
   </div>
   <ConfirmDialog open={!!pendingDiscard} danger={false} compact={narrowVp}
     confirmIcon="check"
@@ -955,6 +975,7 @@
   /* The main column: the shared page-head on top, the padded board below —
      the head spans full width like Chat's, the padding belongs to the content. */
   .bmain { display: flex; flex-direction: column; height: 100%; min-width: 0; overflow: hidden; }
+  .note-feedback { position: fixed; z-index: 8; }
   .board {
     flex: 1;
     min-height: 0;

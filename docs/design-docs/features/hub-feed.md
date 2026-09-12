@@ -4,6 +4,22 @@ The chat column of the Hub: bubble language, the single user-message anchor, lay
 
 ## Rules and their reasons
 
+### Copy feedback belongs to a message, not its body (#167, 2026-09-12)
+
+Feed and Board use one `message-actions.ts` state model. A click captures the
+message key and a fresh attempt before `copyText`; an equal body in another
+row is not the same operation. Success alone marks Copied and schedules the
+shared completion expiry. Failure remains retryable, while a new row, room,
+hidden view or unmount invalidates pending results and expiry callbacks.
+
+The error uses OperationFeedback, not a message menu or another Copy button.
+It is positioned from the live Copy control through the existing placement
+functions, within the feed scrollport, and measured before `.pop-layer.ready`.
+The fixed-corner prototype obscured Copy/Raw on a short tail reply; anchoring
+keeps the triggering controls clear without changing row markup or reading
+layout. The original Hub capture callbacks still own outside/Escape dismissal
+and include this error's Close control in their pointer territory.
+
 ### Shared command states, unchanged reading ownership (#166, 2026-09-12)
 
 The owner's Chat-control consistency request is quoted in design-language.md.

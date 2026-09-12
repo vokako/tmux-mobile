@@ -42,3 +42,23 @@ test('note-acts gen: a stale Copy timeout can never touch a later context (board
   assert.equal(messageActsExpired(h, h.gen).open, -1, 'an undisturbed beat closes its own row');
   assert.ok(messageActsSet(h, -1).gen > h.gen, 'every transition bumps the gen — monotonic, never reused');
 });
+
+test('message keys and copy failures use the same attempt identity across A-B-A (#167)', async () => {
+  const { MESSAGE_ACTS_IDLE, messageActsSet, messageActsCopyLanded, messageActsCopyFailed, messageActsExpired } = await import('./message-actions.ts');
+  let state = messageActsSet(MESSAGE_ACTS_IDLE, 'message-a');
+  const old = state.gen;
+  state = messageActsSet(state, 'message-b');
+  state = messageActsSet(state, 'message-a');
+  assert.equal(messageActsCopyLanded(state, old), state);
+  assert.equal(messageActsCopyFailed(state, old, 'stale'), state);
+  state = messageActsCopyFailed(state, state.gen, 'Copy failed');
+  assert.equal(state.open, 'message-a');
+  assert.equal(state.copied, false);
+  assert.equal(state.error, 'Copy failed');
+  assert.equal(messageActsExpired(state, old), state);
+  state = messageActsSet(state, 'message-a');
+  assert.equal(state.error, undefined, 'retry begins a new attempt');
+  state = messageActsCopyLanded(state, state.gen);
+  assert.equal(state.copied, true);
+  assert.equal(state.error, undefined);
+});
