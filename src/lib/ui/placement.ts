@@ -5,6 +5,8 @@
 // Pure, so the clamp/flip is testable without a browser.
 
 export interface AnchorRect { left: number; right: number; top: number; bottom: number }
+export const POPOVER_GAP = 6;
+export const POPOVER_EDGE = 8;
 
 /** Only scrolling a container of the trigger changes its viewport anchor.
  * Structural Node.contains also works across document realms; non-node event
@@ -19,8 +21,8 @@ export function scrollMovesTrigger(scroller: EventTarget | null, trigger: Node |
 export function menuHeightLimit(
   anchor: AnchorRect,
   view: { h: number },
-  gap = 6,
-  edge = 8,
+  gap = POPOVER_GAP,
+  edge = POPOVER_EDGE,
 ): number {
   // offsetHeight rounds to integer CSS pixels; never round into the trigger.
   return Math.floor(Math.min(
@@ -50,8 +52,8 @@ export function menuPlacement(
   anchor: AnchorRect,
   size: { w: number; h: number },
   view: { w: number; h: number },
-  gap = 6,
-  edge = 8,
+  gap = POPOVER_GAP,
+  edge = POPOVER_EDGE,
   align: 'right' | 'left' = 'right',
 ): { x: number; y: number } {
   const want = align === 'left' ? anchor.left : anchor.right - size.w;

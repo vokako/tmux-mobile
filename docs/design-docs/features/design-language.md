@@ -372,6 +372,11 @@ scrollport so it flips above inputs. Local resize/scroll tracking is disposed
 with the box; the existing caller still owns dismissal. This replaces fixed
 corner placement that Chromium measured over short-tail Copy/Raw and Board
 input controls. It adds no flow row, reading-layout change or global listener.
+Content bounds and the actual scroller are distinct: Board's `.notes` is
+clipped and tracked through its `.detail` ancestor. The vertical anchor can
+include an adjacent timestamp/tool row while retaining the Copy trigger's
+horizontal origin. Unmeasured or off-scrollport boxes are inert as well as
+not ready; opacity alone had left an invisible Close in the Tab sequence.
 
 **Controlled icon tools (#157, 2026-09-10):** `CommandButton` accepts optional
 `pressed`, `expanded` and `controls`, reflected as native `aria-pressed`,
