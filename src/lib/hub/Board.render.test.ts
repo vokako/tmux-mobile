@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { ssrServer } from '../test/ssr.ts';
 
 // Board #23's lesson: a source-contract can pass while the RENDERED tree still
 // disappoints ("不要仅凭静态断言，核对…最终 DOM"). This file renders the REAL
@@ -28,15 +29,10 @@ const noop = () => {};
 (globalThis as Record<string, unknown>).navigator ??= { language: 'en', userAgent: 'node' };
 
 test('the embedded Board renders NO head row — the drawer head is the head (board #23, final DOM)', { timeout: 60000 }, async () => {
-  const { createServer } = await import('vite');
-  const vite = await createServer({
-    server: { middlewareMode: true, hmr: false },
-    logLevel: 'error',
-    appType: 'custom',
+  const vite = await ssrServer({
     // A private cache so this run cannot fight the live dev server's
     // optimizer (a shared cacheDir crashed esbuild mid-scan).
     cacheDir: 'node_modules/.vite-render-test',
-    optimizeDeps: { noDiscovery: true, include: [] },
   });
   try {
     const Board = (await vite.ssrLoadModule('/src/lib/hub/Board.svelte')).default;

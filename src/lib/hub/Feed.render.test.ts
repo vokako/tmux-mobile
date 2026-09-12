@@ -3,6 +3,7 @@ import test from 'node:test';
 import { JSDOM } from 'jsdom';
 import { feedBlocks, ELIDE } from './hub.ts';
 import type { HubActivityEvent } from '../core/ws.ts';
+import { ssrServer } from '../test/ssr.ts';
 
 const noop = () => {};
 (globalThis as Record<string, unknown>).localStorage ??= { getItem: () => null, setItem: noop, removeItem: noop };
@@ -16,12 +17,7 @@ const noop = () => {};
 };
 
 test('Feed renders direct rows, safe rich content, complete capped tools and the original empty slot', { timeout: 60000 }, async () => {
-  const { createServer } = await import('vite');
-  const vite = await createServer({
-    server: { middlewareMode: true, hmr: false }, appType: 'custom', logLevel: 'error',
-    cacheDir: 'node_modules/.vite-feed-render-test',
-    optimizeDeps: { noDiscovery: true, include: [] },
-  });
+  const vite = await ssrServer({ cacheDir: 'node_modules/.vite-feed-render-test' });
   try {
     const Feed = (await vite.ssrLoadModule('/src/lib/hub/Feed.svelte')).default;
     const { render } = await vite.ssrLoadModule('svelte/server');

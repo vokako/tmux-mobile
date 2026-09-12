@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
+import { ssrServer } from '../test/ssr.ts';
 
 const noop = () => {};
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://render.test/' });
@@ -13,11 +14,8 @@ Object.assign(globalThis, {
 });
 
 test('Drawer renders its original window list, real partitions and single head', { timeout: 60000 }, async () => {
-  const { createServer } = await import('vite');
-  const vite = await createServer({
-    server: { middlewareMode: true, hmr: false }, appType: 'custom', logLevel: 'error',
+  const vite = await ssrServer({
     cacheDir: 'node_modules/.vite-drawer-render-test',
-    optimizeDeps: { noDiscovery: true, include: [] },
     // Vite must load their ESM entry; Node cannot infer named exports from
     // xterm's minified CommonJS facade. Production imports remain unchanged.
     ssr: { noExternal: ['@xterm/xterm', '@xterm/addon-web-links'] },

@@ -47,6 +47,23 @@ Prefer it over source regexes for rendered branches and attributes.
 SSR does not run client effects or event handlers; it cannot establish
 timing, listener order or reactive behavior after a click.
 
+**A test harness holds no fixed port** (board #177, lead 2026-09-12). Several
+agents share this host, so two `npm test` runs at once — the launch checkout
+and a worktree — are normal, not a mistake. They collided: every render and
+mount case in one run timed out at 60 s behind "WebSocket server error: Port
+24678 is already in use", and a rerun minutes later was green. Vite 6's
+`createServer` in middleware mode opens its OWN http server for the HMR
+websocket on the fixed default 24678 even with `server.hmr: false` — that
+flag only stops the update messages; `server.ws: false` is what opens no
+socket (Vite 6.4.2, `if (config.server.ws === false)`). Every render test
+therefore obtains its server from the ONE helper, `src/lib/test/ssr.ts`
+(`ssrServer({ cacheDir, … })`: middleware mode, `hmr: false`, `ws: false`,
+no port), and the mount tier builds without serving.
+`src/lib/test/harness.source.test.ts` pins both and that `createServer(`
+appears nowhere else under `src/` or `scripts/`. Proof: two concurrent
+`npm test` runs on the fix are both green with 24678 never bound; with
+`ws: false` removed the guard fails and a single render test binds the port.
+
 ### 3. Client Behavior: `<Component>.mount.test.ts`
 
 Board #115 adds one helper, `src/lib/test/mount.ts`, for executing the real

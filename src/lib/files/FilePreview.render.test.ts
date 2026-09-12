@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { PreviewFile } from './file-preview.ts';
+import { ssrServer } from '../test/ssr.ts';
 
 const noop = () => {};
 (globalThis as Record<string, unknown>).localStorage ??= { getItem: () => null, setItem: noop, removeItem: noop };
@@ -17,13 +18,9 @@ const noop = () => {};
 };
 
 test('the extracted preview renders every existing branch and preserves the code cap', { timeout: 60000 }, async () => {
-  const { createServer } = await import('vite');
-  const vite = await createServer({
-    server: { middlewareMode: true, hmr: false },
-    logLevel: 'error', appType: 'custom',
+  const vite = await ssrServer({
     // Separate from BOTH the live optimizer and Board.render.test.ts.
     cacheDir: 'node_modules/.vite-file-preview-render-test',
-    optimizeDeps: { noDiscovery: true, include: [] },
   });
   try {
     const Preview = (await vite.ssrLoadModule('/src/lib/files/FilePreview.svelte')).default;

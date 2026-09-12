@@ -5,6 +5,7 @@ import { ALL_TARGET } from './hub-composer.ts';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ssrServer } from '../test/ssr.ts';
 
 const noop = () => {};
 (globalThis as Record<string, unknown>).localStorage ??= { getItem: () => null, setItem: noop, removeItem: noop };
@@ -18,15 +19,9 @@ const noop = () => {};
 };
 
 test('Composer renders a destination-labelled textarea and send-only actions (#168)', { timeout: 60000 }, async () => {
-  const { createServer } = await import('vite');
   const { svelte } = await import('@sveltejs/vite-plugin-svelte');
   const cacheDir = await mkdtemp(join(tmpdir(), 'tmm-composer-render-'));
-  const vite = await createServer({
-    configFile: false, plugins: [svelte({ configFile: false })],
-    server: { middlewareMode: true, hmr: false }, appType: 'custom', logLevel: 'error',
-    cacheDir,
-    optimizeDeps: { noDiscovery: true, include: [] },
-  });
+  const vite = await ssrServer({ configFile: false, plugins: [svelte({ configFile: false })], cacheDir });
   try {
     const Composer = (await vite.ssrLoadModule('/src/lib/hub/Composer.svelte')).default;
     const { render } = await vite.ssrLoadModule('svelte/server');

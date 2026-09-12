@@ -3,6 +3,7 @@ import test from 'node:test';
 import { JSDOM } from 'jsdom';
 import type { ProjectRow } from '../projects/projects.ts';
 import type { SidebarPane } from './sidebar.ts';
+import { ssrServer } from '../test/ssr.ts';
 
 const noop = () => {};
 (globalThis as Record<string, unknown>).localStorage ??= { getItem: () => null, setItem: noop, removeItem: noop };
@@ -18,13 +19,7 @@ const noop = () => {};
 };
 
 test('Sidebar renders live/closed rows and the compact sheet without another wrapper', { timeout: 60000 }, async () => {
-  const { createServer } = await import('vite');
-  const vite = await createServer({
-    server: { middlewareMode: true, hmr: false },
-    logLevel: 'error', appType: 'custom',
-    cacheDir: 'node_modules/.vite-sidebar-render-test',
-    optimizeDeps: { noDiscovery: true, include: [] },
-  });
+  const vite = await ssrServer({ cacheDir: 'node_modules/.vite-sidebar-render-test' });
   try {
     const Sidebar = (await vite.ssrLoadModule('/src/lib/hub/Sidebar.svelte')).default;
     const { render } = await vite.ssrLoadModule('svelte/server');
