@@ -128,6 +128,9 @@ async function isAvailable(name: string): Promise<boolean> {
   });
 }
 
+/** Dispatched on `document` after a font role's CSS var is rewritten. */
+export const FONT_CHANGE_EVENT = 'tmux:font';
+
 export interface FontPref {
   /** The user's custom family name ('' = the role's default stack). */
   readonly custom: string;
@@ -165,6 +168,11 @@ function makeFontPref(key: string, defaultStack: string, cssVar: string, common:
     },
     apply() {
       document.documentElement.style.setProperty(cssVar, pref.stack);
+      // Announce the swap (board #189): a system family arrives through no
+      // browser event — `document.fonts` stays silent, nothing resizes — yet
+      // every line re-wraps. Layout readers (the Feed's reading transaction)
+      // listen for this the way they listen for `fonts.loadingdone`.
+      document.dispatchEvent(new CustomEvent(FONT_CHANGE_EVENT, { detail: { role: cssVar } }));
     },
   };
   return pref;

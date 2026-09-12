@@ -11,6 +11,7 @@
   import { selectionClickGuard } from '../ui/native-context-menu.ts';
   import { boxFromOffsets } from '../ui/indicator.ts';
   import { heldAnchor, readingDirection, refoldEligible, sameReadingSize } from './hub-reading.ts';
+  import { FONT_CHANGE_EVENT } from '../app/fonts.svelte.ts';
   import { TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, mentionedAgents, splitImages, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, perLineOf, STEPS_ROWS, stateIsLive } from './hub.ts';
 
   let {
@@ -269,10 +270,22 @@
       void withReadingAnchor(measureHeld, before);
     });
     ro.observe(feedEl);
-    document.fonts?.addEventListener('loadingdone', queueReadingCapture);
+    // A FONT is a layout mutation that arrives through no other door (board
+    // #189): the container does not resize, no block changes, and a system
+    // family fires no `document.fonts` event at all — yet every bubble
+    // re-wraps. Measured at 390×844 with 24 messages: uiFont.set("DejaVu Sans
+    // Mono") grew scrollHeight 2563 → 2795 while scrollTop stayed 1839, a
+    // 232 px gap under a feed that still believed it was following. Both the
+    // web-font completion and the app's own font-role swap (`tmux:font`,
+    // dispatched by fonts.apply) run the ONE reading transaction: following
+    // re-measures the fold and re-takes the tail; a reader keeps their row.
+    const onFontChange = () => { void withReadingAnchor(() => {}, reading); };
+    document.fonts?.addEventListener('loadingdone', onFontChange);
+    document.addEventListener(FONT_CHANGE_EVENT, onFontChange);
     return () => {
       ro.disconnect();
-      document.fonts?.removeEventListener('loadingdone', queueReadingCapture);
+      document.fonts?.removeEventListener('loadingdone', onFontChange);
+      document.removeEventListener(FONT_CHANGE_EVENT, onFontChange);
     };
   });
   /** How many whole lines a folded user message may show — the mapping is

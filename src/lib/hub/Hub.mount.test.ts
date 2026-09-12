@@ -1540,3 +1540,41 @@ test('Files opened from a project Chat starts at the DECLARED project path, not 
     assert.deepEqual(routes.at(-1), ['fixture', '/declared'], 'compact: the page is asked to start at the project path');
   } finally { await phone.close(); }
 });
+
+test('a global font change re-takes the tail through the reading anchor; a history reader is not yanked (board #189)', { timeout: 60000 }, async context => {
+  // Measured in Chromium (390×844, 24 messages): uiFont.set("DejaVu Sans Mono")
+  // grew scrollHeight 2563 → 2795 while scrollTop stayed 1839 — a 232 px gap
+  // under a feed that still believed it was following; document.fonts fired
+  // nothing (a system family), the container did not resize, no block changed.
+  const { rpc } = roomFixture();
+  const messages = Array.from({ length: 24 }, (_, i) => ({ id: 'm' + i, seq: i + 1, ts: 100 + i, from: i % 2 ? 'alice' : 'human', body: 'line ' + i }));
+  const app = await compiledHub().then(f => f.mount(context, {
+    props: { visible: true, mobile: true },
+    setup(window) { window.Element.prototype.getAnimations = () => []; window.HTMLCanvasElement.prototype.getContext = () => null; },
+    modules: [{ ...rpc, hubLog: async () => ({ messages, has_more: false }) }],
+  }));
+  try {
+    for (let i = 0; i < 12 && app.document.querySelectorAll('.msg').length < 24; i++) await app.flush();
+    const feed = app.document.querySelector<HTMLElement>('.feed')!;
+    let sh = 2563;
+    Object.defineProperty(feed, 'scrollHeight', { get: () => sh, configurable: true });
+    Object.defineProperty(feed, 'clientHeight', { get: () => 724, configurable: true });
+    // Following, at the tail.
+    feed.scrollTop = sh - 724;
+    feed.dispatchEvent(new app.window.Event('scroll'));
+    await app.flush();
+    // The font swap: every bubble re-wraps, the content grows, nothing else moves.
+    sh = 2795;
+    app.document.dispatchEvent(new app.window.CustomEvent('tmux:font'));
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.equal(feed.scrollTop, sh, `the tail is re-taken through the reading anchor (gap ${sh - 724 - feed.scrollTop})`);
+    // A history reader: far above the tail, the same swap must not yank them down.
+    feed.scrollTop = 300;
+    feed.dispatchEvent(new app.window.Event('scroll'));
+    await app.flush();
+    sh = 3000;
+    app.document.dispatchEvent(new app.window.CustomEvent('tmux:font'));
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.notEqual(feed.scrollTop, sh, 'a reader keeps their place');
+  } finally { await app.close(); }
+});

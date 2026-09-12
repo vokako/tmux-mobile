@@ -222,6 +222,28 @@ Svelte 5.53.5 and Vite 6.4.1 were used for the isolated build.
 
 the terminal drawer regrids the columns and every message rewraps, so the same scrollTop points at different content and the reader's message drifts (owner, 2026-08-20). Scroll anchoring is OFF on purpose (`overflow-anchor: none` ended the held-ask blink), so the helper re-anchors by hand — topmost visible block, same element back at the same offset after `tick()`, sticky variants skipped as references (a pinned rect does not move with the flow), tail stays tail. All drawer toggles route through `openDrawer`/`closeDrawer`; `Hub.source.test.ts` counts bare `termOpen =` writes.
 
+**A font is a layout mutation that arrives through no other door** (board
+#189, found by codex during #186). The reading transaction had three
+entrances: a block change, the feed's own `ResizeObserver` (the container's
+content box), and web-font completion (`document.fonts` `loadingdone` — which
+only re-captured the reading). A global font-role change (`uiFont.set`, the
+Settings font picker) rewrites `--font-ui` on `<html>`: every bubble re-wraps
+and the scroll content grows, while the container does not resize, no block
+changes, and a SYSTEM family fires no `document.fonts` event at all (0 events,
+status `loaded`). Measured in Chromium 152 on the isolated Hub fixture, 24
+messages: at 390×844 `uiFont.set("DejaVu Sans Mono")` grew `scrollHeight`
+2563 → 2795 with `scrollTop` frozen at 1839 — a 232 px tail gap under a feed
+that still believed it was `following` (so no to-tail control either); at
+1440×900 the same swap left 28 px (codex's message set left 457 / 0). Now
+`fonts.apply()` announces every role swap on `document` (`tmux:font`,
+`FONT_CHANGE_EVENT`), and the Feed routes that event AND `fonts.loadingdone`
+through the ONE `withReadingAnchor` transaction: following re-measures the
+fold and re-takes the tail; a history reader keeps their row. After: gap 0 at
+both sizes; a reader at scrollTop 300 kept their row at the same −71 px offset
+through the swap. No timer, no second tail mechanism. `Hub.mount.test.ts`
+drives the event with a grown `scrollHeight` (red on main with the measured
+232 px gap); `Feed.source.test.ts` pins the single handler for both signals.
+
 **The drawer has TWO partitions** (owner, 2026-08-28: "右侧边栏，可以展开文件浏览器的分区，类似展示 terminal 面板一样的逻辑"): `drawerView = 'term' | 'files'`, one width handle, a header toggle per partition (on the phone the files toggle JUMPS to the Files tab instead — the same translation the terminal toggle makes to the Terminal tab). The files partition embeds the REAL `Files` component (`session={selected}`, per-project cwd via its module-scoped parked map) in `singlePane` mode — the drawer is 320–900px of a WIDE window, so Files' window-width split heuristic lies there (owner, 2026-08-28: "类似手机的单页模式，不用做成左右分屏") — and its head carries a maximize button that hands the drawer's cwd to the Files PAGE (`openFilesTab` → App sets `filesSession` + a `{path, n}` `navRequest` the page instance consumes; `loadDir` got a `seq` guard so the newest navigation always wins); the terminal body hides under `visibility: hidden`, never `display: none` — a re-laid-out terminal would resize the pane and make the agent repaint (the `.keep-rows` lesson) — and an Esc originating inside `.files-body` passes through (closing would unmount an open editor mid-edit), the same territory rule as `.xterm`.
 
 ### Drawer widths are bounded requests (#158, parent #154, 2026-09-10)

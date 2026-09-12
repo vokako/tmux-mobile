@@ -21,6 +21,7 @@
 // collapses the newlines and is the one allowed value.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const source = await readFile(new URL('./Feed.svelte', import.meta.url), 'utf8');
@@ -473,4 +474,16 @@ test('a prompt row folds through the ONE message mechanism — never a silent cl
   assert.equal((source.match(/class="m-unfold"/gu) ?? []).length, 1, 'the unfold button markup exists once');
   assert.equal((source.match(/\{@render unfold\(key, folded\)\}/gu) ?? []).length, 2,
     'the bubble and the prompt row both render it');
+});
+
+test('a font change is a layout mutation through the ONE reading transaction (board #189)', () => {
+  // Both signals — web-font completion and the app's own font-role swap —
+  // run withReadingAnchor; neither re-captures alone, neither has a timer or
+  // a second tail writer.
+  assert.match(source, /const onFontChange = \(\) => \{ void withReadingAnchor\(\(\) => \{\}, reading\); \};/u);
+  assert.match(source, /document\.fonts\?\.addEventListener\('loadingdone', onFontChange\);/u);
+  assert.match(source, /document\.addEventListener\(FONT_CHANGE_EVENT, onFontChange\);/u);
+  assert.doesNotMatch(source, /addEventListener\('loadingdone', queueReadingCapture\)/u, 'the old capture-only listener is gone');
+  const fonts = readFileSync(new URL('../app/fonts.svelte.ts', import.meta.url), 'utf8');
+  assert.match(fonts, /document\.dispatchEvent\(new CustomEvent\(FONT_CHANGE_EVENT/u, 'apply() announces the swap');
 });
