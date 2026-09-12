@@ -10,5 +10,7 @@ test('operation feedback is presentation over the shared chrome and control owne
   assert.doesNotMatch(source, /setTimeout|setInterval|core\/ws|window\.|document\.|1500/u);
   assert.match(source, /prefers-reduced-motion: reduce/u);
   assert.match(source, /class:config-error=/u);
+  assert.match(source, /\.feedback-body \{ min-width: 0; flex: 1 1 auto;/u,
+    'intrinsic text width keeps a short notice and Close in one row in a shrink-to-fit popover');
   assert.doesNotMatch(source, /#[0-9a-fA-F]{3,8}\b|rgba?\(/u, 'shared tokens own the palette');
 });

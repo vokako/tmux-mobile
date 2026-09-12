@@ -45,13 +45,13 @@
 
 <style>
   .operation-feedback {
-    box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; gap: calc(2 * var(--ui-gap));
+    box-sizing: border-box; display: flex; align-items: center; gap: calc(2 * var(--ui-gap));
     padding: calc(2 * var(--ui-gap)) calc(3 * var(--ui-gap));
     font: var(--fs-ui)/1.5 var(--font-ui); color: var(--text);
     max-width: 100%; max-height: var(--feedback-max-height, none); overflow: auto;
   }
   .feedback-icon { display: inline-flex; flex: none; width: var(--control-icon-size); height: var(--control-icon-size); }
-  .feedback-body { min-width: min(100%, calc(2 * var(--control-height))); flex: 1; display: flex; flex-direction: column; }
+  .feedback-body { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; }
   .feedback-message, .feedback-detail { overflow-wrap: anywhere; }
   .feedback-detail { color: var(--text2); font: var(--fs-sub)/1.5 var(--font-mono); }
   .error .feedback-icon { color: var(--danger-ink); }

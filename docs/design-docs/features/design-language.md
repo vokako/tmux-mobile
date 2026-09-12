@@ -341,6 +341,9 @@ progress and actionable results. Files and Terminal both adopt it; their
 private toast paint and flash animation are removed. It reuses `menu-surface`,
 the shared error text role and CommandButton. Callers own position and actions;
 the component owns no transport, timer, queue or notification policy.
+The message flexes from its intrinsic width beside actions; a percentage-based
+minimum made short copy errors wrap Close onto a second row in shrink-to-fit
+popovers. Long text wraps inside the message column instead.
 
 `feedback-lifetime.ts` owns `COMPLETION_FEEDBACK_MS = 1500` and the completion
 scheduler. A local instance captures an attempt before awaiting and accepts
