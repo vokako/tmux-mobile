@@ -11,7 +11,7 @@ test('back retraces the USER\u2019s steps — a history, not a parent walk (boar
   for (const site of [
     /navTo\(entry\.path, 'fwd'\);/u,   // entering a directory
     /navTo\(parent, 'back'\);/u,       // the up button
-    /onclick=\{\(\) => navTo\('\/', 'back'\)\}/u, // the root crumb
+    /onclick=\{\(\) => \{ if \(!selecting\(\)\) navTo\('\/', 'back'\); \}\}/u, // the root crumb (#187: not over a text selection)
     /navTo\(bc\.path, 'back'\)/u,      // a crumb
     /navTo\(bm, 'fwd'\);/u,            // a bookmark
   ]) assert.match(source, site, `user navigation pushes: ${site}`);
@@ -225,6 +225,6 @@ test('the root reads as the first separator, not a wide first crumb (board #187)
   // Owner 2026-09-12: "首个 / 斜线后边的文件夹间距比较大，整体看的不是很和谐".
   // Measured: the segment min-width put the root glyph 15 px from "local"
   // where every other glyph sits 5 px from its neighbours; after, 5/5/5.
-  assert.match(source, /<button class="bc-seg bc-root" onclick=\{\(\) => navTo\('\/', 'back'\)\}>\/<\/button>/u);
+  assert.match(source, /<button class="bc-seg bc-root" onclick=\{\(\) => \{ if \(!selecting\(\)\) navTo\('\/', 'back'\); \}\}/u);
   assert.match(source, /\.bc-seg\.bc-root \{ min-width: 0; padding-right: 0; color: var\(--text3\); font-size: var\(--fs-sub\); \}/u);
 });

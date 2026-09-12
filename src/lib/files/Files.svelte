@@ -339,7 +339,10 @@
   const menuActions = $derived.by(() => {
     const menu = fileMenu;
     if (!menu) return [];
-    const actions = menu.entry ? rowActions(menu.entry)
+    // A path crumb offers its path (board #187); a row its file; the rest the tools.
+    const actions = menu.kind === 'path'
+      ? [{ key: 'copy', label: t('filesCopyPath'), icon: 'copy', run: () => rowHandlers.copy(menu.entry.path) }]
+      : menu.entry ? rowActions(menu.entry)
       : menu.kind === 'overflow' ? toolbarActions.slice(toolCount) : toolbarActions;
     return actions.map(action => ({
       label: action.label, icon: action.icon, danger: action.danger,
@@ -359,6 +362,19 @@
     openFileMenu(at, entry ? 'entry' : 'directory', entry);
   }
   const directoryPress = (target) => !target?.closest?.('.file-row');
+  /** Right-click / long-press on a crumb: the one context-menu mechanism,
+   * offering that segment's path (board #187: "这个路径最好可以复制"). */
+  function contextCrumb(event, crumb) {
+    if (systemOwnsContextMenu(event)) { event.preventDefault(); return; }
+    event.preventDefault(); event.stopPropagation();
+    const at = event.clientX || event.clientY ? { x: event.clientX, y: event.clientY }
+      : { anchor: anchorOf(event.currentTarget), align: 'left' };
+    openFileMenu(at, 'path', { name: crumb.name, path: crumb.path, type: 'dir' });
+  }
+  /** A tap that ends a text selection is a copy gesture, not a navigation —
+   * crumb and file-name text are selectable (owner: "文件夹文件的名字我也可以
+   * 选中复制"); Feed's bubbles use the same guard. */
+  const selecting = () => typeof getSelection === 'function' && !(getSelection()?.isCollapsed ?? true);
   function measureToolbar(node) {
     const measure = () => {
       if (!node.clientWidth) return;
@@ -1556,9 +1572,13 @@
       <CommandButton variant="icon" icon="arrow-left" label={t('back')} disabled={!canGoBack} onclick={popDir} />
       <CommandButton variant="icon" icon="arrow-right" label={t('forward')} disabled={!canGoForward} onclick={fwdDir} />
       <div class="bc-scroll" bind:this={bcPathEl}>
-      <button class="bc-seg bc-root" onclick={() => navTo('/', 'back')}>/</button>
+      <button class="bc-seg bc-root" onclick={() => { if (!selecting()) navTo('/', 'back'); }}
+        oncontextmenu={(event) => contextCrumb(event, { name: '/', path: '/' })}
+        use:longpress={{ onlongpress: (point) => openFileMenu(point, 'path', { name: '/', path: '/', type: 'dir' }) }}>/</button>
       {#each breadcrumbs as bc, i (bc.path)}
-        <button class="bc-seg" class:appear={i === breadcrumbs.length - 1} onclick={() => navTo(bc.path, 'back')}
+        <button class="bc-seg" class:appear={i === breadcrumbs.length - 1} onclick={() => { if (!selecting()) navTo(bc.path, 'back'); }}
+          oncontextmenu={(event) => contextCrumb(event, bc)}
+          use:longpress={{ onlongpress: (point) => openFileMenu(point, 'path', { name: bc.name, path: bc.path, type: 'dir' }) }}
           use:hoverInfo={() => ({ title: bc.name, text: bc.path })}>{bc.name}</button>
         <span class="bc-sep">/</span>
       {/each}
@@ -1667,7 +1687,7 @@
         {#each entries as entry (entry.path)}
           <div class="file-row" class:broken={entry.type === 'broken'} oncontextmenu={(event) => contextFile(event, entry)}
             use:longpress={{ onlongpress: (point) => openFileMenu(point, 'entry', entry) }}>
-            <button class="file-main" onclick={() => rowHandlers.open(entry)} use:hoverInfo={() => entryInfo(entry)}>
+            <button class="file-main" onclick={() => { if (!selecting()) rowHandlers.open(entry); }} use:hoverInfo={() => entryInfo(entry)}>
               <span class="file-icon" class:is-link={entry.is_symlink}>
                 <Icon name={fileIcon(entry)} size={16} />
               </span>
@@ -1956,6 +1976,7 @@
     min-width: var(--control-height); min-height: var(--control-height); flex-shrink: 0;
     padding: 2px 4px; border: none; background: none; color: var(--text2);
     cursor: pointer; white-space: nowrap; font-size: var(--fs-ui); font-family: inherit;
+    user-select: text; -webkit-user-select: text; /* a name you can drag-select and copy (board #187) */
     transition: color var(--t-fast);
   }
   /* The root reads as the FIRST SEPARATOR, not as a wide first crumb: the
@@ -2068,7 +2089,7 @@
   .file-row.broken { opacity: 0.55; }
   .file-row.broken .file-icon.is-link::after { color: var(--danger, #f87171); }
   .link-name { font-style: italic; }
-  .file-name { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .file-name { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
   .dir-name { color: var(--accent-ink); }
   .file-size { flex: none; color: var(--text2); font-size: var(--fs-sub); font-family: var(--font-mono); white-space: nowrap; }
   .file-actions { display: flex; flex: none; gap: 0; padding-right: 4px; }

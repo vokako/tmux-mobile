@@ -31,6 +31,16 @@ row reads `/ local / home / …` at one rhythm (after: 5/5/5). It keeps the
 row's touch height; its width is the glyph's — the root is one tap away by
 the row's own scroll and rarely the destination.
 
+A crumb is a THING WITH A PATH, so it gets the one context-menu mechanism
+(board #187, owner: "这个路径最好可以复制，包括文件夹文件的名字我也可以选中复制"):
+right-click / long-press a segment (root included) → `ContextMenu` with Copy
+path of THAT segment, through the same `openFileMenu`/`copyPath` a row uses
+(`kind: 'path'`). Crumb and file-name text are `user-select: text`; a tap
+that ends a text selection is a copy gesture, not a navigation — the crumb
+and row `onclick` skip when the selection is not collapsed, Feed's guard.
+Measured with a real Chromium mouse drag: the file name selects and no
+preview opens; the crumb `home` selects and no listing loads.
+
 ### Compact rows and contextual actions (#164, 2026-09-11)
 
 Owner, 03:00, verbatim:

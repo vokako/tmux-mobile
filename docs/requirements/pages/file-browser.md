@@ -15,7 +15,7 @@ directory, or the server's home directory when no session is open yet.
   (terminal glyph, "Session directory") returns to the active session's
   working directory; it is NOT a home button — the house icon means the
   user's home (`~`) wherever it appears (the directory picker)
-- Breadcrumb path row (separate from toolbar): headed by the browser pair, Back and Forward (arrow glyphs, 28/44 targets) — Back retraces the user's directory steps, Forward undoes a Back, each disabled at its end, a fresh navigation clears Forward; the crumb strip scrolls to its tail
+- Breadcrumb path row (separate from toolbar): headed by the browser pair, Back and Forward (arrow glyphs, 28/44 targets) — Back retraces the user's directory steps, Forward undoes a Back, each disabled at its end, a fresh navigation clears Forward; the crumb strip scrolls to its tail; the root reads as the first separator; a segment's text is selectable, and right-click / long-press offers Copy path of that segment; file names in the list are selectable too, and a tap that ends a selection does not open or navigate
 - File/directory list with icons, size, modified date
 - The desktop list uses the available width until a preview is open. Beside a
   preview its independent, resizable width defaults to 400px (320-520px), not

@@ -388,3 +388,41 @@ test('Back/Forward: the browser pair heads the path row, disabled at the ends (b
     assert.equal(back().disabled, false);
   } finally { await app.close(); }
 });
+
+test('a path segment has the one context menu (Copy path) and a text selection does not navigate (board #187)', async context => {
+  // Owner 2026-09-12: "这个路径最好可以复制，包括文件夹文件的名字我也可以选中复制".
+  const copied: string[] = [];
+  const listed: string[] = [];
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, session: 'fixture' },
+    modules: [rpc({ fsList: async (path: string) => { listed.push(path); return { path, entries }; } })],
+    setup(window) {
+      window.localStorage.setItem('tmux_layout_mode', 'desktop');
+      Object.defineProperty(window.navigator, 'clipboard', { value: { writeText: async (text: string) => { copied.push(text); } } });
+    },
+  });
+  try {
+    await settle(app);
+    const segs = app.document.querySelectorAll<HTMLButtonElement>('.bc-path-row .bc-seg');
+    assert.equal(segs.length, 2, 'root + fixture');
+    // Right-click the "fixture" crumb: the same context-menu mechanism as a row, offering Copy path of THAT segment.
+    contextMenu(app, segs[1]!); await app.flush();
+    assert.equal(app.document.querySelector('.ctx-who')?.textContent, 'fixture');
+    menuAction(app, 'Copy path').click(); await settle(app);
+    assert.deepEqual(copied, ['/fixture']);
+    assert.equal(app.document.querySelectorAll('.ctx-item, .menu-item').length, 0, 'the menu closed');
+    // A tap that ends a text selection is a copy gesture, not a navigation.
+    const before = listed.length;
+    const name = app.document.querySelector('.file-row .file-name')!;
+    const range = app.document.createRange(); range.selectNodeContents(name);
+    const sel = app.window.getSelection()!; sel.removeAllRanges(); sel.addRange(range);
+    assert.equal(sel.isCollapsed, false);
+    app.document.querySelector<HTMLButtonElement>('.file-row .file-main')!.click(); await settle(app);
+    assert.equal(app.document.querySelector('.preview-header'), null, 'no preview opened over a selection');
+    segs[1]!.click(); await settle(app);
+    assert.equal(listed.length, before, 'no directory navigation over a selection');
+    sel.removeAllRanges();
+    segs[1]!.click(); await settle(app);
+    assert.equal(listed.length, before + 1, 'without a selection the crumb navigates');
+  } finally { await app.close(); }
+});
