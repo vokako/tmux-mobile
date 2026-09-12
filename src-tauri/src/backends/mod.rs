@@ -168,7 +168,7 @@ impl Backend {
 
     /// Render an agent's isolated home from its definition — prompt, backend
     /// config, hooks, launch command (board #128). Each arm is the backend's
-    /// own file; `workspace` is read by claude alone (trust pre-seeding).
+    /// own file; `workspace` is read by claude and codex (trust pre-seeding).
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     #[allow(clippy::too_many_arguments)]
     pub fn render(
@@ -183,7 +183,7 @@ impl Backend {
         match self {
             Backend::Kiro => kiro::render_kiro(def, window_name, home, system_prompt, skills),
             Backend::Claude => claude::render_claude(def, window_name, home, workspace, system_prompt, skills),
-            Backend::Codex => codex::render_codex(def, window_name, home, system_prompt, skills),
+            Backend::Codex => codex::render_codex(def, window_name, home, workspace, system_prompt, skills),
             Backend::Grok => grok::render_grok(def, window_name, home, system_prompt, skills),
             Backend::Omp => omp::render_omp(def, window_name, home, system_prompt, skills),
         }

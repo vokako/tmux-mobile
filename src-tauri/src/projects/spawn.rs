@@ -1327,6 +1327,31 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
     }
 
     #[test]
+    fn codex_launch_line_pre_answers_its_startup_prompts() {
+        // Board #184 (owner 2026-09-12: "codex 启动会有提示是否升级，这个也要屏蔽掉，
+        // 以及…是否信任当前文件夹目录"). A managed pane is unattended: the two
+        // startup screens are answered on the launch line, as config
+        // overrides — never by editing the user's config.toml (the isolated
+        // home's config.toml is a symlink into it).
+        let dir = std::env::temp_dir().join(format!("tmm-spawn-codex-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let d = def("codex");
+        let prompt = build_prompt(&d, "tester", "proj", "", "", "");
+        let cmd = render_codex(&d, "tester", &dir, Path::new("/srv/work/my-app"), &prompt, &[]).unwrap().cmd;
+        assert!(cmd.contains("check_for_update_on_startup=false"), "no update prompt: {cmd}");
+        // Measured on codex-cli 0.154.0: the `-c` key is split on dots and a
+        // quoted segment is NOT honoured, so the path rides unquoted.
+        assert!(cmd.contains("projects./srv/work/my-app.trust_level="), "trust pre-answered for the workspace: {cmd}");
+        assert!(!cmd.contains("projects.\"") && !cmd.contains("projects.\\\""), "no quoted segment: {cmd}");
+        // A path with a dot cannot be expressed as a `-c` key; the pane
+        // watcher (StartupConfirmation) still answers that screen.
+        let dotted = render_codex(&d, "tester", &dir, Path::new("/srv/work/my.app"), &prompt, &[]).unwrap();
+        assert!(!dotted.cmd.contains("trust_level"), "a dotted path is left to the watcher: {}", dotted.cmd);
+        assert!(dotted.confirmation.is_some(), "the watcher stays as the fallback");
+        assert!(dotted.cmd.contains("check_for_update_on_startup=false"));
+    }
+
+    #[test]
     fn claude_and_codex_render_without_team_plumbing() {
         for backend in ["claude", "codex"] {
             let dir = std::env::temp_dir().join(format!("tmm-spawn-{backend}-{}", uuid::Uuid::new_v4()));
@@ -1335,7 +1360,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
             let prompt = build_prompt(&d, "tester", "proj", "", "", "");
             let r = match backend {
                 "claude" => render_claude(&d, "tester", &dir, &dir, &prompt, &[]).unwrap(),
-                _ => render_codex(&d, "tester", &dir, &prompt, &[]).unwrap(),
+                _ => render_codex(&d, "tester", &dir, &dir, &prompt, &[]).unwrap(),
             };
             assert!(!r.cmd.contains("x-room"), "no team room headers");
             assert!(r.cmd.contains("files") || dir.join("mcp.json").exists(), "registry MCP present");
@@ -1410,7 +1435,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         d.backend = "grok".into();
         assert!(render_grok(&d, "t", &dir, &prompt, &[]).unwrap().cmd.ends_with("--effort high"));
         d.backend = "codex".into();
-        let cx = render_codex(&d, "t", &dir, &prompt, &[]).unwrap().cmd;
+        let cx = render_codex(&d, "t", &dir, &dir, &prompt, &[]).unwrap().cmd;
         assert!(cx.contains("model_reasoning_effort=\\\"high\\\"") || cx.contains("model_reasoning_effort=\"high\""), "{cx}");
         // Empty effort leaves every line clean.
         d.effort = String::new();

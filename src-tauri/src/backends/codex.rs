@@ -185,9 +185,10 @@ pub(crate) fn codex_hooks(notify: &str) -> Value {
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn render_codex(
-    def: &RegAgent, _name: &str, home: &Path, system_prompt: &str,
+    def: &RegAgent, _name: &str, home: &Path, workspace: &Path, system_prompt: &str,
     skills: &[crate::projects::skills::ResolvedSkill],
 ) -> Result<Rendered, String> {
+
     let codex_home = home.join("codex");
     std::fs::create_dir_all(&codex_home).map_err(|e| e.to_string())?;
     shared::inherit_codex_system_files(&codex_home)?;
@@ -237,6 +238,23 @@ pub(crate) fn render_codex(
             Value::String(def.effort.trim().to_string()),
         ));
     }
+    // A managed pane is UNATTENDED (board #184, owner 2026-09-12: "codex 启动会
+    // 有提示是否升级，这个也要屏蔽掉，以及…是否信任当前文件夹目录"): codex's two
+    // startup screens are answered here, as config overrides on the launch
+    // line — never by editing config.toml, which in this home is a symlink
+    // into the user's own. (1) `check_for_update_on_startup` (documented:
+    // "Check for Codex updates on startup") switches the "Update available!
+    // … Update now" screen off. (2) The folder-trust screen reads
+    // `projects.<path>.trust_level`; measured on codex-cli 0.154.0 with an
+    // isolated CODEX_HOME in an untrusted git dir: the override with the
+    // path UNQUOTED removes the screen and writes nothing back, while a
+    // quoted segment is not honoured (`-c` keys are split on dots and quotes
+    // stay literal) — so a path containing a dot cannot be expressed here and
+    // keeps the pane watcher below (StartupConfirmation) as its answer.
+    config_args.push(shared::codex_config_override("check_for_update_on_startup", Value::Bool(false)));
+    if let Some(key) = codex_trust_key(workspace) {
+        config_args.push(shared::codex_config_override(&key, Value::String("trusted".into())));
+    }
     config_args.push("--dangerously-bypass-approvals-and-sandbox".into());
     config_args.push("--dangerously-bypass-hook-trust".into());
     Ok(Rendered {
@@ -251,6 +269,18 @@ pub(crate) fn render_codex(
     })
 }
 
+
+/// The `-c` key that pre-answers codex's folder-trust screen for `workspace`,
+/// or None when the path holds a dot (codex splits the key on dots and keeps
+/// quotes literal — measured on 0.154.0 — so such a path has no key form).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn codex_trust_key(workspace: &Path) -> Option<String> {
+    let path = workspace.to_str()?;
+    if path.is_empty() || path.contains('.') || path.contains('=') || path.contains(char::is_whitespace) {
+        return None;
+    }
+    Some(format!("projects.{path}.trust_level"))
+}
 
 /// The codex half of `refresh_hooks`.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
