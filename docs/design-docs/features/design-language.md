@@ -322,7 +322,11 @@ The existing `ConfirmDialog` owns presentation and keyboard focus, never
 the RPC. `confirmIcon` is independent of `danger`; a caller's `error` appears
 inside the dialog as an alert and its accessible description, in the shared
 error text role. Names and errors wrap within the existing scroll-capped
-dialog/sheet. Error text does not expire or animate in. A rejection remains
+dialog/sheet. While busy, focus parks on the dialog itself: Chromium 152
+otherwise dropped the disabled command's focus to BODY in 15 measured async
+scenarios. The initial return target and listener lifetime are retained;
+busy transitions do not re-register the modal or replace its return target.
+Error text does not expire or animate in. A rejection remains
 retryable on the captured object; successful mutation closes the matching
 view, while a later read failure retries the read, not the mutation.
 

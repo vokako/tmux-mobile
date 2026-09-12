@@ -69,3 +69,28 @@ test('a failed operation is visible inside the confirmation and stays retryable 
     assert.equal(retries, 1);
   } finally { await app.close(); }
 });
+
+test('disabling the clicked command parks focus inside the modal without replacing its return target (#167)', async context => {
+  const fixture = await compileMount(new URL('./ConfirmDialog.test.svelte', import.meta.url), []);
+  let controls!: { fail: () => void; close: () => void };
+  const app = await fixture.mount(context, {
+    props: { ready: (value: typeof controls) => controls = value },
+    setup(window) {
+      const origin = window.document.createElement('button');
+      origin.id = 'origin';
+      window.document.body.append(origin);
+      origin.focus();
+    },
+    modules: [],
+  });
+  try {
+    const dialog = app.document.querySelector<HTMLElement>('[role=alertdialog]')!;
+    const confirm = dialog.querySelector<HTMLButtonElement>('.dlg-actions button:last-child')!;
+    confirm.focus(); confirm.click(); await app.flush();
+    assert.equal(app.document.activeElement, dialog, 'a disabled command cannot retain usable focus');
+    controls.fail(); await app.flush();
+    assert.ok(dialog.contains(app.document.activeElement), 'failure keeps keyboard ownership in the dialog');
+    controls.close(); await app.flush();
+    assert.equal(app.document.activeElement?.id, 'origin', 'busy transitions do not replace the original focus target');
+  } finally { await app.close(); }
+});

@@ -45,8 +45,6 @@
     if (!open || !cancelEl || !dialogEl) return;
     const dialog = dialogEl;
     const previousFocus = document.activeElement;
-    if (cancelEl.disabled) dialogEl.focus();
-    else cancelEl.focus();
     const onKey = (e: KeyboardEvent) => {
       if (activeModal(document) !== dialog) return;
       if (e.key === 'Escape') {
@@ -67,6 +65,13 @@
       if (previousFocus instanceof HTMLElement && previousFocus.isConnected
         && (!owner || owner === dialog || owner.contains(previousFocus))) previousFocus.focus();
     };
+  });
+  // Busy is a focus transition, not a new dialog lifetime: disabling the
+  // clicked button otherwise leaves BODY focused and loses keyboard ownership.
+  $effect(() => {
+    if (!open || !cancelEl || !dialogEl || activeModal(document) !== dialogEl) return;
+    if (busy) dialogEl.focus({ preventScroll: true });
+    else if (!dialogEl.contains(document.activeElement)) cancelEl.focus({ preventScroll: true });
   });
 </script>
 
