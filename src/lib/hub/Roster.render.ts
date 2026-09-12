@@ -31,15 +31,12 @@ test('Roster renders the controlled destination strip (#168)', { timeout: RENDER
     assert.equal(root.querySelectorAll('.roster').length, 1);
     assert.equal(root.querySelectorAll('.tgroup').length, 0);
     assert.deepEqual([...root.querySelectorAll('.acard[data-agent]')].map((node) => node.getAttribute('data-agent')),
-      ['waiting', 'runner', 'solo', 'paused', 'all']);
+      ['waiting', 'runner', 'solo', 'paused']);
     assert.match(select(root, 'waiting').getAttribute('aria-label')!, /dev\/review/u);
     assert.doesNotMatch(root.textContent!, /State:|stopped|@all/u, 'state words live only in hover/ARIA');
     assert.equal(select(root, 'runner').getAttribute('aria-pressed'), 'true');
-    assert.equal(select(root, 'all').getAttribute('aria-pressed'), 'false');
     assert.equal(select(root, 'waiting').getAttribute('aria-pressed'), 'false');
-    assert.match(select(root, 'all').getAttribute('aria-label')!, /everyone/u);
-    assert.equal(select(root, 'all').querySelector('.ava'), null, 'broadcast is not another agent avatar (#173)');
-    assert.ok(select(root, 'all').querySelector('.broadcast-glyph svg'));
+    assert.equal(root.querySelector('[data-agent="all"]'), null, '#180: All belongs to Composer, never the roster');
     assert.match(select(root, 'runner').getAttribute('aria-label')!, /unread/iu);
     assert.ok(card(root, 'runner').querySelector('.st.live-dot'));
     assert.ok(card(root, 'runner').querySelector('.unread'));
@@ -49,11 +46,9 @@ test('Roster renders the controlled destination strip (#168)', { timeout: RENDER
     assert.equal(card(root, 'waiting').querySelector('.st.live-dot'), null);
     assert.equal(stop(root, 'runner')?.parentElement?.parentElement, card(root, 'runner'));
     assert.equal(stop(root, 'runner')?.getAttribute('aria-label'), 'Interrupt runner');
-    assert.equal(stop(root, 'all')?.getAttribute('aria-label'), 'Interrupt everyone');
     assert.ok(stop(root, 'runner')?.classList.contains('warn'));
     assert.equal(stop(root, 'runner')?.classList.contains('secondary'), false);
     assert.equal(root.querySelector('.agent-watch'), null, '#180: Watch remains in the existing ContextMenu, not a reserved slot');
-    assert.equal(card(root, 'all').querySelector('.agent-watch'), null);
     assert.equal(select(root, 'runner').querySelector('button'), null);
     assert.equal(root.querySelector('.a-menu, [role="menu"], [role="button"]'), null);
   });
@@ -63,22 +58,21 @@ test('Roster renders the controlled destination strip (#168)', { timeout: RENDER
     assert.equal(stop(root, 'runner'), null, 'working without parent membership has no Stop');
     assert.equal(stop(root, 'waiting'), null);
     assert.ok(stop(root, 'solo'), 'parent membership is authoritative even with a stale status label');
-    assert.ok(stop(root, 'all'));
     assert.equal(view({ busyNames: [] }).querySelector('.agent-stop'), null);
   });
 
-  await ctx.test('pending blocks its member and all, without dimming selection or peers', () => {
+  await ctx.test('pending blocks its member without dimming selection or peers', () => {
     const root = view({ interrupting: ['runner'] });
-    for (const name of ['runner', 'all']) {
+    for (const name of ['runner']) {
       assert.ok(stop(root, name)?.hasAttribute('disabled'));
       assert.equal(stop(root, name)?.getAttribute('aria-busy'), 'true');
     }
     assert.equal(stop(root, 'waiting')?.hasAttribute('disabled'), false);
     assert.equal(select(root, 'runner').hasAttribute('disabled'), false);
     const allPending = view({ interrupting: ['runner', 'waiting'] });
-    for (const name of ['all', 'runner', 'waiting']) assert.ok(stop(allPending, name)?.hasAttribute('disabled'));
+    for (const name of ['runner', 'waiting']) assert.ok(stop(allPending, name)?.hasAttribute('disabled'));
     const unrelated = view({ interrupting: ['removed'] });
-    assert.equal(stop(unrelated, 'all')?.hasAttribute('disabled'), false);
+    assert.equal(stop(unrelated, 'runner')?.hasAttribute('disabled'), false);
   });
 
   await ctx.test('body extras mark only reached cards with @, without selecting them', () => {
@@ -90,9 +84,9 @@ test('Roster renders the controlled destination strip (#168)', { timeout: RENDER
     assert.deepEqual(marked(extra), ['waiting']);
     assert.equal(select(extra, 'runner').getAttribute('aria-pressed'), 'true');
     assert.equal(select(extra, 'waiting').getAttribute('aria-pressed'), 'false');
-    assert.deepEqual(marked(view({ composerText: '@all' })), ['waiting', 'runner', 'solo', 'all']);
+    assert.deepEqual(marked(view({ composerText: '@all' })), ['waiting', 'runner', 'solo']);
     assert.deepEqual(marked(view({ recipient: 'all', composerText: '@waiting' })), []);
-    assert.equal(select(view({ recipient: 'all' }), 'all').getAttribute('aria-pressed'), 'true');
+    assert.equal(view({ recipient: 'all' }).querySelector('[aria-pressed="true"]'), null, 'All is selected outside this list');
     const none = view({ recipient: '', composerText: '@waiting' });
     assert.equal(none.querySelector('[aria-pressed="true"]'), null);
     assert.deepEqual(marked(none), ['waiting']);

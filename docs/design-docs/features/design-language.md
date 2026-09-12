@@ -234,6 +234,15 @@ Chromium 152 measured 3.42:1 (light) and 10.26:1 (dark) on a selected card.
 
 ## 3 · Control dialects (reuse, never invent)
 
+**Inline Chat composer (#180, 2026-09-12).** The owner's 14:22 words are
+quoted in hub-composer.md. One naturally growing textarea row ends with
+All, Attach and Send, bottom-aligned; there is no permanent action footer
+or hidden layout mirror. All is a circular icon command using the existing
+pressed treatment, not another solid CTA. Its first activation selects
+broadcast; selected activation opens the existing ContextMenu with Record
+only and busy-only Interrupt. The roster's old All card is removed rather
+than duplicated. Native 28/44px targets and the one popup/focus owner remain.
+
 ### Configuration controls (#155, revised by #161, 2026-09-10)
 
 The audit found 24px Settings commands, 28x26px editor commands, 29px fields,

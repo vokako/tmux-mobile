@@ -340,6 +340,13 @@ sizes (owner declined).
 
 ## Rules and their reasons
 
+- **Inline composer growth is layout, not animation** (#180, 2026-09-12):
+  All/Attach/Send share the textarea's row and stay bottom-aligned. Natural
+  textarea measurement drives the existing shell-height notification;
+  neither width nor height is animated and no mirror is restored. All uses
+  the existing command pressed feedback and Hub ContextMenu `.pop-layer`;
+  there is no resident All Stop or second popup/history mechanism.
+
 - **Capacity rings use fixed geometry and discrete colour** (#180, 2026-09-12):
   the owner's 14:26 correction supersedes the edge-bar width/colour tween.
   Equal avatar rings show the reported fraction without an intermediate

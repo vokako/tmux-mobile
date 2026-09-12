@@ -1,5 +1,4 @@
 <script>
-  import Icon from '../ui/Icon.svelte';
   import CommandButton from '../ui/CommandButton.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import { untrack } from 'svelte';
@@ -72,7 +71,6 @@
     if (cardsEl) { cardsEl.scrollLeft = 0; cardsEl.scrollTop = 0; }
   });
   const extras = $derived(chipExtras(composerText, recipient, managedNames));
-  const allPending = $derived(busyNames.some((name) => interrupting.includes(name)));
   const slotBackend = (name) => (selectedRow?.slots ?? []).find((s) => s.window_name === name)?.command;
 
   function selectTarget(name) {
@@ -97,7 +95,7 @@
 
   function destinationNote(name) {
     if (recipient !== name) return '';
-    const destination = name === ALL_TARGET ? t('hubToAllLong') : t('hubToDmLong').replace('{name}', `@${name}`);
+    const destination = t('hubToDmLong').replace('{name}', `@${name}`);
     const also = extras.length ? t('hubToAlsoHint').replace('{names}', extras.map((n) => `@${n}`).join(', ')) : '';
     return [destination, also].filter(Boolean).join('\n');
   }
@@ -220,27 +218,6 @@
           </button>
         </div>
       {/each}
-      {#if roomReady}
-        <div class="acard all" data-agent={ALL_TARGET} class:sel={recipient === ALL_TARGET} class:has-stop={busyNames.length > 0}>
-          <button type="button" class="agent-select" aria-pressed={recipient === ALL_TARGET}
-            aria-label={[t('hubEveryone'), '@all', extras.includes(ALL_TARGET) ? t('hubToAlsoHint').replace('{names}', '@all') : ''].filter(Boolean).join(' · ')}
-            use:hoverInfo={() => ({ title: t('hubEveryone'), note: destinationNote(ALL_TARGET) })}
-            onclick={() => selectTarget(ALL_TARGET)}>
-            <span class="broadcast-glyph"><Icon name="collab" size={18} /></span>
-            <span class="a-name">{t('hubEveryone')}</span>
-            <span class="agent-marks" class:unmarked={!extras.includes(ALL_TARGET)}>
-              {#if extras.includes(ALL_TARGET)}<span class="agent-mention" aria-hidden="true">@</span>{/if}
-            </span>
-          </button>
-          {#if renderedStops.length}
-            <span class="agent-stop" class:pending={allPending}>
-              <CommandButton label={`${t('hubInterrupt')} ${t('hubEveryone')}`} icon="stop" variant="warn" iconOnly
-                pending={allPending} disabled={allPending || !busyNames.length}
-                onclick={(e) => { e.stopPropagation(); interrupt(ALL_TARGET); }} />
-            </span>
-          {/if}
-        </div>
-      {/if}
       <!-- Spawning opens a closed project too; keep its entry even in an empty room. -->
       <div class="roster-add">
         <CommandButton icon="plus" variant="icon" label={t('hubSpawn')} onclick={onadd} />
@@ -302,14 +279,6 @@
     content: ''; position: absolute; inset: var(--control-paint-inset) 0; border: 1px dashed var(--text2);
     border-radius: inherit; pointer-events: none;
   }
-  .acard.all {
-    border-radius: var(--ui-radius-pill); color: var(--text2);
-    --card-paint: transparent; --card-line: transparent;
-  }
-  .acard.all:hover { --card-paint: var(--surface2); --card-line: transparent; }
-  .acard.all.sel { --card-paint: var(--accent-bg); --card-line: var(--accent-line); color: var(--accent-ink); }
-  .cards:not(.expanded) .all .a-name { display: none; }
-  .acard.all .agent-select { border-radius: inherit; }
   .ctx-ring {
     position: absolute; left: var(--roster-card-inset); top: calc(50% - var(--roster-ring-size) / 2);
     width: var(--roster-ring-size); height: var(--roster-ring-size); border-radius: 50%;
@@ -344,7 +313,6 @@
   .avatar-slot { width: var(--roster-ring-size); height: var(--roster-ring-size); display: grid; place-items: center; flex: none; }
   .ava { width: var(--roster-avatar-size); height: var(--roster-avatar-size); flex: none; border-radius: 50%; object-fit: contain; display: grid; place-items: center; }
   .ctx-value { width: 4ch; flex: none; text-align: right; font: var(--fs-meta)/1 var(--font-mono); color: var(--text2); white-space: nowrap; }
-  .broadcast-glyph { display: grid; place-items: center; width: var(--roster-avatar-size); height: var(--roster-avatar-size); flex: none; }
   .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--status-danger); flex: none; }
   .off { color: var(--text2); }
   .ava.dim { background: var(--surface2); color: var(--text3); }

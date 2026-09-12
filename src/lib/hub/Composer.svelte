@@ -8,6 +8,7 @@
 
   let {
     selected = '', compact = false, recipient = '', composerText = $bindable(''),
+    roomReady = false, allMenuOpen = false, onall = (_event) => {},
     agents = [], interruptible = false,
     pending = [], attaching = false, failed = false, sendable = false,
     onsend: send = () => {},
@@ -32,21 +33,32 @@
   }
 
   let composerEl = $state(null);
+  let shellEl = $state(null);
+  let actionsEl = $state(null);
   let ctrlCTapAt = null;
 
-  /** The action row is in flow, so natural textarea height is the only
-   * measurement needed before applying its CSS scroll ceiling. */
+  /** Natural textarea growth is the only height calculation; the controls
+   * share its row and the whole shell includes any attachment rows. */
   function growComposer() {
     const el = composerEl;
     if (!el) return;
-    el.style.height = 'auto';
-    const maxH = parseFloat(getComputedStyle(el).maxHeight) || Infinity;
-    const overflowing = el.scrollHeight > maxH + 1;
-    el.style.overflowY = overflowing ? 'auto' : 'hidden';
-    el.style.height = `${Math.min(el.scrollHeight, maxH)}px`;
+    const row = el.parentElement;
+    const previousMin = row?.style.minHeight ?? '';
+    // Measuring a shorter textarea must not transiently expand the Feed and
+    // clamp its scrollTop. Keep the row in place until the real height is ready.
+    if (row) row.style.minHeight = `${row.offsetHeight}px`;
+    try {
+      el.style.height = 'auto';
+      const maxH = parseFloat(getComputedStyle(el).maxHeight) || Infinity;
+      const overflowing = el.scrollHeight > maxH + 1;
+      el.style.overflowY = overflowing ? 'auto' : 'hidden';
+      el.style.height = `${Math.min(el.scrollHeight, maxH)}px`;
+    } finally {
+      if (row) row.style.minHeight = previousMin;
+    }
     // Attachments and actions count toward the shell; unchanged height must
     // not re-park the feed on every keystroke.
-    const shellH = el.parentElement?.offsetHeight ?? el.offsetHeight;
+    const shellH = shellEl?.offsetHeight ?? el.offsetHeight;
     if (shellH !== lastShellH) {
       lastShellH = shellH;
       onheightchange();
@@ -59,6 +71,23 @@
     void compact;
     void composerIsCmd;
     growComposer();
+  });
+  $effect(() => {
+    const available = shellEl?.parentElement?.parentElement;
+    if (!composerEl || !actionsEl || !available) return;
+    let measured = '';
+    // The chat column supplies space; commands supply the text inset. Observing
+    // the textarea itself would observe our own height writes and form a loop.
+    const observer = new ResizeObserver(() => {
+      const style = getComputedStyle(composerEl);
+      const next = `${composerEl.clientWidth}:${style.maxHeight}:${style.minHeight}`;
+      if (next === measured) return;
+      measured = next;
+      growComposer();
+    });
+    observer.observe(available);
+    observer.observe(actionsEl);
+    return () => observer.disconnect();
   });
 
   let fileEl = $state(null);
@@ -185,7 +214,7 @@
 </script>
 
 <div class="composer">
-  <div class="compose-shell" class:cmd={composerIsCmd}>
+  <div class="compose-shell" class:cmd={composerIsCmd} bind:this={shellEl}>
   {#if palette?.items.length}
     <div class="cmd-menu pop-layer" class:ready={cmdMenuH > 0} style:--pop-origin="bottom left" role="listbox" tabindex="-1" bind:clientHeight={cmdMenuH}>
       {#each palette.items as it, i (it.value)}
@@ -199,12 +228,26 @@
       {/each}
     </div>
   {/if}
+  <div class="compose-line">
   <textarea class="c-input" rows="1" bind:this={composerEl} bind:value={composerText}
     aria-label={composerLabel} placeholder={composerLabel}
     onkeydown={onComposerKey}
     onpaste={onComposerPaste}
     onfocus={onfocus}
   ></textarea>
+  <div class="composer-actions" bind:this={actionsEl}>
+    <span class="all-choice">
+      <CommandButton variant="icon" icon="collab" label={t('hubEveryone')} pressed={recipient === ALL_TARGET}
+        hasPopup={recipient === ALL_TARGET ? 'menu' : undefined}
+        expanded={recipient === ALL_TARGET ? allMenuOpen : undefined}
+        disabled={!selected || !roomReady} onclick={onall} />
+    </span>
+    <CommandButton variant="icon" icon="plus" label={t('hubAttach')} disabled={!selected || attaching}
+      pending={attaching} onclick={() => fileEl?.click()} />
+    <CommandButton variant="primary" iconOnly icon="send-up" label={t('hubSend')}
+      disabled={!selected || attaching || failed || !sendable} onclick={send} />
+  </div>
+  </div>
   {#if pending.length}
     <div class="pend-row">
       {#each pending as a, i (a.key)}
@@ -244,12 +287,6 @@
     </div>
   {/if}
   <input type="file" multiple hidden bind:this={fileEl} onchange={onPickFiles} />
-  <div class="composer-actions">
-    <CommandButton variant="icon" icon="plus" label={t('hubAttach')} disabled={!selected || attaching}
-      pending={attaching} onclick={() => fileEl?.click()} />
-    <CommandButton variant="primary" iconOnly icon="send-up" label={t('hubSend')}
-      disabled={!selected || attaching || failed || !sendable} onclick={send} />
-  </div>
   </div>
 </div>
 
@@ -260,19 +297,21 @@
   }
   .compose-shell {
     position: relative; border: 1px solid var(--border); border-radius: 16px;
-    background: var(--bubble-in); padding: 9px 10px 4px;
+    background: var(--bubble-in); padding: var(--tool-inset-block) var(--tool-inset-inline);
   }
   .compose-shell:focus-within { border-color: var(--accent-line); }
   .compose-shell.cmd { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 6%, var(--bubble-in)); }
   .compose-shell.cmd .c-input { font-family: var(--font-mono); }
+  .compose-line { display: flex; align-items: flex-end; gap: var(--tool-gap); min-width: 0; }
   .c-input {
-    display: block; width: 100%; box-sizing: border-box; min-height: 36px;
-    max-height: calc(30vh / var(--ui-zoom, 1)); padding: 2px 0;
+    display: block; flex: 1; min-width: 0; width: 100%; box-sizing: border-box; min-height: var(--control-height);
+    max-height: calc(30vh / var(--ui-zoom, 1)); padding: max(2px, calc((var(--control-height) - 1.5em) / 2)) 0;
     border: 0; outline: none; background: transparent; color: var(--text);
     font: var(--fs-body)/1.5 var(--font-ui); resize: none; overflow-y: hidden;
   }
   .c-input::placeholder { color: var(--text3); }
-  .composer-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 3px; }
+  .composer-actions { display: flex; align-items: center; flex: none; gap: var(--tool-gap); }
+  .all-choice { display: flex; flex: none; }
   .pend-row { display: flex; flex-wrap: wrap; gap: 6px; padding-block: 5px; }
   .pend-chip {
     display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 3px 7px;

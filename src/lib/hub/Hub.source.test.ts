@@ -11,6 +11,16 @@ test('Chat header hit targets occupy layout instead of overlapping neighbors (#1
   assert.doesNotMatch(head, /class="icon-btn/u);
   assert.match(head, /<CommandButton[^>]*icon="files"/u);
 });
+
+test('All menu actions keep their opening identity while items follow live state (#180)', () => {
+  const actions = source.slice(source.indexOf('function allItems('), source.indexOf('const visibleCtxItems'));
+  assert.match(actions, /selected === session && recipient === ALL_TARGET && ctxAt\?\.allMenuId === menuId/u,
+    'a stale callback cannot affect a new room, destination or reopened menu');
+  assert.match(source, /const allMenuId = Symbol\('all-menu'\)/u);
+  assert.match(source, /const visibleCtxItems = \$derived\(ctxAt\?\.allSession \? allItems\(ctxAt\.allSession, ctxAt\.allMenuId\) : ctxItems\)/u,
+    'normal menus keep their captured lists; All follows current busy/pending inputs');
+  assert.match(source, /<ContextMenu at=\{ctxAt\} items=\{visibleCtxItems\}/u);
+});
 const rule = (selector: string) =>
   source.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
 
@@ -598,7 +608,7 @@ test('the title caret expands the NAME — left-aligned on its real rect (board 
   const opens = [...source.matchAll(/openCtx\((?!at, who)/g)].length; // call sites, not the definition
   const leftAligned = [...source.matchAll(/openCtx\(\{ anchor:[^}]*align: 'left'/g)].length;
   assert.equal(leftAligned, 1, 'ONE explicitly left-aligned entry');
-  assert.equal(opens - leftAligned, 2, 'Sidebar and Roster context callbacks carry no explicit align (#121/#132)');
+  assert.equal(opens - leftAligned, 3, '#180 adds the captured All trigger to Sidebar and Roster context entries');
   assert.ok(!/getBoundingClientRect\(\)[^]{0,80}openCtx/u.test(source),
     'no raw client rect reaches openCtx — anchorOf owns the zoom correction');
   // #166 replaces the 20px private caret with the shared command's centered

@@ -7,6 +7,59 @@ per-agent interruption. The feed is `hub-feed.md`.
 
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
 
+### One input row and one All command (#180, 2026-09-12)
+
+Owner, 14:22, verbatim (the subsequent 14:26 correction replaces only the
+card's capacity encoding):
+> A 背景填充的方案。everyone 的按钮应该是一个圆形的小按钮在 加号 左边 ，加号还是按照原来在发送键左边的方案，一起发发送的消息在同一行，就是不额外把消息框撑高一行，发送按钮在同一行就行，停止按钮可以是选中 everyone 后再次点击，才显示菜单栏选项 stop
+
+Textarea and All/Attach/Send share one normal-flow flex row, in that order.
+The textarea grows in the remaining width; commands align with its bottom,
+not a separate footer. Attachments retain their own rows below it. Use the
+existing natural-height measurement and CSS ceiling, not the retired mirror
+or overlapping corner controls. Height notification measures the whole
+shell, including attachments. Its local ResizeObserver watches the available
+chat column and fixed command group, not the textarea it resizes, and reuses
+the same calculation when text width or the CSS height ceiling changes.
+Chromium 152 exposed both mistakes: observing the textarea produced resize-
+loop warnings; a height-only viewport shrink left a 145px draft clipped to
+90px with `overflow:hidden`. A shrink now enables scrolling, and growth
+releases the old ceiling without waiting for another keystroke.
+Natural-height measurement also holds the existing input row's minimum
+height synchronously until the textarea's final height is set. Otherwise
+`height:auto` briefly shrinks a four-line draft by 61px, expands the Feed
+and clamps its scrollTop during a width resize; restoring the textarea
+then leaves a 61px tail gap. The row hold is removed in `finally` before
+the shell-height notification. It is not a mirror, timer or Feed correction.
+
+All is the single circular icon CommandButton in the composer, with the
+existing 28/44px native target. Selected All wears the shared pressed
+control-surface/accent-ink treatment; Send is the only solid CTA. The old
+roster All card, its private styling and resident All Stop are removed whole.
+First activation selects `ALL_TARGET`; another activation opens the existing
+Hub ContextMenu. Constructive Record only comes first and clears All
+directly; the amber interrupt command appears only while members are busy,
+disabled during an in-flight interrupt. Named-card deselection still chooses
+record-only too.
+
+The menu captures its opening room in the existing context-menu record and
+closes if that room or destination changes. Its items follow current
+busy/pending state while open, rather than freezing the opening snapshot.
+Dispatch checks room, destination and this menu instance before revalidating
+busy membership through the existing interrupt function. It
+does not kill processes or change the recipient. No new listener, Back stack
+or popup owner is added. Double Ctrl+C still mirrors the interrupt offered
+for the selected named card or All menu; record-only is a no-op. The Send,
+staging, draft, IME and command-palette gates remain in their original owners.
+Chromium 152.0.7977.64 measures a 34px pointer / 50px coarse empty shell,
+with native 28/44px controls on the same line. Seven desktop/390px light/dark,
+reduced-motion and 360px variants cover multiline text, attachments, width
+changes and menu actions; separate height-only shrink/grow and real Feed
+scroll checks pass without ResizeObserver errors. Disabling only the
+temporary row hold restores the 61px tail gap; removing that override
+returns to zero. Browser coverage uses controlled RPC and synthetic IME;
+native WebView/IME and owner-client acceptance remain separate.
+
 ### Comparable avatar meters and content-sized cards (#180, 2026-09-12)
 
 Owner, 12:13, requested a narrower card and a meter integrated with it:

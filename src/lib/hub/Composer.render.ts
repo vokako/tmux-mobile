@@ -16,15 +16,22 @@ test('Composer renders a destination-labelled textarea and send-only actions (#1
     { name: 'bob', window: 1, managed: true, agent: 'codex', state: 'idle' },
   ];
   const view = (props: Record<string, unknown> = {}) => h.fragment(render(Composer, { props: {
-    selected: 'fixture', recipient: 'alice', agents, ...props,
+    selected: 'fixture', recipient: 'alice', roomReady: true, agents, ...props,
   } }).body as string);
   const send = (fragment: DocumentFragment) =>
-    fragment.querySelector<HTMLButtonElement>('.composer-actions button:last-child')!;
+    fragment.querySelector<HTMLButtonElement>('.composer-actions > button:last-child')!;
+  const all = (fragment: DocumentFragment) => fragment.querySelector<HTMLButtonElement>('.all-choice button')!;
   const textarea = (fragment: DocumentFragment) => fragment.querySelector('textarea')!;
   const empty = view();
   assert.equal(empty.children.length, 1);
   assert.ok(empty.firstElementChild?.classList.contains('composer'));
-  assert.equal(empty.querySelectorAll('.composer-actions .command-button').length, 2);
+  assert.equal(empty.querySelectorAll('.composer-actions .command-button').length, 3);
+  assert.equal(all(empty).getAttribute('aria-label'), t('hubEveryone'));
+  assert.equal(all(empty).getAttribute('aria-pressed'), 'false');
+  assert.equal(all(view({ recipient: ALL_TARGET })).getAttribute('aria-pressed'), 'true');
+  assert.equal(all(view({ recipient: ALL_TARGET })).getAttribute('aria-haspopup'), 'menu');
+  assert.equal(all(view({ recipient: ALL_TARGET, allMenuOpen: true })).getAttribute('aria-expanded'), 'true');
+  assert.equal(all(view({ roomReady: false })).disabled, true);
   assert.equal(send(empty).disabled, true);
   assert.equal(send(view({ interruptible: true })).disabled, true, 'an interruptible recipient never turns empty Send into Stop');
   assert.equal(send(empty).getAttribute('aria-label'), t('hubSend'));

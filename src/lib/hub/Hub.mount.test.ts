@@ -73,7 +73,8 @@ test('saved all restores through a fresh mount and room revisit without deliveri
 });
 
 const selectedCard = (document: Document) =>
-  document.querySelector('.agent-select[aria-pressed="true"]')?.closest<HTMLElement>('.acard')?.dataset.agent ?? '';
+  document.querySelector('.all-choice [aria-pressed="true"]') ? 'all'
+    : document.querySelector('.agent-select[aria-pressed="true"]')?.closest<HTMLElement>('.acard')?.dataset.agent ?? '';
 const stripCard = (document: Document, name: string) =>
   document.querySelector<HTMLElement>(`.acard[data-agent="${name}"]`)!;
 
@@ -88,7 +89,8 @@ async function characterize(context: TestContext, fixture: Awaited<ReturnType<ty
       await app.flush();
     }
     const card = (name: string) => {
-      const found = stripCard(app.document, name)?.querySelector<HTMLButtonElement>('.agent-select');
+      const found = name === 'all' ? app.document.querySelector<HTMLButtonElement>('.all-choice button')
+        : stripCard(app.document, name)?.querySelector<HTMLButtonElement>('.agent-select');
       assert.ok(found, `${name} is rendered by the real Hub`);
       return found;
     };
@@ -162,7 +164,7 @@ test('a pending attachment blocks Enter until the real Hub can send the complete
     assert.equal(selectedCard(app.document), 'alice');
     const input = app.document.querySelector<HTMLTextAreaElement>('.c-input')!;
     const picker = app.document.querySelector<HTMLInputElement>('input[type="file"]')!;
-    const send = app.document.querySelector<HTMLButtonElement>('.composer-actions button:last-child')!;
+    const send = app.document.querySelector<HTMLButtonElement>('.composer-actions > button:last-child')!;
     input.value = 'Inspect ';
     input.dispatchEvent(new app.window.Event('input', { bubbles: true }));
     await app.flush();
@@ -516,7 +518,7 @@ async function composerFixture(context: TestContext, extra: Record<string, (...a
   };
   await wait(() => selectedCard(app.document) === 'alice');
   const input = app.document.querySelector<HTMLTextAreaElement>('.c-input')!;
-  const send = app.document.querySelector<HTMLButtonElement>('.composer-actions button:last-child')!;
+  const send = app.document.querySelector<HTMLButtonElement>('.composer-actions > button:last-child')!;
   const text = async (value: string) => {
     input.value = value;
     input.dispatchEvent(new app.window.Event('input', { bubbles: true }));
@@ -536,7 +538,16 @@ async function composerFixture(context: TestContext, extra: Record<string, (...a
     const target = name === 'everyone' ? 'all' : name === 'note' ? '' : name;
     const current = selectedCard(app.document);
     if (current === target) return;
-    const button = stripCard(app.document, target || current)?.querySelector<HTMLButtonElement>('.agent-select');
+    if (!target && current === 'all') {
+      app.document.querySelector<HTMLButtonElement>('.all-choice button')!.click();
+      await app.flush();
+      [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')]
+        .find(button => button.textContent?.trim() === 'Record only')!.click();
+      await app.flush();
+      return;
+    }
+    const button = target === 'all' ? app.document.querySelector<HTMLButtonElement>('.all-choice button')
+      : stripCard(app.document, target || current)?.querySelector<HTMLButtonElement>('.agent-select');
     assert.ok(button, name);
     button.click();
     await app.flush();
@@ -610,7 +621,7 @@ test('body mentions mark cards without replacing the selected delivery target (#
     assert.deepEqual(posts, ['@alice @bob Review the change.']);
     await app.to('note');
     await app.text('@all Report progress.');
-    for (const name of ['all', 'alice', 'bob']) {
+    for (const name of ['alice', 'bob']) {
       assert.equal(stripCard(app.document, name).querySelector('.agent-mention')?.textContent, '@');
     }
     assert.equal(selectedCard(app.document), '');
@@ -720,7 +731,7 @@ test('roster disclosure keeps its cards, remembers each room, and holds order du
   const toggle = () => app.document.querySelector<HTMLButtonElement>('.roster-toggle button')!;
   try {
     // Owner #176 moves the bulk destination after identities, not ahead of them.
-    assert.deepEqual(order(), ['charlie', 'bob', 'alice', 'all']);
+    assert.deepEqual(order(), ['charlie', 'bob', 'alice']);
     const alice = stripCard(app.document, 'alice');
     const list = app.document.querySelector('.cards')!;
     assert.doesNotMatch(list.textContent!, /running|waiting|idle/u);
@@ -737,22 +748,22 @@ test('roster disclosure keeps its cards, remembers each room, and holds order du
     agents[0]!.state = 'running'; agents[0]!.since = 5000;
     agents[2]!.state = 'idle'; agents[2]!.since = 6000;
     await app.advance(5000);
-    assert.deepEqual(order(), ['alice', 'bob', 'charlie', 'all'], 'an idle expanded monitor follows new turn order');
+    assert.deepEqual(order(), ['alice', 'bob', 'charlie'], 'an idle expanded monitor follows new turn order');
     assert.ok(stripCard(app.document, 'alice').querySelector('.agent-stop button'));
     assert.equal(stripCard(app.document, 'charlie').querySelector('.agent-stop'), null,
       'new turn state updates Stop availability');
     toggle().click(); await app.flush();
-    assert.deepEqual(order(), ['alice', 'bob', 'charlie', 'all'], 'collapse adopts the new turn order');
+    assert.deepEqual(order(), ['alice', 'bob', 'charlie'], 'collapse adopts the new turn order');
 
     const bobStop = stripCard(app.document, 'bob').querySelector<HTMLButtonElement>('.agent-stop button')!;
     bobStop.dispatchEvent(new app.window.Event('pointerdown', { bubbles: true }));
     agents[1]!.since = 10000;
     await app.advance(5000);
-    assert.deepEqual(order(), ['alice', 'bob', 'charlie', 'all'], 'a pressed Stop cannot move to another card');
+    assert.deepEqual(order(), ['alice', 'bob', 'charlie'], 'a pressed Stop cannot move to another card');
     bobStop.click(); await app.flush();
     assert.deepEqual(interrupts, ['bob']);
     assert.equal(selectedCard(app.document), 'alice');
-    assert.deepEqual(order(), ['bob', 'alice', 'charlie', 'all']);
+    assert.deepEqual(order(), ['bob', 'alice', 'charlie']);
   } finally { await app.close(); }
 });
 
@@ -766,24 +777,24 @@ test('a restored expanded roster reorders live unless a pointer or focus holds i
   const order = () => [...app.document.querySelectorAll<HTMLElement>('.acard[data-agent]')].map((node) => node.dataset.agent);
   try {
     assert.equal(app.document.querySelector('.roster-toggle button')!.getAttribute('aria-expanded'), 'true');
-    assert.deepEqual(order(), ['bob', 'alice', 'all']);
+    assert.deepEqual(order(), ['bob', 'alice']);
     agents[0]!.since = 40;
     await app.advance(5000);
-    assert.deepEqual(order(), ['alice', 'bob', 'all']);
+    assert.deepEqual(order(), ['alice', 'bob']);
     const list = app.document.querySelector('.cards')!;
     list.dispatchEvent(new app.window.Event('pointerenter'));
     agents.push({ name: 'new', window: 2, managed: true, agent: 'codex', state: 'running', since: 50 });
     await app.advance(5000);
-    assert.deepEqual(order(), ['alice', 'bob', 'new', 'all'], 'new members append without moving a pointed-at target');
+    assert.deepEqual(order(), ['alice', 'bob', 'new'], 'new members append without moving a pointed-at target');
     list.dispatchEvent(new app.window.Event('pointerleave'));
     await app.flush();
-    assert.deepEqual(order(), ['new', 'alice', 'bob', 'all'], 'pointerleave releases order without a timer');
+    assert.deepEqual(order(), ['new', 'alice', 'bob'], 'pointerleave releases order without a timer');
     stripCard(app.document, 'alice').querySelector<HTMLButtonElement>('.agent-select')!.focus();
     agents[1]!.since = 60;
     await app.advance(5000);
-    assert.deepEqual(order(), ['new', 'alice', 'bob', 'all'], 'keyboard focus holds its target');
+    assert.deepEqual(order(), ['new', 'alice', 'bob'], 'keyboard focus holds its target');
     app.input.focus(); await app.flush();
-    assert.deepEqual(order(), ['bob', 'new', 'alice', 'all'], 'blur releases the new turn order immediately');
+    assert.deepEqual(order(), ['bob', 'new', 'alice'], 'blur releases the new turn order immediately');
   } finally { await app.close(); }
 });
 
@@ -810,27 +821,27 @@ test('roster releases a touch press without click and reconciles focus after a c
     pointer(stop, 'pointerdown');
     agents[0]!.since = 40;
     await app.advance(5000);
-    assert.deepEqual(order(), ['bob', 'alice', 'all']);
+    assert.deepEqual(order(), ['bob', 'alice']);
     pointer(stop, 'pointerup');
     await app.flush();
-    assert.deepEqual(order(), ['alice', 'bob', 'all'], 'disabled touch targets may release without any click');
+    assert.deepEqual(order(), ['alice', 'bob'], 'disabled touch targets may release without any click');
     job.resolve({}); await app.flush();
 
     stop.focus(); await app.flush();
     agents[1]!.since = 50;
     await app.advance(5000);
-    assert.deepEqual(order(), ['alice', 'bob', 'all'], 'focused controls keep their location');
+    assert.deepEqual(order(), ['alice', 'bob'], 'focused controls keep their location');
     agents[0]!.state = 'idle'; agents[0]!.since = 80;
     agents[1]!.state = 'idle'; agents[1]!.since = 90;
     await app.advance(5000);
     assert.equal(stop.isConnected, false);
-    assert.deepEqual(order(), ['bob', 'alice', 'all'], 'DOM removal does not guarantee focusout');
+    assert.deepEqual(order(), ['bob', 'alice'], 'DOM removal does not guarantee focusout');
     stripCard(app.document, 'alice').querySelector<HTMLButtonElement>('.agent-select')!.focus();
     agents.splice(0, 1);
     await app.advance(5000);
     agents.push({ name: 'new', window: 2, managed: true, agent: 'codex', state: 'running', since: 100 });
     await app.advance(5000);
-    assert.deepEqual(order(), ['new', 'bob', 'all'], 'removing a focused member does not leave order locked');
+    assert.deepEqual(order(), ['new', 'bob'], 'removing a focused member does not leave order locked');
   } finally { job.resolve({}); await app.close(); }
 });
 
@@ -853,6 +864,72 @@ test('a pressed content-sized card holds action slots but never keeps a stale St
     await app.flush();
     assert.equal(alice.querySelector('.agent-stop'), null);
     assert.ok(bob.querySelector('.agent-stop'), 'release adopts current action availability');
+  } finally { await app.close(); }
+});
+
+test('Composer All selects once, then opens scoped Stop and record-only actions (#180)', { timeout: 60000 }, async context => {
+  const calls: unknown[][] = [];
+  const job = deferred<object>();
+  const app = await composerFixture(context, {
+    hubAgents: async () => ({ agents: [
+      { name: 'alice', window: 0, agent: 'kiro', managed: true, state: 'running' },
+      { name: 'bob', window: 1, agent: 'codex', managed: true, state: 'idle' },
+      { name: 'carol', window: 2, agent: 'claude', managed: true, state: 'waiting' },
+    ] }),
+    hubAgentInterrupt: (...args: unknown[]) => { calls.push(args); return job.promise; },
+  });
+  try {
+    const all = app.document.querySelector<HTMLButtonElement>('.all-choice button')!;
+    assert.ok(all);
+    assert.equal(app.document.querySelector('.roster [data-agent="all"]'), null, 'one All, no roster copy');
+    all.click(); await app.flush();
+    assert.equal(all.getAttribute('aria-pressed'), 'true');
+    assert.equal(app.document.querySelector('.ctx'), null, 'first click selects only');
+    all.click(); await app.flush();
+    assert.equal(all.getAttribute('aria-expanded'), 'true');
+    assert.equal(calls.length, 0, 'second click opens, never interrupts');
+    app.document.querySelector('.feed')!.dispatchEvent(new app.window.Event('scroll'));
+    await app.flush();
+    assert.ok(app.document.querySelector('.ctx'), 'sibling feed output cannot dismiss an unchanged composer anchor');
+    const menuButton = (label: string) => [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')]
+      .find(button => button.textContent?.trim() === label)!;
+    menuButton('Interrupt').click(); await app.flush();
+    assert.deepEqual(calls, [['fixture', 'alice'], ['fixture', 'carol']]);
+    assert.equal(all.getAttribute('aria-pressed'), 'true');
+    all.click(); await app.flush();
+    assert.ok(menuButton('Interrupt').disabled, 'pending members cannot be interrupted twice');
+    job.resolve({}); await app.flush();
+    assert.equal(menuButton('Interrupt').disabled, false, 'an open menu follows request completion');
+    app.window.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await app.flush();
+    all.click(); await app.flush();
+    menuButton('Record only').click(); await app.flush();
+    assert.equal(all.getAttribute('aria-pressed'), 'false');
+    assert.equal(selectedCard(app.document), '');
+    all.click(); await app.flush(); all.click(); await app.flush();
+    await app.room('other');
+    assert.equal(app.document.querySelector('.ctx'), null, 'All menu belongs to its opening room');
+  } finally { job.resolve({}); await app.close(); }
+});
+
+test('an open All menu follows live busy membership without reopening (#180)', { timeout: 60000 }, async context => {
+  const agents = [
+    { name: 'alice', window: 0, agent: 'kiro', managed: true, state: 'idle' },
+  ];
+  const app = await composerFixture(context, { hubAgents: async () => ({ agents }) });
+  const interrupt = () => [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')]
+    .find(button => button.textContent?.trim() === 'Interrupt');
+  try {
+    const all = app.document.querySelector<HTMLButtonElement>('.all-choice button')!;
+    all.click(); await app.flush(); all.click(); await app.flush();
+    assert.equal(interrupt(), undefined);
+    agents[0]!.state = 'running';
+    await app.advance(5000);
+    assert.ok(interrupt());
+    agents[0]!.state = 'idle';
+    await app.advance(5000);
+    assert.equal(interrupt(), undefined);
+    assert.equal(all.getAttribute('aria-expanded'), 'true');
   } finally { await app.close(); }
 });
 

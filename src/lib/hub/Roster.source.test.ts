@@ -22,22 +22,17 @@ test('context meters surround equal circular avatars with room inside the card (
   assert.doesNotMatch(source, /ac-bar|roster-meter-height/u, 'edge bar removed whole');
 });
 
-test('everyone is a broadcast capsule while selection keeps the shared accent vocabulary (#173)', async () => {
-  assert.doesNotMatch(source, /all-ava/u);
-  assert.match(rule('.acard.all'), /border-radius: var\(--ui-radius-pill\)/u);
-  assert.match(rule('.acard.all'), /color: var\(--text2\)/u);
-  assert.match(rule('.acard.all.sel'), /--card-paint: var\(--accent-bg\)/u);
+test('everyone leaves the roster whole for the sole Composer command (#180)', async () => {
+  assert.doesNotMatch(source, /acard all|acard\.all|all-ava|allPending|broadcast-glyph/u);
   const css = await readFile(new URL('../../app.css', import.meta.url), 'utf8');
-  assert.match(css, /\.hub-root \.acard\.all \{ corner-shape: round; \}/u);
+  assert.doesNotMatch(css, /\.hub-root \.acard\.all/u, 'the obsolete corner exception leaves with the old card');
 });
 
-test('card paint is compact inside native targets and All is a trailing secondary choice (#176)', () => {
+test('card paint keeps its inset and the single measured scrolling edge (#180)', () => {
   assert.match(rule('.acard::before'), /inset: var\(--control-paint-inset\) 0/u);
   assert.match(rule('.acard::before'), /pointer-events: none/u);
   assert.match(rule('.roster'), /padding: 0 14px/u);
   assert.match(rule('.roster'), /gap: 0/u);
-  assert.ok(source.indexOf('class="acard all"') > source.indexOf('class="acard off"'));
-  assert.match(rule('.cards:not(.expanded) .all .a-name'), /display: none/u);
   assert.match(source, /class="cards edge-fade"[^>]*use:scrollEdges=\{!expanded\}/u);
 });
 
@@ -54,7 +49,7 @@ test('one controlled roster replaces the delayed tap menu whole (#168)', () => {
     'owner 07:09 replaces team adjacency with turn-edge recency');
   assert.match(source, /onselect: setRecipient = \(\) => \{\}/u);
   assert.match(source, /setRecipient\(recipient === name \? '' : name\)/u);
-  assert.match(source, /onclick=\{\(\) => selectTarget\(ALL_TARGET\)\}/u);
+  assert.doesNotMatch(source, /selectTarget\(ALL_TARGET\)/u);
   assert.match(source, /onclick=\{\(e\) => clickAgent\(e, a\.name\)\}/u);
   assert.doesNotMatch(source.slice(source.indexOf('} = $props();')), /\brecipient\s*=(?!=)/u,
     'selection emits intent without locally committing recipient');
@@ -68,13 +63,11 @@ test('Stop consumes parent busy and pending sets through the shared command', ()
   assert.match(source, /const renderedStops = \$derived\(pressing \? pressStops : busyNames\)/u);
   assert.match(source, /\{#if renderedStops\.includes\(a\.name\)\}/u);
   assert.match(source, /disabled=\{pending \|\| !busyNames\.includes\(a\.name\)\}/u);
-  assert.match(source, /\{#if renderedStops\.length\}/u);
   assert.doesNotMatch(source, /interrupting\.includes\(ALL_TARGET\)/u,
     'pending contains captured member names, never a second all-job sentinel');
-  assert.match(source, /busyNames\.some\(\(name\) => interrupting\.includes\(name\)\)/u);
   assert.match(source, /interrupting\.includes\(a\.name\)/u);
-  assert.equal([...source.matchAll(/icon="stop" variant="warn" iconOnly/gu)].length, 2);
-  assert.equal([...source.matchAll(/e\.stopPropagation\(\); interrupt\(/gu)].length, 2);
+  assert.equal([...source.matchAll(/icon="stop" variant="warn" iconOnly/gu)].length, 1);
+  assert.equal([...source.matchAll(/e\.stopPropagation\(\); interrupt\(/gu)].length, 1);
   assert.doesNotMatch(source, /hubAgentStop|hubAgentInterrupt|busyTargetsFor|\.state\s*===\s*'(?:running|working|waiting|blocked)'/u,
     'the parent owns target membership and dispatch, not a second local busy classifier');
 });
@@ -100,7 +93,7 @@ test('native selection owns hover and context; stopped slots never select or res
   assert.match(off, /disabled=\{acting\}/u);
   assert.doesNotMatch(off, /selectTarget|interrupt\(|startAgent|a-start|aria-pressed/u);
   assert.doesNotMatch(source, /role="button"|onkeydown|position:\s*fixed/u);
-  for (const fact of ['modelLabel(a.vitals.model)', 'fmtElapsed(a.since, tick)', 'stateTone(a.state)', "t('hubHoverTarget')", "t('hubHoverPath')", "t('hubToDmLong')", "t('hubToAllLong')", "t('hubToAlsoHint')"]) {
+  for (const fact of ['modelLabel(a.vitals.model)', 'fmtElapsed(a.since, tick)', 'stateTone(a.state)', "t('hubHoverTarget')", "t('hubHoverPath')", "t('hubToDmLong')", "t('hubToAlsoHint')"]) {
     assert.ok(source.includes(fact), `retained hover fact: ${fact}`);
   }
 });

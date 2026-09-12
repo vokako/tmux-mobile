@@ -932,8 +932,6 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 /* Pill variants of listed classes go back to the circular arc: a superellipse
    flattens a stadium's caps. */
 .sessions .icon-btn { corner-shape: round; }
-/* #173: the broadcast choice is a capsule, not an agent avatar card. */
-.hub-root .acard.all { corner-shape: round; }
 .hub-root .roster .ava, .hub-root .ctx-ring { corner-shape: round; }
 /* #166: window-choice paint follows the compact control's inset arcs. */
 .hub-root .win-pill { corner-shape: round; }

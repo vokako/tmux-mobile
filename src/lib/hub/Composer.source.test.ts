@@ -4,7 +4,32 @@ import test from 'node:test';
 
 const source = await readFile(new URL('./Composer.svelte', import.meta.url), 'utf8');
 const rule = (selector: string) =>
-  source.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
+  source.match(new RegExp(`(?:^|\\n)\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
+
+test('All, attachment and Send share the naturally growing input row (#180)', () => {
+  assert.match(source, /class="compose-line"/u);
+  assert.match(rule('.compose-line'), /display: flex/u);
+  assert.match(rule('.compose-line'), /align-items: flex-end/u);
+  assert.match(rule('.c-input'), /min-width: 0/u);
+  assert.match(source, /class="all-choice"/u);
+  assert.ok(source.indexOf("label={t('hubEveryone')}") < source.indexOf("label={t('hubAttach')}"));
+  assert.doesNotMatch(source, /justify-content: space-between/u, 'no separate footer distributes the controls');
+});
+
+test('composer measurement observes available geometry, not the textarea it resizes (#180)', () => {
+  assert.doesNotMatch(source, /observer\.observe\(composerEl\)/u);
+  assert.match(source, /observer\.observe\(available\)/u);
+  assert.match(source, /observer\.observe\(actionsEl\)/u);
+  assert.match(source, /style\.maxHeight/u, 'a height-only viewport change refreshes the scroll ceiling');
+});
+
+test('natural textarea measurement cannot transiently expand the Feed (#180)', () => {
+  const grow = source.slice(source.indexOf('function growComposer()'), source.indexOf('let lastShellH'));
+  assert.match(grow, /row\.style\.minHeight = `\$\{row\.offsetHeight\}px`/u);
+  assert.ok(grow.indexOf('row.style.minHeight = `${row.offsetHeight}px`') < grow.indexOf("el.style.height = 'auto'"));
+  assert.match(grow, /finally \{\s*if \(row\) row\.style\.minHeight = previousMin;/u);
+  assert.ok(grow.indexOf('row.style.minHeight = previousMin') < grow.indexOf('const shellH'));
+});
 
 test('Composer retires inline recipient and send-arm mechanisms whole (#168)', () => {
   assert.doesNotMatch(source, /recipientOpen|toChipW|toExtras|toChipInfo|toMenuH|managedAgents|managedNames|setRecipient/u);
@@ -121,7 +146,7 @@ test('the composer scrollbar follows measured overflow and the placeholder names
 
 test('normal-flow actions use the existing shared commands without corner hit overlays (#168)', async () => {
   assert.match(source, /import CommandButton from '\.\.\/ui\/CommandButton\.svelte';/u);
-  assert.match(source, /<div class="composer-actions">/u);
+  assert.match(source, /<div class="composer-actions" bind:this=\{actionsEl\}>/u);
   assert.match(rule('.composer-actions'), /display: flex/u);
   assert.doesNotMatch(rule('.composer-actions'), /position:\s*absolute/u);
   assert.match(rule('.compose-shell'), /border-radius: 16px/u);

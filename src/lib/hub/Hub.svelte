@@ -1251,6 +1251,33 @@
   }
   const closeCtx = () => { ctxAt = null; ctxItems = []; };
 
+  function activateAll(event) {
+    const session = selected;
+    if (!session) return;
+    if (recipient !== ALL_TARGET) { setRecipient(ALL_TARGET); return; }
+    if (ctxAt?.allSession === session) { closeCtx(); return; }
+    const trigger = event.currentTarget;
+    const allMenuId = Symbol('all-menu');
+    openCtx({ anchor: anchorOf(trigger), trigger, keepTriggerClear: true, allSession: session, allMenuId },
+      t('hubEveryone'), allItems(session, allMenuId));
+  }
+  function allItems(session, menuId) {
+    const current = () => selected === session && recipient === ALL_TARGET && ctxAt?.allMenuId === menuId;
+    return [
+      { label: t('hubRecordOnly'), icon: 'chat', onselect: () => {
+        if (current()) setRecipient('');
+      } },
+      ...(busyNames.length ? [{
+        label: t('hubInterrupt'), icon: 'stop', warn: true, disabled: !interruptible,
+        onselect: () => { if (current()) return interrupt(ALL_TARGET, session); },
+      }] : []),
+    ];
+  }
+  const visibleCtxItems = $derived(ctxAt?.allSession ? allItems(ctxAt.allSession, ctxAt.allMenuId) : ctxItems);
+  $effect(() => {
+    if (ctxAt?.allSession && (ctxAt.allSession !== selected || recipient !== ALL_TARGET)) closeCtx();
+  });
+
   // ── The phone's BACK GESTURE, the Files page's contract (owner, 2026-08-24:
   // "chat…对于返回手势适配不太好 像是网页刷新了。像文件管理页面就很好"): App
   // routes a history pop here, and a `true` means it was CONSUMED by peeling
@@ -1647,6 +1674,7 @@
         oncontext={(at, name) => openCtx(at, name, agentItems(name))} />
 
       <Composer bind:this={composer} bind:composerText {selected} {compact} {recipient}
+        {roomReady} allMenuOpen={!!ctxAt?.allSession && ctxAt.allSession === selected} onall={activateAll}
         {agents} {pending} {attaching} {failed} {sendable} {interruptible}
         onsend={send} onstage={stageFiles} onremove={removeAttachment}
         onmodels={modelsList} oninterrupt={interrupt} onpreview={(path) => { shotView = path; }}
@@ -1685,7 +1713,7 @@
 
   <!-- One context menu for every subject above: right-click on the desktop, long
        press on a phone. -->
-  <ContextMenu at={ctxAt} items={ctxItems} who={ctxWho} oncancel={closeCtx} />
+  <ContextMenu at={ctxAt} items={visibleCtxItems} who={ctxWho} oncancel={closeCtx} />
 
   <!-- Forgetting a PROJECT for good — only reachable from the recycle bin,
        the two-step rule: hide first, destroy there. -->
