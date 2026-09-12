@@ -881,6 +881,10 @@ mod tests {
         d.model = "claude-haiku-4.5".into();
         let r = render_kiro(&d, "tester", &dir, &build_prompt(&d, "tester", "proj", "fix the bug", "lead", ""), &[]).unwrap();
         assert!(r.env.iter().any(|(k, v)| k == "KIRO_HOME" && v.contains("tmm-spawn-kiro")), "home must be the isolated dir");
+        // Board #183: a managed pane is unattended — kiro-cli's launch-time
+        // "Refresh it now with mwinit? [y/N]" would park the agent until a
+        // human types. kiro-cli 2.21.4 reads this switch beside that prompt.
+        assert!(r.env.iter().any(|(k, v)| k == "KIRO_SKIP_MIDWAY_CHECK" && v == "1"), "no y/N gate at an unattended launch: {:?}", r.env);
         let conf: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("agents/tester.json")).unwrap()).unwrap();
         // The model lives in the CONFIG, not on the launch line: kiro's TUI

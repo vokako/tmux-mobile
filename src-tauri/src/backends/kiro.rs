@@ -269,6 +269,26 @@ pub(crate) fn migrate_launch_model(home: &Path, config: &Path) -> bool {
     recipe_written || config_written
 }
 
+/// The environment a managed kiro pane launches with — ONE definition for
+/// the spawn recipe and the launch.json backfill.
+///
+/// `KIRO_HOME` is the isolated home (the agent's identity). `KIRO_SKIP_MIDWAY_CHECK`
+/// (board #183, owner 2026-09-12: "跳过这个提示，避免启动被阻塞住"): a managed
+/// pane is unattended, and kiro-cli's launch-time "Your Midway session has
+/// expired or is missing. Refresh it now with mwinit? [y/N]" parks the agent
+/// until a human types. kiro-cli 2.21.4 reads this switch right beside that
+/// prompt (`crates/chat-cli/src/launch/midway.rs`); there is no flag or
+/// setting for it. Skipping the CHECK changes nothing about kiro's own login —
+/// Midway only gates internal endpoints, and an expired session fails those
+/// calls instead of freezing the launch.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub(crate) fn kiro_launch_env(home: &Path) -> Vec<(String, String)> {
+    vec![
+        ("KIRO_HOME".into(), home.to_string_lossy().to_string()),
+        ("KIRO_SKIP_MIDWAY_CHECK".into(), "1".into()),
+    ]
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn render_kiro(
     def: &RegAgent, name: &str, home: &Path, system_prompt: &str,
@@ -337,7 +357,7 @@ pub(crate) fn render_kiro(
         .map_err(|e| e.to_string())?;
 
     Ok(Rendered {
-        env: vec![("KIRO_HOME".into(), home.to_string_lossy().to_string())],
+        env: kiro_launch_env(home),
         cmd: format!(
             "command kiro-cli chat --agent {} --trust-all-tools{}",
             crate::shell::quote(name),
@@ -368,7 +388,7 @@ pub(crate) fn refresh(home: &Path, window_name: &str, notify: &str) -> bool {
             // and the restart then takes the generic launch path.
             changed |= crate::projects::spawn::LaunchRecipe {
                 backend: "kiro",
-                env: &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())],
+                env: &kiro_launch_env(home),
                 cmd: &format!(
                     "command kiro-cli chat --agent {} --trust-all-tools kick",
                     crate::shell::quote(window_name),
