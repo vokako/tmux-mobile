@@ -4,6 +4,7 @@
   import Board from './Board.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import Icon from '../ui/Icon.svelte';
+  import CommandButton from '../ui/CommandButton.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import { stateDotColor, stateIsLive } from './hub.ts';
   import { hoverInfo } from '../ui/hover.ts';
@@ -41,11 +42,12 @@
     <SideHandle varName="--hub-drawer-w" storeKey="tmux_hub_drawer_w"
       min={320} max={900} def={520} edge="left" label={t('hubTerminal')} />
   {/if}
-  <div class="drawer-head">
+  <div class="drawer-head chat-head">
     {#if drawerView === 'term'}
       <div class="win-list">
         {#each winPills as a (a.window)}
           <button class="win-pill state-ctl" class:cur={termTarget.startsWith(`${selected}:${a.window}.`)} onclick={() => pickWindow(a)}
+            aria-pressed={termTarget.startsWith(`${selected}:${a.window}.`)}
             use:hoverInfo={() => pillInfo(a)}>
             <span class="st" class:live-dot={!!a.agent && stateIsLive(a.state)} style:background={stateDotColor(a.agent ? a.state : 'shell')}></span>
             {a.window}:{a.name}{#if a.agent && !a.managed}<span class="direct-tag">{t('hubDirect')}</span>{/if}
@@ -53,8 +55,8 @@
         {/each}
         {#if winsFolded > 0 || winsExpanded}
           <button class="win-pill state-ctl more"
-            title={winsExpanded ? t('hubWinLess') : t('hubWinMore').replace('{n}', String(winsFolded))}
             aria-label={winsExpanded ? t('hubWinLess') : t('hubWinMore').replace('{n}', String(winsFolded))}
+            use:hoverInfo={() => ({ title: winsExpanded ? t('hubWinLess') : t('hubWinMore').replace('{n}', String(winsFolded)) })}
             aria-expanded={winsExpanded}
             onclick={onexpand}>
             {winsExpanded ? '−' : `+${winsFolded}`}
@@ -65,18 +67,13 @@
       <!-- The roster count the retired statusline carried. Everything else it
            showed was a second copy of this bar. -->
       <span class="d-count">{managedAgents.length} · {working} {t('hubState_running')}</span>
-      <button class="icon-btn" title={t('hubOpenFull')} onclick={onterminal}>
-        <Icon name="maximize" size={14} />
-      </button>
+      <CommandButton variant="icon" icon="maximize" label={t('hubOpenFull')} onclick={onterminal} />
     {:else if drawerView === 'files'}
       <!-- Files carries its own path bar and toolbar; the head only says
            which partition this is and keeps the one close affordance. -->
       <span class="d-files"><Icon name="files" size={13} />{t('files')} — {selected}</span>
       <span class="spacer"></span>
-      <button class="icon-btn" title={t('hubFilesFull')} aria-label={t('hubFilesFull')}
-        onclick={onfiles}>
-        <Icon name="maximize" size={14} />
-      </button>
+      <CommandButton variant="icon" icon="maximize" label={t('hubFilesFull')} onclick={onfiles} />
     {:else}
       <!-- The board partition: the head names it, maximize hands off to
            the board PAGE — the same translation the files head makes.
@@ -85,18 +82,10 @@
            this head already carries. -->
       <span class="d-files"><Icon name="layout" size={13} />{t('board')} — {selected}</span>
       <span class="spacer"></span>
-      <button class="icon-btn" title={t('boardNew')} aria-label={t('boardNew')}
-        onclick={onnewissue}>
-        <Icon name="plus" size={14} />
-      </button>
-      <button class="icon-btn" title={t('board')} aria-label={t('board')}
-        onclick={onboard}>
-        <Icon name="maximize" size={14} />
-      </button>
+      <CommandButton variant="icon" icon="plus" label={t('boardNew')} onclick={onnewissue} />
+      <CommandButton variant="icon" icon="maximize" label={t('board')} onclick={onboard} />
     {/if}
-    <button class="icon-btn" title="Esc" onclick={closeDrawer}>
-      <Icon name="x" size={14} />
-    </button>
+    <CommandButton variant="icon" icon="x" label={t('close')} onclick={closeDrawer} />
   </div>
   <div class="term-body" class:off={drawerView !== 'term'}>
     {#if termTarget}
@@ -132,15 +121,11 @@
      that matched nothing. The dark surface belongs to the terminal BODY
      alone; files/board partitions already carry var(--bg). */
   .drawer { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); border-left: 1px solid var(--border); }
-  /* The head is the page-head's TWIN across the divider (board #23: the two
-     top bars sat at different heights in different colors): same 42px
-     min-height and border so the horizontal line runs THROUGH the divider,
-     same transparent ground over the same var(--bg) as the chat column's. */
-  .drawer-head { display: flex; align-items: center; gap: 8px; min-height: 42px; box-sizing: border-box; padding: 6px 10px; border-bottom: 1px solid var(--border); }
-  .win-list { display: flex; gap: 5px; overflow-x: auto; scrollbar-width: none; }
+  /* The header shares its dimensions with Chat through hub-atoms.css. */
+  .win-list { display: flex; gap: var(--ui-gap); min-width: 0; overflow-x: auto; scrollbar-width: none; }
   .win-list::-webkit-scrollbar { display: none; }
-  .win-pill { display: flex; align-items: center; gap: 5px; flex: none; background: var(--surface); border: 1px solid var(--border); border-radius: var(--ui-radius-control); color: var(--text2); padding: 4px 9px; font-family: var(--font-mono); font-size: var(--fs-sub); cursor: pointer; }
-  .win-pill.cur { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+  .win-pill { display: flex; align-items: center; gap: var(--ui-gap); flex: none; box-sizing: border-box; height: var(--control-height); min-width: var(--control-height); background: var(--surface); background-clip: padding-box; border: solid transparent; border-width: var(--control-paint-inset) 0; border-radius: calc(var(--control-radius) + var(--control-paint-inset)); color: var(--text2); padding: 0 var(--menu-item-padding-x); font-family: var(--font-mono); font-size: var(--fs-sub); cursor: pointer; }
+  .win-pill.cur { color: var(--accent-ink); background-color: var(--accent-bg); }
   .direct-tag { font-size: var(--fs-micro); color: var(--text3); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-left: 3px; }
   .term-body { flex: 1; min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; }
   /* The files partition replaces the terminal VISUALLY only: the terminal

@@ -582,16 +582,14 @@ button:disabled {
    the feed around or change the scroll height the anchor math (or the Board
    detail) depends on. */
 .m-acts {
-  position: absolute; z-index: 8; bottom: -13px; right: 10px;
-  display: flex; gap: 5px; margin: 0;
+  position: absolute; z-index: 8; bottom: calc(var(--control-height) / -2); right: 10px;
+  left: 0; display: flex; justify-content: safe flex-end; gap: var(--tool-gap); margin: 0;
+  pointer-events: none;
 }
-.m-acts button {
-  display: inline-flex; align-items: center; gap: 4px; min-height: 26px;
-  background: var(--bubble-in); border: 1px solid var(--border); border-radius: var(--ui-radius-control);
-  color: var(--text2); padding: 3px 10px; font-size: var(--fs-meta); cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
-}
-.m-acts button:hover, .m-acts button.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+/* A short incoming bubble cannot place tools left of its own edge. The empty
+   alignment track is inert; only native command boxes take pointer input. */
+.m-acts > .command-button { pointer-events: auto; }
+.msg.me > .m-acts { justify-content: flex-end; }
 
 /* ── Back to the tail (board #49) ─────────────────────────────────────────
    ONE floating "jump to the newest" button for every scrolling record —
@@ -936,6 +934,8 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 .sessions .icon-btn { corner-shape: round; }
 /* #173: the broadcast choice is a capsule, not an agent avatar card. */
 .hub-root .acard.all { corner-shape: round; }
+/* #166: window-choice paint follows the compact control's inset arcs. */
+.hub-root .win-pill { corner-shape: round; }
 .hub-root .acard::before, .hub-root .acard::after { corner-shape: inherit; }
 /* #161: compact controls use circular arcs; squircle would flatten their caps.
    The legacy list is zero-specificity so context selectors cannot defeat it. */

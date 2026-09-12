@@ -3,4 +3,12 @@
 .hub-root :where(.ac-top, .m-state, .win-pill) > .st { width: 6px; height: 6px; border-radius: 50%; flex: none; transition: background var(--t-fast); }
 .hub-root :where(.m-state) > .note-dot { border: 1px dashed var(--text3); background: none; }
 .hub-root :where(.page-head, .drawer-head) > .spacer { flex: 1; }
+/* Chat and its drawer keep one divider line. Real targets occupy the row;
+   paint insets never expand the hit area over a neighboring command (#166). */
+.hub-root .chat-head {
+  display: flex; align-items: center; gap: var(--ui-gap);
+  min-height: 42px; box-sizing: border-box; flex-shrink: 0;
+  padding: var(--tool-inset-block) var(--menu-item-padding-x);
+  border-bottom: 1px solid var(--border);
+}
 .hub-root :where(.feed, .term-body) > .empty { color: var(--text3); font-size: var(--fs-ui); text-align: center; margin: auto; padding: 0 24px; line-height: 1.6; }

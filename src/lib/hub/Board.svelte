@@ -1,4 +1,5 @@
 <script lang="ts">
+  import CommandButton from '../ui/CommandButton.svelte';
   /* The project task board (owner, 2026-08-29: "引入一个新的看板功能…人类有一个
      看板页面，能写任务issue，agent也可以读任务，修改任务状态，在看板上记录信息
      状态"). This is the HUMAN's half; agents read and update the same issues
@@ -786,9 +787,8 @@
                 <div class="n-text" lang={hanLang(n.body)} oncontextmenu={(e) => { noteSelectionClicks.mark(e, i); }} onclick={() => toggleNoteActs(i)}>{n.body.trim()}</div>
                 {#if acts.open === i}
                   <div class="m-acts appear">
-                    <button onclick={() => copyNote(n.body)}>
-                      <Icon name="copy" size={11} />{acts.copied ? t('hubCopied') : t('hubCopy')}
-                    </button>
+                    <CommandButton iconOnly icon={acts.copied ? 'check' : 'copy'}
+                      label={acts.copied ? t('hubCopied') : t('hubCopy')} onclick={() => copyNote(n.body)} />
                   </div>
                 {/if}
               </div>
@@ -1153,7 +1153,7 @@
      line, the content in its own box below — ragged author widths no longer
      push the text around, and the inks follow the app's hierarchy (accent
      name / grey time / full-ink content). */
-  .notes { display: flex; flex-direction: column; gap: 8px; }
+  .notes { display: flex; flex-direction: column; gap: 8px; padding-bottom: calc(var(--control-height) / 2); }
   .note { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
   .n-head { display: flex; align-items: baseline; gap: 8px; }
   .n-author { color: var(--accent); font-weight: 650; font-size: var(--fs-meta); }

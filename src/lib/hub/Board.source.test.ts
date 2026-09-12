@@ -759,9 +759,17 @@ test('a note bubble reveals ONE Copy action in Chat\u2019s own dialect (board #4
   // The dialect is SHARED, not copied: the atoms live in app.css (lifted
   // verbatim from Hub), and neither wearer re-styles them — the same
   // anti-drift rule the sidebar atoms follow.
-  assert.match(appCss, /\.m-acts \{\n  position: absolute; z-index: 8; bottom: -13px; right: 10px;/u,
+  // #166 keeps the overlay geometry but derives its half-height offset from
+  // the actual 28/44px command; both consumers retire private button paint.
+  assert.match(appCss, /\.m-acts \{\n  position: absolute; z-index: 8; bottom: calc\(var\(--control-height\) \/ -2\); right: 10px;/u,
     'app.css owns the action row, out of the flow (absolute overlay)');
-  assert.match(appCss, /\.m-acts button \{/u, 'and its buttons');
+  assert.doesNotMatch(appCss, /\.m-acts button(?::|\s|\.)/u, 'CommandButton is the sole paint owner');
+  assert.match(appCss, /justify-content: safe flex-end/u, 'short incoming bubbles fall back inside their left edge');
+  assert.match(appCss, /\.m-acts > \.command-button \{ pointer-events: auto; \}/u,
+    'only actual commands intercept input, not the empty alignment track');
+  assert.match(source, /<CommandButton iconOnly icon=\{acts\.copied \? 'check' : 'copy'\}/u);
+  assert.match(source, /\.notes \{[^}]*padding-bottom: calc\(var\(--control-height\) \/ 2\)/u,
+    '#166: last-note Copy cannot take the note-add input hit region');
   assert.match(appCss, /--bubble-in: color-mix\(in srgb, var\(--bg\) 92%, white 8%\);/u,
     'the bubble surface token is global — the buttons render outside Hub');
   assert.ok(!/^\s*\.m-acts/mu.test(source.slice(source.indexOf('<style>'))), 'Board carries no scoped .m-acts rule');

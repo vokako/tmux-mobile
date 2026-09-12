@@ -454,6 +454,63 @@ rule. Ordinary files/folders share one row minimum; long names may grow.
 See [file-handling.md](file-handling.md) for the verbatim owner correction,
 measurements, width bounds and unchanged routing/Back contract.
 
+### Chat command adoption (#166, 2026-09-12)
+
+Owner, 2026-09-11 03:00 (verbatim):
+> 还有 chat 界面里的一些按钮风格都帮我也检查都统一一下。
+
+The remaining Chat commands still used private/legacy button paint and
+negative-inset touch overlays. Their native layout boxes did not describe
+their hit regions; Raw/window selection also existed only as a CSS class.
+Hub header, Drawer commands, filter exit and picker footer now use
+`CommandButton`. Native targets occupy 28/44px in flow; the paint keeps the
+already-approved compact inset. No invisible hit region crosses another
+command. `hub-atoms.css` owns the matching Chat/Drawer header line: 42px
+minimum, the shared 2px tool vertical inset, 10px inline inset and 4px gap.
+Coarse targets can grow both headers together without a second row.
+
+Desktop partition commands expose controlled expanded state and their
+region relationship. Compact page-navigation commands do not pretend to
+expand hidden drawers. The title remains selectable, with its menu beside
+it; rename and all project verbs keep the same captured action list.
+Window chips remain native choices, not command buttons or a second roster:
+their selected state is `aria-pressed`, their 28/44px native box retains the
+shared vertical paint inset, and dots keep the one status language.
+
+Copy/Raw are icon commands with accessible names and the shared hover card.
+The existing `.m-acts` overlay owns position only, offset by half the actual
+target height; CommandButton owns all paint and focus. Board's identical
+note Copy adopts it too, so the old button recipe is removed whole.
+Incoming tools use safe end alignment: a very short bubble falls back to
+its left edge instead of sending Copy outside the scrollport. Outgoing tools
+remain right-aligned. The empty alignment track passes pointer input through;
+only the native commands intercept it. Compact Feed reserves half a target
+in its existing bottom padding before any action opens, so last-message tools
+do not create scrollable overflow or get clipped by the composer.
+Board's notes container reserves the same half-target before its note input;
+otherwise the Copy command took 14px of that input's native hit region.
+Quiet painted icon tools can expose the same controlled selected wash as
+borderless icon tools. Ordinary text/primary/danger commands are unchanged.
+No permanent row, message context menu or new toast is introduced.
+
+Inline prose folds, timestamps and data rows retain their content roles;
+the shared `.to-tail`, Roster/Composer commands, RPC payloads and capture
+listener order are unchanged. Interrupt remains plain amber and recoverable;
+process stop, removal and project deletion remain red shared menu actions
+with their existing confirmations. Operation feedback and confirmation
+policy changes belong to #167, not this control adoption.
+
+Chromium 152.0.7977.64 measured two 9x42px overlapping header hit regions
+at 390px in the baseline and none after adoption. Seven general variants
+(desktop/390px, both themes, reduced motion and wide touch) pass the
+shared target/state checks; four edge variants add 360px, 1000px splits,
+short incoming/outgoing tail messages and Board note/input boundaries.
+Restoring only the old 6px bottom padding reproduces 16px extra scrollable
+height; restoring only right-alignment sends short-message Copy 6.53px
+outside the left edge. Both negative controls fail and recover after removal.
+This is a real-component, controlled-RPC browser fixture, not a native APK
+or full App safe-area/assistive-technology acceptance pass.
+
 ### Legacy consumers during migration
 
 The following records explain existing non-migrated atoms and historical

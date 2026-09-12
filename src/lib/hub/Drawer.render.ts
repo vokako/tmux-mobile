@@ -29,9 +29,14 @@ test('Drawer renders its original window list, real partitions and single head',
   assert.equal(empty.querySelector('.win-pill.more')?.textContent?.trim(), '+2');
   assert.equal(empty.querySelector('.direct-tag')?.textContent, 'direct');
   assert.ok(empty.querySelector('.win-pill .live-dot'));
+  assert.equal(empty.querySelector('.win-pill')?.getAttribute('aria-pressed'), 'false');
+  const commands = empty.querySelectorAll('.drawer-head .command-button');
+  assert.equal(commands.length, 2, '#166: maximize and close share the command owner');
+  assert.equal(commands[1]?.getAttribute('aria-label'), 'Close');
   assert.equal(view({ winsExpanded: true }).querySelectorAll('.win-pill:not(.more)').length, 4);
   const selectedShell = view({ termTarget: 'fixture:2.0', termCommand: 'zsh' });
   assert.ok(selectedShell.querySelector('.win-pill.cur')?.textContent?.includes('2:shell'));
+  assert.equal(selectedShell.querySelector('.win-pill.cur')?.getAttribute('aria-pressed'), 'true');
   assert.equal(selectedShell.querySelector('.win-pill.more')?.textContent?.trim(), '+1');
   assert.ok(selectedShell.querySelector('.xterm-wrap'), 'the real Terminal markup is embedded');
   const files = view({ drawerView: 'files' });

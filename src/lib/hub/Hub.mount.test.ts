@@ -1097,9 +1097,15 @@ test('Feed keeps native selection, Copy/Raw dismissal, path intents and room-loc
     bubble().click();
     await app.flush();
     assert.ok(actions());
+    const rawButton = actions()!.querySelector<HTMLButtonElement>('button:last-child')!;
+    assert.ok(rawButton.classList.contains('command-button'), '#166: shared command states, not private bubble paint');
+    assert.equal(rawButton.getAttribute('aria-label'), 'Raw');
+    assert.equal(rawButton.getAttribute('aria-pressed'), 'false');
     actions()!.querySelector<HTMLElement>('button:last-child')!.click();
     await app.flush();
     assert.equal(reply().querySelector('.raw')?.textContent, body);
+    assert.equal(rawButton.getAttribute('aria-pressed'), 'true');
+    assert.ok(rawButton.classList.contains('engaged'), 'selected source view has the shared visible state');
     const composer = app.document.querySelector<HTMLTextAreaElement>('.c-input')!;
     composer.value = '/';
     composer.dispatchEvent(new app.window.Event('input', { bubbles: true }));
@@ -1144,6 +1150,74 @@ test('Feed keeps native selection, Copy/Raw dismissal, path intents and room-loc
     assert.deepEqual(boards, [['other', 7]], 'the feed board row carries the clicked issue id');
   } finally { await app.close(); }
   assert.equal(pushed.size, 0);
+});
+
+test('Chat header commands report drawer state and preserve compact navigation (#166)', { timeout: 60000 }, async context => {
+  const fixture = await compiledHub();
+  for (const compact of [false, true]) {
+    const { rpc } = roomFixture();
+    const routes: unknown[] = [];
+    const app = await fixture.mount(context, {
+      props: { visible: true, mobile: compact, openFilesTab: (...args: unknown[]) => routes.push(args) },
+      setup(window) { window.Element.prototype.getAnimations = () => []; },
+      modules: [{
+        ...rpc, fsList: async () => ({ entries: [] }), fsCwd: async () => ({ path: '/fixture' }),
+        getPrefs: async () => ({}), getBookmarks: async () => ({ bookmarks: [] }),
+        gitCmd: async () => ({ code: 1 }),
+      }],
+    });
+    try {
+      for (let i = 0; i < 12 && !app.document.querySelector('.h1-text')?.textContent; i++) await app.flush();
+      const files = app.document.querySelector<HTMLButtonElement>('.page-head [aria-label="Files"]')!;
+      assert.ok(files.classList.contains('command-button'));
+      assert.equal(files.getAttribute('aria-expanded'), compact ? null : 'false');
+      assert.equal(files.getAttribute('aria-controls'), null, 'a closed/unmounted drawer has no dangling relationship');
+      files.click();
+      for (let i = 0; i < 12; i++) await app.flush();
+      if (compact) {
+        assert.equal(app.document.querySelector('.drawer'), null);
+        assert.equal(routes.length, 1, 'phone navigates instead of pretending to disclose a drawer');
+      } else {
+        assert.equal(files.getAttribute('aria-expanded'), 'true');
+        assert.ok(app.document.getElementById(files.getAttribute('aria-controls')!)?.querySelector('.drawer'));
+        app.document.querySelector<HTMLButtonElement>('.drawer-head [aria-label="Close"]')!.click();
+        for (let i = 0; i < 12; i++) await app.flush();
+        assert.equal(files.getAttribute('aria-expanded'), 'false');
+      }
+    } finally { await app.close(); }
+  }
+});
+
+test('Chat picker commands retain choice, disabled start and the original spawn intent (#166)', { timeout: 60000 }, async context => {
+  const { rpc } = roomFixture();
+  const spawned: unknown[] = [];
+  const app = await (await compiledHub()).mount(context, {
+    props: { visible: true },
+    modules: [{
+      ...rpc,
+      registryList: async () => ({ agents: [{ name: 'helper', backend: 'kiro' }] }),
+      hubSpawn: async (...args: unknown[]) => { spawned.push(args); return {}; },
+    }],
+  });
+  try {
+    for (let i = 0; i < 12 && !app.document.querySelector('.roster-add button'); i++) await app.flush();
+    app.document.querySelector<HTMLButtonElement>('.roster-add button')!.click();
+    await app.flush();
+    const start = app.document.querySelector<HTMLButtonElement>('.dlg-actions .command-button.primary')!;
+    assert.ok(start);
+    assert.ok(start.disabled, 'no selection still means no spawn');
+    const choice = app.document.querySelector<HTMLButtonElement>('.dlg-agents .agent-pick')!;
+    assert.equal(choice.getAttribute('aria-pressed'), 'false');
+    choice.click();
+    await app.flush();
+    assert.equal(choice.getAttribute('aria-pressed'), 'true');
+    assert.equal(start.disabled, false);
+    assert.ok(start.querySelector('svg')?.children.length, 'the command uses an existing icon, not a blank glyph');
+    start.click();
+    await app.flush();
+    assert.deepEqual(spawned, [['fixture', 'helper', '']]);
+    assert.equal(app.document.querySelector('.dlg-agents'), null, 'the existing spawn path closes the picker');
+  } finally { await app.close(); }
 });
 
 test('Feed observes its box once across data updates and releases the observer on unmount', { timeout: 60000 }, async (context) => {

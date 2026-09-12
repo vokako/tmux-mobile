@@ -124,6 +124,13 @@ test('the agent filter remains visible and leavable inside the feed (board #3)',
   assert.match(source, /onclick=\{onclearfilter\}/u, 'the banner requests the parent-owned filter exit');
 });
 
+test('compact tail padding contains the floating command targets without opening-time layout changes (#166)', () => {
+  const compact = /:global\(\.hub-root\.compact\) \.feed \{([^}]+)\}/u.exec(source)?.[1] ?? '';
+  assert.match(compact, /padding: 14px 10px max\(6px, calc\(var\(--control-height\) \/ 2\)\)/u,
+    'the absolute action overhang is reserved even before the row opens');
+  assert.doesNotMatch(compact, /msgOpen/u);
+});
+
 test('a Han-bearing bubble declares its OWN language (board #97, round two)', () => {
   // A Chinese message in an ENGLISH UI drew Japanese-variant glyphs (骨/直/
   // 门…): glyph variants of a fallback face follow the nearest lang, and the

@@ -4,6 +4,19 @@ import { compileMount } from '../test/mount.ts';
 
 const compiled = compileMount(new URL('./CommandButton.svelte', import.meta.url), []);
 
+test('quiet painted tools expose controlled pressed and popup states (#166)', async context => {
+  const app = await (await compiled).mount(context, {
+    props: { label: 'Raw', icon: 'command', iconOnly: true, variant: 'secondary', pressed: true, hasPopup: 'menu' },
+    modules: [],
+  });
+  try {
+    const button = app.document.querySelector('button')!;
+    assert.equal(button.getAttribute('aria-pressed'), 'true');
+    assert.equal(button.getAttribute('aria-haspopup'), 'menu');
+    assert.ok(button.classList.contains('engaged'));
+  } finally { await app.close(); }
+});
+
 test('disclosure chevrons turn with the controlled expanded state through the shared flip atom (#168)', async context => {
   for (const expanded of [false, true]) {
     const app = await (await compiled).mount(context, {

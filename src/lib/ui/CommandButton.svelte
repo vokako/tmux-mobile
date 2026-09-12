@@ -14,6 +14,7 @@
      * disclosure of content elsewhere wears (the roster's). */
     inside?: boolean;
     controls?: string;
+    hasPopup?: 'menu' | 'dialog' | 'listbox';
     disabled?: boolean;
     destructiveConfirm?: boolean;
     onclick?: (event: MouseEvent) => void;
@@ -21,13 +22,13 @@
   } & ({ pending?: false; icon?: string } | { pending: boolean; icon: string });
   let {
     label, icon = '', variant = 'secondary', iconOnly = false,
-    pressed, expanded, inside = false, controls,
+    pressed, expanded, inside = false, controls, hasPopup,
     disabled = false, pending = false, destructiveConfirm = false,
     onclick = () => {}, element = $bindable(null),
   }: Props = $props();
   const compact = $derived(iconOnly || variant === 'icon');
   const solid = $derived(variant === 'primary' || (variant === 'danger' && destructiveConfirm));
-  const engaged = $derived(variant === 'icon' && (pressed === true || (expanded === true && !inside)));
+  const engaged = $derived((variant === 'icon' || (variant === 'secondary' && iconOnly)) && (pressed === true || (expanded === true && !inside)));
   // A disclosure chevron turns instead of swapping (motion.md 4) — vertical
   // for a roster, horizontal for a side partition (board #174).
   const disclosure = $derived(!pending && expanded !== undefined && icon.startsWith('chevron-'));
@@ -37,7 +38,7 @@
   class:primary={solid} class:secondary={variant === 'secondary'}
   class:danger={variant === 'danger'} class:warn={variant === 'warn'} class:icon-only={compact} class:solid class:pending class:engaged
   disabled={disabled || pending} aria-label={label} aria-busy={pending || undefined}
-  aria-pressed={pressed} aria-expanded={expanded} aria-controls={controls}
+  aria-pressed={pressed} aria-expanded={expanded} aria-controls={controls} aria-haspopup={hasPopup}
   bind:this={element}
   use:hoverInfo={() => compact ? { title: label } : null}
   onclick={(event) => { if (!disabled && !pending) onclick(event); }}>

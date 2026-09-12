@@ -4,6 +4,30 @@ The chat column of the Hub: bubble language, the single user-message anchor, lay
 
 ## Rules and their reasons
 
+### Shared command states, unchanged reading ownership (#166, 2026-09-12)
+
+The owner's Chat-control consistency request is quoted in design-language.md.
+Copy/Raw remain the tap-revealed absolute `.m-acts` overlay, never a flow
+row or ContextMenu. Their private 26px text-button paint is retired in favor
+of shared named icon commands, 28px pointer / 44px coarse targets with
+compact inset paint. Raw exposes its actual selected state, and Copy's
+existing completion changes the glyph to a check. Board notes reuse the
+same Copy command and position owner. Native selection, exact-source copy,
+the 1.5s dismissal, path-link priority and room reset stay unchanged.
+At the compact tail, the old 6px bottom padding could not contain a 22px
+half-target overhang: Chromium 152 measured 16px of new scrollable overflow.
+Reserve that half-height in the existing padding regardless of action state.
+The shared overlay also falls back to start alignment for incoming bubbles
+too narrow for its commands, without intercepting the empty alignment area.
+
+The header and Drawer share one height/spacing owner and native command
+boxes instead of overlapping touch overlays. Desktop partition state is
+announced as expanded; compact page navigation has no fictitious drawer
+state. The drawer's window choices keep their existing data/dot/hover
+content and explicitly expose `aria-pressed`. No frame, scroll, transport,
+status or Back mechanism changes. The older visual measurements below
+describe the pre-adoption command paint, not a second current dialect.
+
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
 
 ### Agent strip revision (board #168, 2026-09-11)

@@ -340,6 +340,16 @@ sizes (owner declined).
 
 ## Rules and their reasons
 
+- **Chat commands adopt state feedback without new motion** (2026-09-12,
+  #166): header, Drawer and bubble tools use the existing CommandButton
+  paint transitions, focus and reduced-motion rules. Raw selected state is
+  controlled by the displayed source view. Copy changes its glyph to a
+  check without changing its target width. The existing absolute `.m-acts`
+  intro stays `.appear`; no layout animation, delayed click, new listener
+  or replacement reading transaction is added. Window choices keep
+  `.state-ctl`; terminal reveal/visibility/keyed lifetime and `.to-tail`
+  retain their separate existing owners.
+
 - **Dense Files tools do not animate their packing** (2026-09-11, #164):
   measured trailing overflow replaces toolbar wrapping; the shared command
   paint may be smaller, but the native 28/44px targets stay fixed. Menus still

@@ -1,4 +1,5 @@
 <script>
+  import CommandButton from '../ui/CommandButton.svelte';
   import { tick as settled } from 'svelte';
   import Icon from '../ui/Icon.svelte';
   import ChatImage from './ChatImage.svelte';
@@ -556,9 +557,7 @@
       <Icon name="search" size={12} />
       <span class="f-label">{t('hubFilterOn')}</span>
       <span class="f-name">@{filterAgent}</span>
-      <button class="icon-btn" title={t('hubFilterExit')} aria-label={t('hubFilterExit')} onclick={onclearfilter}>
-        <Icon name="x" size={13} />
-      </button>
+      <CommandButton variant="icon" icon="x" label={t('hubFilterExit')} onclick={onclearfilter} />
     </div>
   {/if}
   <!-- Low-presence paging feedback at the very top: fetching, or the
@@ -750,7 +749,7 @@
                   {/each}
                 </div>
               {/if}
-              <button class="m-meta" aria-label={t('hubMsgActions')}
+              <button class="m-meta" aria-label={t('hubMsgActions')} aria-expanded={msgOpen === key}
                 onclick={(e) => { e.stopPropagation(); msgOpen = msgOpen === key ? '' : key; }}>
                 <span class="m-time">{fmtTime(m.ts)}</span>
                 {#if m.from === 'human'}
@@ -776,12 +775,10 @@
           </div>
           {#if msgOpen === key}
             <div class="m-acts appear">
-              <button onclick={() => copyMsg(m.body)}>
-                <Icon name="copy" size={11} />{copied === m.body ? t('hubCopied') : t('hubCopy')}
-              </button>
-              <button class:on={rawOpen === key} onclick={() => { rawOpen = rawOpen === key ? '' : key; }}>
-                <Icon name="command" size={11} />{t('hubRaw')}
-              </button>
+              <CommandButton iconOnly icon={copied === m.body ? 'check' : 'copy'}
+                label={copied === m.body ? t('hubCopied') : t('hubCopy')} onclick={() => copyMsg(m.body)} />
+              <CommandButton iconOnly icon="command" label={t('hubRaw')} pressed={rawOpen === key}
+                onclick={() => { rawOpen = rawOpen === key ? '' : key; }} />
             </div>
           {/if}
         </div>
@@ -908,7 +905,7 @@
 <style>
   /* Bottom padding tight against the composer: the capsule brings its own 8px
      (owner, 2026-08-21: "最后一个消息框，和发送框中间的高度也有点大"). */
-  :global(.hub-root.compact) .feed { padding: 14px 10px 6px; gap: 9px; }
+  :global(.hub-root.compact) .feed { padding: 14px 10px max(6px, calc(var(--control-height) / 2)); gap: 9px; }
   :global(.hub-root.compact) .msg, :global(.hub-root.compact) .prompt { max-width: 91%; }
 
   :global(.hub-root.compact) .s-head { min-height: 34px; }

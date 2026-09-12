@@ -4,6 +4,13 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const source = await readFile(new URL('./Hub.svelte', import.meta.url), 'utf8');
+
+test('Chat header hit targets occupy layout instead of overlapping neighbors (#166)', () => {
+  assert.doesNotMatch(source, /\.hub-root\.compact \.page-head [^\n]*::before/u);
+  const head = source.slice(source.indexOf('<div class="page-head '), source.indexOf('{#snippet emptyFeed()}'));
+  assert.doesNotMatch(head, /class="icon-btn/u);
+  assert.match(head, /<CommandButton[^>]*icon="files"/u);
+});
 const rule = (selector: string) =>
   source.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
 
@@ -36,7 +43,7 @@ test('open drawer tracks yield to the container without overwriting requested wi
 test('Hub keeps the Drawer mount gate, durable state and navigation authority (#136)', () => {
   // #174: the Drawer stays mounted while its track shrinks (drawerShown =
   // open OR closing) — the gate is that, and still desktop-only.
-  assert.match(source, /\{#if drawerShown && !compact\}\s*<!--[^]*?-->\s*<div class="track drawer-track" bind:this=\{drawerTrackEl\}>\s*<Drawer/u);
+  assert.match(source, /\{#if drawerShown && !compact\}\s*<!--[^]*?-->\s*<div class="track drawer-track" id=\{drawerId\} bind:this=\{drawerTrackEl\}>\s*<Drawer/u);
   assert.match(source, /bind:drawerFilesDir onpick=\{pickWindow\} onclose=\{closeDrawer\}/u);
   assert.match(source, /onfilesback=\{\(back\) => \{ drawerFilesBack = back; \}\}/u);
   assert.match(source, /onexpand=\{\(\) => \(winsExpanded = !winsExpanded\)\}/u);
@@ -397,9 +404,10 @@ test('the drawer has a board partition, and the tap prefers it on desktop (board
 test('the header toggles read board, files, terminal — the owner-set order (2026-08-29)', () => {
   const start = source.indexOf('<!-- The task board:');
   const bar = source.slice(start, source.indexOf('{#if selected}', start));
-  const iBoard = bar.indexOf("name=\"layout\"");
-  const iFiles = bar.indexOf("name=\"files\"");
-  const iTerm = bar.indexOf("name=\"terminal\"");
+  // #166 changes only the renderer: the same order uses shared commands.
+  const iBoard = bar.indexOf('icon="layout"');
+  const iFiles = bar.indexOf('icon="files"');
+  const iTerm = bar.indexOf('icon="terminal"');
   assert.ok(iBoard >= 0 && iFiles > iBoard && iTerm > iFiles, 'board, then files, then terminal');
 });
 
@@ -431,7 +439,7 @@ test('the ⋯ is grouped WITH the name, so the row gap cannot separate them (own
   assert.ok(group.length > 0, 'the title group must exist');
   assert.ok(group.includes('class="h1-text"'), 'the name lives in the group');
   assert.ok(group.includes('class="h1-edit"'), 'so does the rename input — the ⋯ must not jump when renaming starts');
-  assert.ok(group.includes('name="chevron-down"'), 'and so does its caret — the dropdown grammar (owner, 2026-08-30: "向下的直角箭头…像把这个名字展开")');
+  assert.ok(group.includes('icon="chevron-down"'), 'and so does its caret — the dropdown grammar (owner, 2026-08-30: "向下的直角箭头…像把这个名字展开")');
   assert.match(source, /\.title-group \{[^}]*gap: 1px[^}]*\}/u, 'a tight, deliberate gap — not the row rhythm');
   // The NAME wins the width fight against the PATH (owner, 2026-08-30: "名字
   // 还是优先要显示全的") but never against the BUTTONS (owner, 2026-09-02,
@@ -443,11 +451,9 @@ test('the ⋯ is grouped WITH the name, so the row gap cannot separate them (own
   assert.ok(!/\.title-group \{[^}]*flex: none/u.test(source), 'flex: none is what hid the buttons');
   assert.match(source, /\.path \{[\s\S]{0,800}?min-width: 0; flex: 0 1000 auto;/u,
     'the path gives way first — a 1000× shrink weight, below content, scrolls');
-  // The button must stay a SIBLING of the h1, not a child: the heading's
-  // `overflow: hidden` would clip the invisible ~42px tap overlay the compact
-  // rule adds, making the affordance read closer but tap worse.
+  // The heading must not clip the command's native target or focus ring.
   const h1 = source.slice(source.indexOf('<h1>', source.indexOf('<div class="title-group">')), source.indexOf('</h1>'));
-  assert.ok(!h1.includes('name="chevron-down"'), 'the caret sits beside the h1, never inside it');
+  assert.ok(!h1.includes('icon="chevron-down"'), 'the caret sits beside the h1, never inside it');
 });
 
 test('the Chat header path is selectable prose and a double-click copies the full value (board #88)', () => {
@@ -594,11 +600,10 @@ test('the title caret expands the NAME — left-aligned on its real rect (board 
   assert.equal(opens - leftAligned, 2, 'Sidebar and Roster context callbacks carry no explicit align (#121/#132)');
   assert.ok(!/getBoundingClientRect\(\)[^]{0,80}openCtx/u.test(source),
     'no raw client rect reaches openCtx — anchorOf owns the zoom correction');
-  // The narrowed caret resets the BROWSER's button padding (Chromium: 1px 6px,
-  // which .icon-btn never clears): without it the 14px glyph overflowed flush
-  // against the button's right edge — measured live, svg.right == button.right
-  // — and read as clipped the moment the wash showed (owner, 2026-09-01).
-  assert.match(source, /\.title-caret \{ width: 20px; padding: 0;/u, 'the 20px caret zeroes the UA padding');
+  // #166 replaces the 20px private caret with the shared command's centered
+  // glyph and real 28/44px target; the original name anchor stays unchanged.
+  assert.match(source, /<CommandButton variant="icon" icon="chevron-down" label=\{t\('hubProjectMenu'\)\} hasPopup="menu"/u);
+  assert.doesNotMatch(source, /\.title-caret \{/u);
 });
 
 test('a path reference in a bubble opens the file preview, not the void (board #99)', async () => {

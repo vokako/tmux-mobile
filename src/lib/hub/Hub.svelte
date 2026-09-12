@@ -50,6 +50,7 @@
   import { activeModal } from '../ui/modal.ts';
 
   let { visible = false, fontSize = 14, mobile = false, openTerminal = () => {}, onSelectSession = (_s) => {}, onGoBack = null, openAgentConfig = null, openFilesTab = null, openBoardTab = null } = $props();
+  const drawerId = $props.id();
 
   // Layout follows the viewport, not the device class (a squeezed desktop
   // window must not overflow). `mobile` still decides behavior defaults.
@@ -1482,43 +1483,19 @@
 
     <!-- ── Main: the conversation ─────────── -->
     <main class="mid">
-      <div class="page-head">
+      <div class="page-head chat-head">
         <!-- The phone reaches the project list here, as a drawer. No chip strip:
              separate conversations are chosen deliberately, not flicked past. -->
         {#if compact}
-          <button class="icon-btn" title={t('hubProjects')} onclick={() => sideOpen = true}>
-            <Icon name="menu" size={17} />
-          </button>
+          <CommandButton variant="icon" icon="menu" label={t('hubProjects')}
+            expanded={sideOpen} controls="hub-sidebar" onclick={() => sideOpen = true} />
         {/if}
         <!-- Collapsed, the way back to the project list is the same control
              at the header's left edge — where the phone's menu button
              stands (board #174). -->
         {#if !compact && sideCollapsed}{@render sideToggle()}{/if}
-        <!-- The title IS the rename control: a project's name is the one thing
-             in this header you might want to change, and a second pencil button
-             would be a duplicate of the thing it edits. -->
-        <!-- The title IS the rename control. It carries a visible pencil,
-             because the first version relied on a hover underline and the owner
-             could not find the feature at all (2026-08-19) — and hover does not
-             exist on a phone, where this page mostly lives. The icon sits INSIDE
-             the title button, so it is a hint on the thing it edits rather than
-             a second control next to it. -->
-        <!-- The ⋯ belongs TO the name, so the two are ONE group and the row
-             gap falls OUTSIDE it: 3px between the name and its menu, the
-             header's own spacing between this group and the path/spacer
-             (owner, 2026-08-30: "离 project name 还是有点远，可以直接紧挨着
-             name，让人觉得是可以点击操作的").
-
-             A wrapper rather than the two alternatives: a negative margin
-             cancelling the row gap would be wrong arithmetic the moment that
-             gap changes (it is 10px here, 7px compact), and moving the button
-             INSIDE the h1 would put it under the heading's `overflow: hidden`,
-             which clips the invisible ~42px tap overlay the compact rule adds
-             — the affordance would read closer and be harder to hit. The group
-             also sidesteps the phone's shared `.page-head h1 { flex: 1 1 auto }`
-             without fighting it: the h1 may still stretch, but only inside a
-             group that is itself content-sized, so the ⋯ stays against the
-             name instead of being parked at the far right. -->
+        <!-- Name and menu stay one tight group (board #32). The name is
+             selectable prose; its sibling command owns the full hit target. -->
         <div class="title-group">
           {#if renaming}
             <input class="h1-edit" bind:this={renameEl} bind:value={renameDraft}
@@ -1530,12 +1507,7 @@
               onblur={commitRename} />
           {:else}
             <h1>
-              <!-- The NAME is text, not a control. Making the whole title clickable
-                   meant every attempt to select it, or a stray tap on the way to
-                   something else, opened an editor ("不应该点击名字都是改名，只有点击
-                   右边小图标才是改名", owner 2026-08-20). The pencil beside it is the
-                   rename affordance, and it is a real button so assistive tech and
-                   Enter/Space come for free. -->
+              <!-- Rename remains an explicit project-menu action. -->
               <span class="h1-text" bind:this={titleNameEl}>{selectedRow?.project.name ?? ''}</span>
             </h1>
           {/if}
@@ -1546,12 +1518,10 @@
                  the name — it reads as "expand this name for its options",
                  the dropdown grammar everyone already knows (owner,
                  2026-08-30: "换成一个向下的直角箭头…有点像把这个名字展开给
-                 出的下拉标签选项，这样对于人类更好理解"). A SIBLING of the
-                 h1, inside the group: within the heading, its
-                 overflow:hidden would clip the compact 42px tap overlay.
+                 出的下拉标签选项，这样对于人类更好理解").
                  Opens the SAME projectItems menu the sidebar row's
                  long-press/right-click speaks. -->
-            <button class="icon-btn title-caret" title={t('hubProjectMenu')} aria-label={t('hubProjectMenu')}
+            <CommandButton variant="icon" icon="chevron-down" label={t('hubProjectMenu')} hasPopup="menu"
               onclick={(e) => {
                 // The menu is the NAME expanding downward (board #32): its
                 // LEFT edge sits on the name's own left edge, measured from
@@ -1563,9 +1533,7 @@
                 // right-aligned pointer default.
                 openCtx({ anchor: anchorOf(titleNameEl ?? e.currentTarget), align: 'left' },
                   selectedRow?.project.name ?? '', projectItems(selectedRow, true));
-              }}>
-              <Icon name="chevron-down" size={14} />
-            </button>
+              }} />
           {/if}
         </div>
         <!-- The FULL path, not a middle-elided stub: it renders whole when it
@@ -1574,12 +1542,8 @@
              only, same as before. -->
         {#if !compact}<span class="path" use:wheelX use:doubleClickCopy={selectedRow?.project.path ?? ''} title={selectedRow?.project.path ?? ''}>{selectedRow?.project.path ?? ''}</span>{/if}
         <span class="spacer"></span>
-        <!-- Header actions are ONE dialect: icon-only .icon-btn, the label on
-             hover via title (and aria-label for readers). Mixed text-and-icon
-             chips read as three different kinds of control (owner, 2026-08-25:
-             "删除 关闭 命令按钮 都不统一 有的文字 有的图案，可以改成图案 鼠标
-             悬停显示按钮文字"). Icons match the project context menu's verbs:
-             zap=up, stop=down, trash=delete. -->
+        <!-- Shared commands own paint, accessible names and hover. Desktop
+             discloses a partition; compact layouts navigate to its page. -->
         <!-- The message-notification switch that stood here moved to Settings
              (board #72): a header keeps no spare switches, and on a phone it
              cost this row a button. -->
@@ -1587,32 +1551,32 @@
              2026-08-29: "board单独作为一个独立的功能的页面"); on desktop it is
              the drawer's THIRD partition ("或者右侧边栏有这个任务侧边栏", same
              day) — exactly the files toggle's split. -->
-        <button class="icon-btn term-toggle" class:on={termOpen && drawerView === 'board' && !compact} title={t('board')} aria-label={t('board')}
+        <CommandButton variant="icon" icon="layout" label={t('board')}
+          expanded={mobile || compact ? undefined : termOpen && drawerView === 'board'}
+          controls={mobile || compact || !drawerShown ? undefined : drawerId}
           onclick={() => {
             if (mobile || compact) { openBoardTab?.(selected); return; }
             if (termOpen && drawerView === 'board') { closeDrawer(); } else { drawerView = 'board'; openDrawer(); }
-          }}>
-          <Icon name="layout" size={14} />
-        </button>
+          }} />
         <!-- The drawer's second partition. On the phone (no drawer) the same
              button JUMPS to the Files tab — exactly what the terminal toggle
              does with the Terminal tab (owner, 2026-08-28: "手机上好像没有
              打开文件侧边栏的按钮"). -->
-        <button class="icon-btn term-toggle" class:on={termOpen && drawerView === 'files' && !compact} title={t('files')} aria-label={t('files')}
+        <CommandButton variant="icon" icon="files" label={t('files')}
+          expanded={mobile || compact ? undefined : termOpen && drawerView === 'files'}
+          controls={mobile || compact || !drawerShown ? undefined : drawerId}
           onclick={() => {
             if (mobile || compact) { openFilesTab?.(selected, drawerFilesDir); return; }
             if (termOpen && drawerView === 'files') { closeDrawer(); } else { drawerView = 'files'; openDrawer(); }
-          }}>
-          <Icon name="files" size={14} />
-        </button>
+          }} />
         <!-- THE terminal affordance: a button, not a permanent pane. Adding an
              agent belongs to the roster row, and chat detail belongs to the
              title's menu (and Settings) — a header is not a place to keep
              spare switches. -->
-        <button class="icon-btn term-toggle" class:on={termOpen && drawerView === 'term'} title={t('hubTerminal')} aria-label={t('hubTerminal')}
-          onclick={() => termOpen && drawerView === 'term' && !compact ? closeDrawer() : (drawerView = 'term', openDrawer())}>
-          <Icon name="terminal" size={14} />
-        </button>
+        <CommandButton variant="icon" icon="terminal" label={t('hubTerminal')}
+          expanded={mobile || compact ? undefined : termOpen && drawerView === 'term'}
+          controls={mobile || compact || !drawerShown ? undefined : drawerId}
+          onclick={() => termOpen && drawerView === 'term' && !compact ? closeDrawer() : (drawerView = 'term', openDrawer())} />
       </div>
 
       {#snippet emptyFeed()}
@@ -1644,9 +1608,8 @@
                   </button>
                 {/each}
               </div>
-              <button class="chip-btn" disabled={starting} onclick={() => openPicker('start')}>
-                <Icon name="collab" size={13} /> {t('hubStartTeam')}
-              </button>
+              <CommandButton icon="collab" label={t('hubStartTeam')} disabled={starting}
+                onclick={() => openPicker('start')} />
             </div>
           {:else}
             <div class="empty">{managedAgents.length ? t('hubEmpty') : t('hubEmptyNoAgents')}</div>
@@ -1687,7 +1650,7 @@
     <!-- ── Terminal drawer: where terminal things live. The .track is the
          grid item the reveal pins; the Drawer inside never changes size
          while the track moves (board #174). ── -->
-    <div class="track drawer-track" bind:this={drawerTrackEl}>
+    <div class="track drawer-track" id={drawerId} bind:this={drawerTrackEl}>
     <Drawer {compact} {visible} {fontSize} {selected} {termTarget} {termCommand}
       {drawerView} {drawerFilesReq} {drawerIssueReq} {drawerBoardNew}
       {agents} {panes} {managedAgents} {winsExpanded} {stateLabel} {stateTone}
@@ -1743,7 +1706,7 @@
       {/if}
       <div class="dlg-agents">
         {#each registry as r (r.name)}
-          <button class="agent-pick" class:sel={startPick.includes(r.name)}
+          <button class="agent-pick" class:sel={startPick.includes(r.name)} aria-pressed={startPick.includes(r.name)}
             onclick={() => { startPick = startPick.includes(r.name) ? startPick.filter((n) => n !== r.name) : [...startPick, r.name]; }}>
             {#if backendIcon(r.backend)}<img class="ava" src={backendIcon(r.backend)} alt={r.backend} />{:else}<span class="ava" style:background={backendColor(r.backend)}>{r.name.slice(0, 1).toUpperCase()}</span>{/if}
             {r.name} · {r.backend}
@@ -1753,11 +1716,9 @@
       </div>
       <input placeholder={t('hubBrief')} bind:value={startBrief} />
       <div class="dlg-actions">
-        <button class="chip-btn" onclick={() => pickerOpen = false}>{t('cancel')}</button>
-        <button class="chip-btn primary" disabled={!startPick.length || starting}
-          onclick={() => addAgents(startPick, startBrief.trim())}>
-          {starting ? '…' : t('hubStartGo').replace('{n}', String(startPick.length))}
-        </button>
+        <CommandButton label={t('cancel')} onclick={() => pickerOpen = false} />
+        <CommandButton variant="primary" icon="zap" label={t('hubStartGo').replace('{n}', String(startPick.length))}
+          disabled={!startPick.length} pending={starting} onclick={() => addAgents(startPick, startBrief.trim())} />
       </div>
     </div>
   {/if}
@@ -1831,15 +1792,9 @@
      wrapping put the Terminal toggle on a second line (owner, 2026-08-21:
      "打开terminal的按钮给换行到第二行了"). The title is the flexible child —
      .h1-text ellipsizes — and the buttons refuse to shrink. */
-  .hub-root.compact .page-head { flex-wrap: nowrap; row-gap: 6px; padding: 8px 12px; gap: 7px; }
-  /* The header actions are 28×25 icon squares; on the phone the VISUAL box
-     stays small and the TAP target grows to ~42px via the invisible overlay
-     (the token contract's hit rule). */
-  .hub-root.compact .page-head :global(.icon-btn) { position: relative; }
-  .hub-root.compact .page-head :global(.icon-btn)::before { content: ''; position: absolute; inset: -8px; }
+  .hub-root.compact .page-head { flex-wrap: nowrap; }
   .hub-root.compact .page-head h1 { font-size: var(--fs-title); }
   .hub-root.compact .h1-edit { font-size: var(--fs-title); }
-  .hub-root.compact .chip-btn { min-height: 34px; }
 
   /* SideHandle widths are requested maxima: both side tracks yield when the
      container cannot fit them, without rewriting the saved preferences.
@@ -1850,15 +1805,6 @@
      visible only while the move uncovers or withdraws it. */
   .hub-root.side-collapsed .cols { --side-open: 0; }
   .hub-root.side-collapsed .cols:not(:global(.moving)) > .track.side { visibility: hidden; }
-  /* The project title, in its two states. The idle one carries a visible pencil
-     and only underlines on hover — a permanent box would make the header look
-     like a form, but relying on hover ALONE hid the feature (no hover on a
-     phone). The edit state keeps the title's metrics so nothing in the row
-     shifts when it appears. */
-  /* The name and its ⋯ are ONE unit: content-sized so the group hugs the text,
-     `min-width: 0` so a long name still ellipsizes inside it, and a 3px gap —
-     close enough to read as an affordance ON the name (owner, 2026-08-30)
-     while the button keeps its own 28×26 box and its enlarged tap overlay. */
   /* The NAME displays WHOLE, with priority over the PATH (owner, 2026-08-30:
      "名字还是优先要显示全的，尽量不要省略") — but NEVER over the buttons
      (owner, 2026-09-02, board #72: "按钮应该优先出现，避免项目名把按钮挤不见").
@@ -1870,26 +1816,9 @@
      effectively all of it and the name only starts to ellipsize once the
      path is gone. The buttons are `flex: none` and always keep their box. */
   .title-group { display: flex; align-items: center; gap: 1px; flex: 0 1 auto; min-width: 0; max-width: 60%; }
-  /* The caret hugs the last letter: a narrow box (the icon-btn's 28px read
-     as a detached control), quiet ink so the NAME stays the subject. The
-     compact rule's invisible tap overlay still gives it a full target. */
-  /* padding: 0 resets the BROWSER's default button padding (Chromium: 1px
-     6px), which .icon-btn never clears: in the base 28px button the 16px
-     content box hides it, but narrowed to 20px only 8px remains and the 14px
-     glyph overflowed flush against the RIGHT edge — measured live, svg right
-     == button right, reading as "clipped" the moment the wash shows
-     (owner, 2026-09-01: "右边一小条被挡住了"). */
-  .title-caret { width: 20px; padding: 0; color: var(--text3); }
-  .title-caret:hover { color: var(--text); }
-  /* The global `.page-head h1` rule ellipsizes its own text; with a second child
-     it has to be a flex row, or the pencil is pushed out and clipped by the
-     heading's own `overflow: hidden` as soon as the name is long. */
+  /* The title yields width before any native command target does. */
   h1 { display: flex; align-items: center; min-width: 0; }
-  /* The name is selectable text that ellipsizes; the pencil never shrinks with
-     it, and it is the only thing that renames. */
   .h1-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* Glued to the name (2px, inside the h1's flex) and never shrinking with
-     it — the retired rename pencil's exact geometry. */
   .h1-edit {
     font-family: var(--font-mono);
     font-size: var(--fs-title); font-weight: 600; color: var(--text);
@@ -1916,7 +1845,6 @@
     user-select: text; -webkit-user-select: text; cursor: text;
   }
   .path::-webkit-scrollbar { display: none; }
-  .term-toggle.on { color: var(--accent); background: var(--accent-bg); }
   .tava { display: inline-grid; place-items: center; background: var(--accent-bg); color: var(--accent); }
   .ap-go { margin-left: auto; font-size: var(--fs-micro); color: var(--accent); }
 
