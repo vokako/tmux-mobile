@@ -482,6 +482,8 @@ test('the Chat header path is selectable prose and a double-click copies the ful
   const action = source.slice(source.indexOf('function doubleClickCopy'), source.indexOf('</script>'));
   assert.match(action, /el\.addEventListener\('dblclick', onDoubleClick\)/u, 'double-click is attached without turning prose into a button');
   assert.match(action, /void copyText\(value\)/u, 'the exact untruncated project path is copied');
+  assert.match(action, /kind: ok \? 'success' : 'error'/u, '#167 never claims Copied on a failed write');
+  assert.match(source, /use:feedbackPosition=\{\{ trigger: headerCopyAnchor,/u);
   const css = rule('.path');
   assert.match(css, /user-select:\s*text/u, 'mouse drag selection explicitly overrides the app shell');
   assert.match(css, /-webkit-user-select:\s*text/u, 'WebKit selection is explicit too');

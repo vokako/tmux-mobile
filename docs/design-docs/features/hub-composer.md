@@ -5,6 +5,17 @@ per-agent interruption. The feed is `hub-feed.md`.
 
 ## Rules and their reasons
 
+### Header path copy reports its actual result (#167 batch 2, 2026-09-12)
+
+The desktop path stays selectable prose; double-click still copies its full,
+untruncated value with the existing text-selection handling. Feedback follows the
+clipboard result: only `copyText=true` shows Copied, through the shared
+completion lifetime. A failed write now shows a retryable local error; previously
+the result was ignored. A room/path/visibility change or unmount invalidates
+the pending attempt, even when two rooms share the same path.
+The same feedback presentation and placement action anchor to the path; this
+adds no button to the header, notification transport or copy parser.
+
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
 
 ### Confirmed actions retain their outcome (#167, 2026-09-12)

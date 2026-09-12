@@ -21,6 +21,9 @@
   import Feed from './Feed.svelte';
   import Drawer from './Drawer.svelte';
   import { copyText } from '../core/clipboard.ts';
+  import OperationFeedback from '../ui/OperationFeedback.svelte';
+  import { createFeedbackLifetime } from '../ui/feedback-lifetime.ts';
+  import { feedbackPosition } from '../ui/feedback-position.ts';
   import Lightbox from '../ui/Lightbox.svelte';
   import CommandButton from '../ui/CommandButton.svelte';
   import './hub-atoms.css';
@@ -292,6 +295,7 @@
   }
 
   async function selectProject(session) {
+    headerCopyLifetime.clear();
     selectionGeneration++;
     actionReadError = ''; actionRefreshing = false;
     // An unsent line belongs to the conversation it was written for. Park it on
@@ -1498,11 +1502,17 @@
    * app's clipboard helper. An action keeps the span's read-only semantics —
    * it is not a fake button — and lets the browser perform its normal text
    * selection before we expand the highlight to the whole copied path. */
+  let headerCopyFeedback = $state(null), headerCopyAnchor = $state(null);
+  const headerCopyLifetime = createFeedbackLifetime(value => { headerCopyFeedback = value; });
+  $effect(() => { if (!visible) headerCopyLifetime.clear(); });
+  onDestroy(() => headerCopyLifetime.dispose());
   function doubleClickCopy(el, initialValue) {
     let value = initialValue;
     const onDoubleClick = () => {
-      if (!value) return;
-      void copyText(value);
+      if (!value || !visible) return;
+      const attempt = headerCopyLifetime.begin(); headerCopyAnchor = el;
+      void copyText(value).then(ok => headerCopyLifetime.update(attempt,
+        { kind: ok ? 'success' : 'error', message: ok ? t('copied') : t('copyFailed') }));
       const selection = window.getSelection();
       if (!selection || !el.isConnected) return;
       const range = document.createRange();
@@ -1512,8 +1522,8 @@
     };
     el.addEventListener('dblclick', onDoubleClick);
     return {
-      update(nextValue) { value = nextValue; },
-      destroy() { el.removeEventListener('dblclick', onDoubleClick); },
+      update(nextValue) { if (value !== nextValue) headerCopyLifetime.clear(); value = nextValue; },
+      destroy() { el.removeEventListener('dblclick', onDoubleClick); headerCopyLifetime.clear(); if (headerCopyAnchor === el) headerCopyAnchor = null; },
     };
   }
 
@@ -1651,6 +1661,11 @@
           expanded={mobile || compact ? undefined : termOpen && drawerView === 'term'}
           controls={mobile || compact || !drawerShown ? undefined : drawerId}
           onclick={() => termOpen && drawerView === 'term' && !compact ? closeDrawer() : (drawerView = 'term', openDrawer())} />
+        {#if headerCopyFeedback && headerCopyAnchor}
+          <div class="header-copy-feedback pop-layer" use:feedbackPosition={{ trigger: headerCopyAnchor, bounds: headerCopyAnchor.closest('main'), keepClear: headerCopyAnchor.closest('.chat-head') }}>
+            <OperationFeedback value={headerCopyFeedback} ondismiss={headerCopyFeedback.kind === 'error' ? headerCopyLifetime.clear : undefined} />
+          </div>
+        {/if}
       </div>
 
       {#if actionReadError}
@@ -1821,6 +1836,7 @@
 </div>
 
 <style>
+  .header-copy-feedback { position: fixed; z-index: 8; }
   .action-read-error { display: flex; align-items: center; gap: var(--tool-gap); padding: calc(2 * var(--ui-gap)) calc(3 * var(--ui-gap)); }
   .action-read-error span { min-width: 0; overflow-wrap: anywhere; }
   .hub-root {

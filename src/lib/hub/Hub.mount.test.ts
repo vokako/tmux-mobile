@@ -1549,6 +1549,44 @@ test('failed message copy remains retryable and ignores an older clipboard compl
   } finally { await app.close(); }
 });
 
+test('header path copy reports only a confirmed write and invalidates the previous room (#167 batch2)', async context => {
+  const { rpc } = roomFixture();
+  const jobs: { resolve: () => void; reject: (error: Error) => void }[] = [];
+  const app = await (await compiledHub()).mount(context, {
+    props: { visible: true },
+    setup(window) {
+      window.Element.prototype.getAnimations = () => [];
+      window.document.execCommand = () => false;
+      Object.defineProperty(window.navigator, 'clipboard', { value: {
+        writeText: () => new Promise<void>((resolve, reject) => jobs.push({ resolve, reject })),
+      } });
+    },
+    modules: [{ ...rpc, projectList: async () => ({ projects: ['fixture', 'other'].map(session => ({
+      project: { id: session, name: session, session, path: '/same-path' }, live: true, slots: [],
+    })) }) }],
+  });
+  try {
+    for (let i = 0; i < 12 && !app.document.querySelector('.chat-head .path'); i++) await app.flush();
+    const copy = async () => {
+      app.document.querySelector('.chat-head .path')!.dispatchEvent(new app.window.MouseEvent('dblclick', { bubbles: true }));
+      await app.flush();
+    };
+    await copy();
+    assert.equal(app.document.querySelector('.header-copy-feedback [role=status]'), null);
+    jobs[0]!.reject(new Error('denied')); await app.flush();
+    assert.match(app.document.querySelector('.header-copy-feedback [role=alert]')?.textContent ?? '', /Copy failed/);
+    await copy(); jobs[1]!.resolve(); await app.flush();
+    assert.match(app.document.querySelector('.header-copy-feedback [role=status]')?.textContent ?? '', /Copied/);
+    await app.advance(1500);
+    assert.equal(app.document.querySelector('.header-copy-feedback'), null);
+    await copy();
+    app.document.querySelector<HTMLButtonElement>('[aria-label="other"] .proj-pick')!.click();
+    for (let i = 0; i < 6; i++) await app.flush();
+    jobs[2]!.resolve(); await app.flush();
+    assert.equal(app.document.querySelector('.header-copy-feedback'), null, 'same path in another room is a new context');
+  } finally { await app.close(); }
+});
+
 test('Chat header commands report drawer state and preserve compact navigation (#166)', { timeout: 60000 }, async context => {
   const fixture = await compiledHub();
   for (const compact of [false, true]) {
