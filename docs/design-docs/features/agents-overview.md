@@ -17,6 +17,36 @@ when reopening the same document. These rules replace the independent unguarded
 close/save handlers found by #154. Exact geometry, shared controls and the
 pending/return contract live in [design-language.md](design-language.md).
 
+### Deletion confirmation owns its failure (2026-09-12, #167 batch 1)
+
+Deletion errors were already visible in the baseline: AgentsPage appended the
+shared editor error to the confirmation's consequence note. This change gives
+deletion its own error state and a separate modal `role="alert"`; it is not a
+fix for hidden error text or for the already-correct busy Back behavior.
+
+Agent, Team, Skill and MCP deletion keep their captured kind/name and editor
+generation until the mutation settles. Pending is set before awaiting; duplicate
+activation, Escape, backdrop and the existing registered Back callback cannot
+dismiss it. A rejected deletion remains retryable with an `error` alert inside
+ConfirmDialog, separate from its consequence note and the editor's save error.
+The caller explicitly supplies `trash`; neutral Discard supplies `check` and
+keeps the existing `configKeepEditing` translation.
+
+Deletion success ends `removing` and closes only its own confirmation/editor
+before refreshing the catalog. Refresh is not a pending deletion: a newer editor
+can open while it runs, and its completion must not reset a newer deletion's
+busy state. `AgentsPage.mount.test.ts` asserts the separate modal alert and
+reproduces the refresh blocking a newer editor. A committed host section change clears
+the old view's pending state; its late failure/finally cannot affect a new
+confirmation. The tests also preserve the pre-existing busy
+Back, failed-target retry, save and draft-exit behaviors. Source contracts pin
+the explicit glyphs rather than inferring them from danger tone. These are
+real Svelte client mounts with controlled RPC promises, not native Back or
+layout/paint acceptance; no feedback timers change in this batch.
+Verified with Node 22.23.2, Svelte 5.55.5, Vite 6.4.2 and jsdom 30.0.1.
+Disconnecting the caller's `error` prop made the deletion-alert test fail;
+restoring it passed. No shared file was changed for that negative control.
+
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
 
 ### Agents v2 — CLI substrate, hooks telemetry, isolated homes

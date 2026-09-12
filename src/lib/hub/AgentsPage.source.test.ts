@@ -5,6 +5,12 @@ import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('./AgentsPage.svelte', import.meta.url), 'utf8');
 const i18n = await readFile(new URL('../core/i18n.svelte.ts', import.meta.url), 'utf8');
 
+test('delete and neutral discard own explicit glyphs and reuse the existing exit copy (#167, 2026-09-12)', () => {
+  // Source pins caller semantics, while mount tests exercise async behavior.
+  assert.match(source, /confirmLabel=\{t\('delete'\)\} confirmIcon="trash" error=\{removeError\}/u);
+  assert.match(source, /confirmLabel=\{t\('configDiscard'\)\} confirmIcon="check" cancelLabel=\{t\('configKeepEditing'\)\}/u);
+});
+
 test('Agent-family forms opt into the shared compact composition (#163)', () => {
   assert.match(source, /class="agents-root config-compact config-entity"/u);
   assert.doesNotMatch(source, /\.config-field\s*\{|\.config-row\s*\{/u,

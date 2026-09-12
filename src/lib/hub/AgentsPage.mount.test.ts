@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import { compileMount } from '../test/mount.ts';
 
 const compiled = compileMount(new URL('./AgentsPage.svelte', import.meta.url), [new URL('../core/ws.ts', import.meta.url)]);
+let hosted: ReturnType<typeof compileMount> | undefined;
+function hostFixture() {
+  return hosted ??= compileMount(new URL('./AgentsPage.test.svelte', import.meta.url), [new URL('../core/ws.ts', import.meta.url)]);
+}
 const alpha = { name: 'alpha', backend: 'codex', model: '', effort: '', system: 'Original',
   skills: '["missing-skill"]', mcp: '["missing-server",{"name":"inline","expanded":true}]', can_hire: false };
 function rpc(extra: Record<string, (...args: any[]) => unknown> = {}) {
@@ -198,7 +202,7 @@ test('a successful unnamed Skill import returns to its list, not another editor 
 });
 
 test('a hidden page retains its draft and a held deep link opens only after the captured save (#156)', async context => {
-  const fixture = await compileMount(new URL('./AgentsPage.test.svelte', import.meta.url), [new URL('../core/ws.ts', import.meta.url)]);
+  const fixture = await hostFixture();
   let controls!: { show: (value: boolean) => void; edit: (name: string) => void };
   let finish!: () => void;
   let finishReload!: (value: unknown) => void;
@@ -328,5 +332,115 @@ test('a built-in Skill description is readable without an edit affordance (#156)
     assert.equal(app.document.querySelector('.desc-view'), null);
     assert.equal(app.document.querySelector('.desc-readonly')?.textContent, 'Read-only description');
     assert.equal(command(app, 'Save').disabled, true);
+  } finally { await app.close(); }
+});
+
+// #167, 2026-09-12: baseline errors were already visible in the modal note.
+// Separate alert/error ownership while preserving busy/Back and retry behavior.
+for (const kind of ['agent', 'team', 'skill', 'mcp'] as const) {
+  test(`${kind} deletion preserves busy Back and retry with a separate modal alert (#167)`, async context => {
+    const names = { agent: 'alpha', team: 'squad', skill: 'docs', mcp: 'files' };
+    const section = { agent: 'agents', team: 'teams', skill: 'skills', mcp: 'mcp' }[kind];
+    const deletes = { agent: 'registryDelete', team: 'teamsDelete', skill: 'skillsDelete', mcp: 'mcpDelete' };
+    const calls: string[] = [];
+    let back!: () => boolean, reject!: (error: Error) => void;
+    const app = await (await compiled).mount(context, {
+      props: { visible: true, section, onGoBack: (value: typeof back) => back = value },
+      modules: [rpc({
+        teamsList: async () => ({ teams: [{ name: 'squad', description: '', members: '[{"name":"dev","base":"alpha"}]' }] }),
+        skillsList: async () => ({ skills: [{ name: 'docs', source: '/fixture', description: '' }] }),
+        skillsFiles: async () => ({ files: [] }), skillsFile: async () => ({ content: '' }),
+        mcpList: async () => ({ mcp: [{ name: 'files', def: '{"command":"test"}' }] }),
+        [deletes[kind]]: (name: string) => { calls.push(name); return new Promise((_, no) => reject = no); },
+      })],
+    });
+    try {
+      await openAgent(app, names[kind]);
+      command(app, 'Delete').click(); await app.flush();
+      const confirm = () => app.document.querySelector<HTMLButtonElement>('.dlg-actions button:last-child')!;
+      confirm().click(); confirm().click(); await app.flush();
+      assert.equal(back(), true, 'busy Back is consumed');
+      app.document.querySelector<HTMLElement>('.dlg-backdrop')!.click();
+      const escape = new app.window.KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+      app.window.dispatchEvent(escape); await app.flush();
+      assert.equal(escape.defaultPrevented, true);
+      assert.equal(app.document.querySelector('[role=alertdialog]')?.getAttribute('aria-busy'), 'true');
+      assert.deepEqual(calls, [names[kind]]);
+      reject(new Error('Deletion refused')); await app.flush();
+      assert.ok(app.document.querySelector('[role=alertdialog]'), 'existing retry guard stays intact');
+      assert.match(app.document.querySelector('[role=alertdialog] [role=alert]')?.textContent ?? '', /Deletion refused/);
+      assert.doesNotMatch(app.document.querySelector('.dlg-note')?.textContent ?? '', /Deletion refused/);
+      assert.equal(confirm().disabled, false);
+      confirm().click(); await app.flush();
+      assert.deepEqual(calls, [names[kind], names[kind]]);
+      assert.equal(app.document.querySelector('[role=alertdialog] [role=alert]'), null);
+    } finally { await app.close(); }
+  });
+}
+
+test('a completed deletion releases the editor before a failed refresh and cannot clear a newer deletion (#167)', async context => {
+  const reads: ((error: Error) => void)[] = [];
+  const writes: string[] = [];
+  let initial = true, finishBeta!: () => void;
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, section: 'agents' },
+    modules: [rpc({
+      registryList: () => {
+        if (initial) { initial = false; return Promise.resolve({ agents: [alpha, { ...alpha, name: 'beta' }] }); }
+        return new Promise((_, no) => reads.push(no));
+      },
+      registryDelete: name => {
+        writes.push(name);
+        return name === 'alpha' ? Promise.resolve() : new Promise<void>(yes => finishBeta = yes);
+      },
+    })],
+  });
+  try {
+    await openAgent(app);
+    command(app, 'Delete').click(); await app.flush();
+    app.document.querySelector<HTMLButtonElement>('.dlg-actions button:last-child')!.click();
+    for (let i = 0; i < 4; i++) await app.flush();
+    assert.equal(app.document.querySelector('[role=alertdialog]'), null);
+    await openAgent(app, 'beta');
+    assert.equal(app.document.querySelector('.mid h1')?.textContent, 'beta', 'catalog refresh is not a pending mutation');
+    command(app, 'Delete').click(); await app.flush();
+    app.document.querySelector<HTMLButtonElement>('.dlg-actions button:last-child')!.click(); await app.flush();
+    reads[0]!(new Error('Catalog unavailable'));
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.equal(app.document.querySelector('[role=alertdialog]')?.getAttribute('aria-busy'), 'true',
+      'old refresh cleanup cannot clear the new mutation busy state');
+    assert.deepEqual(writes, ['alpha', 'beta']);
+    finishBeta();
+    for (let i = 0; i < 4; i++) await app.flush();
+    assert.equal(app.document.querySelector('[role=alertdialog]'), null);
+  } finally { await app.close(); }
+});
+
+test('a committed host section change invalidates old delete completion and cleanup (#167)', async context => {
+  const fixture = await hostFixture();
+  let controls!: { section: (value: string) => void };
+  let rejectOld!: (error: Error) => void, rejectNew!: (error: Error) => void;
+  const app = await fixture.mount(context, {
+    props: { ready: (value: typeof controls) => controls = value },
+    modules: [rpc({
+      teamsList: async () => ({ teams: [{ name: 'squad', description: '', members: '[{"name":"dev","base":"alpha"}]' }] }),
+      registryDelete: () => new Promise((_, no) => rejectOld = no),
+      teamsDelete: () => new Promise((_, no) => rejectNew = no),
+    })],
+  });
+  try {
+    await openAgent(app);
+    command(app, 'Delete').click(); await app.flush();
+    app.document.querySelector<HTMLButtonElement>('.dlg-actions button:last-child')!.click(); await app.flush();
+    controls.section('teams'); await app.flush();
+    assert.equal(app.document.querySelector('[role=alertdialog]'), null, 'the host committed a different view');
+    await openAgent(app, 'squad');
+    command(app, 'Delete').click(); await app.flush();
+    app.document.querySelector<HTMLButtonElement>('.dlg-actions button:last-child')!.click(); await app.flush();
+    rejectOld(new Error('Old rejection')); await app.flush();
+    assert.equal(app.document.querySelector('[role=alertdialog]')?.getAttribute('aria-busy'), 'true');
+    assert.equal(app.document.querySelector('[role=alertdialog] [role=alert]'), null);
+    rejectNew(new Error('Current rejection')); await app.flush();
+    assert.match(app.document.querySelector('[role=alertdialog] [role=alert]')?.textContent ?? '', /Current rejection/);
   } finally { await app.close(); }
 });

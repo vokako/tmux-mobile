@@ -215,6 +215,7 @@
    * 2026-08-19). The words per kind live here so the dialog stays generic. */
   let pending = $state(null);
   let removing = $state(false);
+  let removeError = $state('');
 
   /** Grow long prompts to their CSS max-height, then scroll within the field.
    * The expanded member card should reveal writing, not another keyhole-sized
@@ -271,25 +272,33 @@
     mcp:   { title: 'confirmDeleteMcpTitle',      note: 'confirmDeleteMcpNote' },
     team:  { title: 'confirmDeleteTeamTitle',     note: 'confirmDeleteTeamNote' },
   };
-  const ask = (kind, name) => { if (!saving && !removing) pending = { kind, name }; };
+  const ask = (kind, name) => {
+    if (saving || removing || pending) return;
+    removeError = '';
+    pending = { kind, name };
+  };
   async function runPending() {
     if (!pending || removing) return;
-    const { kind, name } = pending;
+    const act = pending;
+    const { kind, name } = act;
     const generation = epoch;
     removing = true;
-    error = '';
+    removeError = '';
     try {
       if (kind === 'agent') await registryDelete(name);
       else if (kind === 'team') await teamsDelete(name);
       else if (kind === 'skill') await skillsDelete(name);
       else await mcpDelete(name);
-      if (generation !== epoch) return;
-      pending = null;
-      closeAll();
-      await reload();
     } catch (e) {
-      if (generation === epoch) error = String(e?.message ?? e);
-    } finally { removing = false; }
+      if (generation === epoch && pending === act) removeError = String(e?.message ?? e);
+      return;
+    } finally {
+      if (generation === epoch && pending === act) removing = false;
+    }
+    if (generation !== epoch || pending !== act) return;
+    pending = null;
+    closeAll();
+    await reload();
   }
 
   // The model ids the selected backend accepts, asked of the backend's own CLI
@@ -358,6 +367,7 @@
 
   function closeAll(clearExit = true) {
     epoch++;
+    pending = null; removing = false; removeError = ''; pendingOperation = '';
     editing = null; editingSkill = null; editingMcp = null; editingTeam = null; editingGlobal = null;
     original = ''; if (clearExit) exitIntent = null; error = ''; info = '';
   }
@@ -1071,12 +1081,12 @@
 
 <ConfirmDialog open={!!pending} busy={removing} compact={compactViewport}
   title={pending ? t(COPY[pending.kind].title).replace('{name}', pending.name) : ''}
-  note={pending ? t(COPY[pending.kind].note) + (error ? `\n${error}` : '') : ''}
-  confirmLabel={t('delete')}
-  onconfirm={runPending} oncancel={() => (pending = null)} />
+  note={pending ? t(COPY[pending.kind].note) : ''}
+  confirmLabel={t('delete')} confirmIcon="trash" error={removeError}
+  onconfirm={runPending} oncancel={() => { if (!removing) pending = null; }} />
 <ConfirmDialog open={!!pendingExit} danger={false} compact={compactViewport}
   title={t('discardChanges')} note={t('configDiscardNote')}
-  confirmLabel={t('configDiscard')} cancelLabel={t('configKeepEditing')}
+  confirmLabel={t('configDiscard')} confirmIcon="check" cancelLabel={t('configKeepEditing')}
   onconfirm={() => { const action = pendingExit; exitIntent = null; action?.(); }}
   oncancel={() => exitIntent = null} />
 
