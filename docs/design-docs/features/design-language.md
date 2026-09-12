@@ -243,7 +243,7 @@ unchanged until its consumers migrate.
 | `--config-nav-height` (minimum row) | 40px | 44px |
 | `config-compact` header / navigation minimum (#162) | 44 / 36px | 56 / 44px |
 | `--config-padding` | 24px | 16px on compact |
-| Popover option minimum | 36px | 44px |
+| Menu/option row minimum (#165) | 28px | 44px |
 | Label / field / section gaps | 8 / 16 / 24px | same |
 | `config-compact` label / field / section gaps (#162) | 6 / 12 / 20px | same |
 | `config-entity` short-row minimum / vertical inset (#163) | 44 / 2px | same; 44px control makes a 49px row |
@@ -533,6 +533,37 @@ press-scale/brightness details below do not override it.
 
 ## 5 · Menus & popovers
 
+- **Shared popup chrome (#165, 2026-09-12).** Owner, 2026-09-11:
+  "对了右键的菜单风格都检查统一。" The later compact correction
+  ("很多卡片按钮什么的，不要这么傻大的", 2026-09-12) is the reason to
+  use 28px pointer rows rather than enlarging every action menu to the old
+  36px Select rows; coarse rows remain 44px.
+  `menu-surface` owns only background, border, the 16px round panel and the
+  softer shadow derived from `--control-shadow`. ContextMenu, Select,
+  PanePicker and HoverCard share this paint without sharing roles or content
+  layout. `menu-list` opts list-shaped content into 5px padding and 2px gaps;
+  `menu-item` owns 4px/10px padding, 8px content gaps, 12px row corners,
+  UI-face text (12.5px pointer / 13.5px coarse), hover/cursor and disabled paint.
+  These metrics live in app.css, not repeated component styles. Font-preview
+  option text still uses its requested family; data headings/hints keep mono.
+  Long labels/headings wrap; hints yield width to labels. One optional leading
+  icon column aligns a mixed list without reserving it for an icon-free list.
+  Menu actions are explicitly non-submit buttons. ContextMenu keeps
+  menuitem/menuitemcheckbox, Select keeps options, PanePicker keeps its
+  dialog/chip composition, and HoverCard remains a non-interactive tooltip.
+  Width/height/position and dismissal stay with their existing owners.
+  ContextMenu uses `width: max-content` before its viewport cap: once labels
+  wrapped, auto shrink-to-fit width depended on the already-clamped left
+  position, creating a ResizeObserver feedback loop at the right edge.
+  Warning **text** mixes 60% `--status-warn` with `--text`, reaching 5.42:1
+  on light background and 4.76:1 on its 14% warning hover wash; raw dot amber
+  failed 4.5:1. Destructive text uses `--danger-ink`. This derives readable
+  menu ink from existing semantics, not a new status palette or a change to
+  the Stop glyph's separate 3:1 contract.
+  Chromium 152.0.7977.64 verifies 96 corner/zoom/theme/input cases without the
+  width/position feedback loop, plus real Hub/Files menu consumers. The measured
+  warning-text floor is 4.75:1 including hover. This paint adoption does not
+  claim that unrelated picker or keyboard behavior is already corrected.
 - **ContextMenu activation contract (#164, 2026-09-11):** checked view/tool
   choices announce `menuitemcheckbox` and `aria-checked`; ordinary verbs remain
   `menuitem`. Disabled entries reject queued activation too. Its dimensions
@@ -547,10 +578,10 @@ press-scale/brightness details below do not override it.
   and cleanup never steals focus from a newer control. Earlier Hub capture
   handling yields to menu territory instead of closing the drawer below it.
   These are shared prerequisites,
-  not a second Files menu or a global history trap; visual adoption is #165.
+  not a second Files menu or a global history trap; #165 supplies the shared paint.
 - ONE popover mechanism: `position: fixed` layer placed by `menuPlacement`
   (`anchorOf`/`pointAnchor` divide by `--ui-zoom`), styled `--bg` surface,
-  1px `--border`, `--ui-radius-panel`, shadow, `--ui-font-control` rows;
+  1px `--border`, the shared `menu-surface` frame and `menu-item` rows;
   invisible until measured. Dismissal set: outside pointerdown, Escape, any
   ancestor scroll, resize — and every transient layer auto-hides after its
   job (owner rule, 2026-08-22). "Ancestor scroll" is a CAPTURE listener on

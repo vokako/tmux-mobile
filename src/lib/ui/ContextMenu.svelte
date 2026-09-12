@@ -46,6 +46,7 @@
   let w = $state(0);
   let h = $state(0);
   let cursor = $state(-1);
+  const hasIcons = $derived(items.some((item) => !!item.icon));
   let restoreFocus = () => {};
   function selectItem(item) {
     if (item.disabled) return;
@@ -146,23 +147,24 @@
 </script>
 
 {#if at && items.length}
-  <div class="ctx pop-layer" class:ready={h > 0} bind:this={el} role="menu" tabindex="-1" {id} aria-label={who || undefined}
+  <div class="ctx menu-surface menu-list pop-layer" class:ready={h > 0} bind:this={el} role="menu" tabindex="-1" {id} aria-label={who || undefined}
     aria-activedescendant={cursor >= 0 && items[cursor] ? `${id}-${cursor}` : undefined}
     style:left="{pos.x}px" style:top="{pos.y}px"
     style:max-height={heightLimit === undefined ? undefined : `${heightLimit}px`}
     style:--pop-origin={at ? popOrigin(at.anchor ?? pointAnchor(at.x, at.y), pos, align) : undefined}
     bind:offsetWidth={w} bind:offsetHeight={h}>
-    {#if who}<div class="ctx-who">{who}</div>{/if}
+    {#if who}<div class="ctx-who menu-heading data" title={who}>{who}</div>{/if}
     {#each items as it, i (it.label)}
-      <button role={it.checked === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-checked={it.checked}
+      <button class="menu-item" type="button" role={it.checked === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-checked={it.checked}
         id={`${id}-${i}`}
         class:danger={it.danger} class:warn={it.warn} class:cur={i === cursor}
         disabled={it.disabled} title={it.title}
         onpointerenter={() => (cursor = i)}
         onclick={() => selectItem(it)}>
-        {#if it.icon}<Icon name={it.icon} size={12} />{/if}<span class="ctx-label">{it.label}</span>
-        {#if it.hint}<span class="ctx-hint">{it.hint}</span>{/if}
-        {#if it.checked}<span class="ctx-check"><Icon name="check" size={12} /></span>{/if}
+        {#if hasIcons}<span class="menu-icon" aria-hidden="true">{#if it.icon}<Icon name={it.icon} size={14} />{/if}</span>{/if}
+        <span class="ctx-label menu-label">{it.label}</span>
+        {#if it.hint}<span class="ctx-hint menu-hint data">{it.hint}</span>{/if}
+        {#if it.checked}<span class="ctx-check menu-check" aria-hidden="true"><Icon name="check" size={12} /></span>{/if}
       </button>
     {/each}
   </div>
@@ -170,43 +172,11 @@
 
 <style>
   .ctx {
-    position: fixed; z-index: 60; min-width: 156px; max-width: 260px;
+    position: fixed; z-index: 60; width: max-content;
+    min-width: min(156px, calc(100vw / var(--ui-zoom, 1) - 16px));
+    max-width: min(260px, calc(100vw / var(--ui-zoom, 1) - 16px));
     max-height: calc(100vh / var(--ui-zoom, 1) - 16px); overflow-y: auto;
-    background: var(--bg); border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
-    box-shadow: 0 14px 38px rgba(0, 0, 0, 0.45); padding: 5px;
-    display: flex; flex-direction: column; gap: 1px;
     /* Invisible until measured, then grows from its anchor corner: the shared
        .pop-layer atom (app.css) owns opacity/pointer-events/transform. */
-  }
-  .ctx-who {
-    padding: 3px 9px 5px; font-size: var(--fs-meta); color: var(--text3);
-    font-family: var(--font-mono);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .ctx button {
-    display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
-    background: none; border: 0; border-radius: var(--ui-radius-control); color: var(--text2);
-    font-size: var(--ui-font-control); padding: 6px 9px; cursor: pointer;
-  }
-  /* Hover and the keyboard cursor are ONE highlight: two would read as two
-     selections. Same rule as Select and the composer's command palette. */
-  .ctx button:hover, .ctx button.cur { background: var(--surface2); color: var(--text); }
-  /* Tones: amber = interrupt-class verbs (a turn cut short), red =
-     destructive. Same language as the Hub's agent menu and the sys rows. */
-  .ctx button.warn { color: var(--status-warn); }
-  .ctx button.warn:hover, .ctx button.warn.cur { background: color-mix(in srgb, var(--status-warn) 14%, transparent); }
-  .ctx button.danger { color: var(--danger); }
-  .ctx button.danger:hover, .ctx button.danger.cur { background: var(--danger-bg); }
-  .ctx button:disabled { opacity: 0.45; cursor: default; }
-  .ctx button :global(svg) { flex: none; }
-  .ctx-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* Select's `.so-hint` / trailing check, so a pick-one menu reads as the
-     same species as a dropdown. */
-  .ctx-hint { margin-left: auto; font-size: var(--fs-meta); color: var(--text3); font-family: var(--font-mono); }
-  .ctx-check { margin-left: auto; display: flex; color: var(--accent); }
-  .ctx-hint + .ctx-check { margin-left: 0; }
-  /* A phone needs a real target; the desktop stays compact. */
-  @media (any-pointer: coarse) {
-    .ctx button { min-height: 44px; font-size: var(--fs-body); }
   }
 </style>

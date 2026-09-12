@@ -71,6 +71,7 @@
       return hit.length === 1 && hit[0]!.value === value ? norm : hit;
     })(),
   );
+  const hasIcons = $derived(shown.some((option) => !!option.icon));
 
   // EXACTLY as wide as the field: with the menu right-aligned to the trigger,
   // equal widths make both edges line up, which is what a field-shaped picker
@@ -216,18 +217,18 @@
 {/if}
 
 {#if open && shown.length}
-  <div class="sel-menu pop-layer" class:ready={menuH > 0} role="listbox" tabindex="-1" id={listId}
+  <div class="sel-menu menu-surface menu-list pop-layer" class:ready={menuH > 0} role="listbox" tabindex="-1" id={listId}
     style:left="{pos.x}px" style:top="{pos.y}px" style:width="{fieldW}px"
     style:--pop-origin={anchor ? popOrigin(anchor, pos) : undefined}
     bind:this={menuEl} bind:offsetHeight={menuH}>
     {#each shown as o, i (o.value)}
-      <button class="sel-opt" class:sel={o.value === value} class:cur={i === cursor}
+      <button class="sel-opt menu-item" class:sel={o.value === value} class:cur={i === cursor}
         role="option" aria-selected={o.value === value} type="button" tabindex="-1" id={`${listId}-${i}`}
         onclick={() => pick(o.value)} onpointerenter={() => (cursor = i)}>
-        {#if o.icon}<img class="so-ico" src={o.icon} alt="" />{/if}
-        <span class="so-label" style:font-family={fontPreview && o.value ? `'${o.value.replace(/['"]/g, '')}'` : undefined}>{o.label ?? o.value}</span>
-        {#if o.hint}<span class="so-hint">{o.hint}</span>{/if}
-        {#if o.value === value}<Icon name="check" size={12} />{/if}
+        {#if hasIcons}<span class="menu-icon" aria-hidden="true">{#if o.icon}<img class="so-ico" src={o.icon} alt="" />{/if}</span>{/if}
+        <span class="so-label menu-label" style:font-family={fontPreview && o.value ? `'${o.value.replace(/['"]/g, '')}'` : undefined}>{o.label ?? o.value}</span>
+        {#if o.hint}<span class="so-hint menu-hint">{o.hint}</span>{/if}
+        {#if o.value === value}<span class="menu-check" aria-hidden="true"><Icon name="check" size={12} /></span>{/if}
       </button>
     {/each}
   </div>
@@ -268,31 +269,12 @@
   /* Same popover dialect as the Hub's menus: one menu language app-wide. */
   .sel-menu {
     position: fixed; z-index: 40; max-height: calc(46vh / var(--ui-zoom, 1)); overflow-y: auto;
-    background: var(--bg); border: 1px solid var(--border); border-radius: var(--control-menu-radius);
-    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45); padding: 5px;
-    display: flex; flex-direction: column; gap: 2px;
     /* Visibility and the intro are the shared .pop-layer atom (app.css). */
   }
-  .sel-opt {
-    display: flex; align-items: center; gap: 8px; min-height: 36px; width: 100%; text-align: left;
-    background: none; border: none; border-radius: var(--control-radius); color: var(--text2);
-    padding: 6px 10px; font-size: var(--ui-font-control); cursor: pointer;
-    font-family: var(--font-ui);
-  }
-  /* Hover and the keyboard cursor are the SAME highlight — two different ones
-     read as two selections. */
-  .sel-opt:hover, .sel-opt.cur { background: var(--surface2); color: var(--text); }
   .sel-opt.sel { color: var(--accent-ink); }
-  .sel-opt :global(svg) { margin-left: auto; flex: none; color: var(--accent-ink); }
-  .so-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .so-hint { font-size: var(--fs-meta); color: var(--text3); font-family: inherit; }
   /* An option's icon (a backend logo): sized to the text line, never stretched. */
   .so-ico { flex: none; width: 15px; height: 15px; border-radius: 3px; object-fit: contain; }
 
-  /* Touch contract: a menu row is a tap target. */
-  @media (any-pointer: coarse) {
-    .sel-opt { min-height: 44px; }
-  }
   /* iOS (only) zooms a focused control below 16px. On Android this bump made
      a Select disagree with the fields beside it — and .dense (0,2,0) beat the
      old media rule anyway, so dense triggers never bumped while inputs did

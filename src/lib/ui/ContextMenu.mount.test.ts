@@ -8,13 +8,17 @@ test('controlled menu states are announced and disabled items cannot activate (#
   let calls = 0;
   const app = await (await compiled).mount(context, {
     props: { at: { x: 10, y: 10 }, items: [
-      { label: 'Hidden files', checked: false, onselect: () => {} },
+      { label: 'Hidden files', icon: 'folder', checked: false, onselect: () => {} },
       { label: 'Bookmark', checked: true, onselect: () => {} },
       { label: 'Delete', disabled: true, onselect: () => { calls++; } },
     ] }, modules: [],
   });
   try {
     const buttons = [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')];
+    for (const button of buttons) {
+      assert.equal(button.type, 'button', 'a menu action never submits an enclosing form (#165)');
+      assert.ok(button.querySelector('.menu-icon'), 'one icon column even on rows without an icon (#165)');
+    }
     assert.equal(buttons[0]?.getAttribute('role'), 'menuitemcheckbox');
     assert.equal(buttons[0]?.getAttribute('aria-checked'), 'false');
     assert.equal(buttons[1]?.getAttribute('aria-checked'), 'true');

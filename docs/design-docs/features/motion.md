@@ -369,6 +369,13 @@ sizes (owner declined).
   scrolling without a timer, animated overlay or new scroll engine; fitting
   and expanded lists have no mask. Keyed recency motion, input-held ordering
   and the parent reading-anchor transaction remain unchanged.
+- **Popup paint has one owner without merging interaction roles** (2026-09-12,
+  #165): shared menu frames/rows replace the ContextMenu/Select private
+  recipes; richer pickers and tooltips share only frame paint. `.pop-layer`
+  still owns measured readiness and origin, and row feedback uses `--t-fast`
+  with a reduced-motion rule. No private opacity gate, layout animation or
+  delayed style correction is added. Intrinsic width is resolved before
+  placement instead of repairing a width/position loop with another frame.
 - **Compact controls change paint, not motion or hit geometry** (2026-09-10,
   #160/#161): the owner's 14:19/14:58 words are recorded verbatim in
   [design-language.md](design-language.md#compact-paint-does-not-shrink-the-input-target-2026-09-10-160161).

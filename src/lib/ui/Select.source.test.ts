@@ -7,7 +7,7 @@ const style = source.match(/<style>([\s\S]*?)<\/style>/u)?.[1] ?? '';
 
 // #161 deliberately changes paint, not the actual trigger/anchor. Wrapping an
 // input in a second click owner would put IME, blur and outside-dismiss at risk.
-test('both Select modes use the shared inset field on the native trigger (#161)', () => {
+test('both Select modes use the shared inset field on the native trigger (#161)', async () => {
   assert.match(source, /<input class="sel-trigger control-field combo"/u);
   assert.match(source, /<button class="sel-trigger control-field"/u);
   assert.match(source, /anchor = anchorOf\(\(triggerEl \?\? inputEl\)!\)/u);
@@ -17,5 +17,8 @@ test('both Select modes use the shared inset field on the native trigger (#161)'
     'there is one field paint owner, not a page/Select override');
   assert.match(style, /button\.sel-trigger \{ --field-paint: transparent;/u,
     'a select-only value uses its chevron rather than another heavy box');
-  assert.match(style, /@media \(any-pointer: coarse\)[^]*?\.sel-opt \{ min-height: 44px;/u);
+  // #165 shares the row metrics without changing native trigger ownership.
+  const css = await readFile(new URL('../../app.css', import.meta.url), 'utf8');
+  assert.match(source, /class="sel-opt menu-item"/u);
+  assert.match(css, /@media \(any-pointer: coarse\) \{\s*:root \{ --menu-row-height: 44px/u);
 });

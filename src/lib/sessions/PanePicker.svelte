@@ -134,7 +134,7 @@
   }
 </script>
 
-<div class="picker pop-layer" class:ready={h > 0} role="dialog" aria-label={t('pickPane')} tabindex="-1"
+<div class="picker menu-surface pop-layer" class:ready={h > 0} role="dialog" aria-label={t('pickPane')} tabindex="-1"
   style:--pop-origin={anchorRect ? popOrigin(anchorRect, pos, align) : undefined}
   style:left="{pos.x}px" style:top="{pos.y}px"
   bind:this={el} bind:clientWidth={w} bind:clientHeight={h}>
@@ -187,10 +187,6 @@
     max-width: min(360px, calc(100vw / var(--ui-zoom, 1) - 16px));
     max-height: calc(60vh / var(--ui-zoom, 1));
     overflow-y: auto;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--ui-radius-panel);
-    box-shadow: 0 12px 40px rgba(0,0,0,0.4);
     padding: 6px;
     /* Visibility and the intro are the shared .pop-layer atom (app.css). */
   }

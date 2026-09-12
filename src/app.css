@@ -79,6 +79,15 @@ html {
   --control-icon-size: 16px;
   --control-line-height: 18px;
   --control-disabled-opacity: 0.4;
+  --menu-row-height: 28px;
+  --menu-font-size: var(--fs-ui);
+  --menu-padding: 5px;
+  --menu-gap: 2px;
+  --menu-item-gap: 8px;
+  --menu-item-padding-y: 4px;
+  --menu-item-padding-x: 10px;
+  --menu-icon-width: 16px;
+  --menu-shadow: 0 8px 24px var(--control-shadow), 0 2px 6px var(--control-shadow);
   --control-overlay-light: #ffffff;
   --control-overlay-dark: #000000;
   --config-width: 860px;
@@ -105,6 +114,7 @@ html {
 
 .compact-tools { --control-paint-inset: 4px; }
 @media (any-pointer: coarse) {
+  :root { --menu-row-height: 44px; --menu-font-size: var(--fs-body); }
   :root { --files-row-height: 44px; }
   .compact-tools { --control-paint-inset: 8px; }
 }
@@ -778,6 +788,46 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
      the first 150ms, so a fast load never flashes a skeleton. */
 .pop-layer { opacity: 0; pointer-events: none; transform: scale(0.96); transform-origin: var(--pop-origin, top right); }
 .pop-layer.ready { opacity: 1; pointer-events: auto; transform: none; transition: opacity var(--t-fast) ease-out, transform var(--t-fast) ease-out; }
+/* Menus share chrome, not option/menuitem/dialog semantics or width policies. */
+.menu-surface {
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--control-menu-radius);
+  box-shadow: var(--menu-shadow);
+}
+.menu-list {
+  --menu-warn-ink: color-mix(in srgb, var(--status-warn) 60%, var(--text));
+  padding: var(--menu-padding); display: flex; flex-direction: column; gap: var(--menu-gap);
+}
+.menu-item {
+  display: flex; align-items: center; gap: var(--menu-item-gap); flex: none;
+  min-width: 0; min-height: var(--menu-row-height); width: 100%; text-align: left;
+  padding: var(--menu-item-padding-y) var(--menu-item-padding-x);
+  background: none; border: 0; border-radius: var(--control-radius); color: var(--text);
+  font: 400 var(--menu-font-size)/var(--control-line-height) var(--font-ui); cursor: pointer; letter-spacing: 0;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.menu-item:not(:disabled):is(:hover, .cur) { background: var(--surface2); }
+.menu-item.warn { color: var(--menu-warn-ink); }
+.menu-item.warn:not(:disabled):is(:hover, .cur) {
+  color: var(--menu-warn-ink); background: color-mix(in srgb, var(--status-warn) 14%, transparent);
+}
+.menu-item.danger { color: var(--danger-ink); }
+.menu-item.danger:not(:disabled):is(:hover, .cur) { color: var(--danger-ink); background: var(--danger-bg); }
+.menu-item:disabled { opacity: var(--control-disabled-opacity); cursor: default; }
+.menu-heading {
+  flex: none; min-width: 0; padding: var(--menu-item-padding-y) var(--menu-item-padding-x);
+  font: 500 var(--fs-sub)/1.4 var(--font-ui); color: var(--text2); letter-spacing: 0;
+  overflow-wrap: anywhere; white-space: normal;
+}
+.menu-label { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+.menu-hint {
+  flex: 0 1 auto; min-width: 0; max-width: 40%; margin-left: auto;
+  font: 400 var(--fs-meta)/1.4 var(--font-ui); color: var(--text2); overflow-wrap: anywhere;
+}
+.menu-heading.data, .menu-hint.data { font-family: var(--font-mono); }
+.menu-icon { display: inline-grid; place-items: center; width: var(--menu-icon-width); height: var(--menu-icon-width); flex: none; }
+.menu-check { display: inline-grid; place-items: center; margin-left: auto; flex: none; color: var(--accent-ink); }
+.menu-hint + .menu-check { margin-left: 0; }
+@media (prefers-reduced-motion: reduce) { .menu-item { transition: none; } }
 .slide-pill {
   position: absolute; left: 0; top: 0; pointer-events: none;
   width: var(--ind-w, 0px); height: var(--ind-h, 0px); border-radius: var(--ui-radius-control);
@@ -890,7 +940,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 /* #161: compact controls use circular arcs; squircle would flatten their caps.
    The legacy list is zero-specificity so context selectors cannot defeat it. */
 :is(.command-button, .control-field, .config-input, .segmented, .segmented button,
-  .slide-pill.control, .sel-menu, .sel-opt, .dlg.confirm) {
+  .slide-pill.control, .menu-surface, .menu-item, .dlg.confirm) {
   corner-shape: round;
 }
 

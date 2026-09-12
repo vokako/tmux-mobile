@@ -28,7 +28,7 @@
 </script>
 
 {#if cur}
-  <div class="hover-card pop-layer" class:ready={h > 0} role="tooltip"
+  <div class="hover-card menu-surface pop-layer" class:ready={h > 0} role="tooltip"
     style:left="{pos.x}px" style:top="{pos.y}px" style:--pop-origin={origin}
     bind:clientWidth={w} bind:clientHeight={h}>
     {#if cur.info.title}<div class="hc-title">{cur.info.title}</div>{/if}
@@ -47,8 +47,7 @@
 <style>
   .hover-card {
     position: fixed; z-index: 70; max-width: 300px; min-width: 120px;
-    background: var(--bg); border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4); padding: 8px 10px;
+    padding: 8px 10px;
     display: flex; flex-direction: column; gap: 4px;
     font-size: var(--fs-ui); color: var(--text2);
   }
