@@ -143,6 +143,16 @@ doc already describes. Design decisions, in the order they bit:
   Team state reset by construction instead of by per-component sweeps. The
   caller cancels the reconnect machine and closes the socket FIRST — a live
   retry loop re-reads `tmux_address` and would race the writes.
+- **Single click switches; a pencil renames** (2026-09-12, #165, lead decision
+  01:32). The old 260ms click hold guessed whether another click would arrive
+  and delayed the requested switch, repeating the roster defect retired in
+  #168. The chooser now closes and invokes the same switch primitive at once;
+  choosing the current entry closes without reconnecting. Each row has an
+  explicitly named pencil command, disabled while that row is already being
+  edited. Rename still uses the existing name input and registry operation.
+  The timer, delayed-click functions and double-click handler are removed
+  whole. No alternate switch path, storage format or reconnect behavior is
+  introduced.
 - **An address switch shows on the row that was tapped** (review, 2026-09-03):
   App keeps `pendingAddress` from the moment `onAddress` dials until the
   connect settles either way (`.finally`, guarded so a second tap's pending

@@ -29,6 +29,7 @@
   import { anchorOf, menuPlacement, popOrigin, viewBox } from './lib/ui/placement.ts';
   import HoverCard from './lib/ui/HoverCard.svelte';
   import ContextMenu from './lib/ui/ContextMenu.svelte';
+  import CommandButton from './lib/ui/CommandButton.svelte';
   import { cycleItem, shortcutFromEvent, shortcutLabel } from './lib/app/shortcuts.ts';
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.ts';
   import { installExternalLinkHandler } from './lib/core/external-links.ts';
@@ -823,18 +824,6 @@
     if (applySwitch(localStorage, id)) location.reload();
     else serverMenuOpen = false; // stale row (entry vanished) — just close
   }
-  // Click switches, double-click renames — the same 260ms disambiguation the
-  // Hub's agent cards use (a dblclick's first click must not fire the switch,
-  // which would reload the page out from under the rename).
-  let smClickTimer = null;
-  function smRowClick(id) {
-    if (smClickTimer) { clearTimeout(smClickTimer); smClickTimer = null; return; }
-    smClickTimer = setTimeout(() => { smClickTimer = null; doServerSwitch(id); }, 260);
-  }
-  function smRowDbl(s) {
-    if (smClickTimer) { clearTimeout(smClickTimer); smClickTimer = null; }
-    serverRenameStart(s);
-  }
   /** Removing a saved server is DESTRUCTIVE (config + parked state gone for
    *  good), so it goes through the shared ConfirmDialog like every other
    *  discarding path (lead blocker #3; the × sits in a dense popover where a
@@ -1583,11 +1572,13 @@
               onblur={serverRenameCommit} />
           {:else}
             <button class="sm-pick" role="menuitem" title={s.address}
-              onclick={() => smRowClick(s.id)} ondblclick={() => smRowDbl(s)}>
+              onclick={() => { serverMenuOpen = false; doServerSwitch(s.id); }}>
               <span class="sm-name">{s.name}</span>
               <span class="sm-addr">{s.address}</span>
             </button>
           {/if}
+          <CommandButton variant="icon" icon="edit" label={`${t('serverRename')} ${s.name}`}
+            disabled={serverRenaming === s.id} onclick={() => serverRenameStart(s)} />
           {#if s.id === serverCurId}
             <span class="sm-check" title={t('serverCurrent')}><Icon name="check" size={13} /></span>
           {:else}
