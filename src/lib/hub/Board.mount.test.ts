@@ -116,3 +116,30 @@ test('a late Board deletion cannot close a newer visit to the same room (#167)',
     assert.equal(app.document.querySelector('[role=alertdialog]'), null);
   } finally { await app.close(); }
 });
+
+test('an older Board refresh cannot resurrect a subsequently deleted issue (#167)', async context => {
+  const second = { ...issue, id: 2, title: 'Second issue' };
+  let deletes = 0;
+  const reads: ((value: unknown) => void)[] = [];
+  const app = await (await compiled).mount(context, {
+    props: { session: 'fixture', visible: true },
+    setup(window) { window.Element.prototype.getAnimations = () => []; },
+    modules: [rpc({
+      boardList: () => deletes ? new Promise(yes => reads.push(yes)) : Promise.resolve({ issues: [issue, second] }),
+      boardGet: async (_session: string, id: number) => id === 1 ? issue : second,
+      boardDelete: async () => { deletes++; return {}; },
+    })],
+  });
+  try {
+    await askDelete(app); confirm(app).click(); await flush(app);
+    [...app.document.querySelectorAll<HTMLButtonElement>('.card')]
+      .find(card => card.textContent?.includes('Second issue'))!.click(); await flush(app);
+    app.document.querySelector<HTMLButtonElement>('[aria-label="Delete issue"]')!.click(); await app.flush();
+    confirm(app).click(); await flush(app);
+    assert.equal(reads.length, 2);
+    reads[1]!({ issues: [] }); await flush(app);
+    reads[0]!({ issues: [second] }); await flush(app);
+    assert.equal(deletes, 2);
+    assert.equal(app.document.querySelectorAll('.card').length, 0, 'old read cannot resurrect the deleted issue');
+  } finally { await app.close(); }
+});

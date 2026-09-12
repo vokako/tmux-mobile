@@ -583,7 +583,9 @@ test('load() is pinned to the board it was asked FOR — a stale response never 
   assert.ok(!/boardList\(cur\)|hubAgents\(cur\)/.test(load), 'no RPC in load() reads the LIVE cur');
   // Both awaited branches guard before writing — including the CATCH: an
   // error about a board we already left must not paint on the new one.
-  const guards = [...load.matchAll(/if \(cur !== s\) return;/g)].length;
+  assert.match(load, /const current = \(\) => cur === s && request === readSequence;/u,
+    '#167: an older read of the same room cannot resurrect a later deletion');
+  const guards = [...load.matchAll(/if \(!current\(\)\) return;/g)].length;
   assert.ok(guards >= 3, `every await (boardList ok/err, hubAgents ok) re-checks identity — found ${guards} guards`);
   assert.match(load, /countsMap = applyCounts\(countsMap, s, issues\);/u,
     'the counts fold names the FROZEN session, never live cur');

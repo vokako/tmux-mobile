@@ -22,6 +22,13 @@ Real Board mount tests reproduce the old pending-Back failure and Cancel
 wording, then verify retry, duplicate protection and successful-delete/
 failed-refresh separation. The latter was already correct and is retained
 as a regression guard, not claimed as a new repair.
+Once mutation and refresh are separate phases, a second deletion can finish
+before the first refresh returns. Review reproduced that old reply restoring
+the second deleted card. `load()` now gates publication by its request ID as
+well as the room, and successful deletion immediately removes its known row
+and updates counts before refreshing. The ordered-promise regression returns
+the newer empty list before the older populated list and requires it to stay
+empty; no mutation is replayed and no refresh queue is added.
 
 ### The project has ONE task board, and both species keep it
 

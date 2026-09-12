@@ -33,8 +33,8 @@
   // FOLLOW default — the last-touched session, same as Files — and a pick
   // here overrides it until the prop moves again.
   let cur = $state('');
-  let viewGeneration = 0;
-  onDestroy(() => { viewGeneration++; });
+  let viewGeneration = 0, readSequence = 0;
+  onDestroy(() => { viewGeneration++; readSequence++; });
   let picked = $state(false);      // a manual pick overrides the session follow
   // The Board sheet's own condition (≤760px — the old media gate, expressed
   // where the class is applied; see app.css .side-sheet).
@@ -223,9 +223,11 @@
     // whole; the switch effect already reset the view, and s's own next
     // reader is gone.
     const s = cur;
+    const request = ++readSequence;
+    const current = () => cur === s && request === readSequence;
     try {
       const r = await boardList(s);
-      if (cur !== s) return;
+      if (!current()) return;
       if (!ready) unfold(); // the first answer for this board, not a poll
       issues = r.issues;
       ready = true;
@@ -238,7 +240,7 @@
       // speaks. Keyed by the FROZEN session — the one the issues belong to.
       countsMap = applyCounts(countsMap, s, issues);
     } catch (e) {
-      if (cur !== s) return;
+      if (!current()) return;
       // A failed poll keeps the last board — "could not ask" ≠ "empty".
       err = String((e as Error)?.message ?? e);
     }
@@ -246,7 +248,7 @@
     // an assignment can be typed into). A failed read keeps the last roster.
     try {
       const a = await hubAgents(s);
-      if (cur !== s) return;
+      if (!current()) return;
       agents = a.agents.filter((x) => x.managed);
     } catch { /* keep */ }
   }
@@ -463,6 +465,8 @@
     pendingDelete = null;
     if (cur === cap.session) {
       if (sel?.id === cap.id) sel = null;
+      issues = issues.filter(issue => issue.id !== cap.id);
+      countsMap = applyCounts(countsMap, cap.session, issues);
       await load();
     }
   }
