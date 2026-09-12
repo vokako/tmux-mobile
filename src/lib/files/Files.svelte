@@ -1556,7 +1556,7 @@
       <CommandButton variant="icon" icon="arrow-left" label={t('back')} disabled={!canGoBack} onclick={popDir} />
       <CommandButton variant="icon" icon="arrow-right" label={t('forward')} disabled={!canGoForward} onclick={fwdDir} />
       <div class="bc-scroll" bind:this={bcPathEl}>
-      <button class="bc-seg" onclick={() => navTo('/', 'back')}>/</button>
+      <button class="bc-seg bc-root" onclick={() => navTo('/', 'back')}>/</button>
       {#each breadcrumbs as bc, i (bc.path)}
         <button class="bc-seg" class:appear={i === breadcrumbs.length - 1} onclick={() => navTo(bc.path, 'back')}
           use:hoverInfo={() => ({ title: bc.name, text: bc.path })}>{bc.name}</button>
@@ -1958,6 +1958,12 @@
     cursor: pointer; white-space: nowrap; font-size: var(--fs-ui); font-family: inherit;
     transition: color var(--t-fast);
   }
+  /* The root reads as the FIRST SEPARATOR, not as a wide first crumb: the
+     segment min-width put its glyph 15 px from "local" where every other
+     glyph sits 5 px from its neighbours (measured, board #187: "首个 / 斜线
+     后边的文件夹间距比较大"). It keeps the row's touch height; its width is
+     the glyph's. */
+  .bc-seg.bc-root { min-width: 0; padding-right: 0; color: var(--text3); font-size: var(--fs-sub); }
   .bc-seg:last-of-type { color: var(--accent); }
   .bc-sep { color: var(--text3); font-size: var(--fs-sub); }
 

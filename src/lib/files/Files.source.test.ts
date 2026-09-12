@@ -220,3 +220,11 @@ test('the path row scrolls; its segments never squash (board #185)', () => {
   assert.match(seg, /flex-shrink: 0;/u, 'a breadcrumb segment never shrinks below its text');
   assert.match(source, /\.bc-scroll \{[^}]*overflow-x: auto;/u, 'the crumb strip scrolls instead');
 });
+
+test('the root reads as the first separator, not a wide first crumb (board #187)', () => {
+  // Owner 2026-09-12: "首个 / 斜线后边的文件夹间距比较大，整体看的不是很和谐".
+  // Measured: the segment min-width put the root glyph 15 px from "local"
+  // where every other glyph sits 5 px from its neighbours; after, 5/5/5.
+  assert.match(source, /<button class="bc-seg bc-root" onclick=\{\(\) => navTo\('\/', 'back'\)\}>\/<\/button>/u);
+  assert.match(source, /\.bc-seg\.bc-root \{ min-width: 0; padding-right: 0; color: var\(--text3\); font-size: var\(--fs-sub\); \}/u);
+});

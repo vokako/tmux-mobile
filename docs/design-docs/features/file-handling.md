@@ -22,6 +22,15 @@ each other. `.bc-seg { flex-shrink: 0 }`: a segment keeps its width and the
 row does the moving (after: 0 squashed segments, `scrollLeft` 489 of 878 at
 390 px). `Files.source.test.ts` pins both halves.
 
+The root reads as the FIRST SEPARATOR, not as a wide first crumb (board #187,
+owner: "首个 / 斜线后边的文件夹间距比较大，整体看的不是很和谐"): the segment
+min-width put the root glyph 15 px from "local" where every other glyph sits
+5 px from its neighbours (measured in Chromium); `.bc-seg.bc-root` drops the
+min-width and right padding and wears the separator's colour and size, so the
+row reads `/ local / home / …` at one rhythm (after: 5/5/5). It keeps the
+row's touch height; its width is the glyph's — the root is one tap away by
+the row's own scroll and rarely the destination.
+
 ### Compact rows and contextual actions (#164, 2026-09-11)
 
 Owner, 03:00, verbatim:
