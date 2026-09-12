@@ -64,7 +64,14 @@
   });
   const { loadHljs, renderPdf, renderMermaidBlocks, resolveImages, attachHtmlPreviewLinks } = renderers;
 
-  let { session = '', onGoBack = null, visible = false, fontSize = 14, singlePane = false, navRequest = null, jumped = false, currentDir = $bindable('') } = $props();
+  // `root` is the PROJECT'S DECLARED PATH (board #181, owner 2026-09-12: "你应该
+  // 默认从我们选定的项目路径去跑"): when set, it is where this instance starts and
+  // the source the follow rule watches — never the pane cwd, which is an
+  // accident of whatever the user last touched in tmux (a zsh window, an
+  // agent in a worktree). Empty = no declaration (a direct/adopted session):
+  // follow the pane cwd, the pre-#181 rule. The Session-directory tool
+  // (goSessionDir) keeps offering the pane cwd explicitly either way.
+  let { session = '', root = '', onGoBack = null, visible = false, fontSize = 14, singlePane = false, navRequest = null, jumped = false, currentDir = $bindable('') } = $props();
   const panelId = $props.id();
   const LIST_WIDTH = { min: 320, max: 520, default: 400 };
   $effect(() => {
@@ -631,7 +638,10 @@
     const sourceSession = session;
     const sourceRequest = navRequest;
     const handoff = !!sourceRequest && sourceRequest.n !== lastNav;
-    fsCwd(sourceSession).then(r => {
+    // Declaration over pane accident: a declared root IS the source; only a
+    // session without one asks tmux where its active pane is.
+    const source = root ? Promise.resolve({ path: root }) : fsCwd(sourceSession);
+    source.then(r => {
       if (session !== sourceSession || navRequest !== sourceRequest) return;
       // The follow is DISARMED before it asks (lastSourceDir moves first): a
       // cancelled follow is skipped for this event, not queued — the next

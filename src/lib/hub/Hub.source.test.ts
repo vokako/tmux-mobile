@@ -49,7 +49,8 @@ test('Hub keeps the Drawer mount gate, durable state and navigation authority (#
   assert.match(source, /onexpand=\{\(\) => \(winsExpanded = !winsExpanded\)\}/u);
   assert.match(source, /termTarget = ''; termCommand = ''; winsExpanded = false;/u);
   assert.match(source, /onterminal=\{\(\) => \{ const m = [^]*?if \(m\) openTerminal\(selected, termTarget, termCommand\); \}\}/u);
-  assert.match(source, /onfiles=\{\(\) => openFilesTab\?\.\(selected, drawerFilesDir\)\}/u);
+  // #181: maximize hands the parked position, else the project's declared path.
+  assert.match(source, /onfiles=\{\(\) => openFilesTab\?\.\(selected, drawerFilesDir \|\| projectPath\)\}/u);
   assert.match(source, /onboard=\{\(\) => openBoardTab\?\.\(selected\)\}/u);
   assert.match(source, /drawerBoardNew = \{ n: \(drawerBoardNew\?\.n \?\? 0\) \+ 1 \}/u);
   assert.doesNotMatch(source, /<Terminal |<Files |<Board |function pillInfo|const winPills/u);

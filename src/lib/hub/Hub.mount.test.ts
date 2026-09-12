@@ -1324,3 +1324,68 @@ test('Feed settles image load/error before reapplying live tail intent', { timeo
     assert.ok(writes.every((w) => w === 'failed'), 'the failed fallback is rendered before measuring/writing the tail');
   } finally { await app.close(); }
 });
+
+test('Files opened from a project Chat starts at the DECLARED project path, not the active pane cwd (board #181)', { timeout: 60000 }, async context => {
+  // Owner, 2026-09-12: "你应该默认从我们选定的项目路径去跑". fs_cwd answers with
+  // whatever pane happens to be active in tmux (a worktree here); the project
+  // declares /declared. Declaration over pane accident (tenets 7/9).
+  const fixture = await compiledHub();
+  const { rpc } = roomFixture();
+  const listed: string[] = [];
+  const stated: string[] = [];
+  const routes: unknown[][] = [];
+  const mountHub = (mobile: boolean) => fixture.mount(context, {
+    props: { visible: true, mobile, openFilesTab: (...args: unknown[]) => routes.push(args) },
+    setup(window) { window.Element.prototype.getAnimations = () => []; window.HTMLCanvasElement.prototype.getContext = () => null; },
+    modules: [{
+      ...rpc,
+      projectList: async () => ({ projects: [{ project: { id: 'fixture', name: 'Fixture', session: 'fixture', path: '/declared' }, live: true, slots: [] }] }),
+      hubLog: async () => ({ messages: [{ id: 'm1', seq: 1, ts: 100, from: 'alice', body: 'see [the plan](docs/plan.md)' }], has_more: false }),
+      fsCwd: async () => ({ path: '/pane/worktree' }),
+      fsList: async (path: string) => { listed.push(path); return { path, entries: path === '/declared' ? [{ name: 'docs', path: '/declared/docs', type: 'dir', size: 0 }] : [] }; },
+      fsStat: async (path: string) => { stated.push(path); return { path, is_text: true, readable: true, writable: false, size: 1, mime_hint: 'text/markdown' }; },
+      fsRead: async () => ({ content: '# plan' }),
+      getPrefs: async () => ({}), setPref: async () => ({}), getBookmarks: async () => ({ bookmarks: [] }), gitCmd: async () => ({ code: 1 }),
+    }],
+  });
+  const app = await mountHub(false);
+  try {
+    const settle = async (n = 12) => { for (let i = 0; i < n; i++) await app.flush(); };
+    for (let i = 0; i < 12 && !app.document.querySelector('.h1-text')?.textContent; i++) await app.flush();
+    const files = () => app.document.querySelector<HTMLButtonElement>('.page-head [aria-label="Files"]')!;
+    // 1. Open Files: the first listing is the declared path.
+    files().click();
+    await settle();
+    assert.ok(app.document.querySelector('.drawer .file-list'), 'the Files partition opened');
+    assert.equal(listed[0], '/declared', `first listing is the project path, got ${listed.join(' → ')}`);
+    assert.ok(!listed.includes('/pane/worktree'), 'the pane cwd is never the default');
+    // 2. Browse into docs, close, reopen: the parked position still wins.
+    app.document.querySelector<HTMLButtonElement>('.drawer .file-row .file-main')!.click();
+    await settle();
+    assert.equal(listed.at(-1), '/declared/docs');
+    // Closing withdraws over moveMs (#174): the Drawer unmounts — and parks
+    // its position — only after the move.
+    const close = async () => { files().click(); await settle(); await app.advance(400); await settle(); };
+    await close();
+    assert.equal(app.document.querySelector('.drawer'), null);
+    listed.length = 0;
+    files().click(); await settle();       // reopen
+    assert.equal(listed[0], '/declared/docs', 'a parked browse position wins over the default (file-handling.md)');
+    assert.ok(!listed.includes('/declared'), 'and the default does not yank it back');
+    await close();
+    // 3. A relative path reference in chat resolves against the project path.
+    const link = app.document.querySelector<HTMLAnchorElement>('.feed a[href="docs/plan.md"]')!;
+    assert.ok(link, 'the relative reference rendered as a link');
+    link.click();
+    await settle();
+    assert.equal(stated.at(-1), '/declared/docs/plan.md', `relative refs resolve against the project, got ${stated.join(' → ')}`);
+  } finally { await app.close(); }
+  // 4. The phone route hands the declared path to the Files page.
+  const phone = await mountHub(true);
+  try {
+    for (let i = 0; i < 12 && !phone.document.querySelector('.h1-text')?.textContent; i++) await phone.flush();
+    phone.document.querySelector<HTMLButtonElement>('.page-head [aria-label="Files"]')!.click();
+    for (let i = 0; i < 6; i++) await phone.flush();
+    assert.deepEqual(routes.at(-1), ['fixture', '/declared'], 'compact: the page is asked to start at the project path');
+  } finally { await phone.close(); }
+});

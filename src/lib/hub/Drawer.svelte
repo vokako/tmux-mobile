@@ -11,6 +11,8 @@
 
   let {
     compact = false, visible = false, fontSize = 14, selected = '',
+    /** The project's declared path — where its Files partition starts (board #181). */
+    projectPath = '',
     termTarget = '', termCommand = '', drawerView = 'term',
     drawerFilesReq = null, drawerIssueReq = null, drawerBoardNew = null,
     agents = [], panes = [], managedAgents = [], winsExpanded = false,
@@ -100,7 +102,7 @@
     <!-- Per-project cwd is Files' own parked-position map (module-scoped,
          keyed by session), so each project wakes up where you left it. -->
     <div class="files-body appear">
-      <Files session={selected} visible={visible} {fontSize} singlePane jumped onGoBack={onfilesback} navRequest={drawerFilesReq} bind:currentDir={drawerFilesDir} />
+      <Files session={selected} root={projectPath} visible={visible} {fontSize} singlePane jumped onGoBack={onfilesback} navRequest={drawerFilesReq} bind:currentDir={drawerFilesDir} />
     </div>
   {/if}
   {#if drawerView === 'board'}

@@ -273,3 +273,28 @@ test('Copy path cannot report success when both clipboard paths fail (#164)', as
     assert.match(app.document.body.textContent ?? '', /Copy failed/);
   } finally { await app.close(); }
 });
+
+test('without a declared root Files follows the pane cwd; with one it starts there and never asks fs_cwd (board #181)', async context => {
+  const fixture = await compiled;
+  const listed: string[] = [];
+  let cwdAsked = 0;
+  const modules = () => [rpc({
+    fsCwd: async () => { cwdAsked++; return { path: '/pane' }; },
+    fsList: async (path: string) => { listed.push(path); return { path, entries: [] }; },
+  })];
+  // No project declaration (a direct/adopted session): the pane cwd is the fallback.
+  const loose = await fixture.mount(context, { props: { visible: true, session: 'loose' }, modules: modules() });
+  try {
+    await settle(loose);
+    assert.equal(listed[0], '/pane');
+    assert.ok(cwdAsked >= 1);
+  } finally { await loose.close(); }
+  listed.length = 0; cwdAsked = 0;
+  // A project: its declared path is the start, and fs_cwd is not consulted.
+  const declared = await fixture.mount(context, { props: { visible: true, session: 'proj', root: '/declared' }, modules: modules() });
+  try {
+    await settle(declared);
+    assert.equal(listed[0], '/declared');
+    assert.equal(cwdAsked, 0, 'the declaration is the truth; the pane is not asked');
+  } finally { await declared.close(); }
+});

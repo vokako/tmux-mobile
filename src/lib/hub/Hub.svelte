@@ -151,9 +151,13 @@
     const target = selected;
     let file = raw;
     // A relative reference is relative to the PROJECT — the same base the
-    // agents' own paths mean. (~ passes through; the server expands it.)
+    // agents' own paths mean. (~ passes through; the server expands it.) The
+    // declared path is that base (board #181); only a session without a
+    // declaration falls back to asking where its active pane is.
     if (!file.startsWith('/') && !file.startsWith('~')) {
-      try { const r = await fsCwd(target); if (r.path) file = resolvePathRef(r.path, file); } catch {}
+      const base = projectPath;
+      if (base) file = resolvePathRef(base, file);
+      else { try { const r = await fsCwd(target); if (r.path) file = resolvePathRef(r.path, file); } catch {} }
     }
     if (selected !== target) return;
     if (mobile || compact) { openFilesTab?.(target, '', file); return; }
@@ -179,6 +183,12 @@
   let lastTs = 0;
 
   const selectedRow = $derived(rows.find((r) => r.project.session === selected) ?? null);
+  /** The project's DECLARED path — where Files opened from this room starts
+   * and what a relative path reference resolves against (board #181, owner
+   * 2026-09-12: "你应该默认从我们选定的项目路径去跑"). The active pane's cwd is
+   * an accident of what was last touched in tmux; it stays the explicit
+   * Session-directory tool and the fallback for a session with no project. */
+  const projectPath = $derived(selectedRow?.project.path ?? '');
   const liveSelected = $derived(!!selectedRow?.live);
   const managedAgents = $derived(agents.filter((a) => a.managed));
   // The names `deliver_mentions` can type into — the roster the room-note
@@ -1566,7 +1576,7 @@
           expanded={mobile || compact ? undefined : termOpen && drawerView === 'files'}
           controls={mobile || compact || !drawerShown ? undefined : drawerId}
           onclick={() => {
-            if (mobile || compact) { openFilesTab?.(selected, drawerFilesDir); return; }
+            if (mobile || compact) { openFilesTab?.(selected, drawerFilesDir || projectPath); return; }
             if (termOpen && drawerView === 'files') { closeDrawer(); } else { drawerView = 'files'; openDrawer(); }
           }} />
         <!-- THE terminal affordance: a button, not a permanent pane. Adding an
@@ -1651,13 +1661,13 @@
          grid item the reveal pins; the Drawer inside never changes size
          while the track moves (board #174). ── -->
     <div class="track drawer-track" id={drawerId} bind:this={drawerTrackEl}>
-    <Drawer {compact} {visible} {fontSize} {selected} {termTarget} {termCommand}
+    <Drawer {compact} {visible} {fontSize} {selected} {projectPath} {termTarget} {termCommand}
       {drawerView} {drawerFilesReq} {drawerIssueReq} {drawerBoardNew}
       {agents} {panes} {managedAgents} {winsExpanded} {stateLabel} {stateTone}
       bind:drawerFilesDir onpick={pickWindow} onclose={closeDrawer}
       onexpand={() => (winsExpanded = !winsExpanded)}
       onterminal={() => { const m = /^(.+):(\d+)\.(\d+)$/.exec(termTarget); if (m) openTerminal(selected, termTarget, termCommand); }}
-      onfiles={() => openFilesTab?.(selected, drawerFilesDir)}
+      onfiles={() => openFilesTab?.(selected, drawerFilesDir || projectPath)}
       onboard={() => openBoardTab?.(selected)}
       onnewissue={() => (drawerBoardNew = { n: (drawerBoardNew?.n ?? 0) + 1 })}
       onfilesback={(back) => { drawerFilesBack = back; }} />

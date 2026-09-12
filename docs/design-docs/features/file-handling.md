@@ -146,6 +146,10 @@ Tauri opens links through `plugin-opener`; browser mode uses a separate
 `noopener` tab. A Tauri opener error is reported and never falls back to
 `window.open`, which could create another in-app WebView.
 
+### Files opened from a project starts at the DECLARED path (board #181, 2026-09-12)
+
+Owner: "现在从 Agent 的对话页面跳转到文件时，路径有时候不太对，没有获取到当前项目真正的路径。不知道你是从 Z shell 还是从哪里读取的路径？你应该默认从我们选定的项目路径去跑，路径问题要注意一下". Every "where am I" for Files came from `fs_cwd(session)` — tmux's `pane_current_path` of the session's ACTIVE pane — and which pane is active is an accident of what was last touched in tmux: a zsh window, an agent whose cwd is a worktree under `~/work/worktrees`, a task window. The layer is the declaration, not the pane (tenets 7/9: a project declares its PATH; the running session is a projection): the Files partition or tab opened from a project's Chat starts at `project.path` (`Files` prop `root`, plumbed Hub → Drawer → Files and, on the compact route, as `openFilesTab`'s path), and a relative path reference in chat resolves against it. A declared `root` is the source the cwd-follow rule watches, so `fs_cwd` is not even asked; only a session with no project declaration (direct/adopted) follows the pane cwd as before, and the pane cwd stays one tap away as the explicit Session-directory tool (`goSessionDir`). A parked browse position for that room still wins once the user navigated. `Hub.mount.test.ts` mounts a project at `/declared` against an `fs_cwd` of `/pane/worktree`: the first listing is `/declared`, a browse into `docs` survives close/reopen, `[the plan](docs/plan.md)` stats `/declared/docs/plan.md`, and the phone route receives `/declared`; `Files.mount.test.ts` pins the no-root fallback and that a root never asks `fs_cwd`.
+
 ### File references stay in Files (#106, 2026-09-09)
 
 Root cause: the document's **capture** external-link handler used resolved
@@ -156,8 +160,9 @@ programmatic open. Reproduced on Chromium 152.0.7977.64 against the current
 `:5173` module, not inferred from an old client.
 
 `core/path-links.ts` owns path classification, line-suffix stripping, URI
-decoding and filesystem-relative resolution. Hub uses the project cwd; all
-Files previews use the source document's directory. Plain, Cmd/Ctrl and
+decoding and filesystem-relative resolution. Hub uses the project's declared
+path (board #181; the pane cwd only for a session without one); all Files
+previews use the source document's directory. Plain, Cmd/Ctrl and
 middle clicks route through the same handler. The preview body covers
 Markdown, converted HTML and other rendered content; the sandbox HTML
 iframe installs that same handler on its own document because events cannot
