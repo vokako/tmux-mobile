@@ -9,7 +9,7 @@ function harness() {
   const events: string[] = [];
   const queue = createKeyQueue({
     send: (target, keys, literal) => { sends.push([target, keys, literal]); return new Promise<void>((resolve, reject) => pending.push({ resolve, reject })); },
-    onSuccess: () => events.push('ok'), onFailure: () => events.push('fail'), dbg: (m) => events.push(m),
+    onSuccess: (pane) => events.push('ok:' + pane), onFailure: (pane) => events.push('fail:' + pane), dbg: (m) => events.push(m),
   });
   return { queue, sends, pending, events };
 }
@@ -47,7 +47,7 @@ test('a failed send drops everything queued behind it; the cap drops the newest 
   queue.enqueue('A', 'Up', false);
   pending[0]!.reject(new Error('link down')); await settle();
   assert.deepEqual(sends, [['A', 'a', true]], 'nothing replayed after the failure');
-  assert.ok(events.includes('fail'));
+  assert.ok(events.includes('fail:A'));
   const small = createKeyQueue({ send: () => new Promise(() => {}), onSuccess() {}, onFailure() {}, dbg: (m) => events.push(m), max: 2 });
   small.enqueue('A', 'Up', false); small.enqueue('A', 'Up', false); small.enqueue('A', 'Up', false); small.enqueue('A', 'Up', false);
   assert.equal(small.length, 2, 'one in flight, two queued (the cap counts what waits), the fourth dropped');
@@ -63,7 +63,7 @@ test('the paste fallback types into the pane that was pasted into, even after a 
   const done = pasteOrFallback('A', 'ls\r', {
     paste: () => new Promise((_, rj) => { reject = rj; }),
     enqueue: (target, keys, literal) => enqueued.push([target, keys, literal]),
-    onSuccess: () => events.push('ok'), onFailure: (k) => events.push('fail:' + k),
+    onSuccess: (pane) => events.push('ok:' + pane), onFailure: (k, pane) => events.push('fail:' + k + ':' + pane),
   });
   // (the caller's live target has moved to B meanwhile — irrelevant to the captured pane)
   reject(Object.assign(new Error('method not found'), { code: -32601 }));
@@ -72,9 +72,32 @@ test('the paste fallback types into the pane that was pasted into, even after a 
   assert.deepEqual(events, []);
   // Any other failure is a paste failure, not a retype.
   const enqueued2: unknown[] = []; const events2: string[] = [];
-  await pasteOrFallback('A', 'x', { paste: () => Promise.reject(new Error('boom')), enqueue: (...a) => enqueued2.push(a), onSuccess: () => events2.push('ok'), onFailure: (k) => events2.push('fail:' + k) });
-  assert.deepEqual(enqueued2, []); assert.deepEqual(events2, ['fail:paste']);
+  await pasteOrFallback('A', 'x', { paste: () => Promise.reject(new Error('boom')), enqueue: (...a) => enqueued2.push(a), onSuccess: (pane) => events2.push('ok:' + pane), onFailure: (k, pane) => events2.push('fail:' + k + ':' + pane) });
+  assert.deepEqual(enqueued2, []); assert.deepEqual(events2, ['fail:paste:A'], 'the paste failure names its pane — the host mutes it once the user has moved on');
   const events3: string[] = [];
-  await pasteOrFallback('A', 'x', { paste: () => Promise.resolve(), enqueue: () => { throw new Error('no'); }, onSuccess: () => events3.push('ok'), onFailure: (k) => events3.push('fail:' + k) });
-  assert.deepEqual(events3, ['ok']);
+  await pasteOrFallback('A', 'x', { paste: () => Promise.resolve(), enqueue: () => { throw new Error('no'); }, onSuccess: (pane) => events3.push('ok:' + pane), onFailure: (k, pane) => events3.push('fail:' + k + ':' + pane) });
+  assert.deepEqual(events3, ['ok:A']);
+});
+
+test("an old pane's late failure neither drops the new pane's keys nor speaks for it (board #190, codex's reset-boundary repro)", async () => {
+  const { queue, sends, pending, events } = harness();
+  queue.enqueue('A', 'a', true);            // in flight to A
+  queue.reset();                            // switch to B
+  queue.enqueue('B', 'b', true);            // typed into B, waiting behind A's send
+  pending[0]!.reject(new Error('link down')); await settle();
+  assert.deepEqual(sends, [['A', 'a', true], ['B', 'b', true]], "B's key is still sent — the failure belonged to A's generation");
+  assert.deepEqual(events.filter(e => e.startsWith('fail')), ['fail:A'], 'the failure names the pane it was for; the host decides whether B hears it');
+  assert.equal(queue.length, 0);
+  pending[1]!.resolve(); await settle();
+  assert.deepEqual(events.filter(e => e.startsWith('ok')), ['ok:B']);
+});
+
+test('a failure inside the current generation still drops what waits behind it (board #190)', async () => {
+  const { queue, sends, pending } = harness();
+  queue.enqueue('A', 'a', true);
+  queue.enqueue('A', 'Up', false);
+  queue.enqueue('A', 'Up', false);
+  pending[0]!.reject(new Error('link down')); await settle();
+  assert.deepEqual(sends, [['A', 'a', true]]);
+  assert.equal(queue.length, 0);
 });

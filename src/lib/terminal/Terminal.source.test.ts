@@ -419,4 +419,8 @@ test('input never retargets: each queued key carries its pane; the paste fallbac
   // The defect: the -32601 catch ran after a round trip and read the LIVE target.
   assert.doesNotMatch(source, /-32601\) \{ enqueueKeys\(data, true\); return; \}/u, 'the fallback must not read the live target after the await');
   assert.match(source, /pasteOrFallback\(target, data, \{/u, 'the pasted pane is captured at the call');
+  // Feedback is the pane's on screen: an outcome for a pane the user left is muted (codex's reset-boundary repro).
+  assert.match(source, /const forThisPane = \(pane, note\) => \{ if \(pane === target\) note\(\); \};/u);
+  assert.match(source, /onSuccess: \(pane\) => forThisPane\(pane, noteSendSuccess\),\s*onFailure: \(pane\) => forThisPane\(pane, \(\) => noteSendFailure\('key'\)\),/u);
+  assert.match(source, /onFailure: \(kind, pane\) => forThisPane\(pane, \(\) => noteSendFailure\(kind\)\),/u);
 });

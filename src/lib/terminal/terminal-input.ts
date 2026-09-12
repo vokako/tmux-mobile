@@ -10,26 +10,32 @@ export type SendKeys = (target: string, keys: string, literal: boolean) => Promi
 
 interface QueueDeps {
   send: SendKeys;
-  onSuccess: () => void;
-  onFailure: () => void;
+  /** Completion, named with the PANE the input was for — the host decides
+   * whether the pane the user now looks at should hear it. */
+  onSuccess: (pane: string) => void;
+  onFailure: (pane: string) => void;
   dbg?: (message: string) => void;
   /** Saturation cap (long-press repeat on a dead-slow link); default 64. */
   max?: number;
 }
 
-interface Item { target: string; keys: string; literal: boolean }
+interface Item { target: string; keys: string; literal: boolean; gen: number }
 
 /** One send_keys in flight at a time; keys pressed meanwhile queue up, and
  * consecutive LITERAL chars for the SAME pane merge into one string (tmux
  * send-keys -l applies it as one write). Special keys never merge but still
  * serialize, so their order against typed chars holds. A failure drops
  * everything queued behind it — replaying seconds-old keystrokes after a
- * reconnect is worse than losing them. `reset()` is the pane switch: queued
- * keys belonged to the previous pane. */
+ * reconnect is worse than losing them — but only what waits in the SAME
+ * generation: `reset()` is the pane switch and opens a new one, so a send
+ * that was in flight for the old pane cannot, by failing late, drop the keys
+ * the user has since typed into the new pane (codex's reset-boundary repro,
+ * board #190). Its outcome is still reported, named with its own pane. */
 export function createKeyQueue(deps: QueueDeps) {
   const max = deps.max ?? 64;
   let items: Item[] = [];
   let sending = false;
+  let gen = 0;
 
   async function pump() {
     if (sending) return;
@@ -38,11 +44,11 @@ export function createKeyQueue(deps: QueueDeps) {
       const item = items.shift()!;
       try {
         await deps.send(item.target, item.keys, item.literal);
-        deps.onSuccess();
+        deps.onSuccess(item.target);
       } catch (e) {
         deps.dbg?.(`input: sendKeys FAILED: ${(e as Error)?.message ?? e}`);
-        deps.onFailure();
-        items = [];
+        deps.onFailure(item.target);
+        if (item.gen === gen) items = [];
       }
     }
     sending = false;
@@ -59,11 +65,11 @@ export function createKeyQueue(deps: QueueDeps) {
         deps.dbg?.('input: key queue full — dropping key');
         return;
       } else {
-        items.push({ target, keys, literal });
+        items.push({ target, keys, literal, gen });
       }
       void pump();
     },
-    reset(): void { items = []; },
+    reset(): void { items = []; gen++; },
     get length(): number { return items.length; },
     get sending(): boolean { return sending; },
   };
@@ -72,8 +78,9 @@ export function createKeyQueue(deps: QueueDeps) {
 interface PasteDeps {
   paste: (target: string, data: string) => Promise<unknown>;
   enqueue: (target: string, keys: string, literal: boolean) => void;
-  onSuccess: () => void;
-  onFailure: (kind: 'paste') => void;
+  /** Completion, named with the pasted pane (see QueueDeps). */
+  onSuccess: (pane: string) => void;
+  onFailure: (kind: 'paste', pane: string) => void;
 }
 
 /** Paste through tmux's paste buffer; a pre-paste_text server (-32601,
@@ -84,9 +91,9 @@ interface PasteDeps {
 export async function pasteOrFallback(pane: string, data: string, deps: PasteDeps): Promise<void> {
   try {
     await deps.paste(pane, data);
-    deps.onSuccess();
+    deps.onSuccess(pane);
   } catch (e) {
     if ((e as { code?: number })?.code === -32601) { deps.enqueue(pane, data, true); return; }
-    deps.onFailure('paste');
+    deps.onFailure('paste', pane);
   }
 }

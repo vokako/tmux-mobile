@@ -66,6 +66,17 @@ keys, hidden-frame recording and the failure feedback are untouched.
 switch, then a key for B, reaches A then B; a `-32601` rejection after the
 switch re-types into A.
 
+**The reset is a GENERATION, and feedback is the pane's on screen** (codex's
+reset-boundary repro at #167 integration, same day): with the first cut,
+"enqueue A, reset(), enqueue B, reject A" dropped B (drop-on-failure emptied
+the queue the new pane had just filled) and fired the failure toast in B's
+face for A's send. Now `reset()` opens a new generation and a failure drops
+only what waits in ITS OWN generation; every completion — queue and paste —
+is reported with the pane it was for, and Terminal's `forThisPane` lets only
+the pane on screen hear it. The tests pin both: B's key is still sent after
+A's late failure and the failure names A; a failure inside the current
+generation still drops what waits behind it.
+
 ### Auto-pair textarea force-clear
 
 (all platforms, was mobile-only): Force-clear xterm's hidden textarea after keyboard input (NOT paste, NOT mid-IME-composition). Use `paste` event flag to distinguish — NEVER use `data.length` (auto-paired `""` `()` have length 2, gets misclassified as paste). Composition needs TWO signals: `compositionstart/end` listeners AND per-event `insertCompositionText` inputType — some Android IMEs (Samsung/pad suggestion-bar keyboards) compose without ever firing compositionstart. `compositionend` must reset BOTH flags: Chromium commits as input(insertCompositionText) → compositionend with no trailing input event, so a sticky per-event flag would permanently suppress the clear for standard IMEs (GBoard).

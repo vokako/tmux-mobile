@@ -803,8 +803,8 @@
         void pasteOrFallback(target, data, {
           paste: pasteText,
           enqueue: (pane, keys, literal) => enqueueKeys(keys, literal, pane),
-          onSuccess: noteSendSuccess,
-          onFailure: noteSendFailure,
+          onSuccess: (pane) => forThisPane(pane, noteSendSuccess),
+          onFailure: (kind, pane) => forThisPane(pane, () => noteSendFailure(kind)),
         });
         return;
       }
@@ -1578,10 +1578,13 @@
   // tested module terminal-input.ts; every item carries the pane it was typed
   // into (board #190), so a send that lands after a pane switch still goes
   // where the user typed.
+  // Feedback is scoped to the pane on screen: an outcome that arrives for a
+  // pane the user has since left is not this pane's news (board #190).
+  const forThisPane = (pane, note) => { if (pane === target) note(); };
   const keyQueue = createKeyQueue({
     send: sendKeys,
-    onSuccess: noteSendSuccess,
-    onFailure: () => noteSendFailure('key'),
+    onSuccess: (pane) => forThisPane(pane, noteSendSuccess),
+    onFailure: (pane) => forThisPane(pane, () => noteSendFailure('key')),
     dbg: (message) => window.__dbg?.(message),
   });
 
