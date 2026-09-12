@@ -29,6 +29,16 @@ test('Drawer renders its original window list, real partitions and single head',
   assert.equal(empty.querySelector('.win-pill.more')?.textContent?.trim(), '+2');
   assert.equal(empty.querySelector('.direct-tag')?.textContent, 'direct');
   assert.ok(empty.querySelector('.win-pill .live-dot'));
+  // Board #179: the head's running count and the pill's live dot are ONE
+  // definition (stateIsLive). The state is 'running' today ('working' is the
+  // pre-2026-08 name, still accepted); the count read `=== 'working'` and
+  // showed "3 · 0 running" beside a live dot.
+  const live = view({ managedAgents: [
+    { name: 'devops', window: 5, agent: 'codex', managed: true, state: 'running' },
+    { name: 'builder', window: 6, agent: 'claude', managed: true, state: 'waiting' },
+    { name: 'legacy', window: 7, agent: 'kiro', managed: true, state: 'working' },
+  ] });
+  assert.equal(live.querySelector('.d-count')?.textContent?.trim(), '3 · 2 running', 'running and legacy working both count; waiting does not');
   assert.equal(empty.querySelector('.win-pill')?.getAttribute('aria-pressed'), 'false');
   const commands = empty.querySelectorAll('.drawer-head .command-button');
   assert.equal(commands.length, 2, '#166: maximize and close share the command owner');

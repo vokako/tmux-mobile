@@ -11,7 +11,7 @@
   import { selectionClickGuard } from '../ui/native-context-menu.ts';
   import { boxFromOffsets } from '../ui/indicator.ts';
   import { heldAnchor, readingDirection, refoldEligible, sameReadingSize } from './hub-reading.ts';
-  import { TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, mentionedAgents, splitImages, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, perLineOf, STEPS_ROWS } from './hub.ts';
+  import { TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, mentionedAgents, splitImages, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, perLineOf, STEPS_ROWS, stateIsLive } from './hub.ts';
 
   let {
     blocks = [], agents = [], managedNames = [], selected = '', visible = false, compact = false,
@@ -487,7 +487,7 @@
   }
   const isRunning = (b) =>
     b.key === newestSteps[b.window] &&
-    ['running', 'working'].includes(agents.find((a) => a.name === b.window)?.state);
+    stateIsLive(agents.find((a) => a.name === b.window)?.state ?? '');
   const stepsOpen = (b) => stepsChoice[b.key] ?? true;
   const toggleSteps = (b, open) => { stepsChoice[b.key] = open; };
 

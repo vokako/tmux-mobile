@@ -28,7 +28,11 @@
 
   const winsFolded = $derived(agents.length - winPills.length);
 
-  const working = $derived(managedAgents.filter((a) => a.state === 'working').length);
+  // ONE definition of "live" (stateIsLive) for the count and the pill dots:
+  // the state is 'running' today ('working' is its pre-2026-08 name), and a
+  // private `=== 'working'` here showed "3 · 0 running" beside a live dot
+  // (board #179).
+  const working = $derived(managedAgents.filter((a) => stateIsLive(a.state)).length);
 
   function pillInfo(a) {
     const lines = [{ label: t('hubHoverCommand'), value: a.command || '—' }];

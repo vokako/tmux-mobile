@@ -448,7 +448,7 @@ test('feed-lane identity comparisons match the window NAME, never the pane index
   );
   assert.match(
     source,
-    /includes\(agents\.find\(\(a\) => a\.name === b\.window\)\?\.state\)/u,
+    /stateIsLive\(agents\.find\(\(a\) => a\.name === b\.window\)\?\.state \?\? ''\)/u,
     'isRunning matches on the name',
   );
   // The numeric index may not creep back into either lookup.
