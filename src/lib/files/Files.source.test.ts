@@ -236,5 +236,16 @@ test('the root reads as the first separator, not a wide first crumb (board #187)
   // Measured: the segment min-width put the root glyph 15 px from "local"
   // where every other glyph sits 5 px from its neighbours; after, 5/5/5.
   assert.match(source, /<button class="bc-seg bc-root" onclick=\{\(\) => \{ if \(!selecting\(\)\) navTo\('\/', 'back'\); \}\}/u);
-  assert.match(source, /\.bc-seg\.bc-root \{ min-width: 0; padding-right: 0; color: var\(--text3\); font-size: var\(--fs-sub\); \}/u);
+  // (#191: every crumb hugs its text now, so the root no longer needs its own min-width: 0.)
+  assert.match(source, /\.bc-seg\.bc-root \{ padding-right: 0; color: var\(--text3\); font-size: var\(--fs-sub\); \}/u);
+});
+
+test('a crumb hugs its text — touch height, not a control-wide box (board #191)', () => {
+  // Owner 2026-09-12: "文件路径显示可以紧凑一点". Measured at 390 coarse: with
+  // min-width: var(--control-height) "src"/"lib"/"files" sat in 44/44/44 px
+  // boxes for 23–30 px glyphs and the strip was 646 px; hugging, 594 px —
+  // the same as pointer — with every box = glyph + 8 px.
+  const seg = source.match(/\.bc-seg \{[^}]*\}/u)?.[0] ?? '';
+  assert.doesNotMatch(seg, /min-width: var\(--control-height\)/u, 'no control-wide crumb');
+  assert.match(seg, /min-height: var\(--control-height\)/u, 'the touch height stays');
 });

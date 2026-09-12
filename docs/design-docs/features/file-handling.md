@@ -128,6 +128,14 @@ row reads `/ local / home / …` at one rhythm (after: 5/5/5). It keeps the
 row's touch height; its width is the glyph's — the root is one tap away by
 the row's own scroll and rarely the destination.
 
+A crumb HUGS ITS TEXT (board #191, owner 2026-09-12: "文件路径显示可以紧凑一点"):
+the control min-width that #185 left on `.bc-seg` made every short name a
+44 px box on the phone — measured at 390 coarse, `src`/`lib`/`files` sat in
+44/44/44 px boxes for 23–30 px glyphs and the strip was 646 px wide; without
+it every box is glyph + 8 px and the strip is 594 px, the same as on a
+pointer. The touch HEIGHT stays the row's (`min-height: var(--control-height)`);
+a crumb's width is its name's. `Files.source.test.ts` pins both.
+
 A crumb is a THING WITH A PATH, so it gets the one context-menu mechanism
 (board #187, owner: "这个路径最好可以复制，包括文件夹文件的名字我也可以选中复制"):
 right-click / long-press a segment (root included) → `ContextMenu` with Copy

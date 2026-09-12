@@ -2014,8 +2014,12 @@
      automatic min-content floor, so without flex-shrink: 0 every segment
      shrank to the control size and neighbours' glyphs painted over each
      other once the path outgrew the pane (board #185). */
+  /* A crumb hugs its text (owner, 2026-09-12: "文件路径显示可以紧凑一点"): the
+     control min-width made "src" a 44 px box on the phone and the strip read
+     spaced out (measured: /src/lib/files boxes 44/44/44 for 23–30 px glyphs).
+     The touch HEIGHT stays the row's; width is the name's plus its padding. */
   .bc-seg {
-    min-width: var(--control-height); min-height: var(--control-height); flex-shrink: 0;
+    min-height: var(--control-height); flex-shrink: 0;
     padding: 2px 4px; border: none; background: none; color: var(--text2);
     cursor: pointer; white-space: nowrap; font-size: var(--fs-ui); font-family: inherit;
     user-select: text; -webkit-user-select: text; /* a name you can drag-select and copy (board #187) */
@@ -2026,7 +2030,7 @@
      glyph sits 5 px from its neighbours (measured, board #187: "首个 / 斜线
      后边的文件夹间距比较大"). It keeps the row's touch height; its width is
      the glyph's. */
-  .bc-seg.bc-root { min-width: 0; padding-right: 0; color: var(--text3); font-size: var(--fs-sub); }
+  .bc-seg.bc-root { padding-right: 0; color: var(--text3); font-size: var(--fs-sub); }
   .bc-seg:last-of-type { color: var(--accent); }
   .bc-sep { color: var(--text3); font-size: var(--fs-sub); }
 
