@@ -134,4 +134,7 @@ Both rules are implemented once in `src/lib/files/persisted-list.ts`
 - Failed transfers leave pending state and expose their error; a stale
   completion cannot replace the feedback for a newer operation or context.
 - Git arguments are passed directly as argv, not through a shell; log format separators such as `|` are valid argument data
-- Every git verb (stage, unstage, add all, commit, push) reports its outcome in the same 3-second banner under the panel header; a failure shows `✗ ` + git's stderr (or the exit code when stderr is empty) — a failing stage never looks like a button that did nothing
+- Git outcomes share the local feedback contract under the panel header.
+  Failures keep stderr (or the exit code when stderr is empty) visible until
+  retry/dismiss/context exit; ordinary completion uses the common 1500ms
+  scheduler, not the retired 3-second error flash (#167, 2026-09-12).

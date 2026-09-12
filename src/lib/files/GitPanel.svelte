@@ -13,6 +13,8 @@
   //   returns true if the panel consumed the back (closed an open diff).
   import { flip } from 'svelte/animate';
   import Icon from '../ui/Icon.svelte';
+  import OperationFeedback from '../ui/OperationFeedback.svelte';
+  import { createFeedbackLifetime, type FeedbackValue } from '../ui/feedback-lifetime.ts';
   import { t } from '../core/i18n.svelte.ts';
   import { gitCmd } from '../core/ws.ts';
   import { moveMs } from '../ui/motion.ts';
@@ -40,7 +42,7 @@
   let gitLoading = $state(false);
   let gitListEl = $state<HTMLElement | null>(null);
   let gitError = $state('');
-  let pushResult = $state('');
+  let feedback = $state<FeedbackValue | null>(null);
   let commitMsg = $state('');
   let showCommitInput = $state(false);
   // Which way the last diff hop went: the view that mounts next drills in
@@ -124,56 +126,63 @@
     gitLoading = false;
   }
 
-  // THE outcome banner for every git VERB (push, commit, stage, unstage): a
-  // 3 s flash under the header, `✗ ` marks a failure. One timer — a fresh
-  // message restarts it, so a slow earlier timeout cannot blank a newer one.
-  // Stage/unstage used to `catch {}` and say nothing, so a failing `git add`
-  // (permissions, a lock file, an index.lock left by a crash) looked like
-  // "the plus button did nothing" (review, 2026-09-03).
-  let flashTimer: ReturnType<typeof setTimeout> | undefined;
-  function flash(msg: string) {
-    pushResult = msg;
-    clearTimeout(flashTimer);
-    flashTimer = setTimeout(() => { pushResult = ''; }, 3000);
+  const feedbackLifetime = createFeedbackLifetime<FeedbackValue>(value => { feedback = value; });
+  function beginFeedback() {
+    const token = feedbackLifetime.begin();
+    const context = { cwd, tab: gitTab, diff: gitDiff };
+    return (value: FeedbackValue) => {
+      if (cwd === context.cwd && gitTab === context.tab && gitDiff === context.diff) {
+        feedbackLifetime.update(token, value);
+      }
+    };
   }
-  const failed = (e: unknown) => flash('✗ ' + ((e as Error)?.message || String(e)));
+  const failed = (report: ReturnType<typeof beginFeedback>, e: unknown) =>
+    report({ kind: 'error', message: (e as Error)?.message || String(e) });
+  $effect(() => {
+    cwd; gitTab; gitDiff;
+    return () => { feedbackLifetime.clear(); };
+  });
+  $effect(() => () => feedbackLifetime.dispose());
 
   async function gitPush() {
+    const report = beginFeedback();
     gitLoading = true;
-    pushResult = '';
     try {
       const r = await git('push');
-      flash(r.trim() || 'Pushed');
-    } catch (e) { failed(e); }
+      report({ kind: 'success', message: r.trim() || t('gitPushed') });
+    } catch (e) { failed(report, e); }
     gitLoading = false;
   }
 
   async function gitAddAll() {
-    try { await git('add', '.'); } catch (e) { failed(e); }
+    const report = beginFeedback();
+    try { await git('add', '.'); } catch (e) { failed(report, e); }
     loadGitStatus();
   }
 
   async function gitAddFile(file: string) {
-    try { await git('add', file); } catch (e) { failed(e); }
+    const report = beginFeedback();
+    try { await git('add', file); } catch (e) { failed(report, e); }
     loadGitStatus();
   }
 
   async function gitRestoreFile(file: string) {
-    try { await git('restore', '--staged', file); } catch (e) { failed(e); }
+    const report = beginFeedback();
+    try { await git('restore', '--staged', file); } catch (e) { failed(report, e); }
     loadGitStatus();
   }
 
   async function gitCommit() {
     if (!commitMsg.trim()) return;
+    const report = beginFeedback();
     gitLoading = true;
-    pushResult = '';
     try {
       await git('commit', '-m', commitMsg.trim());
-      flash('Committed');
+      report({ kind: 'success', message: t('gitCommitted') });
       commitMsg = '';
       showCommitInput = false;
       loadGitStatus();
-    } catch (e) { failed(e); }
+    } catch (e) { failed(report, e); }
     gitLoading = false;
   }
 
@@ -188,8 +197,10 @@
     <button class="act-btn" onclick={() => { gitTab === 'status' ? loadGitStatus() : loadGitLog(); }}><Icon name="refresh" size={14} /></button>
   </div>
 </div>
-{#if pushResult}
-  <div class="git-push-result appear" class:git-error={pushResult.startsWith('✗')}>{pushResult}</div>
+{#if feedback}
+  <div class="git-feedback">
+    <OperationFeedback value={feedback} ondismiss={feedback.kind === 'error' ? feedbackLifetime.clear : undefined} />
+  </div>
 {/if}
 {#if !gitDiff}
   {@const stagedCount = gitStatus.filter(f => f.status[0] !== ' ' && f.status[0] !== '?').length}
@@ -307,8 +318,7 @@
   /* The fill is the shared .slide-pill under it — the button only changes colour. */
   .git-tabs button.active { color: var(--accent); }
   .git-error { padding: 10px; color: var(--danger); font-size: var(--fs-ui); background: var(--danger-bg); }
-  .git-push-result { padding: 8px 12px; font-size: var(--fs-ui); color: var(--status-ok); background: var(--accent-bg); flex-shrink: 0; }
-  .git-push-result.git-error { color: var(--danger); background: var(--danger-bg); }
+  .git-feedback { flex: none; }
   .git-actions {
     display: flex; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0;
   }

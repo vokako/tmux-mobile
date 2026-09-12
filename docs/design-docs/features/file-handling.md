@@ -449,7 +449,38 @@ therefore ordinary argument data (the log view uses `|` in `--format`); only
 NUL is rejected because operating-system argv cannot represent it.
 
 ### Git verbs report through one banner
-`GitPanel.svelte` has ONE outcome surface for git verbs: `flash(msg)` sets `pushResult` for 3 s under the header (`✗ ` prefix = failure, red). Push and commit always used it; stage, unstage and add-all wrapped their call in `catch {}` and said nothing, so a failing `git add` (index.lock left by a crash, permissions, a path outside the work tree) looked like "the plus button did nothing" (review, 2026-09-03). Now every verb's catch goes through `failed(e)` → the same banner — no second error mechanism. One timer, restarted per message, so a slow earlier 3 s timeout cannot blank a newer message. `git()` also throws on ANY non-zero exit, naming the exit code when stderr is empty, so the banner never has nothing to show. `gitError` remains the LOAD error (status/log listing failed) and is a separate, persistent line.
+
+The 2026-09-03 fix made stage/unstage/add-all failures visible instead of
+silently catching them. Its three-second `flash` still expired errors and
+allowed an older verb's callback to overwrite a newer outcome.
+
+The feedback-only #167 adoption (2026-09-12) uses `OperationFeedback` and one
+`createFeedbackLifetime` directly below the existing header. Each verb starts
+an attempt captured against cwd, Status/Log tab and diff context. Context exit
+invalidates it even if the same view reopens; disposal ignores late callbacks.
+The guard applies only to feedback publication, not to Git execution.
+
+Errors are structured `kind: 'error'`, persistent and dismissible. Text
+prefixes never classify state: a successful stdout beginning with a cross is
+still success. Push retains stdout, using localized `gitPushed` only when
+empty; commit uses `gitCommitted`. These existing success notices expire at
+the shared 1500ms lifetime without a Close action. Successful stage, unstage
+and add-all remain silent. The private timer, banner paint and prefix check
+are removed; the caller only preserves the banner's header placement.
+
+Git commands/arguments, root resolution, status/log/diff loading, retry and
+commit draft mutations are unchanged. Commit failure retains the draft;
+successful commit clears it and refreshes status as before. `git()` still
+throws on any non-zero exit, naming the exit code when stderr is empty.
+`gitError` remains the separate load-error line.
+
+Strict mount tests exercise error expiry, out-of-order callbacks, old success
+expiry, cwd/tab/diff return, unmount, unchanged staging arguments and commit
+failure/retry. A negative control that publishes with a fresh token instead
+of the captured attempt reproduces the old-error/new-error overwrite.
+Controlled Chromium checks cover persistent error, plain stdout success,
+Close, header placement and the same callback race on pointer/touch in both
+themes. They do not execute Git or claim native/full-App acceptance.
 
 ### Markdown preview uses the one safe renderer
 The `FilePreview` body calls `renderMarkdown` from `src/lib/core/markdown.ts` — the same escape-first pipeline the chat uses (rule 13: `&` and `<` are escaped BEFORE marked parses, `>` is not, so blockquotes work and raw HTML is inert text). Files used to carry a second renderer that called `marked.parse` on the raw file, and marked v17 does not sanitize: a `README.md` in any cloned repo (or one an agent wrote) containing `<img src=x onerror=…>` ran in the app origin, where `localStorage` holds the token and `__TAURI_INTERNALS__` can invoke commands (review, 2026-09-03). The trade-off is deliberate: a README's inline HTML (badge tables, centered logos) renders as text; markdown-syntax images and links still work. Mermaid fences still render — the shared output keeps `code.language-mermaid`, and `renderMermaidBlocks` swaps them for SVG after paint. `FilePreview.source.test.ts` pins the shared renderer; Files only delegates the body and never calls `marked.parse`.
