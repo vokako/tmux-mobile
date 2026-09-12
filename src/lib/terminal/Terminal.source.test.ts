@@ -410,3 +410,13 @@ test('the gesture Root port has exactly eighteen inert operations and live queri
     }
   }
 });
+
+test('input never retargets: each queued key carries its pane; the paste fallback keeps the pasted pane (board #190)', () => {
+  // The queue is the tested module; Terminal only adds resumeLiveTail and the pane.
+  assert.match(source, /const keyQueue = createKeyQueue\(/u);
+  assert.match(source, /keyQueue\.enqueue\(pane, keys, literal\)/u);
+  assert.match(source, /keyQueue\.reset\(\); \/\/ queued keys belong to the previous pane/u);
+  // The defect: the -32601 catch ran after a round trip and read the LIVE target.
+  assert.doesNotMatch(source, /-32601\) \{ enqueueKeys\(data, true\); return; \}/u, 'the fallback must not read the live target after the await');
+  assert.match(source, /pasteOrFallback\(target, data, \{/u, 'the pasted pane is captured at the call');
+});

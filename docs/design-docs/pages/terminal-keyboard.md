@@ -40,6 +40,32 @@ opening the keyboard used to shrink the box → change cols×rows → `resize_pa
 
 unmodified printable keydowns return `false` from `attachCustomKeyEventHandler` and flow through the textarea input pipeline; a CAPTURE-phase `input` listener on termEl claims non-composition `insertText` events (`stopImmediatePropagation`) and forwards them. It must claim, not just forward: xterm v6 handles `insertText` itself when no keydown preceded it (`!e.composed || !_keyDownSeen`) — exactly the no-keydown commits WKWebView IMEs produce for CJK punctuation — so two live handlers sent those characters TWICE. Reason for the bypass: CJK IMEs convert punctuation (`,`→`，`) at the input stage with NO composition events — xterm's keydown fast path would emit raw ASCII and preventDefault, killing the conversion. Applies to ALL platforms; composition stays with xterm. Paste is detected via a CAPTURE-phase `paste` listener (xterm's own paste handler fires onData synchronously before same-phase listeners) and routed to the `paste_text` RPC — tmux `paste-buffer -p` adds bracketed-paste markers iff the pane app enabled `?2004`, so multi-line pastes don't execute line by line.
 
+### Input carries its pane; nothing reads the live target across an await (board #190, 2026-09-12)
+
+Codex's static finding during #167: `pumpKeyQueue` awaited `sendKeys(target, …)`
+and the paste fallback's `-32601` catch called `enqueueKeys(data, true)` — both
+in a component whose `target` changes in place (the page Terminal is not keyed
+by pane; only the Drawer's is). Step 1, before code: the KEY QUEUE could not
+retarget — `keyQueue.shift()` and the `sendKeys(target, …)` call sit in one
+synchronous step, and the lifecycle effect empties the queue on every switch, so
+a key typed into pane A was either already on the wire to A or discarded. The
+PASTE FALLBACK could: `pasteText(target, data)` captured A, but its rejection
+(a pre-`paste_text` server answering method-not-found) arrives after a round
+trip, and the catch read `target` again — by then B — and typed the pasted
+block into B. Not reproducible against a current server (the RPC resolves, no
+fallback), only against a legacy one; the defect line is pinned by the source
+test. Step 2: the input side is now the tested module `terminal-input.ts` —
+`createKeyQueue` keeps merge (same pane only), the 64-item cap on what waits,
+one send in flight, order, drop-on-failure, `reset()` on a switch — and every
+queued item carries the pane it was typed into, captured at enqueue;
+`pasteOrFallback(pane, …)` captures the pasted pane at the call and hands the
+fallback that pane, never the live one. Terminal.svelte keeps what is its own:
+`enqueueKeys` still calls `resumeLiveTail` first (every input path), named Ctrl
+keys, hidden-frame recording and the failure feedback are untouched.
+`terminal-input.test.ts` drives deferred sends: a key for A resolving after a
+switch, then a key for B, reaches A then B; a `-32601` rejection after the
+switch re-types into A.
+
 ### Auto-pair textarea force-clear
 
 (all platforms, was mobile-only): Force-clear xterm's hidden textarea after keyboard input (NOT paste, NOT mid-IME-composition). Use `paste` event flag to distinguish — NEVER use `data.length` (auto-paired `""` `()` have length 2, gets misclassified as paste). Composition needs TWO signals: `compositionstart/end` listeners AND per-event `insertCompositionText` inputType — some Android IMEs (Samsung/pad suggestion-bar keyboards) compose without ever firing compositionstart. `compositionend` must reset BOTH flags: Chromium commits as input(insertCompositionText) → compositionend with no trailing input event, so a sticky per-event flag would permanently suppress the clear for standard IMEs (GBoard).

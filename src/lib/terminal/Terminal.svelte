@@ -27,6 +27,7 @@
   import { createOneShotCtrl, encodeTerminalShortcut } from './terminal-keyboard.ts';
   import { createTerminalResponseFilter } from './terminal-responses.ts';
   import { writeTerminalFrame } from './terminal-frame.ts';
+  import { createKeyQueue, pasteOrFallback } from './terminal-input.ts';
   import { openExternalUrl } from '../core/external-links.ts';
 
   // Timing constants
@@ -600,7 +601,7 @@
     pendingCols = 0; pendingRows = 0; pendingResizeTs = 0;
     lockKeyboard(); // pane switch
     selection = null; selectionLayout = null;
-    keyQueue = []; // queued keys belong to the previous pane
+    keyQueue.reset(); // queued keys belong to the previous pane
     lastContent = ''; lastCursor = null; // frames belong to the previous pane
 
     const estCellW = fontSize * CELL_W_RATIO;
@@ -795,14 +796,16 @@
         // mode ?2004 (shells, agent TUIs), matching what a real terminal
         // emits; legacy apps still get the raw text. xterm has already
         // normalized paste line endings to \r, same as a real terminal.
-        pasteText(target, data)
-          .then(noteSendSuccess)
-          .catch((e) => {
-            // Pre-paste_text server (-32601 method-not-found): fall back to
-            // the old keystroke path rather than dropping the paste.
-            if (e.code === -32601) { enqueueKeys(data, true); return; }
-            noteSendFailure('paste');
-          });
+        // Pre-paste_text server (-32601 method-not-found): fall back to the
+        // old keystroke path rather than dropping the paste — into the pane
+        // that was pasted into, captured at the call (board #190: the answer
+        // arrives after a round trip; the live target may have moved on).
+        void pasteOrFallback(target, data, {
+          paste: pasteText,
+          enqueue: (pane, keys, literal) => enqueueKeys(keys, literal, pane),
+          onSuccess: noteSendSuccess,
+          onFailure: noteSendFailure,
+        });
         return;
       }
       // Paste returned above, so a pasted single letter never consumes Ctrl.
@@ -1571,44 +1574,21 @@
   // as one write). Special keys can't merge (each is a distinct key name)
   // but still serialize through the queue so ordering with typed chars is
   // preserved.
-  const KEY_QUEUE_MAX = 64;
-  let keyQueue = [];
-  let keySending = false;
+  // The queue itself (merge, cap, one in flight, drop-on-failure) is the
+  // tested module terminal-input.ts; every item carries the pane it was typed
+  // into (board #190), so a send that lands after a pane switch still goes
+  // where the user typed.
+  const keyQueue = createKeyQueue({
+    send: sendKeys,
+    onSuccess: noteSendSuccess,
+    onFailure: () => noteSendFailure('key'),
+    dbg: (message) => window.__dbg?.(message),
+  });
 
-  function enqueueKeys(keys, literal) {
+  function enqueueKeys(keys, literal, pane = target) {
     // Any keystroke returns the display to the live tail (see resumeLiveTail).
     resumeLiveTailRef?.();
-    const last = keyQueue[keyQueue.length - 1];
-    if (literal && last?.literal) {
-      last.keys += keys;
-    } else if (keyQueue.length >= KEY_QUEUE_MAX) {
-      // Saturated (long-press repeat on a dead-slow link). Drop the newest —
-      // dropping anything earlier would reorder the user's input.
-      window.__dbg?.('input: key queue full — dropping key');
-      return;
-    } else {
-      keyQueue.push({ keys, literal });
-    }
-    pumpKeyQueue();
-  }
-
-  async function pumpKeyQueue() {
-    if (keySending) return;
-    keySending = true;
-    while (keyQueue.length > 0) {
-      const item = keyQueue.shift();
-      try {
-        await sendKeys(target, item.keys, item.literal);
-        noteSendSuccess();
-      } catch (e) {
-        window.__dbg?.(`input: sendKeys FAILED: ${e.message}`);
-        noteSendFailure('key');
-        // Drop everything queued behind the failure — replaying seconds-old
-        // keystrokes after a reconnect is worse than losing them.
-        keyQueue = [];
-      }
-    }
-    keySending = false;
+    keyQueue.enqueue(pane, keys, literal);
   }
 
   function sendSpecial(key) {
