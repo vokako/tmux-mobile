@@ -407,6 +407,10 @@ const msgs: Record<string, Record<string, string>> = {
     linkCopied: 'Link copied',
     about: 'About — github.com/vokako/tmux-mobile',
     cancel: 'Cancel',
+    confirm: 'Confirm',
+    operationUnavailable: 'This item is no longer available.',
+    operationStepFailed: '{action} failed: {error}',
+    operationRefreshFailed: 'The action succeeded, but refreshing failed: {error}',
 
     reconnecting: 'Reconnecting...',
 
@@ -466,6 +470,8 @@ const msgs: Record<string, Record<string, string>> = {
     confirmKillWindowNote: 'Closes this window and process. The rest of the session stays.',
     confirmDeleteFileTitle: 'Delete “{name}”?',
     confirmDeleteFileNote: 'Deleted on the server, not moved to a trash — there is no undo from here.',
+    confirmDeleteLocalFileTitle: 'Delete local copy of "{name}"?',
+    confirmDeleteLocalFileNote: 'Deletes this downloaded copy. The original on the server stays.',
     confirmDiscardTitle: 'Discard unsaved changes?',
     confirmDiscardNote: 'The edits in this file have not been saved. Leaving now loses them.',
     confirmDiscard: 'Discard',
@@ -976,6 +982,10 @@ const msgs: Record<string, Record<string, string>> = {
     linkCopied: '链接已复制',
     about: '关于 — github.com/vokako/tmux-mobile',
     cancel: '取消',
+    confirm: '确认',
+    operationUnavailable: '此项目已不可用。',
+    operationStepFailed: '{action}失败：{error}',
+    operationRefreshFailed: '操作已成功，但刷新失败：{error}',
 
     reconnecting: '重新连接中...',
 
@@ -1032,6 +1042,8 @@ const msgs: Record<string, Record<string, string>> = {
     confirmKillWindowNote: '关闭该窗口和进程；会话其余部分保留。',
     confirmDeleteFileTitle: '删除「{name}」？',
     confirmDeleteFileNote: '在服务器上直接删除，不进回收站——从这里无法撤销。',
+    confirmDeleteLocalFileTitle: '删除「{name}」的本地副本？',
+    confirmDeleteLocalFileNote: '删除已下载的副本；服务器原件保留。',
     confirmDiscardTitle: '放弃未保存的更改？',
     confirmDiscardNote: '这个文件的修改还没保存，现在离开会丢失。',
     confirmDiscard: '放弃',

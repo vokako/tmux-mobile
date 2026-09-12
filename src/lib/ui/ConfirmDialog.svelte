@@ -24,7 +24,9 @@
     title = '',
     note = '',
     confirmLabel = '',
+    confirmIcon = 'check',
     cancelLabel = '',
+    error = '',
     /** The confirming button carries the danger tone; false for a neutral
      * confirmation (discarding an edit is not the same as deleting a file). */
     danger = true,
@@ -34,6 +36,7 @@
     oncancel = () => {},
   } = $props();
 
+  const errorId = $props.id();
   let cancelEl: HTMLButtonElement | null = $state(null);
   let dialogEl: HTMLDivElement | null = $state(null);
   // Focus lands on Cancel, never on the destructive verb: the dialog appears
@@ -70,14 +73,16 @@
 {#if open}
   <div class="dlg-backdrop" onclick={() => { if (!busy) oncancel(); }} role="presentation"></div>
   <div class="dlg confirm" class:sheet={compact} role="alertdialog" aria-modal="true" aria-label={title}
+    aria-describedby={error ? errorId : undefined}
     aria-busy={busy || undefined} tabindex="-1" bind:this={dialogEl}>
     <h2>{title}</h2>
     {#if note}<p class="dlg-note">{note}</p>{/if}
+    {#if error}<p class="config-error dlg-error" id={errorId} role="alert">{error}</p>{/if}
     <div class="dlg-actions">
       <CommandButton label={cancelLabel || t('cancel')} disabled={busy}
         bind:element={cancelEl} onclick={() => { if (!busy) oncancel(); }} />
-      <CommandButton label={confirmLabel || t('delete')} variant={danger ? 'danger' : 'primary'}
-        icon={danger ? 'trash' : 'check'} destructiveConfirm={danger} pending={busy}
+      <CommandButton label={confirmLabel || t('confirm')} variant={danger ? 'danger' : 'primary'}
+        icon={confirmIcon} destructiveConfirm={danger} pending={busy}
         onclick={() => { if (!busy) onconfirm(); }} />
     </div>
   </div>
@@ -100,6 +105,8 @@
   }
   .dlg h2 { margin: 0; font-size: var(--fs-title); }
   .dlg-note { margin: 0; color: var(--text2); font-size: var(--fs-ui); line-height: 1.55; }
+  .dlg h2, .dlg-note, .dlg-error { overflow-wrap: anywhere; }
+  .dlg-error { margin: 0; }
   .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
   /* Phone: a bottom sheet — reachable with a thumb, and it never fights the
      on-screen keyboard for the middle of the screen. It RISES from the bottom

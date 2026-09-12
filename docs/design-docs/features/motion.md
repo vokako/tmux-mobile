@@ -340,6 +340,12 @@ sizes (owner declined).
 
 ## Rules and their reasons
 
+- **Confirmation failure is state, not a timed notification** (#167,
+  2026-09-12): a caller's error remains inside the existing confirmation
+  until retry or dismissal. It appears without a new animation or timer;
+  the existing desktop fade, touch sheet, pending spinner and reduced-motion
+  contracts are unchanged. Process-stop and delete glyphs differ by caller
+  intent, not motion or a new button family.
 - **Signature allocation does not animate layout** (#186, 2026-09-12):
   the owner's 15:39 correction restores a measured native-text mirror, not
   the retired send-arm controls or hardcoded avoidance zone. Full-width text

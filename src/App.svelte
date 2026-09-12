@@ -1710,6 +1710,7 @@
        tone — the entry, its token and its parked view state are gone for
        good; the machine itself is untouched. -->
   <ConfirmDialog open={!!pendingServerRemove}
+    confirmIcon="trash"
     title={pendingServerRemove ? t('serverRemoveTitle').replace('{name}', pendingServerRemove.name) : ''}
     note={t('serverRemoveNote')}
     confirmLabel={t('serverRemove')}

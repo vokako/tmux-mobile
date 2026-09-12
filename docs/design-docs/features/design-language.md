@@ -305,7 +305,30 @@ existing thumb/track. No blanket pill conversion of cards, rows or fields.
 | `Slider` | Native range keyboard/input semantics, visible value and a named reset command. Provisional native values reset until the caller commits. Set min/max/step before value: Chromium otherwise rounds a fractional initial value against its default integer step. |
 | `Select` | One fixed measured popover, native 28/44px trigger with 24/28px field paint; unique combobox/list relationships, active-descendant cursor and focus return. IME keys do not select/commit; disabling closes its menu and blocks queued choices. Uses its full border-box height, 6px trigger gap and 8px viewport inset. `dense` only retains the legacy text-size role, never another height. |
 | `Segmented` | One quiet neutral track, equal option targets and one travelling selection surface (`.slide-pill.control`); selected text also has weight 600. No independently framed option buttons or unused tail inside the group. |
-| `ConfirmDialog` | Same confirmation mechanism, shared command buttons; starts on Cancel, traps Tab inside, restores connected trigger focus, and does not cancel or resubmit while busy. Only the active modal handles keys. |
+| `ConfirmDialog` | Same confirmation mechanism, shared command buttons; caller supplies the verb, icon and failure text. Danger is severity, not a trash-icon classifier. Starts on Cancel, traps Tab inside, restores connected trigger focus, and does not cancel or resubmit while busy. Only the active modal handles keys. |
+
+### Confirmation outcomes (#167, 2026-09-12)
+
+Owner, 2026-09-11 03:00:
+> 还有全局的一些消息通知规范，比如删除停止的提示。删除这类高危按钮的样式都统一。保证我们交互统一，注意我们的规范。
+
+Interrupting a response remains immediate, plain amber and unconfirmed.
+Stopping/closing a process is a red confirmed action with a stop/x glyph;
+deleting/removing keeps trash. The caller names the captured object and what
+is lost or retained. A local-copy deletion must not claim the server original
+is deleted. Discard is neutral, with Keep editing and Discard.
+
+The existing `ConfirmDialog` owns presentation and keyboard focus, never
+the RPC. `confirmIcon` is independent of `danger`; a caller's `error` appears
+inside the dialog as an alert and its accessible description, in the shared
+error text role. Names and errors wrap within the existing scroll-capped
+dialog/sheet. Error text does not expire or animate in. A rejection remains
+retryable on the captured object; successful mutation closes the matching
+view, while a later read failure retries the read, not the mutation.
+
+The shared component's mounted regressions were red before the independent
+icon/error slots. Consumer execution and Back ownership are migrated in
+separate #167 commits; this component change alone does not prove those paths.
 
 **Controlled icon tools (#157, 2026-09-10):** `CommandButton` accepts optional
 `pressed`, `expanded` and `controls`, reflected as native `aria-pressed`,
