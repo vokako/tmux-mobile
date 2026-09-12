@@ -8,6 +8,41 @@ Base64 encoding for small file transfer (previews), streaming HTTP for large-fil
 
 ## Key Decisions
 
+### Confirmation owns the operation, not the refresh (#167 batch 1, 2026-09-12)
+
+Files' deletion helpers caught RPC/IPC errors and resolved normally, so the
+confirmation executor closed the dialog after a rejected `fsDelete` or
+`delete_download`. The executor now owns the mutation catch, a synchronous
+per-action busy guard and the persistent error passed to ConfirmDialog.
+Failure retains the same target and an enabled retry; Cancel, Escape,
+backdrop and Back consume pending exits without dismissing the confirmation.
+Once idle, dismissal drops the action and its error.
+
+Each confirmation captures its target and originating session, root,
+directory/request generation, view and file identity (and the downloaded
+listing for local copies). Replacing or hiding that context invalidates the
+confirmation; a late completion cannot refresh another directory, remove a
+new downloaded row or close a newer dialog. Local wording identifies the
+downloaded copy and says the server original survives. Discard is neutral,
+with Keep editing as the return action; both callers supply explicit icons.
+
+A successful remote mutation removes the known-deleted row and closes
+confirmation before a separate listing refresh. Refresh failure is a listing
+error, never an invitation to repeat the delete. Refresh preserves an unrelated
+preview or dirty editor; only a deleted current file, or a current file under
+the deleted directory, closes.
+The #164 menus, #187 navigation/selection and existing clipboard false-result
+check are unchanged. Feedback surfaces/timers remain outside this batch.
+
+`Files.mount.test.ts` executes remote rejection/retry, same-tick repeats,
+busy exits, refresh failure and stale completion with the existing strict
+compileMount harness. `Files.browser.test-fixture.ts` mounts real Files for
+Chromium's local IPC and dirty-editor cases with only transport mocks;
+highlighting is real and no jsdom import/network guard is relaxed.
+Measured on Chromium 153.0.8010.12 at 1280x800 pointer and 390x844 touch,
+both themes: six scenarios pass in each variant. These are controlled
+browser mounts, not native Android IPC/device acceptance.
+
 ### The path row scrolls; a segment never squashes (board #185, 2026-09-12)
 
 Owner: "当文件预览路径超过预览框宽度的时候显示有问题，文字有上下重叠了". `.bc-path-row`

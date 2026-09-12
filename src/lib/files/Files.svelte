@@ -97,6 +97,7 @@
   // Register goBack for Android back gesture
   $effect(() => {
     if (onGoBack) onGoBack(() => {
+      if (cancelPendingAct()) return true;
       if (imageView) { imageView = ''; return true; } // the viewer is the topmost layer (board #188)
       if (fileMenu) { closeFileMenu(); return true; }
       // navAnim('back') rides only the branches that CHANGE the view — the
@@ -225,11 +226,8 @@
   }
 
   async function deleteLocalFile(name) {
-    try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('delete_download', { name });
-      localFiles = localFiles.filter(f => f.name !== name);
-    } catch (e) { error = e.message; }
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('delete_download', { name });
   }
   let currentFile = $state(null); // { path, name, stat, content }
   let editContent = $state('');
@@ -264,7 +262,30 @@
    * Tap-to-confirm is gone: it re-labelled the button for 3s, said nothing about
    * what is lost, and differed from every other destructive verb in the app. */
   let pendingAct = $state(null);
-  let acting = $state(false);
+  let acting = $derived(!!pendingAct?.busy);
+  let alive = true;
+  $effect(() => () => { alive = false; });
+  const actCurrent = (act) => alive && visible && session === act.context.session
+    && root === act.context.root && cwd === act.context.cwd && view === act.context.view
+    && currentFile === act.context.file && navRequest === act.context.request
+    && loadSeq === act.context.load && (act.kind !== 'local' || localFiles === act.context.files);
+  function requestAct(act) {
+    untrack(() => {
+      if (pendingAct?.busy && actCurrent(pendingAct)) return;
+      pendingAct = { ...act, busy: false, error: '',
+        context: { session, root, cwd, view, file: currentFile, request: navRequest, load: loadSeq, files: localFiles } };
+    });
+  }
+  function cancelPendingAct() {
+    if (!pendingAct) return false;
+    if (!pendingAct.busy) pendingAct = null;
+    return true;
+  }
+  $effect(() => {
+    // loadSeq is deliberately plain; loading observes a new directory request.
+    void loading;
+    if (pendingAct && !actCurrent(pendingAct)) pendingAct = null;
+  });
   /** EVERY way out of the editor goes through here — the back button/gesture,
    *  a session switch, the cwd follow, the drawer's "look here". No edits:
    *  `run` moves now. Unsaved edits: `run` waits behind the discard dialog and
@@ -273,25 +294,47 @@
    *  outright and the text was gone. `untrack` because the callers are
    *  $effects that must not start re-running on every keystroke. */
   function leaveEditor(run) {
+    if (untrack(() => pendingAct?.busy && actCurrent(pendingAct))) return;
     if (untrack(() => leaveDecision({ view, edited: isEdited })) === 'go') { run(); return; }
-    pendingAct = { kind: 'leave', run };
+    requestAct({ kind: 'leave', run });
   }
   const ACT_COPY = {
     file:  { title: 'confirmDeleteFileTitle',  note: 'confirmDeleteFileNote',  go: 'delete' },
-    local: { title: 'confirmDeleteFileTitle',  note: 'confirmDeleteFileNote',  go: 'delete' },
+    local: { title: 'confirmDeleteLocalFileTitle', note: 'confirmDeleteLocalFileNote', go: 'delete' },
     leave: { title: 'confirmDiscardTitle',     note: 'confirmDiscardNote',     go: 'confirmDiscard' },
   };
   const actName = (a) => (a?.kind === 'file' ? (a.path.split('/').pop() ?? a.path) : a?.name ?? '');
   async function runPendingAct() {
-    if (!pendingAct || acting) return;
     const act = pendingAct;
-    acting = true;
+    if (!act || act.busy || !actCurrent(act)) return;
+    act.busy = true;
+    act.error = '';
     try {
-      if (act.kind === 'file') await handleDelete(act.path);
+      if (act.kind === 'file') await fsDelete(act.path);
       else if (act.kind === 'local') await deleteLocalFile(act.name);
       else act.run();
-      pendingAct = null;
-    } finally { acting = false; }
+    } catch (e) {
+      if (pendingAct === act && actCurrent(act)) act.error = String(e?.message ?? e);
+      return;
+    } finally { act.busy = false; }
+    if (pendingAct !== act) return;
+    pendingAct = null;
+    if (!actCurrent(act)) return;
+    if (act.kind === 'local') localFiles = localFiles.filter(f => f.name !== act.name);
+    if (act.kind === 'file') {
+      entries = entries.filter(entry => entry.path !== act.path);
+      // Only the deleted file (or a child of a deleted directory) loses its
+      // preview. Another row's deletion must not discard the active draft.
+      if (currentFile?.path === act.path || currentFile?.path.startsWith(act.path.replace(/\/$/, '') + '/')) {
+        fileNav.nextFile();
+        fileNav.resetFiles();
+        view = 'list';
+        currentFile = null;
+      }
+      // The mutation already succeeded. A listing error is not a failed
+      // delete and must never leave a retryable destructive confirmation.
+      loadDir(act.context.cwd, 'refresh');
+    }
   }
   let newName = $state('');
   let newType = $state(''); // 'file' or 'dir'
@@ -311,7 +354,7 @@
     copy: (path) => copyPath(path).catch(e => { error = e.message; }),
     download: handleDownload,
     rename: (entry) => { renaming = entry.path; renameValue = entry.name; },
-    remove: (path) => { pendingAct = { kind: 'file', path }; },
+    remove: (path) => requestAct({ kind: 'file', path }),
   };
   const rowActions = (entry) => entryToolActions(entry, t, rowHandlers);
   const toolbarActions = $derived([
@@ -586,6 +629,7 @@
   }
 
   function goBack() {
+    if (cancelPendingAct()) return;
     // The view branches slide NOW (they swap instantly); the directory pop's
     // slide rides its answer (board #93 — the entrance is one beat).
     if (view === 'edit') { navAnim('back'); view = 'preview'; }
@@ -1046,14 +1090,6 @@
   function backToPreview() {
     // navAnim rides INSIDE the move: the dialog itself moves nothing.
     leaveEditor(() => { navAnim('back'); view = 'preview'; });
-  }
-
-  async function handleDelete(path) {
-    try {
-      await fsDelete(path);
-      if (view !== 'list') backToList();
-      loadDir(cwd);
-    } catch (e) { error = e.message; }
   }
 
   async function handleNewItem() {
@@ -1799,7 +1835,7 @@
             <span class="file-name">{f.name}</span>
           </button>
           <CommandButton variant="danger" iconOnly icon="trash" label={`${t('delete')}: ${f.name}`}
-            onclick={() => (pendingAct = { kind: 'local', name: f.name })} />
+            onclick={() => requestAct({ kind: 'local', name: f.name })} />
         </div>
       {/each}
       {#if !localFiles.length}
@@ -1913,7 +1949,9 @@
   title={pendingAct ? t(ACT_COPY[pendingAct.kind].title).replace('{name}', actName(pendingAct)) : ''}
   note={pendingAct ? t(ACT_COPY[pendingAct.kind].note) : ''}
   confirmLabel={pendingAct ? t(ACT_COPY[pendingAct.kind].go) : ''}
-  onconfirm={runPendingAct} oncancel={() => (pendingAct = null)} />
+  confirmIcon={pendingAct?.kind === 'leave' ? 'check' : 'trash'}
+  danger={pendingAct?.kind !== 'leave'} cancelLabel={pendingAct?.kind === 'leave' ? t('configKeepEditing') : t('cancel')}
+  error={pendingAct?.error || ''} onconfirm={runPendingAct} oncancel={cancelPendingAct} />
 
 <style>
   .files { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; background: var(--bg); }

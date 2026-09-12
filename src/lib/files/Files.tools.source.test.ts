@@ -35,9 +35,20 @@ test('Files menus reuse the shared menu and long-press, without taking preview s
   assert.match(source, /entryToolActions\(entry,/u);
   assert.match(source, /if \(fileMenu\) \{ closeFileMenu\(\); return true; \}/u);
   assert.match(source, /systemOwnsContextMenu\(event\)/u);
-  // Editing reaches the guarded heavy renderer, so the executing dirty-draft
-  // regression belongs to Chromium, not a relaxed jsdom renderer stub.
+  // Files.browser.test-fixture.ts executes the dirty-draft regression in Chromium
+  // with real highlighting; compileMount's heavy-import guards stay strict.
   assert.match(source, /open: \(entry\) => \{ const target = \{ \.\.\.entry \}; leaveEditor\(\(\) => openEntry\(target\)\); \}/u);
+});
+
+test('Files confirmations name the scope and keep errors/Discard semantics in the shared dialog (#167)', () => {
+  // Local deletion removes a copy, not the server original; Discard abandons a
+  // draft, not a file. These are caller-owned semantics, not dialog defaults.
+  assert.match(source, /local: \{ title: 'confirmDeleteLocalFileTitle', note: 'confirmDeleteLocalFileNote'/u);
+  assert.match(source, /confirmIcon=\{pendingAct\?\.kind === 'leave' \? 'check' : 'trash'\}/u);
+  assert.match(source, /danger=\{pendingAct\?\.kind !== 'leave'\}/u);
+  assert.match(source, /cancelLabel=\{pendingAct\?\.kind === 'leave' \? t\('configKeepEditing'\) : t\('cancel'\)\}/u);
+  assert.match(source, /error=\{pendingAct\?\.error \|\| ''\}/u);
+  assert.match(source, /oncancel=\{cancelPendingAct\}/u);
 });
 
 test('long code cannot expand the Files flex item beyond its allocated pane (#157)', () => {

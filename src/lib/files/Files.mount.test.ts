@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compileMount } from '../test/mount.ts';
 
-const compiled = compileMount(new URL('./Files.svelte', import.meta.url), [new URL('../core/ws.ts', import.meta.url)]);
+const compiled = compileMount(new URL('./Files.test.svelte', import.meta.url), [new URL('../core/ws.ts', import.meta.url)]);
 const entries = [
   { name: 'AGENTS.md', path: '/fixture/AGENTS.md', type: 'file', size: 1200 },
   { name: 'next.md', path: '/fixture/next.md', type: 'file', size: 100 },
@@ -24,6 +24,122 @@ async function settle(app: App) { for (let i = 0; i < 8; i++) await app.flush();
 function button(app: App, label: string) {
   const element = app.document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
   assert.ok(element, label); return element;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+test('rejected Files delete retains its dialog/error and retries the captured target (#167)', async context => {
+  const first = deferred<object>();
+  const deletes: string[] = [];
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, session: 'fixture' },
+    modules: [rpc({ fsDelete: (path: string) => {
+      deletes.push(path); return deletes.length === 1 ? first.promise : Promise.resolve({});
+    } })],
+  });
+  try {
+    await settle(app);
+    button(app, 'Delete: next.md').click(); await app.flush();
+    button(app, 'Delete').click(); await app.flush();
+    first.reject(new Error('permission denied')); await settle(app);
+    const dialog = app.document.querySelector('[role=alertdialog]');
+    assert.ok(dialog, 'a rejected delete must not close its confirmation');
+    assert.match(dialog.querySelector('[role=alert]')?.textContent ?? '', /permission denied/);
+    assert.match(dialog.textContent ?? '', /next\.md/);
+    assert.equal(button(app, 'Delete').disabled, false);
+    button(app, 'Delete').click(); await settle(app);
+    assert.deepEqual(deletes, ['/fixture/next.md', '/fixture/next.md']);
+    assert.equal(app.document.querySelector('[role=alertdialog]'), null);
+  } finally { first.resolve({}); await app.close(); }
+});
+
+test('Files delete is single-flight before paint and pending Cancel/Escape/backdrop/Back are consumed (#167)', async context => {
+  const pending = deferred<object>();
+  let calls = 0;
+  let back!: () => boolean;
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, session: 'fixture', onGoBack: (fn: typeof back) => { back = fn; } },
+    modules: [rpc({ fsDelete: () => { calls++; return pending.promise; } })],
+  });
+  try {
+    await settle(app);
+    button(app, 'Delete: next.md').click(); await app.flush();
+    const confirm = button(app, 'Delete');
+    const cancel = button(app, 'Cancel');
+    confirm.click(); confirm.click();
+    cancel.click();
+    app.document.querySelector<HTMLElement>('.dlg-backdrop')!.click();
+    assert.equal(back(), true);
+    await app.flush();
+    assert.equal(calls, 1, 'executor guards before disabled reaches the DOM');
+    const escape = new app.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    app.window.dispatchEvent(escape);
+    assert.equal(escape.defaultPrevented, true);
+    assert.ok(app.document.querySelector('[role=alertdialog]'), 'pending Back cannot dismiss or navigate');
+    assert.equal(button(app, 'Cancel').disabled, true);
+    assert.equal(app.document.querySelector('.bc-scroll')?.textContent?.includes('fixture'), true);
+    pending.resolve({}); await settle(app);
+    assert.equal(app.document.querySelector('[role=alertdialog]'), null);
+  } finally { pending.resolve({}); await app.close(); }
+});
+
+test('Files mutation success closes confirmation even when listing refresh fails (#167)', async context => {
+  let deleted = false;
+  let calls = 0;
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, session: 'fixture' },
+    modules: [rpc({
+      fsDelete: async () => { deleted = true; calls++; return {}; },
+      fsList: async () => { if (deleted) throw new Error('refresh unavailable'); return { path: '/fixture', entries }; },
+    })],
+  });
+  try {
+    await settle(app);
+    button(app, 'Delete: next.md').click(); await app.flush();
+    button(app, 'Delete').click(); await settle(app);
+    assert.equal(app.document.querySelector('[role=alertdialog]'), null, 'a refresh failure cannot offer another delete');
+    assert.match(app.document.querySelector('.error')?.textContent ?? '', /refresh unavailable/);
+    assert.equal(app.document.querySelector('[aria-label="Delete: next.md"]'), null, 'the confirmed-deleted row cannot invite a retry');
+    assert.equal(calls, 1);
+  } finally { await app.close(); }
+});
+
+for (const outcome of ['success', 'failure'] as const) {
+  test(`stale Files delete ${outcome} cannot replace a newer session/view/dialog (#167)`, async context => {
+    const pending = deferred<object>();
+    const deletes: string[] = [];
+    const listed: string[] = [];
+    let update!: (next: Record<string, unknown>) => void;
+    const app = await (await compiled).mount(context, {
+      props: { visible: true, session: 'fixture', register: (fn: typeof update) => { update = fn; } },
+      modules: [rpc({
+        fsDelete: (path: string) => { deletes.push(path); return pending.promise; },
+        fsList: async (path: string) => { listed.push(path); return { path, entries: path === '/fixture' ? entries : [
+          { name: 'new.md', path: '/new/new.md', type: 'file', size: 100 },
+        ] }; },
+      })],
+    });
+    try {
+      await settle(app);
+      button(app, 'Delete: next.md').click(); await app.flush();
+      button(app, 'Delete').click(); await app.flush();
+      update({ session: 'new', root: '/new', navRequest: { path: '/new', n: 1 } }); await settle(app);
+      assert.equal(app.document.querySelector('[role=alertdialog]'), null, 'old confirmation belongs to its old view');
+      button(app, 'Delete: new.md').click(); await app.flush();
+      const before = listed.length;
+      if (outcome === 'success') pending.resolve({}); else pending.reject(new Error('old failure'));
+      await settle(app);
+      assert.match(app.document.querySelector('[role=alertdialog]')?.textContent ?? '', /new\.md/);
+      assert.doesNotMatch(app.document.body.textContent ?? '', /old failure/);
+      assert.equal(listed.length, before, 'old completion cannot refresh the new listing');
+      assert.deepEqual(deletes, ['/fixture/next.md']);
+    } finally { pending.resolve({}); await app.close(); }
+  });
 }
 
 test('every Files toolbar action has a localized accessible name (#157)', async context => {
