@@ -28,7 +28,7 @@
   import type { HoverInfo, HoverLine } from '../ui/hover.svelte.ts';
   import { t } from '../core/i18n.svelte.ts';
 
-  let { visible = false, openTerminal, panes = {}, onTracked = () => {}, onReady = () => {}, dense = false, activeTarget = '' }: {
+  let { visible = false, openTerminal, panes = {}, onTracked = () => {}, onReady = () => {}, onGoBack = null, dense = false, activeTarget = '' }: {
     visible?: boolean;
     openTerminal: (session: string, target: string, command?: string) => void;
     /** Live panes per session, already loaded by the Sessions page. */
@@ -37,6 +37,7 @@
     onTracked?: (sessions: string[]) => void;
     /** Hands the reload function out, so creating a project refreshes us. */
     onReady?: (reload: () => Promise<void>) => void;
+    onGoBack?: ((fn: () => boolean) => void) | null;
     /** Sidebar mode: rows in the shared side-row language instead of cards
      * (ui-unification "Page skeleton"). The Chat sidebar set that style; the
      * Terminal sidebar has to match it (owner, 2026-08-19). */
@@ -59,6 +60,24 @@
    * Close confirms. Two taps used to arm and fire; the app's confirmation says
    * what actually happens instead. */
   let pending = $state<{ kind: 'archive' | 'down'; id: string; name: string } | null>(null);
+  let confirmError = $state('');
+  let viewEpoch = 0;
+  function ask(kind: 'archive' | 'down', row: ProjectRow) {
+    if (pending || busy[row.project.id]) return;
+    confirmError = '';
+    pending = { kind, id: row.project.id, name: row.project.name };
+  }
+  function goBack() {
+    if (!pending) return false;
+    if (!busy[pending.id]) { pending = null; confirmError = ''; }
+    return true;
+  }
+  $effect(() => {
+    const register = onGoBack;
+    if (!register) return;
+    register(goBack);
+    return () => register(() => false);
+  });
 
   // Right-click / long-press on a row: the SAME verbs the row already offers
   // (design-language.md §5 — a context menu is never a second source of
@@ -73,9 +92,9 @@
   function rowItems(row: ProjectRow) {
     return [
       row.live
-        ? { label: t('projectDown'), icon: 'stop', danger: true, onselect: () => (pending = { kind: 'down', id: row.project.id, name: row.project.name }) }
+        ? { label: t('projectDown'), icon: 'stop', danger: true, onselect: () => ask('down', row) }
         : { label: t('projectUp'), icon: 'zap', onselect: () => run(row.project.id, () => projectUp(row.project.id)) },
-      { label: t('projectArchive'), icon: 'x', danger: true, onselect: () => (pending = { kind: 'archive', id: row.project.id, name: row.project.name }) },
+      { label: t('projectArchive'), icon: 'trash', danger: true, onselect: () => ask('archive', row) },
     ];
   }
   function openCtx(at: { x: number; y: number; align?: 'left' | 'right' }, row: ProjectRow) {
@@ -119,12 +138,13 @@
    * first answer lands; later loads keep the keyed cards' nodes. */
   let firstFill = $state(false);
 
-  async function load() {
+  async function load(generation = viewEpoch) {
     try {
       const [res, rooms] = await Promise.all([
         projectList(),
         hubRooms().catch(() => null),
       ]);
+      if (generation !== viewEpoch) return;
       rows = res?.projects ?? [];
       if (rooms) talkMap = rooms.rooms ?? {};
       if (rows.length) firstFill = true;
@@ -132,6 +152,7 @@
       error = '';
       onTracked(rows.map((r) => r.project.session));
     } catch (e) {
+      if (generation !== viewEpoch) return;
       const code = (e as { code?: number })?.code;
       // -32601: this server has no project support. Not an error to show.
       if (code === -32601) { supported = false; onTracked([]); return; }
@@ -154,6 +175,11 @@
   // capturer) may have changed the declaration while we were away.
   $effect(() => {
     if (visible) void load();
+    return () => {
+      viewEpoch++;
+      pending = null; busy = {}; confirmError = '';
+      closeCtx();
+    };
   });
 
   $effect(() => {
@@ -163,18 +189,38 @@
   });
 
   async function run(id: string, fn: () => Promise<unknown>) {
+    if (busy[id]) return;
+    const generation = viewEpoch;
     busy = { ...busy, [id]: true };
     error = '';
     try {
       await fn();
-      await load();
+      if (generation === viewEpoch) await load(generation);
     } catch (e) {
-      error = (e as Error)?.message || String(e);
+      if (generation === viewEpoch) error = (e as Error)?.message || String(e);
     } finally {
-      const next = { ...busy };
-      delete next[id];
-      busy = next;
+      if (generation === viewEpoch) delete busy[id];
     }
+  }
+
+  async function runPending() {
+    if (!pending || busy[pending.id]) return;
+    const act = pending;
+    const generation = viewEpoch;
+    busy[act.id] = true;
+    confirmError = '';
+    try {
+      if (act.kind === 'down') await projectDown(act.id);
+      else await projectArchive(act.id, true);
+    } catch (e) {
+      if (generation === viewEpoch && pending === act) confirmError = (e as Error)?.message || String(e);
+      return;
+    } finally {
+      if (generation === viewEpoch && pending === act) delete busy[act.id];
+    }
+    if (generation !== viewEpoch || pending !== act) return;
+    pending = null;
+    await load(generation);
   }
 
   // A window's live pane target. The panes prop comes from the Sessions page's
@@ -276,7 +322,7 @@
             <div class="acts">
               {#if row.live}
                 <!-- Close confirms (board #77): it kills every pane in the session. -->
-                <button class="act" disabled={busy[row.project.id]} onclick={() => (pending = { kind: 'down', id: row.project.id, name: row.project.name })}>{t('projectDown')}</button>
+                <button class="act" disabled={busy[row.project.id]} onclick={() => ask('down', row)}>{t('projectDown')}</button>
               {:else}
                 <button class="act primary" disabled={busy[row.project.id]} onclick={() => run(row.project.id, () => projectUp(row.project.id))}>{t('projectUp')}</button>
               {/if}
@@ -289,8 +335,8 @@
                 disabled={busy[row.project.id]}
                 aria-label={t('projectArchive')}
                 title={t('projectArchive')}
-                onclick={() => (pending = { kind: 'archive', id: row.project.id, name: row.project.name })}>
-                <Icon name="x" size={13} />
+                onclick={() => ask('archive', row)}>
+                <Icon name="trash" size={13} />
               </button>
             </div>
             {/if}
@@ -325,17 +371,13 @@
 
 <ContextMenu at={ctxAt} items={ctxItems} who={ctxWho} oncancel={closeCtx} />
 
-<ConfirmDialog open={!!pending}
+<ConfirmDialog open={!!pending} busy={!!pending && !!busy[pending.id]} error={confirmError}
   title={pending ? t(pending.kind === 'down' ? 'projectDownTitle' : 'projectArchiveConfirmTitle').replace('{name}', pending.name) : ''}
   note={pending ? t(pending.kind === 'down' ? 'projectDownNote' : 'projectArchiveConfirmNote') : ''}
   confirmLabel={pending?.kind === 'down' ? t('projectDown') : t('projectArchive')}
-  onconfirm={() => {
-    const a = pending;
-    pending = null;
-    if (!a) return;
-    void run(a.id, () => (a.kind === 'down' ? projectDown(a.id) : projectArchive(a.id, true)));
-  }}
-  oncancel={() => (pending = null)} />
+  confirmIcon={pending?.kind === 'down' ? 'stop' : 'trash'}
+  onconfirm={runPending}
+  oncancel={() => { if (!pending || !busy[pending.id]) { pending = null; confirmError = ''; } }} />
 
 <style>
   .projects { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }

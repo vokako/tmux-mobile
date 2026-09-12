@@ -116,7 +116,7 @@ App seeds/re-pushes `{app:true}` history entries and routes `popstate` to the vi
 **Hub dispatch ownership** (board #119, 2026-09-09): one per-Hub
 `hub-back.ts` registry replaces the closure-wide flag chain. Its fixed order
 is lightbox -> ContextMenu -> palette ->
-non-busy action confirmation -> trash confirmation ->
+action confirmation -> trash confirmation ->
 agent picker -> create project -> rename -> agent filter -> Files delegate ->
 drawer close -> compact project-list floor. This is not registration order
 or a chronological stack. Each callback reads its owner's live state;
@@ -128,16 +128,29 @@ Hub still publishes one callback through `onGoBack`; cleanup removes each
 owner's registrations. Board #168 (2026-09-11) removes the agent tap menu,
 recipient popup and send-arm mechanism whole, including their Back slots
 and the obsolete card-menu capture effect. Composer registers only palette;
-Hub owns the other eleven slots. All surviving guards and their relative
-order are unchanged. The original
-guards remain: a truthy palette consumes even
-without items, busy action confirmation falls through, and Files is called
+Hub owns the other eleven slots. The relative order is unchanged. Board #167
+(2026-09-12) deliberately replaces busy-confirmation fallthrough: an open
+action/purge confirmation consumes Back while pending and dismisses only
+when idle. It must not close the drawer beneath its in-flight operation.
+The other guards remain: a truthy palette consumes even
+without items, and Files is called
 only for an open Files partition and consumes only on a true return.
 Message actions/raw view are not Back layers; Board delegation is not added.
 The Escape/pointerdown listeners and their capture order stay in Hub,
 including the terminal/Files/Board focus territories. The registry neither
 installs listeners nor calls browser history. Desktop still uses in-pane
 Files Back/breadcrumbs; a narrow desktop is not a reason to trap browser Back.
+
+**Terminal's confirmations have a local delegate** (#167, 2026-09-12).
+Sessions exposes the same `onGoBack` contract: pending kill confirmation
+first, then its nested Projects confirmation, otherwise false. Busy consumes
+without dismissal; idle confirmation dismisses, and an idle list falls
+through. App consults that callback inside its existing touch-only Terminal
+branch before `jumpedFrom` or the session-drawer floor. Previously neither
+child participated, so Back could leave a busy confirmation for Chat.
+No listener, global modal history trap or desktop history rule is added.
+Sessions/Projects mounts exercise pending/idle behavior; App's source contract
+pins the delegate before both existing fallthrough branches.
 Unit traces cover every layer and overlap; a mounted Hub test exercises
 ContextMenu/palette priority, the compact floor and registration cleanup.
 Since board #134 (2026-09-09), Feed owns Copy/Raw state and registers live

@@ -4,6 +4,18 @@ import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('./Sessions.svelte', import.meta.url), 'utf8');
 
+test('confirmation Back delegates locally without owning browser history (#167, 2026-09-12)', () => {
+  // App owns native Back; the nested caller exposes only its local contract.
+  assert.doesNotMatch(source, /\b(?:window|document)\.addEventListener\(['"](?:popstate|keydown)['"]/u);
+});
+
+test('kill confirmations explicitly distinguish process icons from deletion (#167, 2026-09-12)', () => {
+  // Glyph choice belongs to the caller; danger alone cannot mean trash.
+  assert.match(source, /confirmIcon=\{pendingKill\?\.kind === 'window' \? 'x' : 'stop'\}/u);
+  assert.match(source, /confirmKillSessionAction'\), icon: 'stop'/u);
+  assert.match(source, /confirmKillWindowAction'\), icon: 'x'/u);
+});
+
 test('the retired unread-notification dots stay retired (2026-09-01)', () => {
   assert.doesNotMatch(source, /agent-notifications\.svelte/u);
   assert.doesNotMatch(source, /attention-dot|sessionHasNotification/u);

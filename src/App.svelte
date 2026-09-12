@@ -1238,6 +1238,7 @@
     }
   }
   let boardGoBack = $state(null);
+  let sessionsGoBack = $state(null);
   // A cross-page JUMP from the chat (header toggles, a feed board-line tap,
   // opening a pane full-screen) remembers where it came from, so the phone's
   // back at the target's FLOOR returns to the conversation instead of the
@@ -1289,6 +1290,7 @@
       // re-pushes — it never dumps the reader on the terminal (board #47).
       // A terminal JUMPED INTO from Chat returns there before the ordinary
       // terminal floor gets a chance to lift its drawer.
+      if (page === 'terminal' && sessionsGoBack?.()) { navPush(); return; }
       if (page === 'terminal' && jumpedFrom) { switchTab(jumpedFrom); return; }
       // Compact Terminal has the same FLOOR semantics as Chat/Board (board
       // #58): a bare page lifts the session drawer. Once open, Back falls
@@ -1799,6 +1801,7 @@
       <aside class="term-side" class:side-sheet={layout.isTouchDevice && narrowVp} class:sheet={layout.isTouchDevice} class:open={layout.isTouchDevice && narrowVp && sessListOpen} bind:this={termSideEl}>
         {#if !layout.isTouchDevice}<SideHandle />{/if}
         <Sessions {openTerminal} activeTarget={terminalTarget}
+          onGoBack={(fn) => sessionsGoBack = fn}
           visible={page === 'terminal' && (!layout.isTouchDevice || sessListOpen)}
           onPick={() => sessListOpen = false}
           chips={false} />

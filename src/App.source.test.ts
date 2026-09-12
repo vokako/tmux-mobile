@@ -311,6 +311,18 @@ test('board back on a phone lifts the project drawer, never the terminal (board 
   assert.match(source, /<Board [^\n]*jumped=\{!!jumpedFrom\}/u, 'the return slot reaches the drawer-lift gate');
 });
 
+test('Terminal confirmations delegate before jump-back or drawer floor without another history listener (#167)', () => {
+  // Actual pending/idle behavior is exercised by Sessions/Projects mount
+  // tests; this pins App's wiring and preserves its touch-only history owner.
+  const delegate = source.indexOf("if (page === 'terminal' && sessionsGoBack?.())");
+  const jump = source.indexOf("if (page === 'terminal' && jumpedFrom)");
+  const floor = source.indexOf("if (page === 'terminal' && layout.isTouchDevice && narrowVp && !sessListOpen)");
+  assert.ok(delegate >= 0 && delegate < jump && delegate < floor);
+  assert.match(source, /if \(page === 'terminal' && sessionsGoBack\?\.\(\)\) \{ navPush\(\); return; \}/u);
+  assert.match(source, /onGoBack=\{\(fn\) => sessionsGoBack = fn\}/u);
+  assert.equal([...source.matchAll(/addEventListener\('popstate'/gu)].length, 1);
+});
+
 test('the multi-server registry wires migrate → deep-link → boot, in that order (board #55)', () => {
   // Migration must run BEFORE the deep-link consumer: on a pre-registry
   // client a link would otherwise create the registry via upsert, turn

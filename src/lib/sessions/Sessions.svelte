@@ -22,11 +22,12 @@
   // Terminal's sidebar — the terminal already has a window bar, and the rows
   // are right below (owner: "左侧侧边栏不要显示" that bar). Search moves to
   // the bottom bar in that mode rather than being lost with the row.
-  let { openTerminal: openTerminalRaw, activeTarget = '', visible = false, onPick = null, chips = true }: {
+  let { openTerminal: openTerminalRaw, activeTarget = '', visible = false, onPick = null, onGoBack = null, chips = true }: {
     openTerminal: (session: string, target: string, command?: string) => void;
     activeTarget?: string;
     visible?: boolean;
     onPick?: (() => void) | null;
+    onGoBack?: ((fn: () => boolean) => void) | null;
     chips?: boolean;
   } = $props();
   const openTerminal = (session: string, target: string, command = '') => {
@@ -54,7 +55,14 @@
   // Confirm-to-kill gates
   /** The destructive action awaiting confirmation. `target` is a session name
    * for 'session' and "session:window" for 'window'. */
-  let pendingKill = $state<{ kind: 'session' | 'window'; target: string; session?: string } | null>(null);
+  let pendingKill = $state<{ kind: 'session' | 'window'; target: string } | null>(null);
+  let killError = $state('');
+  let viewEpoch = 0;
+  function askKill(kind: 'session' | 'window', target: string) {
+    if (pendingKill || killing) return;
+    killError = '';
+    pendingKill = { kind, target };
+  }
   // Board #77 (owner, 2026-09-02: "像关闭之类的应该是点击后才有进一步操作"): the
   // destructive verb is no longer a trash icon sitting on every row — a quiet ⋯
   // (and right-click / long-press on the row) opens the ONE context menu, and
@@ -67,15 +75,29 @@
   const pointOf = (e: MouseEvent) => ({ x: e.clientX ?? 0, y: e.clientY ?? 0 });
   function openSessionMenu(at: { x: number; y: number }, s: TmuxSession) {
     ctxWho = s.name;
-    ctxItems = [{ label: t('confirmKillSessionAction'), icon: 'trash', danger: true, onselect: () => { pendingKill = { kind: 'session', target: s.name }; } }];
+    ctxItems = [{ label: t('confirmKillSessionAction'), icon: 'stop', danger: true, onselect: () => askKill('session', s.name) }];
     ctxAt = at;
   }
   function openWindowMenu(at: { x: number; y: number }, s: TmuxSession, p: TmuxPane) {
     ctxWho = `${s.name}:${p.window}`;
-    ctxItems = [{ label: t('confirmKillWindowAction'), icon: 'trash', danger: true, onselect: () => { pendingKill = { kind: 'window', target: `${s.name}:${p.window}`, session: s.name }; } }];
+    ctxItems = [{ label: t('confirmKillWindowAction'), icon: 'x', danger: true, onselect: () => askKill('window', `${s.name}:${p.window}`) }];
     ctxAt = at;
   }
   let killing = $state(false);
+  let projectsGoBack = $state<(() => boolean) | null>(null);
+  function goBack() {
+    if (pendingKill) {
+      if (!killing) { pendingKill = null; killError = ''; }
+      return true;
+    }
+    return projectsGoBack?.() ?? false;
+  }
+  $effect(() => {
+    const register = onGoBack;
+    if (!register) return;
+    register(goBack);
+    return () => register(() => false);
+  });
 
   let refreshing = $state(false);
 
@@ -151,7 +173,14 @@
   }
 
   // ─── Data loading ──────────────────────────────────────
-  $effect(() => { if (visible) refresh(); });
+  $effect(() => {
+    if (visible) void refresh();
+    return () => {
+      viewEpoch++;
+      pendingKill = null; killing = false; killError = '';
+      closeCtx();
+    };
+  });
 
   // After a reconnect, the cached sessions/panes likely went stale (process
   // exited, new windows, …). Re-pull when we hear the app's reconnect-success
@@ -163,12 +192,13 @@
     return () => window.removeEventListener('ws-reconnected', onReconn);
   });
 
-  async function refresh() {
+  async function refresh(generation = viewEpoch) {
     try {
       // Single round-trip: server returns sessions[] + panes[] (across all
       // sessions). We group panes by session_name client-side to populate
       // the same shape the rest of the page expects.
       const { sessions: list, panes: allPanes } = await listSessionsWithPanes();
+      if (generation !== viewEpoch) return;
       const activeSession = activeTarget.split(':')[0];
       sessions = list.sort((a, b) => {
         if (a.name === activeSession) return -1;
@@ -185,7 +215,7 @@
       error = '';
       listReady = true;
     } catch (e) {
-      error = (e as Error).message;
+      if (generation === viewEpoch) error = (e as Error).message;
     }
   }
 
@@ -242,22 +272,25 @@
   // other destructive verb in the app, it says nothing about what is lost, and
   // on a phone the 3s window is easy to hit by accident (owner audit,
   // 2026-08-19).
-  async function removeSession(name: string, e?: Event) {
-    e?.stopPropagation();
+  async function runPendingKill() {
+    if (!pendingKill || killing) return;
+    const act = pendingKill;
+    const generation = viewEpoch;
+    killing = true;
+    killError = '';
     try {
-      await killSession(name);
-      await refresh();
+      if (act.kind === 'session') await killSession(act.target);
+      else await killWindow(act.target);
     } catch (err) {
-      error = (err as Error).message;
+      if (generation === viewEpoch && pendingKill === act) killError = (err as Error).message || String(err);
+      return;
+    } finally {
+      if (generation === viewEpoch && pendingKill === act) killing = false;
     }
-  }
-  async function removeWindow(target: string, session: string, e?: Event) {
-    e?.stopPropagation();
-    try {
-      await killWindow(target);
-      panes[session] = await listPanes(session);
-      if ((panes[session] || []).length === 0) await refresh();
-    } catch (err) { error = (err as Error).message; }
+    if (generation !== viewEpoch || pendingKill !== act) return;
+    // The mutation is complete. A failed read must not offer another kill.
+    pendingKill = null;
+    await refresh(generation);
   }
 
   // ─── Create session ───────────────────────────────────
@@ -545,6 +578,7 @@
       {panes}
       dense={!chips}
       {activeTarget}
+      onGoBack={(fn) => projectsGoBack = fn}
       onTracked={(names) => { trackedSessions = names; trackedReady = true; }}
       onReady={(reload) => reloadProjects = reload} />
     <!-- Creating a project is the same ROW in every sidebar (Chat's projects,
@@ -664,18 +698,10 @@
         .replace('{name}', pendingKill.target)
     : ''}
   note={pendingKill ? t(pendingKill.kind === 'session' ? 'confirmKillSessionNote' : 'confirmKillWindowNote') : ''}
-  confirmLabel={t('del')}
-  onconfirm={async () => {
-    if (!pendingKill || killing) return;
-    killing = true;
-    const act = pendingKill;
-    try {
-      if (act.kind === 'session') await removeSession(act.target);
-      else await removeWindow(act.target, act.session ?? '');
-      pendingKill = null;
-    } finally { killing = false; }
-  }}
-  oncancel={() => (pendingKill = null)} />
+  confirmLabel={t(pendingKill?.kind === 'window' ? 'confirmKillWindowAction' : 'confirmKillSessionAction')}
+  confirmIcon={pendingKill?.kind === 'window' ? 'x' : 'stop'} error={killError}
+  onconfirm={runPendingKill}
+  oncancel={() => { if (!killing) { pendingKill = null; killError = ''; } }} />
 
 <style>
   .sessions {

@@ -349,6 +349,55 @@ can reach it without a DOM.
 
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
 
+### Confirmed process and project actions settle before closing (2026-09-12, #167 batch 1)
+
+Sessions and Projects own the confirmed target, synchronous busy state and a
+modal-local error. Sessions previously swallowed kill RPC rejection, so its
+confirmation closed as though successful; Projects cleared the pending target
+before starting Close/Remove. Both now retain the same target on rejection and
+show the error through ConfirmDialog's alert, with retry available. Busy Escape,
+backdrop and repeated confirmation are consumed by the shared dialog.
+
+Mutation success closes the confirmation before the list refresh. A refresh
+failure uses the existing list error and must not turn a completed mutation
+into a retryable kill/Close/Remove. The captured target and view generation gate
+completion and cleanup; hiding/unmounting the view invalidates old callbacks,
+including refresh results and tracking notifications. Window kill uses the same
+session/pane refresh so its counts and pane list come from one response.
+
+Caller glyphs name the action: session kill and project Close use `stop`, window
+kill uses `x`, project removal uses `trash`. Session confirmation reuses the
+existing Kill session/window labels, not the missing `del` key.
+`Sessions.mount.test.ts` and `Projects.mount.test.ts` reproduce the rejection,
+label and unmount failures with real client components and controlled promises;
+they also cover successful mutation followed by failed refresh. Colocated source
+contracts pin explicit glyph choice. These tests cover synthetic DOM events, not
+layout or native Terminal Back, which remains owned by App.
+Verified with Node 22.23.2, Svelte 5.55.5, Vite 6.4.2 and jsdom 30.0.1.
+Negative controls reintroduced closing on kill rejection and clearing a project
+target before its RPC; each failed its corresponding mount test and was restored
+in place without checking out an uncommitted file.
+
+### Terminal confirmation Back delegation (2026-09-12, #167)
+
+The narrow addition approved by the lead at 17:33 gives Sessions and Projects
+optional `onGoBack` registration callbacks. The host previously had no local
+confirmation handler to consult before its Terminal navigation. Sessions consumes
+its pending kill first, otherwise delegates to the nested Projects handler;
+Projects consumes its pending Close/Remove. Both dismiss only when the mutation
+is not busy and return `false` when no confirmation owns Back.
+
+Each component registers a stable handler reading live local state; unmount or
+registration replacement gives the old host a callback returning `false`.
+No document/window listeners or separate history mechanism are added. App owns
+native Back routing. The colocated client-mount tests exercise idle fallthrough,
+cancel without mutation, busy consumption, failed-confirmation cancellation,
+nested delegation and disposal. These are synthetic callback tests, not Android
+device acceptance; the App wiring is verified separately by its owner.
+Red-first tests failed on the absent registration. Removing either busy guard
+or the nested delegation then failed its corresponding negative-control test;
+each temporary change was restored in place without touching the staged snapshot.
+
 ### Projects declare, tmux projects
 
 a project (`state.db`, `src-tauri/src/projects/`) is a directory + the windows it is made of; the tmux session is a disposable projection.
