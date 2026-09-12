@@ -134,7 +134,7 @@ test('connection commands expose pending/error and reject duplicate activation',
   let calls = 0;
   const app = await mount(context, {
     tab: 'connection',
-    props: { connected: true, onShare: () => { calls++; return share.promise; } },
+    props: { connected: true, onShare: () => ++calls === 1 ? share.promise : Promise.resolve() },
   });
   try {
     const button = app.button('Share connection link');
@@ -143,9 +143,15 @@ test('connection commands expose pending/error and reject duplicate activation',
     assert.equal(calls, 1);
     await app.flush();
     assert.equal(button.getAttribute('aria-busy'), 'true');
-    share.reject(new Error('clipboard unavailable'));
-    await app.wait(() => app.document.body.textContent!.includes('clipboard unavailable'));
+    share.reject(new app.window.Error('Copy failed'));
+    await app.wait(() => app.document.querySelector('[role="alert"]')?.textContent === 'Copy failed');
     assert.equal(button.disabled, false);
+    await app.advance(3000);
+    assert.equal(app.document.querySelector('[role="alert"]')?.textContent, 'Copy failed', 'copy errors do not expire');
+    await app.click('Share connection link');
+    await app.wait(() => !button.disabled);
+    assert.equal(calls, 2, 'the same share command retries after failure');
+    assert.equal(app.document.querySelector('[role="alert"]'), null);
   } finally { share.resolve(); await app.close(); }
 });
 

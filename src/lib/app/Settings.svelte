@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { connect, disconnect } from '../core/ws.ts';
   import { defaultConnectionAddress } from '../core/connection-address.ts';
   import { activateConnected } from './servers.ts';
@@ -7,6 +8,7 @@
   import { t } from '../core/i18n.svelte.ts';
   import { flip } from 'svelte/animate';
   import { moveMs } from '../ui/motion.ts';
+  import { createFeedbackLifetime, type FeedbackValue } from '../ui/feedback-lifetime.ts';
 
   type HistoryEntry = { address: string; token: string };
 
@@ -133,7 +135,11 @@
 
   // Build a deep link that pre-fills + auto-connects (consumed by App.svelte's
   // consumeConnectUrlParams). Includes the token so the link connects on its own.
-  let shared = $state('');
+  let shareFeedback = $state<FeedbackValue | null>(null);
+  const shareLifetime = createFeedbackLifetime(value => { shareFeedback = value; });
+  const shareContext = $derived({ address, token, socket });
+  $effect(() => { void shareContext; shareLifetime.clear(); });
+  onDestroy(() => shareLifetime.dispose());
   function buildShareUrl() {
     const url = normalizeAddress(address);
     const params = new URLSearchParams();
@@ -143,9 +149,14 @@
     return `${location.origin}${location.pathname}?${params.toString()}`;
   }
   async function shareLink() {
-    await copyText(buildShareUrl());
-    shared = t('linkCopied');
-    setTimeout(() => shared = '', 2000);
+    const attempt = shareLifetime.begin();
+    const context = shareContext;
+    const link = buildShareUrl();
+    const copied = await copyText(link);
+    if (!shareLifetime.current(attempt) || context !== shareContext) return;
+    shareLifetime.update(attempt, copied
+      ? { kind: 'success', message: t('linkCopied') }
+      : { kind: 'error', message: t('copyFailed') });
   }
 </script>
 
@@ -213,8 +224,11 @@
       </button>
     {/if}
 
+    {#if shareFeedback?.kind === 'error'}
+      <div class="config-error" role="alert">{shareFeedback.message}</div>
+    {/if}
     <button class="share-btn" onclick={shareLink} disabled={!address} title={t('shareLink')}>
-      <Icon name="copy" size={13} /> {shared || t('shareLink')}
+      <Icon name="copy" size={13} /> {shareFeedback?.kind === 'success' ? shareFeedback.message : t('shareLink')}
     </button>
 
     <a class="about-link" href="https://github.com/vokako/tmux-mobile" target="_blank" rel="noopener">

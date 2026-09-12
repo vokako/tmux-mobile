@@ -1,5 +1,5 @@
 <script>
-  import { tick } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
   import { activeModal } from './lib/ui/modal.ts';
   import Settings from './lib/app/Settings.svelte';
   import Sessions from './lib/sessions/Sessions.svelte';
@@ -15,6 +15,7 @@
   import Preferences from './lib/app/Preferences.svelte';
   import ConfirmDialog from './lib/ui/ConfirmDialog.svelte';
   import { copyText } from './lib/core/clipboard.ts';
+  import { createFeedbackLifetime } from './lib/ui/feedback-lifetime.ts';
   import { hubRooms, systemStatus } from './lib/core/ws.ts';
   import SystemStatus from './lib/system/SystemStatus.svelte';
   import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable, listPanes, listSessions, backendsList } from './lib/core/ws.ts';
@@ -1084,7 +1085,14 @@
   // on the other device). Plain clipboard copy with a brief ✓ — no share sheet,
   // no prompt (copyText already falls back to execCommand on http).
   let linkCopied = $state(false);
+  const linkFeedback = createFeedbackLifetime(value => { linkCopied = value?.kind === 'success'; });
+  // Same-machine polling replaces serverInfo, not the copy's semantic context.
+  const linkContext = $derived(JSON.stringify({ page, connected, activeAddress, serverCurId, machineId: serverInfo.machineId }));
+  $effect(() => { void linkContext; linkFeedback.clear(); });
+  onDestroy(() => linkFeedback.dispose());
   async function shareConnectionLink() {
+    const attempt = linkFeedback.begin();
+    const context = linkContext;
     const addr = localStorage.getItem('tmux_address') || activeAddress;
     if (!addr) return;
     const token = localStorage.getItem('tmux_token') || '';
@@ -1094,9 +1102,15 @@
     if (token) params.set('token', token);
     if (socket) params.set('socket', socket);
     const link = `${location.origin}${location.pathname}?${params.toString()}`;
-    await copyText(link);
-    linkCopied = true;
-    setTimeout(() => linkCopied = false, 1500);
+    // Storage is not reactive; recheck the captured credentials as well as the page/server.
+    const current = () => linkFeedback.current(attempt) && context === linkContext
+      && addr === (localStorage.getItem('tmux_address') || activeAddress)
+      && token === (localStorage.getItem('tmux_token') || '')
+      && socket === (localStorage.getItem('tmux_socket') || '');
+    const copied = await copyText(link);
+    if (!current()) return;
+    if (!copied) throw new Error(t('copyFailed'));
+    linkFeedback.update(attempt, { kind: 'success', message: t('linkCopied') });
   }
 
   // Auto-reconnect and restore state on page load

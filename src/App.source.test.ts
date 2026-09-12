@@ -8,6 +8,35 @@ import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('./App.svelte', import.meta.url), 'utf8');
 
+test('sharing a connection reports only a current successful copy; failure uses Preferences (#167)', () => {
+  // Preferences.mount executes the existing error/retry channel. This source
+  // contract pins App's producer without claiming a full App client mount.
+  const share = source.match(/async function shareConnectionLink\(\) \{[\s\S]*?\n  \}/u)?.[0] ?? '';
+  assert.match(source, /import \{ createFeedbackLifetime \} from '\.\/lib\/ui\/feedback-lifetime\.ts';/u);
+  assert.match(source, /const linkFeedback = createFeedbackLifetime\(value => \{ linkCopied = value\?\.kind === 'success'; \}\);/u);
+  assert.match(share, /const attempt = linkFeedback\.begin\(\);/u);
+  assert.match(share, /const context = linkContext;/u);
+  assert.match(share, /linkFeedback\.current\(attempt\) && context === linkContext/u);
+  for (const key of ['tmux_address', 'tmux_token', 'tmux_socket']) {
+    assert.ok(share.split(`localStorage.getItem('${key}')`).length >= 3, `${key} is captured and rechecked`);
+  }
+  assert.match(share, /const copied = await copyText\(link\);\s*if \(!current\(\)\) return;\s*if \(!copied\) throw new Error\(t\('copyFailed'\)\);/u);
+  assert.match(share, /linkFeedback\.update\(attempt, \{ kind: 'success', message: t\('linkCopied'\) \}\);/u);
+  assert.doesNotMatch(share, /setTimeout|linkCopied = true|console\./u);
+  assert.match(source, /onShare=\{shareConnectionLink\}/u, 'the existing command error channel receives rejection');
+  assert.match(share, /const params = new URLSearchParams\(\);/u);
+  for (const field of ['addr', 'token', 'socket']) assert.ok(share.includes(`params.set('${field}', ${field})`));
+});
+
+test('App link feedback belongs to its page and connection, and disposes with App (#167)', () => {
+  // Polling can replace serverInfo without changing the machine. A primitive
+  // descriptor keeps that refresh from invalidating the copy or its timer.
+  const context = source.split('\n').find(line => line.includes('const linkContext = ')) ?? '';
+  assert.match(context, /const linkContext = \$derived\(JSON\.stringify\(\{ page, connected, activeAddress, serverCurId, machineId: serverInfo\.machineId \}\)\);/u);
+  assert.match(source, /\$effect\(\(\) => \{ void linkContext; linkFeedback\.clear\(\); \}\);/u);
+  assert.match(source, /onDestroy\(\(\) => linkFeedback\.dispose\(\)\);/u);
+});
+
 test('desktop shortcuts yield to inputs and the active modal without changing browser history (#155)', async () => {
   assert.match(source, /import \{ activeModal \} from '\.\/lib\/ui\/modal\.ts';/u);
   assert.match(source, /const onShortcut = \(event\) => \{\s*if \(isShortcutInputTarget\(event\.target\)\) return;\s*if \(activeModal\(document\)\) return;/u);

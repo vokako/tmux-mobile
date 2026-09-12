@@ -273,6 +273,29 @@ Each entry is a decision with the reason it was made; treat them as normative. T
 
 `connect()` cleans up existing. `onclose` rejects pending. `doDisconnect()` clears timers. Heartbeat ping every 15s; 2 consecutive RPC timeouts → auto-close → reconnect.
 
+### Connection-link copy feedback belongs to its attempt (#167, 2026-09-12)
+
+Both share commands previously ignored `copyText(false)` and displayed success;
+their independent timers could also clear a later copy. App and the connect
+form now use `createFeedbackLifetime` and its one completion scheduler. Only a
+successful copy shows the brief copied state. A connect-form failure remains
+visible as an inline `config-error` alert beside the share command until retry
+or input change, without nesting another feedback frame inside the connect
+card. App rejects the current failed attempt into Preferences' existing
+command-error channel. Neither path logs the link or creates a global notice.
+
+The link and context are captured before awaiting the clipboard. A newer
+attempt, changed inputs/page/server or unmount invalidates the old outcome;
+disposal also cancels expiry. App's descriptor is a serialized primitive of
+page, connection state, active address, server ID and machine ID: replacing
+`serverInfo` during same-machine polling must not clear feedback or invalidate
+a pending copy. App additionally rechecks its non-reactive stored address,
+token and socket. URLSearchParams construction and token-bearing
+deep-link semantics are unchanged. Settings mount tests use fake credentials
+and controlled clipboard results/timers; App wiring is source-pinned and
+Preferences' existing error/retry channel is exercised by its mount test,
+not claimed as a full-App or native-clipboard test.
+
 ### Servers are a named registry; the machine is the identity
 
 (board #55): `src/lib/app/servers.ts` keeps `tmux_servers` (+`tmux_server_current`) while the old `tmux_address`/`tmux_token`/`tmux_socket` stay the ACTIVE MIRROR every existing reader keeps reading. One machine = one entry however many LAN/Tailscale/WAN addresses it answers on — `recordServer` merges by `machineId` (learned at connect) without moving CURRENT, migration attributes `tmux_address_history` through `tmux_machines`, and the same-machine failover semantics are untouched. A different-machine successful connect goes through `activateConnected`: park the old live state/machine id before surfacing the target and reload; a same-machine alternate records in place. Switching (`applySwitch` + reload) parks/restores per-server `tmux_state`/`tmux_machine_id` under `::<id>` keys so restore targets never cross servers, and reuses the boot path so no in-memory cache (Hub rooms, terminals, Files cwds) can leak across; the caller cancels the reconnect machine and drops the socket first. The desktop rail's switcher rides the RAIL_GAP branch above the configure group — a control (no drag slot), popover in the one menu recipe; the Settings form is the add flow and activates only after authentication. Forgetting a non-current server captures its row identity and asks through the shared `ConfirmDialog` before removing config + parked state.
