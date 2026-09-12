@@ -10,6 +10,7 @@
   import Icon from './Icon.svelte';
   import { menuHeightLimit, menuPlacement, pointAnchor, popOrigin, viewBox } from './placement.ts';
   import { activeModal } from './modal.ts';
+  import { nextMenuIndex } from './menu-navigation.ts';
   const menuId = $props.id();
 
   /**
@@ -97,6 +98,8 @@
     const onKey = (e) => {
       const modal = activeModal(document);
       if (modal && !modal.contains(menu)) return;
+      if (!menu.contains(document.activeElement) || e.isComposing || e.keyCode === 229) return;
+      if (e.key === 'Tab') { oncancel(); return; }
       if (e.key === 'Escape') {
         e.preventDefault();
         oncancel();
@@ -104,15 +107,11 @@
       }
       const usable = items.filter((i) => !i.disabled);
       if (!usable.length) return;
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
         e.preventDefault();
-        const step = e.key === 'ArrowDown' ? 1 : -1;
-        cursor = (cursor + step + items.length) % items.length;
-        // Skip a disabled row rather than parking the cursor on it.
-        let guard = 0;
-        while (items[cursor]?.disabled && guard++ < items.length) {
-          cursor = (cursor + step + items.length) % items.length;
-        }
+        const step = e.key === 'ArrowDown' || e.key === 'Home' ? 1 : -1;
+        const from = e.key === 'Home' || e.key === 'End' ? -1 : cursor;
+        cursor = nextMenuIndex(from, step, items.length, i => !items[i].disabled);
         menu.querySelectorAll('button')[cursor]?.scrollIntoView?.({ block: 'nearest' });
         return;
       }
@@ -155,7 +154,7 @@
     bind:offsetWidth={w} bind:offsetHeight={h}>
     {#if who}<div class="ctx-who menu-heading data" title={who}>{who}</div>{/if}
     {#each items as it, i (it.label)}
-      <button class="menu-item" type="button" role={it.checked === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-checked={it.checked}
+      <button class="menu-item" type="button" tabindex="-1" role={it.checked === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-checked={it.checked}
         id={`${id}-${i}`}
         class:danger={it.danger} class:warn={it.warn} class:cur={i === cursor}
         disabled={it.disabled} title={it.title}

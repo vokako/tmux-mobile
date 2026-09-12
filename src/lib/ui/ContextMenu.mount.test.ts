@@ -46,3 +46,52 @@ test('opening a context menu gives its keys local focus and Escape returns it (#
     assert.equal(app.document.activeElement, opener);
   } finally { await app.close(); }
 });
+
+test('menu ArrowUp starts at the last enabled item and Home/End use the same boundary (#165)', async context => {
+  const chosen: string[] = [];
+  const app = await (await compiled).mount(context, {
+    props: { at: { x: 10, y: 10 }, items: [
+      { label: 'First', onselect: () => chosen.push('first') },
+      { label: 'Disabled', disabled: true, onselect: () => assert.fail('disabled') },
+      { label: 'Last', onselect: () => chosen.push('last') },
+    ] }, modules: [],
+  });
+  try {
+    const menu = app.document.querySelector('.ctx')!;
+    const buttons = [...menu.querySelectorAll<HTMLButtonElement>('button')];
+    const key = async (value: string) => {
+      menu.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true }));
+      await app.flush();
+    };
+    await key('ArrowUp');
+    assert.equal(menu.getAttribute('aria-activedescendant'), buttons[2]!.id);
+    await key('Home');
+    assert.equal(menu.getAttribute('aria-activedescendant'), buttons[0]!.id);
+    await key('End');
+    assert.equal(menu.getAttribute('aria-activedescendant'), buttons[2]!.id);
+    await key('Enter');
+    assert.deepEqual(chosen, ['last']);
+    assert.ok(buttons.every(button => button.tabIndex === -1), 'one menu tab stop, not one per row');
+  } finally { await app.close(); }
+});
+
+test('Tab closes the menu without stealing the next focus, and foreign fields retain their keys (#165)', async context => {
+  const fixture = await compileMount(new URL('./ContextMenu.test.svelte', import.meta.url), []);
+  const app = await fixture.mount(context, { modules: [] });
+  try {
+    const opener = app.document.querySelector('button')!;
+    const next = app.document.querySelector('input')!;
+    opener.focus(); opener.click(); await app.flush();
+    app.document.activeElement!.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    next.focus(); // Native Tab movement belongs to Chromium coverage.
+    await app.flush();
+    assert.equal(app.document.querySelector('.ctx'), null);
+    assert.equal(app.document.activeElement, next);
+    opener.click(); await app.flush();
+    next.focus();
+    const key = new app.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true });
+    next.dispatchEvent(key); await app.flush();
+    assert.equal(key.defaultPrevented, false);
+    assert.equal(app.document.querySelector('.ctx')?.getAttribute('aria-activedescendant'), null);
+  } finally { await app.close(); }
+});

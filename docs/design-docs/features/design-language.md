@@ -564,6 +564,16 @@ press-scale/brightness details below do not override it.
   width/position feedback loop, plus real Hub/Files menu consumers. The measured
   warning-text floor is 4.75:1 including hover. This paint adoption does not
   claim that unrelated picker or keyboard behavior is already corrected.
+- **Keyboard cursor boundaries (#165, 2026-09-12).** ContextMenu and Select
+  use `ui/menu-navigation.ts`: the first Up enters at the last enabled item,
+  Down at the first, and Home/End use the same edges. Applying modulo to an
+  unseated `-1` cursor previously skipped the last item on Up. Moving the
+  active-descendant alone also left Select's End choice outside its viewport;
+  each view now reveals the chosen row through native `scrollIntoView`.
+  ContextMenu has one tab stop, closes on Tab without stealing the next focus,
+  and ignores keys owned by a foreign field. Select focuses its native
+  trigger on opening and likewise ignores foreign focus. Existing IME,
+  disabled, modal and activation gates remain; no global navigation trap.
 - **ContextMenu activation contract (#164, 2026-09-11):** checked view/tool
   choices announce `menuitemcheckbox` and `aria-checked`; ordinary verbs remain
   `menuitem`. Disabled entries reject queued activation too. Its dimensions

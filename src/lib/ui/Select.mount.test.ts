@@ -96,3 +96,27 @@ test('select Escape closes the list without changing its value', async context =
     assert.equal(app.document.querySelector('[role=listbox]'), null);
   } finally { await app.close(); }
 });
+
+test('Select starts ArrowUp at the last option and scrolls keyboard Home/End into view (#165)', async context => {
+  const changes: string[] = [];
+  const app = await (await compiled).mount(context, {
+    props: { options: ['a', 'b', 'c'], value: '', ariaLabel: 'Choice', onchange: (value: string) => changes.push(value) }, modules: [],
+  });
+  try {
+    const trigger = app.document.querySelector<HTMLButtonElement>('.sel-trigger')!;
+    trigger.click(); await app.flush();
+    const options = [...app.document.querySelectorAll<HTMLButtonElement>('[role=option]')];
+    const seen: number[] = [];
+    options.forEach((option, i) => { option.scrollIntoView = () => { seen.push(i); }; });
+    const key = async (value: string) => {
+      trigger.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true }));
+      await app.flush();
+    };
+    await key('ArrowUp');
+    assert.equal(trigger.getAttribute('aria-activedescendant'), options[2]!.id);
+    await key('Home'); await key('End');
+    assert.deepEqual(seen, [2, 0, 2]);
+    await key('Enter');
+    assert.deepEqual(changes, ['c']);
+  } finally { await app.close(); }
+});

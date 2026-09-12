@@ -1,6 +1,7 @@
 <script lang="ts">
   const listId = $props.id();
   import { activeModal } from './modal.ts';
+  import { nextMenuIndex } from './menu-navigation.ts';
   // The app's ONE dropdown. A native <select> pops the OS menu — a different
   // font, a different palette, a different animation, and on desktop WKWebView
   // a separate window entirely — which is exactly the seam the owner asked to
@@ -90,6 +91,7 @@
 
   function show() {
     if (disabled || !(triggerEl ?? inputEl)) return;
+    focusTrigger();
     anchor = anchorOf((triggerEl ?? inputEl)!);
     menuH = 0;
     cursor = shown.findIndex((o) => o.value === value);
@@ -98,6 +100,10 @@
   let composing = $state(false);
   const imeKey = (event: KeyboardEvent) => composing || event.isComposing || event.keyCode === 229;
   function focusTrigger() { if (!disabled) (editable ? inputEl : triggerEl)?.focus(); }
+  function moveCursor(from: number, step: 1 | -1) {
+    cursor = nextMenuIndex(from, step, shown.length);
+    menuEl?.querySelectorAll('button')[cursor]?.scrollIntoView?.({ block: 'nearest' });
+  }
   function hide(restoreFocus = false) {
     open = false;
     if (restoreFocus) focusTrigger();
@@ -144,16 +150,17 @@
       if (disabled || imeKey(e)) return;
       const modal = activeModal(document);
       if (modal && !modal.contains(editable ? inputEl : triggerEl)) return;
+      if (!(triggerEl ?? inputEl)?.contains(document.activeElement) && !menuEl?.contains(document.activeElement)) return;
       if (e.key === 'Escape') { hide(true); e.preventDefault(); e.stopPropagation(); return; }
       if (e.key === 'Tab') { hide(); return; }
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
         const step = e.key === 'ArrowDown' ? 1 : -1;
-        cursor = shown.length ? (cursor + step + shown.length) % shown.length : -1;
+        moveCursor(cursor, step);
         return;
       }
       if (!editable && (e.key === 'Home' || e.key === 'End')) {
-        e.preventDefault(); cursor = e.key === 'Home' ? 0 : shown.length - 1; return;
+        e.preventDefault(); moveCursor(-1, e.key === 'Home' ? 1 : -1); return;
       }
       // Space stays typeable in a text field; it only picks for the button.
       if (e.key === 'Enter' || (e.key === ' ' && !editable)) {
