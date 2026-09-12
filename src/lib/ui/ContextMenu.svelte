@@ -8,7 +8,7 @@
   // second menu language would read as a second kind of menu. The only difference
   // is what it is anchored to: a pointer instead of a trigger's rect.
   import Icon from './Icon.svelte';
-  import { menuHeightLimit, menuPlacement, pointAnchor, popOrigin, viewBox } from './placement.ts';
+  import { menuHeightLimit, menuPlacement, pointAnchor, popOrigin, viewBox, scrollMovesTrigger } from './placement.ts';
   import { activeModal } from './modal.ts';
   import { nextMenuIndex } from './menu-navigation.ts';
   const menuId = $props.id();
@@ -128,6 +128,7 @@
     // menu's own scroll (a long list under max-height) is not "moving away".
     const onScroll = (e) => {
       if (el && e.target instanceof Node && el.contains(e.target)) return;
+      if (at?.anchor && at.trigger?.isConnected && !scrollMovesTrigger(e.target, at.trigger)) return;
       oncancel();
     };
     window.addEventListener('pointerdown', outside, true);

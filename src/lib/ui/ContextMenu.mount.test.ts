@@ -4,6 +4,28 @@ import { compileMount } from '../test/mount.ts';
 
 const compiled = compileMount(new URL('./ContextMenu.svelte', import.meta.url), []);
 
+test('rect menus ignore sibling output scroll but close when their trigger moves (#180)', async context => {
+  const fixture = await compileMount(new URL('./ContextMenu.test.svelte', import.meta.url), []);
+  for (const rect of [true, false]) {
+    const app = await fixture.mount(context, { props: { rect }, modules: [] });
+    try {
+      app.document.querySelector<HTMLButtonElement>('.source-scroll button')!.click();
+      await app.flush();
+      app.document.querySelector('.ctx')!.dispatchEvent(new app.window.Event('scroll'));
+      await app.flush();
+      assert.ok(app.document.querySelector('.ctx'), 'own scroll stays inside the menu');
+      app.document.querySelector('.sibling-scroll')!.dispatchEvent(new app.window.Event('scroll'));
+      await app.flush();
+      assert.equal(!!app.document.querySelector('.ctx'), rect, 'pointer anchors retain broad outside-scroll dismissal');
+      if (rect) {
+        app.document.querySelector('.source-scroll')!.dispatchEvent(new app.window.Event('scroll'));
+        await app.flush();
+        assert.equal(app.document.querySelector('.ctx'), null, 'an ancestor scroll still dismisses');
+      }
+    } finally { await app.close(); }
+  }
+});
+
 test('controlled menu states are announced and disabled items cannot activate (#164)', async context => {
   let calls = 0;
   const app = await (await compiled).mount(context, {

@@ -1,7 +1,20 @@
 // The popover placement contract — pure geometry, no browser.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { menuHeightLimit, menuPlacement, pointAnchor, popOrigin } from './placement.ts';
+import { menuHeightLimit, menuPlacement, pointAnchor, popOrigin, scrollMovesTrigger } from './placement.ts';
+
+test('only a trigger-containing scroller moves an anchored popup (#180)', () => {
+  // DOM containment itself is the platform boundary; the menu mount suite
+  // exercises real Nodes. These doubles pin null/non-node and delegation.
+  const trigger = {} as Node;
+  const ancestor = { contains: (node: Node) => node === trigger } as unknown as EventTarget;
+  const sibling = { contains: () => false } as unknown as EventTarget;
+  assert.equal(scrollMovesTrigger(ancestor, trigger), true);
+  assert.equal(scrollMovesTrigger(sibling, trigger), false);
+  assert.equal(scrollMovesTrigger(new EventTarget(), trigger), false);
+  assert.equal(scrollMovesTrigger(null, trigger), false);
+  assert.equal(scrollMovesTrigger(ancestor, null), false);
+});
 
 test('an opt-in trigger-clear cap keeps a tall menu on one side even in a short viewport (#173)', () => {
   for (const [top, bottom, height, expected] of [

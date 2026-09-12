@@ -12,7 +12,7 @@ test('the retired unread-notification dots stay retired (2026-09-01)', () => {
 
 test('the picker is the one popover mechanism, not a backdrop panel (2026-09-03)', () => {
   assert.doesNotMatch(source, /picker-backdrop/u, 'no backdrop button — dismissal is the shared set');
-  assert.match(source, /import \{ anchorOf, menuPlacement, popOrigin, viewBox, type AnchorRect \} from '\.\.\/ui\/placement\.ts'/u);
+  assert.match(source, /import \{ anchorOf, menuPlacement, popOrigin, viewBox, scrollMovesTrigger, type AnchorRect \} from '\.\.\/ui\/placement\.ts'/u);
   assert.match(source, /menuPlacement\(anchorRect, \{ w, h \}, viewBox\(\), 6, 8, align\)/u, 'placed from the opener, flipped and clamped by the shared math');
   const style = source.match(/<style>[\s\S]*<\/style>/u)?.[0] ?? '';
   assert.match(style, /\.picker \{[^}]*position: fixed/u, 'a fixed layer — a scrolling or overflow:hidden caller cannot clip it');
@@ -22,7 +22,8 @@ test('the picker is the one popover mechanism, not a backdrop panel (2026-09-03)
   for (const ev of ["'pointerdown', onDown, true", "'keydown', onKey, true", "'resize', onClose", "'scroll', onScroll, true"]) {
     assert.ok(source.includes(`window.addEventListener(${ev})`), `listens: ${ev}`);
   }
-  assert.match(source, /if \(!\(scroller instanceof Node\) \|\| !opener \|\| !scroller\.contains\(opener\)\) return;/u);
+  assert.match(source, /if \(!scrollMovesTrigger\(scroller, opener\)\) return;/u,
+    '#180 shares the trigger-containment predicate with rect-anchored ContextMenu');
 });
 
 test('picker border boxes include chrome and its Escape yields to an active modal (#165)', () => {

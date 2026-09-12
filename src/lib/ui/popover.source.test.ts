@@ -14,7 +14,7 @@ test('a popover’s own scroll never dismisses it; only scrolls outside do', asy
   const cases = [
     ['ui/Select.svelte', /if \(menuEl && e\.target instanceof Node && menuEl\.contains\(e\.target\)\) return;/u],
     ['ui/ContextMenu.svelte', /if \(el && e\.target instanceof Node && el\.contains\(e\.target\)\) return;/u],
-    ['sessions/PanePicker.svelte', /if \(!\(scroller instanceof Node\) \|\| !opener \|\| !scroller\.contains\(opener\)\) return;/u],
+    ['sessions/PanePicker.svelte', /if \(!scrollMovesTrigger\(scroller, opener\)\) return;/u],
   ] as const;
   for (const [file, guard] of cases) {
     const source = await readFile(new URL(file, SRC), 'utf8');

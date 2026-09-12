@@ -603,6 +603,15 @@ press-scale/brightness details below do not override it.
 
 ## 5 · Menus & popovers
 
+- **Trigger-anchored scroll ownership (#180, 2026-09-12).** A ContextMenu
+  with a rect anchor and connected trigger closes only when a container of
+  that trigger scrolls, through `scrollMovesTrigger` in placement.ts, the
+  same predicate PanePicker uses. Sibling feed/terminal output does not move
+  the trigger and must not dismiss an action menu mid-choice. Pointer anchors,
+  trigger-less menus and detached triggers retain broad outside-scroll
+  dismissal. Own-list scrolling remains exempt; no new listener is installed.
+  A mounted regression first reproduced the All menu disappearing on Feed
+  scroll, then pins sibling/own/ancestor paths and the pointer-anchor control.
 - **Shared popup chrome (#165, 2026-09-12).** Owner, 2026-09-11:
   "对了右键的菜单风格都检查统一。" The later compact correction
   ("很多卡片按钮什么的，不要这么傻大的", 2026-09-12) is the reason to

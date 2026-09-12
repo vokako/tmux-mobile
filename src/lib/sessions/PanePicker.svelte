@@ -12,7 +12,7 @@
   import AgentChip from '../ui/AgentChip.svelte';
   import Icon from '../ui/Icon.svelte';
   import { activeModal } from '../ui/modal.ts';
-  import { anchorOf, menuPlacement, popOrigin, viewBox, type AnchorRect } from '../ui/placement.ts';
+  import { anchorOf, menuPlacement, popOrigin, viewBox, scrollMovesTrigger, type AnchorRect } from '../ui/placement.ts';
   import { t } from '../core/i18n.svelte.ts';
   import { listSessionsWithPanes, newWindow } from '../core/ws.ts';
   import type { TmuxPane } from '../core/ws.ts';
@@ -73,7 +73,7 @@
     };
     const onScroll = (e: Event) => {
       const scroller = e.target === document ? document.documentElement : e.target;
-      if (!(scroller instanceof Node) || !opener || !scroller.contains(opener)) return;
+      if (!scrollMovesTrigger(scroller, opener)) return;
       onClose();
     };
     window.addEventListener('pointerdown', onDown, true);

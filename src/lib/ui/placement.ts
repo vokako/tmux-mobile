@@ -6,6 +6,14 @@
 
 export interface AnchorRect { left: number; right: number; top: number; bottom: number }
 
+/** Only scrolling a container of the trigger changes its viewport anchor.
+ * Structural Node.contains also works across document realms; non-node event
+ * targets do not move a DOM trigger. */
+export function scrollMovesTrigger(scroller: EventTarget | null, trigger: Node | null): boolean {
+  const node = scroller as Node | null;
+  return !!trigger && typeof node?.contains === 'function' && node.contains(trigger);
+}
+
 /** Opt-in cap for menus whose trigger must remain clickable (e.g. dblclick).
  * The menu scrolls on whichever side has room; menuPlacement still owns the flip. */
 export function menuHeightLimit(
