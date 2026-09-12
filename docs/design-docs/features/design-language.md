@@ -64,6 +64,19 @@ not an extra pagination menu, overlay or independent animation.
 
 ## 1 · Tokens (app.css `:root` — never restate a value)
 
+**Avatar capacity rings (#180, 2026-09-12).** The owner's 14:26 correction
+and superseded choices are recorded verbatim in hub-composer.md. Card width
+must not be the scale of a capacity reading: every circular 20px avatar now
+has the same 26px outer meter, 1px image gap and 2px stroke. Pointer/coarse
+card paint is 30/34px, with existing inset paint around unchanged 28/44px
+native commands. Cards size to actual content; only busy Stop occupies an
+action slot, Watch remains in ContextMenu, and expanded cards wrap rather
+than stretch. There is no hover-time width change. Exact percentage remains
+in hover/ARIA and expanded cards. The ONE `ctxColor` maps <50 / 50-69 / 70-84 /
+>=85 to existing green/yellow/orange/red tokens without interpolating hues.
+The earlier edge-bar and ground-fill designs are historical, not alternatives
+to retain in production.
+
 **Plain interruption commands (2026-09-11, #173).** The owner rejected the
 card's black Stop square and circular ground: "还有终止按钮，不要圆形的阴影了，还有这个黑方块看着不知道是停止的意思，是不是换个颜色？让我能更容易够理解这个按钮的含义。"
 `CommandButton`'s `warn` variant mixes existing `--status-warn` (80%) with

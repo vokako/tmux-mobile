@@ -19,7 +19,7 @@
     roomReady = false, justLoaded = false, rosterBase = null,
     composerText = '', managedNames = [], busyNames = [], interrupting = [],
     stateLabel = (state) => state, stateTone = () => undefined,
-    onselect: setRecipient = () => {}, oninterrupt: interrupt = () => {}, onfilter = () => {}, onwatch = () => {},
+    onselect: setRecipient = () => {}, oninterrupt: interrupt = () => {}, onfilter = () => {},
     expanded = false, onexpand = () => {}, onadd = () => {}, oncontext = () => {},
   } = $props();
 
@@ -28,13 +28,18 @@
   let hovering = $state(false);
   let focused = $state(false);
   let pressing = $state(false);
+  let pressStops = $state.raw([]);
+  // Only layout is held during a press; current busyNames still gates actions.
+  const renderedStops = $derived(pressing ? pressStops : busyNames);
   let heldOrder = $state.raw({ session: '', names: [] });
   const holdOrder = $derived(hovering || focused || pressing);
   const ranked = $derived(sortAgentsForRoster(managedAgents));
   function clearPress() {
     pressing = false;
+    pressStops = [];
   }
   function beginPress() {
+    if (!pressing) pressStops = busyNames;
     pressing = true;
   }
   $effect(() => {
@@ -168,7 +173,9 @@
             onclick={(e) => clickAgent(e, a.name)} ondblclick={(e) => focusAgent(e, a.name)}
             oncontextmenu={(e) => { e.preventDefault(); oncontext(pointOf(e), a.name); }}
             use:longpress={{ onlongpress: (pt) => oncontext(pt, a.name) }}>
-            {#if backendIcon(a.agent)}<img class="ava" src={backendIcon(a.agent)} alt={a.agent} />{:else}<span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>{/if}
+            <span class="avatar-slot">
+              {#if backendIcon(a.agent)}<img class="ava" src={backendIcon(a.agent)} alt={a.agent} />{:else}<span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>{/if}
+            </span>
             <span class="a-name">{a.name}</span>
             <span class="ac-top">
               <span class="st" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span>
@@ -177,24 +184,20 @@
               {#if mentioned}<span class="agent-mention" aria-hidden="true">@</span>{/if}
               {#if unread.has(a.name)}<span class="unread appear-pop" aria-hidden="true"></span>{/if}
             </span>
+            {#if expanded && a.vitals?.context_pct != null}<span class="ctx-value">{a.vitals.context_pct}%</span>{/if}
           </button>
-          {#if busyNames.includes(a.name)}
-            <span class="agent-stop card-quick" class:pending>
+          {#if renderedStops.includes(a.name)}
+            <span class="agent-stop" class:pending>
               <CommandButton label={`${t('hubInterrupt')} ${a.name}`} icon="stop" variant="warn" iconOnly
-                {pending} disabled={pending}
+                {pending} disabled={pending || !busyNames.includes(a.name)}
                 onclick={(e) => { e.stopPropagation(); interrupt(a.name); }} />
             </span>
           {/if}
-          <span class="agent-watch card-quick">
-            <CommandButton label={`${t('hubWatch')} ${a.name}`} icon="terminal" variant="icon"
-              onclick={(e) => { e.stopPropagation(); onwatch(a); }} />
-          </span>
           {#if a.vitals?.context_pct != null}
             {@const pct = Math.max(0, Math.min(100, a.vitals.context_pct))}
-            <div class="ac-bar" role="meter" aria-label={t('hubCtxUsed')}
-              aria-valuemin="0" aria-valuemax="100" aria-valuenow={pct} aria-valuetext={`${a.vitals.context_pct}%`}>
-              <i style:width={`${pct}%`} style:background={ctxColor(a.vitals.context_pct)}></i>
-            </div>
+            <div class="ctx-ring" role="meter" aria-label={t('hubCtxUsed')}
+              aria-valuemin="0" aria-valuemax="100" aria-valuenow={pct} aria-valuetext={`${a.vitals.context_pct}%`}
+              style:--ctx-amount={`${pct}%`} style:--ctx-color={ctxColor(a.vitals.context_pct)}></div>
           {/if}
         </div>
       {/each}
@@ -210,7 +213,9 @@
             onclick={(e) => stoppedMenu(e, name)} ondblclick={(e) => focusAgent(e, name, true)}
             oncontextmenu={(e) => { e.preventDefault(); oncontext(pointOf(e), name); }}
             use:longpress={{ onlongpress: (pt) => oncontext(pt, name) }}>
-            {#if backendIcon(backend)}<img class="ava dim" src={backendIcon(backend)} alt={backend} />{:else}<span class="ava dim">{name.slice(0, 1).toUpperCase()}</span>{/if}
+            <span class="avatar-slot">
+              {#if backendIcon(backend)}<img class="ava dim" src={backendIcon(backend)} alt={backend} />{:else}<span class="ava dim">{name.slice(0, 1).toUpperCase()}</span>{/if}
+            </span>
             <span class="a-name">{name}</span>
           </button>
         </div>
@@ -227,10 +232,10 @@
               {#if extras.includes(ALL_TARGET)}<span class="agent-mention" aria-hidden="true">@</span>{/if}
             </span>
           </button>
-          {#if busyNames.length}
-            <span class="agent-stop card-quick" class:pending={allPending}>
+          {#if renderedStops.length}
+            <span class="agent-stop" class:pending={allPending}>
               <CommandButton label={`${t('hubInterrupt')} ${t('hubEveryone')}`} icon="stop" variant="warn" iconOnly
-                pending={allPending} disabled={allPending}
+                pending={allPending} disabled={allPending || !busyNames.length}
                 onclick={(e) => { e.stopPropagation(); interrupt(ALL_TARGET); }} />
             </span>
           {/if}
@@ -251,9 +256,12 @@
 <style>
   .roster {
     --roster-avatar-size: 20px;
-    --roster-gap: 6px;
-    --roster-control-gap: 4px;
-    --roster-meter-height: 3px;
+    --roster-ring-size: 26px;
+    --roster-ring-stroke: 2px;
+    --roster-paint-height: 30px;
+    --roster-card-inset: 4px;
+    --roster-gap: 2px;
+    --roster-control-gap: 2px;
     --roster-expanded-max: min(240px, calc(32dvh / var(--ui-zoom, 1)));
     display: grid; grid-template-columns: minmax(0, 1fr) var(--control-height);
     gap: 0; flex: 0 1 auto; min-width: 0; min-height: 0; padding: 0 14px;
@@ -266,21 +274,20 @@
   }
   .cards:not(.expanded)::-webkit-scrollbar { display: none; }
   .cards.expanded {
-    display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; align-items: stretch;
+    flex-wrap: wrap; align-content: start;
     max-height: var(--roster-expanded-max); overflow-x: hidden; overflow-y: auto; scrollbar-width: thin;
   }
-  @container roster (min-width: 360px) { .cards.expanded { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @container roster (min-width: 720px) { .cards.expanded { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
   .sk-cards { display: flex; gap: var(--roster-gap); flex: none; grid-column: 1 / -1; }
   .sk-card {
-    width: calc(3 * var(--control-height)); height: calc(var(--control-height) - 2 * var(--control-paint-inset));
+    width: calc(3 * var(--control-height)); height: var(--roster-paint-height);
     margin-block: var(--control-paint-inset); border-radius: var(--ui-radius-row);
   }
   .acard {
     --card-paint: var(--surface); --card-line: var(--border);
     position: relative;
-    display: grid; grid-template-columns: minmax(0, 1fr) var(--control-height);
+    display: flex;
     align-items: center; flex: none; width: max-content; min-width: 0;
+    min-height: calc(var(--roster-paint-height) + 2 * var(--control-paint-inset));
     border: 0; border-radius: var(--ui-radius-row); color: var(--text);
   }
   .acard::before {
@@ -289,7 +296,6 @@
     background: var(--card-paint); box-shadow: inset 0 0 0 1px var(--card-line);
     transition: background var(--t-fast), box-shadow var(--t-fast);
   }
-  .acard:not(.all):not(.off) { grid-template-columns: minmax(0, 1fr) var(--control-height) var(--control-height); }
   .acard:hover { --card-line: var(--input-border); }
   .acard.sel { --card-paint: var(--accent-bg); --card-line: var(--accent-line); }
   .acard.filtered::after {
@@ -304,51 +310,43 @@
   .acard.all.sel { --card-paint: var(--accent-bg); --card-line: var(--accent-line); color: var(--accent-ink); }
   .cards:not(.expanded) .all .a-name { display: none; }
   .acard.all .agent-select { border-radius: inherit; }
-  .ac-bar {
-    position: absolute; left: var(--ui-radius-row); right: var(--ui-radius-row);
-    bottom: calc(var(--control-paint-inset) - 1px); height: var(--roster-meter-height);
-    border-radius: var(--ui-radius-pill); z-index: 1;
-    background: var(--pill-bg); overflow: hidden; pointer-events: none;
+  .ctx-ring {
+    position: absolute; left: var(--roster-card-inset); top: calc(50% - var(--roster-ring-size) / 2);
+    width: var(--roster-ring-size); height: var(--roster-ring-size); border-radius: 50%;
+    background: conic-gradient(var(--ctx-color) var(--ctx-amount), var(--border) 0);
+    mask: radial-gradient(farthest-side, transparent calc(100% - var(--roster-ring-stroke)), var(--control-overlay-dark) 0);
+    pointer-events: none;
   }
-  .ac-bar > i { display: block; height: 100%; border-radius: inherit; transition: width var(--t-move), background var(--t-move); }
-  @media (prefers-reduced-motion: reduce) { .ac-bar > i { transition: none; } }
   @media (prefers-reduced-motion: reduce) { .acard::before { transition: none; } }
-  .cards.expanded .acard { width: auto; }
+  .cards.expanded .acard { max-width: 100%; }
   .agent-select {
     position: relative;
-    display: flex; align-items: center; gap: var(--roster-control-gap); grid-row: 1;
+    display: flex; align-items: center; gap: var(--roster-control-gap);
     min-height: var(--control-height); min-width: var(--control-height);
     border: 0; border-radius: var(--ui-radius-row); background: transparent; color: inherit;
-    padding: 0 6px; text-align: left; cursor: pointer; font-size: var(--fs-ui);
+    padding: 0 var(--roster-card-inset); text-align: left; cursor: pointer; font-size: var(--fs-ui);
     -webkit-tap-highlight-color: transparent;
   }
-  .agent-select:focus-visible { outline-color: var(--accent-ink); outline-offset: -2px; }
-  .acard:not(.has-stop):not(.off) .agent-select { grid-column: 1 / -1; padding-right: calc(6px + var(--control-height)); }
-  .acard:not(.all):not(.off):not(.has-stop) .agent-select { grid-column: 1 / 3; }
+  .agent-select:focus-visible { outline-color: var(--accent-ink); outline-offset: 0; }
   .a-name { font-family: var(--font-display); font-size: var(--fs-ui); font-weight: 600; white-space: nowrap; }
   .cards.expanded .a-name {
     min-width: 0; white-space: normal; overflow-wrap: anywhere;
-    padding-block: calc(var(--control-paint-inset) + var(--roster-meter-height));
+    padding-block: var(--control-paint-inset);
   }
   .ac-top { display: inline-flex; flex: none; }
   .agent-marks { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-width: 1em; flex: none; }
-  .cards.expanded .agent-marks.unmarked { display: none; }
+  .agent-marks.unmarked { display: none; }
   .agent-mention { color: var(--accent-ink); font-family: var(--font-mono); font-size: var(--fs-meta); font-weight: 600; }
-  .agent-stop { display: flex; align-items: center; justify-self: end; grid-column: 2; grid-row: 1; }
-  .agent-watch { display: flex; align-items: center; justify-self: end; grid-column: 3; grid-row: 1; }
-  .card-quick { position: relative; opacity: 0; pointer-events: none; transition: opacity var(--t-fast); }
-  .acard:hover .card-quick, .acard:focus-within .card-quick, .card-quick.pending { opacity: 1; pointer-events: auto; }
+  .agent-stop { display: flex; align-items: center; flex: none; }
   @media (any-pointer: coarse) {
-    .acard:not(.all):not(.off) { grid-template-columns: minmax(0, 1fr) var(--control-height); }
-    .agent-watch { display: none; }
-    .agent-stop { opacity: 1; pointer-events: auto; }
+    .roster { --roster-paint-height: 34px; }
   }
-  @media (prefers-reduced-motion: reduce) { .card-quick { transition: none; } }
-  .ava { width: var(--roster-avatar-size); height: var(--roster-avatar-size); flex: none; }
+  .avatar-slot { width: var(--roster-ring-size); height: var(--roster-ring-size); display: grid; place-items: center; flex: none; }
+  .ava { width: var(--roster-avatar-size); height: var(--roster-avatar-size); flex: none; border-radius: 50%; object-fit: contain; display: grid; place-items: center; }
+  .ctx-value { width: 4ch; flex: none; text-align: right; font: var(--fs-meta)/1 var(--font-mono); color: var(--text2); white-space: nowrap; }
   .broadcast-glyph { display: grid; place-items: center; width: var(--roster-avatar-size); height: var(--roster-avatar-size); flex: none; }
   .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--status-danger); flex: none; }
   .off { color: var(--text2); }
-  .off .agent-select { grid-column: 1 / -1; }
   .ava.dim { background: var(--surface2); color: var(--text3); }
   img.ava.dim { background: none !important; filter: grayscale(1); opacity: 0.55; }
   .roster-add { display: flex; align-items: center; flex: none; min-height: var(--control-height); }

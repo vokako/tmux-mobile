@@ -959,7 +959,7 @@ test('the palette speaks the addressee backend dialect', () => {
   assert.equal(commandPalette('/', [], 'mixed'), null);
 });
 
-test('ctxColor ramps through the theme tokens, never a raw colour', () => {
+test('ctxColor uses four discrete theme colours without intermediate hues (#180)', () => {
   // Every value must be expressed in the app's status tokens: a raw hex here
   // would be right in one theme and wrong in the other.
   for (const pct of [0, 1, 20, 21, 42, 60, 61, 85, 86, 100, -5, 999, NaN]) {
@@ -967,14 +967,19 @@ test('ctxColor ramps through the theme tokens, never a raw colour', () => {
     assert.ok(c.includes('var(--status-'), `${pct} → ${c}`);
     assert.ok(!/#[0-9a-f]{3}/i.test(c), `${pct} → ${c} must not carry a literal colour`);
   }
-  // kiro's own anchors: green up to 20%, amber by 60%.
+  // Owner 14:26 rejects interpolated colours; #180 keeps the 85% warning
+  // anchor and explicitly adopts 50/70/85 buckets instead of CLI ramp stops.
   assert.equal(ctxColor(0), 'var(--status-ok)');
   assert.equal(ctxColor(20), 'var(--status-ok)');
-  assert.equal(ctxColor(60), 'color-mix(in srgb, var(--status-warn) 100%, var(--status-ok))');
-  // Past the warning threshold it keeps going: hot, then danger.
-  assert.ok(ctxColor(70).includes('--status-hot'));
-  assert.ok(ctxColor(95).includes('--status-danger'));
-  assert.equal(ctxColor(100), 'color-mix(in srgb, var(--status-danger) 100%, var(--status-hot))');
+  assert.equal(ctxColor(49), 'var(--status-ok)');
+  assert.equal(ctxColor(50), 'var(--status-warn)');
+  assert.equal(ctxColor(60), 'var(--status-warn)');
+  assert.equal(ctxColor(69), 'var(--status-warn)');
+  assert.equal(ctxColor(70), 'var(--status-hot)');
+  assert.equal(ctxColor(84), 'var(--status-hot)');
+  assert.equal(ctxColor(85), 'var(--status-danger)');
+  assert.equal(ctxColor(100), 'var(--status-danger)');
+  for (let pct = 0; pct <= 100; pct++) assert.doesNotMatch(ctxColor(pct), /color-mix/u);
   // Out-of-range and garbage clamp instead of producing a broken expression.
   assert.equal(ctxColor(-5), 'var(--status-ok)');
   assert.equal(ctxColor(NaN), 'var(--status-ok)');

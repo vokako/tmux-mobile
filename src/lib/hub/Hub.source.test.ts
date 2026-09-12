@@ -16,7 +16,7 @@ const rule = (selector: string) =>
 
 test('Watch always selects the terminal view and shares one route between menu and card (#173)', () => {
   assert.match(source, /function watchAgent\(agent\) \{\s*drawerView = 'term';\s*openDrawer\(agent\);/u);
-  assert.match(source, /onwatch=\{watchAgent\}/u);
+  assert.match(source, /if \(a\) watchAgent\(a\)/u, '#180: Watch is the existing menu verb, not a reserved card slot');
   assert.match(source, /if \(a\) watchAgent\(a\)/u);
   assert.match(source, /if \(mobile \|\| \(compact && drawerView === 'term'\)\)/u,
     'a narrow desktop cannot open an invisible terminal drawer');

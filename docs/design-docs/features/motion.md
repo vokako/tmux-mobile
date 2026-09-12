@@ -340,6 +340,15 @@ sizes (owner declined).
 
 ## Rules and their reasons
 
+- **Capacity rings use fixed geometry and discrete colour** (#180, 2026-09-12):
+  the owner's 14:26 correction supersedes the edge-bar width/colour tween.
+  Equal avatar rings show the reported fraction without an intermediate
+  hue animation; `ctxColor` owns four thresholds. Hover never changes card
+  width: hidden action slots are removed, busy Stop is resident and Watch
+  stays in ContextMenu. The existing keyed `flip` recency move and its
+  input-held order remain; expanded wrapping stays inside the existing
+  reading transaction, with no animated layout.
+
 - **Chat commands adopt state feedback without new motion** (2026-09-12,
   #166): header, Drawer and bubble tools use the existing CommandButton
   paint transitions, focus and reduced-motion rules. Raw selected state is

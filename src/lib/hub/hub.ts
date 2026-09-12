@@ -60,24 +60,14 @@ export function stateNeedsYou(state: string): boolean {
   return state === 'waiting' || state === 'blocked';
 }
 
-/**
- * The colour of the context-usage bar, as a THEME EXPRESSION rather than a
- * colour: every stop is one of the app's four status tokens, so the ramp is
- * correct in both themes and stays correct if the palette changes.
- *
- * The two anchors are kiro's own: its status line paints context green until 20%
- * and treats 60% as the warning threshold. Past that we continue into our `hot`
- * and `danger` tokens, because a context above 85% is about to force a compact —
- * which is a thing the user should see coming rather than discover.
- */
+/** Four capacity bands, not a colour ramp (#180, owner 2026-09-12).
+ * 85% retains the compaction-imminent anchor; intermediate hues are retired. */
 export function ctxColor(pct: number): string {
   const n = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
-  const ramp = (from: string, to: string, t: number) =>
-    `color-mix(in srgb, var(--status-${to}) ${Math.round(t * 100)}%, var(--status-${from}))`;
-  if (n <= 20) return 'var(--status-ok)';
-  if (n <= 60) return ramp('ok', 'warn', (n - 20) / 40);
-  if (n <= 85) return ramp('warn', 'hot', (n - 60) / 25);
-  return ramp('hot', 'danger', (n - 85) / 15);
+  if (n < 50) return 'var(--status-ok)';
+  if (n < 70) return 'var(--status-warn)';
+  if (n < 85) return 'var(--status-hot)';
+  return 'var(--status-danger)';
 }
 
 /** Merge new chat messages into the feed without duplicates, oldest first.

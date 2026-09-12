@@ -902,7 +902,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
   /* #168: Composer keeps native round corners; retired To/send-arm menus are gone. */
   .bubble, .m-acts button, .sysline, .shots,
   .steps, .s-head, .arow, .ar-acts button,
-  .start-row, .acard, .ac-bar, .arch-bar,
+  .start-row, .acard, .arch-bar,
   .s-all, .h1-edit, .h1-pen, .cmd-menu, .cmd-opt, .win-pill, .agent-pick,
   .pg-tag, .p-tag, .m-note-state, .sr-cap, .direct-tag, .r-cap,
   /* Sessions / Projects */
@@ -934,6 +934,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 .sessions .icon-btn { corner-shape: round; }
 /* #173: the broadcast choice is a capsule, not an agent avatar card. */
 .hub-root .acard.all { corner-shape: round; }
+.hub-root .roster .ava, .hub-root .ctx-ring { corner-shape: round; }
 /* #166: window-choice paint follows the compact control's inset arcs. */
 .hub-root .win-pill { corner-shape: round; }
 .hub-root .acard::before, .hub-root .acard::after { corner-shape: inherit; }

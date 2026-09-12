@@ -7,7 +7,59 @@ per-agent interruption. The feed is `hub-feed.md`.
 
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
 
+### Comparable avatar meters and content-sized cards (#180, 2026-09-12)
+
+Owner, 12:13, requested a narrower card and a meter integrated with it:
+> Context window 百分比进度条：这个进度条现在看起来还是有点丑，感觉像在边缘框上多了一条线，这条线和原来的框没有任何关联。
+
+After comparing card-ground fill and an avatar ring, the owner superseded
+the temporary fill choice at 14:26:
+> 背景色有一个不好的是有可能卡片宽度不一样，大家对进度感知不一样，要不用圆环的方案吧，注意头像一定用圆形，圆环刚好包括头像大一圈。然后 agent 卡片现在右边的空白太多了，就自适应卡片宽度，不要 撑开这么多。agent 卡片现在高度有点太低了，已经贴近头像边边了，可以稍微留一点边冗余，包括给进度圆环留冗余，还有颜色，就绿黄橙红，不要有中间插值不好看的过渡色，看着颜色怪怪的
+
+Use one 26px outer ring around a circular 20px avatar: 1px of ground
+separates the image from a 2px stroke. The card paints 30px high for pointers
+and 34px for coarse input, leaving 2px/4px outside the ring. Its container
+includes the existing paint inset; native commands remain 28/44px. Avatar
+and ring stay round through the one app.css corner-policy owner.
+The existing meter exposes its bounded value and exact reading through ARIA;
+expanded cards also show the exact percentage. Unknown means no ring,
+zero has an empty track, and over-capacity values fill one circle while
+retaining their exact text.
+
+`ctxColor` is the single capacity classifier: green below 50%, yellow at
+50-69%, orange at 70-84%, red at 85% and above. These four existing status
+tokens replace the interpolated CLI-statusline ramp. The 85% imminent-
+compaction anchor remains; neither CSS nor JS interpolates between hues.
+The ring has fixed geometry, independent of name/card width; the old edge
+bar and the rejected ground-fill prototype are not production mechanisms.
+
+The newer auto-fit request supersedes the 2026-09-11 08:41 hover-reveal
+decision quoted under #173 below. Cards no longer reserve invisible Watch
+or Stop slots. Busy cards carry their real Stop; idle cards carry no action.
+Watch remains in the same right-click/long-press ContextMenu on both input
+types. Hover never expands a card or covers its name with actions. The
+expanded, height-bounded view wraps the same content-width keyed cards
+instead of stretching them into fixed columns. Recency ordering, input-
+held order, disclosure persistence, reading transaction and status dots
+retain their existing owners.
+During the existing pointer press lifecycle only, rendered Stop membership
+is held so a turn ending cannot remove the pressed target or shift its
+neighbors. Current busy membership still disables an ended Stop; release
+on pointer-up/cancel adopts current layout, without a timer or another
+classifier. Expanded percentage text reserves four monospace characters
+(the wire value is u8), so changes from 0% to 100% do not move targets.
+Chromium 152.0.7977.64 verifies 26/20px concentric geometry, circular
+avatars, 30/34px paint, native target floors, content widths, hover stability,
+menu Watch and the four colour boundaries across desktop/390px light/dark,
+wide touch, reduced motion and 360px. A forced zero-fraction ring fails the
+computed visual-fraction check and recovers after removing the override.
+The mounted press regression proves slot retention with live disabling;
+native-device gesture and owner-build acceptance remain separate gates.
+
 ### Compact card paint and secondary All (board #176, 2026-09-12)
+
+Historical geometry: #180 above replaces the edge meter, reserved action
+slots and 24/32px card paint, not the native scrolling/selection mechanisms.
 
 Owner, 00:02 (repeating the 2026-09-11 screenshot report), verbatim:
 > 这个card行太高了，看着太难看，你要做的精致一点，还有类似检查一下，很多卡片按钮什么的，不要这么傻大的，上下文的进度条稍微粗一点明显一些。还有这个展开箭头和卡片，中间直接硬截断了，不好看，要融合完整一些。

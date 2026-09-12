@@ -6,18 +6,20 @@ const source = await readFile(new URL('./Roster.svelte', import.meta.url), 'utf8
 const rule = (selector: string) =>
   source.match(new RegExp(`(?:^|\\n)\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
 
-test('context meters reuse ctxColor at the card edge without adding a row (#173)', () => {
-  assert.match(source, /style:background=\{ctxColor\(a\.vitals\.context_pct\)\}/u);
+test('context meters surround equal circular avatars with room inside the card (#180)', () => {
+  assert.match(source, /style:--ctx-color=\{ctxColor\(a\.vitals\.context_pct\)\}/u);
   assert.match(rule('.acard'), /position: relative/u);
-  const bar = rule('.ac-bar');
+  const bar = rule('.ctx-ring');
   assert.match(bar, /position: absolute/u);
-  // Owner #176: the 2px meter was too faint beside full-height card paint.
-  assert.match(bar, /height: var\(--roster-meter-height\)/u);
-  assert.match(rule('.roster'), /--roster-meter-height: 3px/u);
-  assert.match(bar, /bottom: calc\(var\(--control-paint-inset\) - 1px\)/u,
-    '3px meter must clear the 20px avatar inside 24px pointer paint');
+  assert.match(bar, /width: var\(--roster-ring-size\); height: var\(--roster-ring-size\)/u);
+  assert.match(rule('.roster'), /--roster-ring-size: 26px/u);
+  assert.match(rule('.roster'), /--roster-paint-height: 30px/u);
+  assert.match(source, /\.roster \{ --roster-paint-height: 34px; \}/u);
   assert.match(bar, /pointer-events: none/u);
-  assert.match(bar, /var\(--pill-bg\)/u);
+  assert.match(bar, /conic-gradient/u);
+  assert.doesNotMatch(bar, /transition/u, 'colour thresholds never pass through intermediate hues');
+  assert.match(rule('.ava'), /border-radius: 50%/u);
+  assert.doesNotMatch(source, /ac-bar|roster-meter-height/u, 'edge bar removed whole');
 });
 
 test('everyone is a broadcast capsule while selection keeps the shared accent vocabulary (#173)', async () => {
@@ -39,11 +41,10 @@ test('card paint is compact inside native targets and All is a trailing secondar
   assert.match(source, /class="cards edge-fade"[^>]*use:scrollEdges=\{!expanded\}/u);
 });
 
-test('quick actions reveal in their reserved slots and coarse pointers retain only Stop (#173)', () => {
-  assert.match(source, /onwatch=\{\(a\)|onwatch\(a\)/u);
-  assert.match(rule('.card-quick'), /opacity: 0/u);
-  assert.match(source, /\.acard:hover \.card-quick, \.acard:focus-within \.card-quick/u);
-  assert.match(source, /@media \(any-pointer: coarse\)[\s\S]*?\.agent-watch \{ display: none; \}/u);
+test('actual busy Stop is resident; no invisible action slots widen the card (#180)', () => {
+  assert.doesNotMatch(source, /agent-watch|card-quick|onwatch/u);
+  assert.doesNotMatch(rule('.agent-stop'), /opacity: 0|position: absolute/u);
+  assert.doesNotMatch(rule('.acard'), /grid-template-columns/u);
   assert.match(source, /icon="stop" variant="warn" iconOnly/u);
 });
 
@@ -64,8 +65,10 @@ test('one controlled roster replaces the delayed tap menu whole (#168)', () => {
 
 test('Stop consumes parent busy and pending sets through the shared command', () => {
   assert.match(source, /busyNames = \[\], interrupting = \[\]/u);
-  assert.match(source, /\{#if busyNames\.includes\(a\.name\)\}/u);
-  assert.match(source, /\{#if busyNames\.length\}/u);
+  assert.match(source, /const renderedStops = \$derived\(pressing \? pressStops : busyNames\)/u);
+  assert.match(source, /\{#if renderedStops\.includes\(a\.name\)\}/u);
+  assert.match(source, /disabled=\{pending \|\| !busyNames\.includes\(a\.name\)\}/u);
+  assert.match(source, /\{#if renderedStops\.length\}/u);
   assert.doesNotMatch(source, /interrupting\.includes\(ALL_TARGET\)/u,
     'pending contains captured member names, never a second all-job sentinel');
   assert.match(source, /busyNames\.some\(\(name\) => interrupting\.includes\(name\)\)/u);
@@ -136,17 +139,15 @@ test('density lives in local tokens; full names and native targets do not shrink
   assert.match(roster, /--roster-avatar-size: 20px/u);
   assert.match(roster, /--roster-expanded-max: min\(240px, calc\(32dvh \/ var\(--ui-zoom, 1\)\)\)/u);
   assert.match(rule('.agent-select'), /min-height: var\(--control-height\)/u);
-  assert.match(rule('.acard'), /grid-template-columns: minmax\(0, 1fr\) var\(--control-height\)/u,
-    'the Stop track stays reserved when a turn ends');
+  assert.match(rule('.acard'), /width: max-content/u, 'only actual content sets card width');
   assert.match(rule('.cards'), /overflow-x: auto/u);
   assert.match(rule('.cards.expanded'), /overflow-y: auto/u);
   assert.match(rule('.cards.expanded'), /max-height: var\(--roster-expanded-max\)/u);
-  assert.match(source, /repeat\(2, minmax\(0, 1fr\)\)/u);
-  assert.match(source, /repeat\(4, minmax\(0, 1fr\)\)/u);
+  assert.match(rule('.cards.expanded'), /flex-wrap: wrap/u);
+  assert.doesNotMatch(rule('.cards.expanded .acard'), /width: auto/u);
   assert.match(rule('.cards.expanded .a-name'), /overflow-wrap: anywhere/u);
-  assert.match(rule('.cards.expanded .a-name'), /padding-block: calc\(var\(--control-paint-inset\) \+ var\(--roster-meter-height\)\)/u,
-    'wrapped names need room inside the inset paint and above the meter');
-  assert.match(rule('.cards.expanded .agent-marks.unmarked'), /display: none/u);
+  assert.match(rule('.cards.expanded .a-name'), /padding-block: var\(--control-paint-inset\)/u);
+  assert.match(rule('.agent-marks.unmarked'), /display: none/u);
   assert.doesNotMatch(source, /\.agent-marks:empty/u,
     'Svelte leaves conditional whitespace; CSS :empty kept 12.5px reserved and split ordinary phone names');
   assert.match(rule('.a-name'), /white-space: nowrap/u);
@@ -169,12 +170,7 @@ test('one in-flow disclosure controls one list without remounting its cards', ()
   assert.doesNotMatch(source, /@keyframes|position: fixed/u);
 });
 
-test('idle cards keep their width but give the vacant Stop track back to selection', () => {
-  const idle = rule('.acard:not(.has-stop):not(.off) .agent-select');
-  assert.match(idle, /grid-column: 1 \/ -1/u);
-  assert.match(idle, /padding-right: calc\(6px \+ var\(--control-height\)\)/u,
-    'the hit box spans the object while the content budget stays stable');
-  assert.match(rule('.acard:not(.all):not(.off):not(.has-stop) .agent-select'), /grid-column: 1 \/ 3/u,
-    'fine pointers retain the separate Watch slot');
-  assert.match(rule('.agent-watch'), /grid-column: 3/u);
+test('idle cards keep no padding for absent commands (#180)', () => {
+  assert.doesNotMatch(source, /padding-right: calc|grid-column: 1 \/ 3/u);
+  assert.match(rule('.agent-select'), /padding: 0 var\(--roster-card-inset\)/u);
 });

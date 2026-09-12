@@ -52,7 +52,7 @@ test('Roster renders the controlled destination strip (#168)', { timeout: RENDER
     assert.equal(stop(root, 'all')?.getAttribute('aria-label'), 'Interrupt everyone');
     assert.ok(stop(root, 'runner')?.classList.contains('warn'));
     assert.equal(stop(root, 'runner')?.classList.contains('secondary'), false);
-    assert.equal(card(root, 'solo').querySelector('.agent-watch button')?.getAttribute('aria-label'), 'Watch in terminal solo');
+    assert.equal(root.querySelector('.agent-watch'), null, '#180: Watch remains in the existing ContextMenu, not a reserved slot');
     assert.equal(card(root, 'all').querySelector('.agent-watch'), null);
     assert.equal(select(root, 'runner').querySelector('button'), null);
     assert.equal(root.querySelector('.a-menu, [role="menu"], [role="button"]'), null);
@@ -99,15 +99,18 @@ test('Roster renders the controlled destination strip (#168)', { timeout: RENDER
     assert.equal(view({ recipient: '' }).querySelector('.agent-mention'), null);
   });
 
-  await ctx.test('context usage is a visible edge meter, including zero and saturated readings (#173)', () => {
+  await ctx.test('context usage is a uniform avatar ring, including zero and saturated readings (#180)', () => {
     for (const pct of [0, 20, 60, 85, 100, 125]) {
       const root = view({ managedAgents: [{ ...agents[0], vitals: { context_pct: pct } }] });
-      const meter = card(root, 'runner').querySelector('.ac-bar');
+      const meter = card(root, 'runner').querySelector<HTMLElement>('.ctx-ring');
       assert.ok(meter, `${pct}% has a visible meter`);
       assert.equal(meter.getAttribute('aria-valuenow'), String(Math.min(100, pct)));
-      assert.equal(meter.querySelector('i')?.style.width, `${Math.min(100, pct)}%`);
+      assert.equal(meter.style.getPropertyValue('--ctx-amount'), `${Math.min(100, pct)}%`);
+      assert.ok(card(root, 'runner').querySelector('.avatar-slot .ava'));
     }
-    assert.equal(view().querySelector('.ac-bar'), null, 'unknown is absent, not a guessed zero');
+    assert.equal(view().querySelector('.ctx-ring'), null, 'unknown is absent, not a guessed zero');
+    const expanded = view({ expanded: true, managedAgents: [{ ...agents[0], vitals: { context_pct: 125 } }] });
+    assert.equal(expanded.querySelector('.ctx-value')?.textContent, '125%');
   });
 
   await ctx.test('reading filter and delivery selection have independent card states (#173)', () => {

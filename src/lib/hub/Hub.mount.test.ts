@@ -664,7 +664,7 @@ test('stopped-card double-click only filters and closes its click menu (#173)', 
   } finally { await app.close(); }
 });
 
-test('Watch routes the clicked agent on phone and narrow desktop without selecting it (#173)', { timeout: 60000 }, async (context) => {
+test('Watch in the shared menu routes the clicked agent on phone and narrow desktop without selecting it (#180)', { timeout: 60000 }, async (context) => {
   for (const mobile of [true, false]) {
     const routes: unknown[][] = [];
     const { rpc } = roomFixture();
@@ -686,25 +686,19 @@ test('Watch routes the clicked agent on phone and narrow desktop without selecti
     });
     try {
       for (let i = 0; i < 12 && selectedCard(app.document) !== 'alice'; i++) await app.flush();
-      if (mobile) {
-        stripCard(app.document, 'bob').querySelector('.agent-select')!.dispatchEvent(new app.window.MouseEvent('contextmenu', { bubbles: true }));
-        await app.flush();
-        const watch = [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')].find(button => button.textContent?.includes('Watch in terminal'))!;
-        assert.ok(watch); watch.click();
-      } else {
-        const watch = stripCard(app.document, 'bob').querySelector<HTMLButtonElement>('.agent-watch button');
-        assert.ok(watch); watch.click();
-      }
+      assert.equal(app.document.querySelector('.agent-watch'), null, 'content-sized cards reserve no hidden Watch slot');
+      stripCard(app.document, 'bob').querySelector('.agent-select')!.dispatchEvent(new app.window.MouseEvent('contextmenu', { bubbles: true }));
+      await app.flush();
+      const watch = [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')].find(button => button.textContent?.includes('Watch in terminal'))!;
+      assert.ok(watch); watch.click();
       await app.flush();
       assert.deepEqual(routes, [['fixture', 'fixture:1.0', 'codex']]);
       assert.equal(selectedCard(app.document), 'alice');
       panes.splice(0, 1);
       await app.advance(20000);
-      if (mobile) {
-        stripCard(app.document, 'alice').querySelector('.agent-select')!.dispatchEvent(new app.window.MouseEvent('contextmenu', { bubbles: true }));
-        await app.flush();
-        [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')].find(button => button.textContent?.includes('Watch in terminal'))!.click();
-      } else stripCard(app.document, 'alice').querySelector<HTMLButtonElement>('.agent-watch button')!.click();
+      stripCard(app.document, 'alice').querySelector('.agent-select')!.dispatchEvent(new app.window.MouseEvent('contextmenu', { bubbles: true }));
+      await app.flush();
+      [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')].find(button => button.textContent?.includes('Watch in terminal'))!.click();
       await app.flush();
       assert.equal(routes.length, 1, 'a missing pane must not reuse the previously watched agent');
     } finally { await app.close(); }
@@ -838,6 +832,28 @@ test('roster releases a touch press without click and reconciles focus after a c
     await app.advance(5000);
     assert.deepEqual(order(), ['new', 'bob', 'all'], 'removing a focused member does not leave order locked');
   } finally { job.resolve({}); await app.close(); }
+});
+
+test('a pressed content-sized card holds action slots but never keeps a stale Stop enabled (#180)', { timeout: 60000 }, async context => {
+  const agents = [
+    { name: 'alice', window: 0, managed: true, agent: 'kiro', state: 'running', since: 10 },
+    { name: 'bob', window: 1, managed: true, agent: 'codex', state: 'idle', since: 20 },
+  ];
+  const app = await composerFixture(context, { hubAgents: async () => ({ agents }) });
+  try {
+    const alice = stripCard(app.document, 'alice'), bob = stripCard(app.document, 'bob');
+    const stop = alice.querySelector<HTMLButtonElement>('.agent-stop button')!;
+    stop.dispatchEvent(new app.window.Event('pointerdown', { bubbles: true }));
+    agents[0]!.state = 'idle'; agents[1]!.state = 'running';
+    await app.advance(5000);
+    assert.ok(stop.isConnected, 'layout cannot remove the pressed target');
+    assert.ok(stop.disabled, 'the retained target cannot interrupt an ended turn');
+    assert.equal(bob.querySelector('.agent-stop'), null, 'a new target waits for release rather than shifting the row');
+    stop.dispatchEvent(new app.window.Event('pointercancel', { bubbles: true }));
+    await app.flush();
+    assert.equal(alice.querySelector('.agent-stop'), null);
+    assert.ok(bob.querySelector('.agent-stop'), 'release adopts current action availability');
+  } finally { await app.close(); }
 });
 
 test('send never interrupts; double Ctrl+C mirrors only the selected busy card (#168)', { timeout: 60000 }, async (context) => {
