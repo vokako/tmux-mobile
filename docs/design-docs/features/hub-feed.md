@@ -242,7 +242,12 @@ fold and re-takes the tail; a history reader keeps their row. After: gap 0 at
 both sizes; a reader at scrollTop 300 kept their row at the same −71 px offset
 through the swap. No timer, no second tail mechanism. `Hub.mount.test.ts`
 drives the event with a grown `scrollHeight` (red on main with the measured
-232 px gap); `Feed.source.test.ts` pins the single handler for both signals.
+232 px gap) and, for the history reader, gives every row a box (100 px, then
+120 px after the swap) so it asserts the reader is back on the SAME ROW at the
+SAME OFFSET (row 3, 30 px in → scrollTop 390), not merely "not the tail"
+(codex's P2 on the first cut); the live measurement above (−71 px → −71 px)
+is the evidence that the stub's shape — rows grow, the offset holds — is
+reality's. `Feed.source.test.ts` pins the single handler for both signals.
 
 **The drawer has TWO partitions** (owner, 2026-08-28: "右侧边栏，可以展开文件浏览器的分区，类似展示 terminal 面板一样的逻辑"): `drawerView = 'term' | 'files'`, one width handle, a header toggle per partition (on the phone the files toggle JUMPS to the Files tab instead — the same translation the terminal toggle makes to the Terminal tab). The files partition embeds the REAL `Files` component (`session={selected}`, per-project cwd via its module-scoped parked map) in `singlePane` mode — the drawer is 320–900px of a WIDE window, so Files' window-width split heuristic lies there (owner, 2026-08-28: "类似手机的单页模式，不用做成左右分屏") — and its head carries a maximize button that hands the drawer's cwd to the Files PAGE (`openFilesTab` → App sets `filesSession` + a `{path, n}` `navRequest` the page instance consumes; `loadDir` got a `seq` guard so the newest navigation always wins); the terminal body hides under `visibility: hidden`, never `display: none` — a re-laid-out terminal would resize the pane and make the agent repaint (the `.keep-rows` lesson) — and an Esc originating inside `.files-body` passes through (closing would unmount an open editor mid-edit), the same territory rule as `.xterm`.
 

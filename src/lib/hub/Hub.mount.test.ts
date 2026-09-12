@@ -1541,7 +1541,7 @@ test('Files opened from a project Chat starts at the DECLARED project path, not 
   } finally { await phone.close(); }
 });
 
-test('a global font change re-takes the tail through the reading anchor; a history reader is not yanked (board #189)', { timeout: 60000 }, async context => {
+test('a global font change re-takes the tail through the reading anchor; a history reader keeps row and offset (board #189)', { timeout: 60000 }, async context => {
   // Measured in Chromium (390×844, 24 messages): uiFont.set("DejaVu Sans Mono")
   // grew scrollHeight 2563 → 2795 while scrollTop stayed 1839 — a 232 px gap
   // under a feed that still believed it was following; document.fonts fired
@@ -1559,6 +1559,7 @@ test('a global font change re-takes the tail through the reading anchor; a histo
     let sh = 2563;
     Object.defineProperty(feed, 'scrollHeight', { get: () => sh, configurable: true });
     Object.defineProperty(feed, 'clientHeight', { get: () => 724, configurable: true });
+    Object.defineProperty(feed, 'clientWidth', { get: () => 390, configurable: true }); // readingSize() needs a real box
     // Following, at the tail.
     feed.scrollTop = sh - 724;
     feed.dispatchEvent(new app.window.Event('scroll'));
@@ -1568,13 +1569,25 @@ test('a global font change re-takes the tail through the reading anchor; a histo
     app.document.dispatchEvent(new app.window.CustomEvent('tmux:font'));
     for (let i = 0; i < 6; i++) await app.flush();
     assert.equal(feed.scrollTop, sh, `the tail is re-taken through the reading anchor (gap ${sh - 724 - feed.scrollTop})`);
-    // A history reader: far above the tail, the same swap must not yank them down.
-    feed.scrollTop = 300;
+    // A history reader: far above the tail, the same swap must return them to
+    // the SAME ROW at the SAME OFFSET (codex's P2 on the first cut: "not the
+    // tail" alone proved nothing about the row). jsdom lays nothing out, so
+    // give every row a box: 100 px each before the swap, 120 px after — the
+    // shape the live measurement showed (rows grow, the reference row's
+    // offset stays; −71 px → −71 px at 390 with DejaVu Sans Mono).
+    let rowH = 100;
+    const rows = [...feed.children] as HTMLElement[];
+    rows.forEach((row, i) => {
+      Object.defineProperty(row, 'offsetTop', { get: () => i * rowH, configurable: true });
+      Object.defineProperty(row, 'offsetHeight', { get: () => rowH, configurable: true });
+    });
+    feed.scrollTop = 330;                      // inside row 3 (300–400), 30 px into it
     feed.dispatchEvent(new app.window.Event('scroll'));
-    await app.flush();
-    sh = 3000;
+    for (let i = 0; i < 4; i++) await app.flush();
+    rowH = 120; sh = 3000;                     // the swap: every row taller
     app.document.dispatchEvent(new app.window.CustomEvent('tmux:font'));
     for (let i = 0; i < 6; i++) await app.flush();
-    assert.notEqual(feed.scrollTop, sh, 'a reader keeps their place');
+    assert.equal(feed.scrollTop, 3 * 120 + 30, 'the reader is back on row 3, 30 px into it — same row, same offset');
+    assert.notEqual(feed.scrollTop, sh, 'and nowhere near the tail');
   } finally { await app.close(); }
 });
