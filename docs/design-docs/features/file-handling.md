@@ -113,7 +113,7 @@ App/browser-history workflow remain owner/device acceptance, not fixture claims.
 | Path | Used for | Size limit | Transport |
 |------|----------|-----------|-----------|
 | `fs_download` (WS RPC) | Inline PDF/image preview, Markdown-embedded images | 50 MB (`MAX_READ_SIZE`) | JSON-RPC over WebSocket, base64 |
-| `/dl?path=…&ts=…&sig=…` | User-initiated file download | None — streams chunks | Plain HTTP on same port |
+| `/dl?path=…&exp=…&sig=…[&stream=1]` | User-initiated file download; video preview (`<video src>`, board #182) | None — streams chunks; Range | Plain HTTP on same port |
 
 Frontend `fsDownloadHttp` always uses the streaming HTTP path now (both `ws://` and `wss://`). The server peeks the first bytes of every accepted connection (plain TCP via `TcpStream::peek`; TLS via `BufStream::fill_buf` after the TLS handshake) and branches HTTP vs WebSocket-upgrade. This is what keeps a 56 MB .pptx download working over `wss://` — before, `wss://` fell back to the WS RPC path and tripped `MAX_READ_SIZE`.
 
@@ -122,9 +122,61 @@ Frontend `fsDownloadHttp` always uses the streaming HTTP path now (both `ws://` 
 ### Resumable downloads (Range + retry)
 Public-internet paths (reverse proxy in front of the server) routinely kill long-lived large responses: proxy idle/total timeouts, connection resets, silent stalls. Three pieces make `/dl` survive that:
 
-- **Server: `Range: bytes=N-` support.** `/dl` answers `206 Partial Content` + `Content-Range` for the open-ended single-range form, and advertises `Accept-Ranges: bytes`. Only `bytes=N-` is honored (the only form our client sends); other forms fall back to a full 200, which is legal per RFC 7233.
+- **Server: `Range` support.** `/dl` answers `206 Partial Content` + `Content-Range` for the single-range forms `bytes=N-` (what our resume client sends) and `bytes=N-M` (what a media element sends — board #182: WebKit probes with `bytes=0-1` and refuses to play unless the answer is a 206 of exactly two bytes; seeks are bounded windows), clamps `M` to the last byte, answers `416` + `Content-Range: bytes */size` when the start is past the end, and advertises `Accept-Ranges: bytes`. Suffix (`-N`) and multi-range forms fall back to a full 200, which is legal per RFC 7233. Measured live 2026-09-12 against the debug server with curl: 200 / 206 (2 bytes, 1000 bytes, exact slice equality) / 416 / 403.
 - **Server: robust request parsing.** The request is read until `\r\n\r\n` (a proxy may split the request line across TCP segments — a single `read()` used to truncate the query mid-signature and 403 valid requests). `/dl?` is located anywhere in the request line so an unstripped proxy path prefix (`GET /tmux/dl?...`) still routes. Same prefix tolerance in the HTTP-vs-WS dispatch (`looks_like_dl_request`, request line only — header echoes don't match).
-- **Client: `fetchWithResume` (Files.svelte).** Streams the body with a 20 s stall watchdog (AbortController); on any mid-transfer failure it retries with `Range: bytes=<received>-`, so finished bytes are never re-fetched. Each retry re-signs the URL via `fs_download_url` (signatures expire after 60 s — a retry minutes into a transfer would otherwise 403). The retry budget (4) refills whenever an attempt makes progress, so a flaky-but-moving link survives many small interruptions; only consecutive zero-progress failures abort. If a resume gets 200 instead of 206 (proxy stripped the Range), the client restarts from byte 0 rather than corrupting the buffer.
+- **Client: `fetchWithResume` (Files.svelte).** Streams the body with a 20 s stall watchdog (AbortController); on any mid-transfer failure it retries with `Range: bytes=<received>-`, so finished bytes are never re-fetched. Each retry re-signs the URL via `fs_download_url` (a download signature expires after 60 s — a retry minutes into a transfer would otherwise 403). The retry budget (4) refills whenever an attempt makes progress, so a flaky-but-moving link survives many small interruptions; only consecutive zero-progress failures abort. If a resume gets 200 instead of 206 (proxy stripped the Range), the client restarts from byte 0 rather than corrupting the buffer.
+
+### Video previews stream through `/dl` (board #182, 2026-09-12)
+
+Owner: "文件的预览里边，应该加入视频的流式播放的预览能力". Root cause of "not
+previewable": every inline preview arrived as BYTES over the RPC
+(`fs_download` base64, `MAX_READ_SIZE` 50 MB, the 5 MB info-page gate), and
+a film is neither small nor something to buffer whole. The layer is the
+browser's own player: a `<video controls playsinline preload="metadata">`
+pointed at a signed `/dl` URL fetches its own ranges (`FilePreview.svelte`
+`'video'` branch; `mimeCategory` `video/*`; `streamsInline` bypasses the size
+gate because a streamed kind sends no bytes through the RPC). Three server
+facts had to hold for that, each pinned by a unit test in `download.rs` and
+measured live with curl; what neither can prove is the players themselves —
+Android WebView and WKWebView both open with a `bytes=0-1` probe and decide
+from that 206 whether to play at all — so device acceptance stays with the
+owner:
+
+1. **The signature lives as long as the viewing — and only for a viewing.**
+   A media element keeps coming back to the same URL — Chromium suspends
+   loading once its buffer is full and re-issues a Range request from the
+   next offset; every seek is a fresh request — so a 60 s signature 403s a
+   minute into the film. The lifetime is carried IN the signature as an
+   absolute expiry (`exp`, bound into the HMAC so a client cannot extend
+   it), and so is the MODE: a stream signature is `HMAC(dl:stream:<path>:
+   <exp>)`, a download `HMAC(dl:<path>:<exp>)`, so the same tuple signed
+   one way never verifies the other way (`&stream=1` on the URL only says
+   which rule to apply). `fs_download_url` with `stream: true` mints
+   `now + DL_STREAM_TTL_SECS`, a plain download `now + 60 s`, and each mode
+   has its own ceiling at verification. `DL_STREAM_TTL_SECS` is **4 h**: a
+   leaked stream URL replays for at most one film; downloads keep their
+   minute. A stream signature is refused — at mint and at `/dl` — unless the
+   path's extension is one `<video>` plays (`streams()`), so the long life
+   can never be minted for a `.env` or an `index.html`. Files does NOT
+   re-sign a stream on tab return: swapping a `<video>`'s `src` restarts it
+   at 0. Live 2026-09-12 (debug server, curl): stream-signed `.env`, a
+   stream signature relabelled as a download, a download signature with a
+   4 h expiry (labelled either way), and a stream past the ceiling all 403;
+   the video's own URL serves 200 / 206 / 416.
+2. **Bounded ranges are honoured** (see Resumable downloads above).
+3. **Video declares its real type.** `media_content_type` (the table that
+   already spoke for images) adds `mp4/m4v/webm/mov/mkv/ogv`, the same rows
+   `fs::mime_hint` uses — what Files calls a video, `/dl` serves as one.
+   Media execute nothing; `Content-Disposition: attachment` stays, so a
+   top-level navigation still downloads. Documents keep octet-stream.
+
+Guards: `Files.mount.test.ts` opens a 2 GB `demo.mp4` — one
+`fsDownloadHttp(path, { stream: true })`, no `fs_download`/`fs_read`, a
+`<video>` with that URL; `FilePreview.render.ts` pins `controls`,
+`playsinline`, `preload="metadata"`; `file-preview.test.ts` pins the
+category and the gate bypass. Not verified here: actual playback on the
+owner's devices (the WebView's probe-and-decide, and codec support, are the
+browser's).
 
 ### Base64 Chunking
 `btoa(String.fromCharCode(...spread))` crashes on files >100KB (JS argument limit). Use 8192-byte chunks.

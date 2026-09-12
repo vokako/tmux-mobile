@@ -298,3 +298,29 @@ test('without a declared root Files follows the pane cwd; with one it starts the
     assert.equal(cwdAsked, 0, 'the declaration is the truth; the pane is not asked');
   } finally { await declared.close(); }
 });
+
+test('a video previews as a stream: one stream-signed /dl URL, no bytes through the RPC, no size gate (board #182)', async context => {
+  // Owner 2026-09-12: "文件的预览里边，应该加入视频的流式播放的预览能力". A 2 GB
+  // film is far over PREVIEW_SIZE_LIMIT and MAX_READ_SIZE; it must never be
+  // read — the <video> element streams ranges from /dl itself.
+  const signed: unknown[][] = [];
+  const bytes: string[] = [];
+  const videoEntries = [{ name: 'demo.mp4', path: '/fixture/demo.mp4', type: 'file', size: 2 * 1024 ** 3 }];
+  const app = await (await compiled).mount(context, { props: { visible: true, session: 'fixture' }, modules: [rpc({
+    fsList: async () => ({ path: '/fixture', entries: videoEntries }),
+    fsStat: async (path: string) => ({ path, is_text: false, writable: true, readable: true, size: 2 * 1024 ** 3, mime_hint: 'video/mp4' }),
+    fsDownloadHttp: async (...args: unknown[]) => { signed.push(args); return { url: 'https://h/dl?path=%2Ffixture%2Fdemo.mp4&exp=9&sig=s&stream=1', name: 'demo.mp4' }; },
+    fsDownload: async (path: string) => { bytes.push(path); return { data: '' }; },
+    fsRead: async (path: string) => { bytes.push(path); return { content: '' }; },
+  })] });
+  try {
+    await settle(app);
+    app.document.querySelector<HTMLButtonElement>('.file-row .file-main')!.click();
+    await settle(app);
+    const video = app.document.querySelector<HTMLVideoElement>('.preview-body video, .media-preview video');
+    assert.ok(video, 'the preview is a <video>, not the info page');
+    assert.equal(video.getAttribute('src'), 'https://h/dl?path=%2Ffixture%2Fdemo.mp4&exp=9&sig=s&stream=1');
+    assert.equal(JSON.stringify(signed), JSON.stringify([['/fixture/demo.mp4', { stream: true }]]), 'signed once, for a stream lifetime');
+    assert.deepEqual(bytes, [], 'no fs_download / fs_read for a stream');
+  } finally { await app.close(); }
+});

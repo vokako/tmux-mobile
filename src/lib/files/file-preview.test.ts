@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import type { HLJSApi } from 'highlight.js';
 import {
   createPreviewRenderers, defaultWrapForMime, highlightCode, highlightLine,
-  hljsLang, isPreviewable, mimeCategory, mimeFromName, renderCsv,
+  hljsLang, isPreviewable, mimeCategory, mimeFromName, renderCsv, streamsInline,
   type PreviewRenderContext,
 } from './file-preview.ts';
 
@@ -25,6 +25,13 @@ test('preview classification and limits match the existing Files decisions', () 
   assert.equal(isPreviewable({ mime_hint: 'application/pdf', size: 9e6 }), true);
   assert.equal(isPreviewable({ mime_hint: 'image/png', size: 9e6 }), true);
   assert.equal(isPreviewable({ mime_hint: 'application/octet-stream', size: 9e6 }, 'DECK.PPTX'), true);
+  // Board #182: a video STREAMS — its size never decides previewability.
+  assert.equal(mimeCategory('video/mp4'), 'video');
+  assert.equal(mimeCategory('video/quicktime'), 'video');
+  assert.equal(isPreviewable({ mime_hint: 'video/mp4', size: 2 * 1024 ** 3 }), true);
+  assert.equal(streamsInline({ mime_hint: 'video/webm', size: 2 * 1024 ** 3 }), true, 'streamed kinds bypass the inline-bytes size gate');
+  assert.equal(streamsInline({ mime_hint: 'image/png', size: 9e6 }), false, 'images still arrive as bytes');
+  assert.equal(streamsInline(null), false);
 });
 
 test('highlighters keep escaped fallback, known languages and existing error boundaries', () => {

@@ -82,7 +82,7 @@ JSON-RPC over WebSocket (`ws://` or `wss://`).
 | `fs_delete` | `path` | OK |
 | `fs_rename` | `from`, `to` | OK |
 | `fs_download` | `path` | `{name, data}` base64 (≤50MB). For inline preview; user-initiated downloads use `fs_download_url` + HTTP `/dl` streaming instead. |
-| `fs_download_url` | `path` | `{url, name}` where `url` = `/dl?path=…&ts=…&sig=…`. Client GETs it on the same host (http:// for ws://, https:// for wss://) to stream the file. HMAC-SHA256 signature over token+path+ts, 60 s TTL. No server-side size limit. |
+| `fs_download_url` | `path`, `stream?` | `{url, name}` where `url` = `/dl?path=…&exp=…&sig=…`. Client GETs it on the same host (http:// for ws://, https:// for wss://) to stream the file; `/dl` honours `Range: bytes=N-` and `bytes=N-M` (206/416). HMAC-SHA256 over `dl:<path>:<exp>` (download) or `dl:stream:<path>:<exp>` (stream; URL carries `&stream=1`); `exp` is an absolute expiry: 60 s after minting for a download, 4 h with `stream: true` (a `<video>` re-requests the URL for the whole playback). `stream: true` is refused (invalid params, and 403 at `/dl`) unless the path is a video extension. No server-side size limit. |
 | `fs_upload` | `path`, `data` | OK |
 | `fs_convert` | `path`, `format?` | `{html}` (currently only pptx→html) |
 

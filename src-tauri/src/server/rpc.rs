@@ -12,7 +12,7 @@ use tokio::sync::Mutex;
 use crate::fs as rfs;
 use crate::tmux;
 
-use super::download::sign_download;
+use super::download::{download_expiry, sign_download, streams};
 
 // JSON-RPC style request/response
 
@@ -345,10 +345,17 @@ fn dispatch(req: &Request, token: &str) -> Result<serde_json::Value, RpcError> {
 
         "fs_download_url" => {
             let path = param(p, "path")?;
-            let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-            let sig = sign_download(token, path, ts);
+            // `stream: true` = a media element will keep coming back to this
+            // URL for the whole playback (board #182); the expiry and the
+            // mode are signed, and only what a <video> plays may stream.
+            let stream = p.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
+            if stream && !streams(path) {
+                return Err(RpcError::InvalidParams("stream: not a media file".into()));
+            }
+            let exp = download_expiry(stream);
+            let sig = sign_download(token, stream, path, exp);
             let name = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or("file");
-            let qs = format!("/dl?path={}&ts={}&sig={}", urlencoding::encode(path), ts, sig);
+            let qs = format!("/dl?path={}&exp={}&sig={}{}", urlencoding::encode(path), exp, sig, if stream { "&stream=1" } else { "" });
             Ok(serde_json::json!({ "url": qs, "name": name }))
         }
 

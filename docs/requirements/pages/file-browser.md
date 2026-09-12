@@ -23,7 +23,7 @@ directory, or the server's home directory when no session is open yet.
   names, on the same row; ordinary file and folder rows share a height.
 - Bookmark panel (star current dir, scrollable saved paths)
 - Recent files panel (last 20 opened files, scrollable, capped to 40vh)
-- File preview: Markdown (rendered through the shared safe renderer, `core/markdown.ts`, + mermaid + KaTeX), CSV (table), code (syntax highlighted; the lined view shows the first 3000 lines with a "Show all N lines" button), HTML (sandboxed iframe), PDF (pdf.js), images. pdf.js, mermaid and highlight.js load on first use, not at startup.
+- File preview: Markdown (rendered through the shared safe renderer, `core/markdown.ts`, + mermaid + KaTeX), CSV (table), code (syntax highlighted; the lined view shows the first 3000 lines with a "Show all N lines" button), HTML (sandboxed iframe), PDF (pdf.js), images, video (the browser's own `<video>` player streaming ranges from the signed `/dl` URL — mp4/m4v/webm/mov/mkv/ogv, any size). pdf.js, mermaid and highlight.js load on first use, not at startup.
 - Text editor with syntax highlighting, undo stack, save button
 - File operations: create file/folder, rename, delete, upload, download
 - File info panel: path (tap to copy), type, size, modified, permissions
@@ -31,7 +31,7 @@ directory, or the server's home directory when no session is open yet.
 
 ## Interactions
 - Tap directory → navigate into it
-- Tap file → preview (or info page if file size > 5 MB or not previewable)
+- Tap file → preview (or info page if not previewable, or if file size > 5 MB and the kind is not streamed — video streams at any size)
 - Tap a path reference in chat, Markdown, converted content, or an HTML
   preview → open it in Files, with the target's parent listing and a Back
   route to the source preview/list. Relative paths resolve against the

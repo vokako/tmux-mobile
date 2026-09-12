@@ -129,6 +129,14 @@ fn mime_hint(name: &str) -> String {
         "gif" => "image/gif",
         "svg" => "image/svg+xml",
         "webp" => "image/webp",
+        // Video streams through /dl into a <video> (board #182); the same
+        // rows as server::download::media_content_type, so what Files calls a
+        // video, /dl serves as one.
+        "mp4" | "m4v" => "video/mp4",
+        "webm" => "video/webm",
+        "mov" => "video/quicktime",
+        "mkv" => "video/x-matroska",
+        "ogv" => "video/ogg",
         "pdf" => "application/pdf",
         "zip" | "tar" | "gz" | "bz2" | "xz" | "7z" => "application/archive",
         _ => "application/octet-stream",
@@ -410,4 +418,21 @@ pub fn upload_file(path: &str, data_b64: &str) -> Result<(), String> {
         .decode(data_b64)
         .map_err(|e| format!("invalid base64: {}", e))?;
     fs::write(&p, &bytes).map_err(|e| format!("upload error: {}", e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mime_hint;
+
+    #[test]
+    fn video_extensions_are_video_so_files_streams_them() {
+        // Board #182: the rows match server::download::media_content_type.
+        assert_eq!(mime_hint("demo.MP4"), "video/mp4");
+        assert_eq!(mime_hint("/a/b/clip.m4v"), "video/mp4");
+        assert_eq!(mime_hint("screen.webm"), "video/webm");
+        assert_eq!(mime_hint("take.mov"), "video/quicktime");
+        assert_eq!(mime_hint("rip.mkv"), "video/x-matroska");
+        assert_eq!(mime_hint("notes.md"), "text/markdown");
+        assert_eq!(mime_hint("blob.bin"), "application/octet-stream");
+    }
 }

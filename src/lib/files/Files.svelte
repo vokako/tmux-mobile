@@ -8,7 +8,7 @@
 
 <script>
   import FilePreview from './FilePreview.svelte';
-  import { createPreviewRenderers, defaultWrapForMime, highlightCode, isPreviewable, mimeCategory } from './file-preview.ts';
+  import { createPreviewRenderers, defaultWrapForMime, highlightCode, isPreviewable, mimeCategory, streamsInline } from './file-preview.ts';
   import { isAndroid, isTauri, tauriReady } from '../core/platform.ts';
   import Icon from '../ui/Icon.svelte';
   import CommandButton from '../ui/CommandButton.svelte';
@@ -777,6 +777,13 @@
         if (!fileNav.isCurrentFile(my)) return false;
         currentFile = { ...file, dataUrl: `data:${stat.mime_hint};base64,${r.data}` };
         enterView('preview');
+      } else if (streamsInline(stat)) {
+        // A video STREAMS (board #182): the <video> fetches its own ranges
+        // from /dl under a media-lived signature; no bytes cross the RPC.
+        const { url } = await fsDownloadHttp(path, { stream: true });
+        if (!fileNav.isCurrentFile(my)) return false;
+        currentFile = { ...file, mediaUrl: url };
+        enterView('preview');
       } else if (stat.is_text && stat.size <= 512 * 1024) {
         const r = await fsRead(path);
         if (!fileNav.isCurrentFile(my)) return false;
@@ -855,7 +862,8 @@
       currentFile = { path, name: entry.name, stat };
       addRecent(entry.path, entry.name);
       navPush();
-      if (stat.size > PREVIEW_SIZE_LIMIT || !isPreviewable(stat, entry.name)) {
+      // The size gate protects the RPC's inline bytes; a streamed kind sends none.
+      if ((stat.size > PREVIEW_SIZE_LIMIT && !streamsInline(stat)) || !isPreviewable(stat, entry.name)) {
         if (previous) fileNav.rememberFile(previous);
         enterView('info');
         previewLoading = false;
@@ -894,6 +902,8 @@
         currentFile.dataUrl = `data:${file.stat.mime_hint};base64,${r.data}`;
         currentFile = currentFile;
       }
+      // A stream is NOT re-fetched here: swapping a <video>'s src restarts it
+      // at 0, and its signature lives the whole viewing (board #182).
     } catch {}
   }
 

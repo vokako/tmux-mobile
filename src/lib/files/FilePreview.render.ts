@@ -39,6 +39,13 @@ test('the extracted preview renders every existing branch and preserves the code
   assert.ok(!pdf.includes('<iframe'));
   assert.match(renderFile({ stat: { mime_hint: 'image/png' }, dataUrl: 'data:image/png;base64,eA==' }), /<img[^>]*src="data:image\/png;base64,eA=="/u);
   assert.match(renderFile({ stat: { mime_hint: 'application/octet-stream' }, convertedHtml: '<h2>Slide</h2>' }), /<h2>Slide<\/h2>/u);
+  // Board #182: a video is a <video> pointed at the signed stream URL — the
+  // browser fetches ranges itself; no bytes pass through the RPC.
+  const video = renderFile({ name: 'demo.mp4', stat: { mime_hint: 'video/mp4' }, mediaUrl: 'https://h/dl?path=%2Fdemo.mp4&exp=9&sig=s&stream=1' });
+  assert.match(video, /<video[^>]*\bcontrols\b[^>]*src="https:\/\/h\/dl\?path=%2Fdemo\.mp4&amp;exp=9&amp;sig=s&amp;stream=1"/u);
+  assert.match(video, /<video[^>]*\bplaysinline\b/u, 'the phone plays in place, not in a forced fullscreen player');
+  assert.match(video, /<video[^>]*preload="metadata"/u, 'opening a preview costs the header, not the film');
+  assert.ok(!video.includes('<img'));
 
   const content = Array.from({ length: 3002 }, (_, i) => `line ${i}`).join('\n');
   const capped = renderFile({ stat: { mime_hint: 'text/plain' }, content });

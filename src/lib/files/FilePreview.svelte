@@ -52,6 +52,13 @@
     <div class="pdf-container" bind:this={pdfContainer} style="margin: -12px; padding: 0;"></div>
   {:else if mimeCategory(currentFile.stat?.mime_hint) === 'image'}
     <div class="image-preview"><img src={currentFile.dataUrl} alt={currentFile.name} /></div>
+  {:else if mimeCategory(currentFile.stat?.mime_hint) === 'video'}
+    <!-- Board #182: the browser's own player streams ranges from the signed
+         /dl URL (206 + Accept-Ranges); preload=metadata costs the header, not
+         the film; playsinline keeps the phone in the preview, not a forced
+         fullscreen player. -->
+    <!-- svelte-ignore a11y_media_has_caption -->
+    <div class="image-preview"><video controls playsinline preload="metadata" src={currentFile.mediaUrl}></video></div>
   {:else if currentFile.convertedHtml}
     <div class="md-render">{@html currentFile.convertedHtml}</div>
   {:else}
@@ -113,7 +120,7 @@
   .image-preview {
     flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 12px;
   }
-  .image-preview img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; }
+  .image-preview img, .image-preview video { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; }
   .md-render { font-size: var(--file-font-size, 14px); line-height: 1.6; color: var(--text); overflow-wrap: break-word; }
   .md-render :global(h1) { font-size: 1.55em; margin: 16px 0 8px; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 6px; }
   .md-render :global(h2) { font-size: 1.28em; margin: 14px 0 6px; color: var(--accent); }

@@ -746,14 +746,18 @@ export function httpOriginForWs(url: string): string {
   const downloadBasePath = path.endsWith('/ws') ? path.slice(0, -3) : path;
   return `${protocol}//${parsed.host}${downloadBasePath}`;
 }
-export const fsDownloadUrl = (path: string) => call<{ url: string; name: string }>('fs_download_url', { path });
-export function fsDownloadHttp(path: string) {
+/** `stream: true` asks for a media-lived signature — a `<video>` keeps
+ * re-requesting the same URL for the whole playback (board #182); a plain
+ * download URL is fetched at once and dies in a minute. */
+export const fsDownloadUrl = (path: string, opts: { stream?: boolean } = {}) =>
+  call<{ url: string; name: string }>('fs_download_url', opts.stream ? { path, stream: true } : { path });
+export function fsDownloadHttp(path: string, opts: { stream?: boolean } = {}) {
   // Both ws:// and wss:// use the streaming HTTP /dl endpoint — the server
   // peeks the first bytes of every accepted (plain or TLS) connection and
   // branches HTTP vs WS. Streaming avoids the 50 MB cap and base64 overhead.
   // wss://host/prefix/ws → https://host/prefix. Only a trailing /ws proxy
   // segment is discarded; production parent prefixes remain intact.
-  return fsDownloadUrl(path).then(({ url, name }) => {
+  return fsDownloadUrl(path, opts).then(({ url, name }) => {
     const base = httpOriginForWs(wsUrl!); // connect() set wsUrl before any RPC could run
     return { url: base + url, name };
   });

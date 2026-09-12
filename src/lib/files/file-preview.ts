@@ -12,6 +12,8 @@ export interface PreviewFile {
   stat?: { mime_hint?: string | null };
   content?: string | null;
   dataUrl?: string;
+  /** A stream-signed /dl URL the media element fetches ranges from itself (board #182). */
+  mediaUrl?: string;
   pdfData?: string;
   convertedHtml?: string;
 }
@@ -29,11 +31,18 @@ export function defaultWrapForMime(mime: string | null | undefined): boolean {
   return mime === 'text/markdown' || mime === 'text/plain';
 }
 
+/** Kinds the browser streams straight from /dl (a `<video>` fetching its own
+ * ranges) — no bytes cross the RPC, so no size gate applies (board #182). */
+export function streamsInline(stat: { mime_hint?: string | null; size?: number } | null | undefined): boolean {
+  return mimeCategory(stat?.mime_hint) === 'video';
+}
+
 export function isPreviewable(stat: { mime_hint?: string; is_text?: boolean; size: number } | null, name?: string): boolean {
   if (!stat) return false;
   const m = stat.mime_hint || '';
   if (m === 'application/pdf') return true;
   if (m.startsWith('image/')) return true;
+  if (streamsInline(stat)) return true;
   if (stat.is_text && stat.size <= 512 * 1024) return true;
   if (name && /\.pptx$/i.test(name)) return true;
   return false;
@@ -42,6 +51,7 @@ export function isPreviewable(stat: { mime_hint?: string; is_text?: boolean; siz
 export function mimeCategory(mime: string | null | undefined) {
   if (!mime) return 'other';
   if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('video/')) return 'video';
   if (mime === 'text/markdown') return 'markdown';
   if (mime === 'text/csv') return 'csv';
   if (mime === 'text/html') return 'html';
