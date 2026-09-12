@@ -8,6 +8,20 @@ Base64 encoding for small file transfer (previews), streaming HTTP for large-fil
 
 ## Key Decisions
 
+### The path row scrolls; a segment never squashes (board #185, 2026-09-12)
+
+Owner: "当文件预览路径超过预览框宽度的时候显示有问题，文字有上下重叠了". `.bc-path-row`
+is a flex row with `overflow-x: auto` that scrolls to its tail after every
+navigation — the design is a horizontal strip whose end is the current
+directory. The defect was a CSS fact, not a layout choice: an explicit
+`min-width` on a flex item REPLACES its automatic min-content floor, so with
+`min-width: var(--control-height)` every `.bc-seg` shrank to the control size
+(measured in Chromium at 390 px and 520 px: 14 segments each 28 px wide while
+their text measured 34–87 px) and the nowrap glyphs of neighbours painted over
+each other. `.bc-seg { flex-shrink: 0 }`: a segment keeps its width and the
+row does the moving (after: 0 squashed segments, `scrollLeft` 489 of 878 at
+390 px). `Files.source.test.ts` pins both halves.
+
 ### Compact rows and contextual actions (#164, 2026-09-11)
 
 Owner, 03:00, verbatim:

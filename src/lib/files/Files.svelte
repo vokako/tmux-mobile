@@ -1907,8 +1907,13 @@
     scrollbar-width: none; border-bottom: 1px solid var(--border2); flex-shrink: 0;
   }
   .bc-path-row::-webkit-scrollbar { display: none; }
+  /* A segment keeps its width — the ROW scrolls (to its tail, see the
+     breadcrumbs effect). An explicit min-width replaces a flex item's
+     automatic min-content floor, so without flex-shrink: 0 every segment
+     shrank to the control size and neighbours' glyphs painted over each
+     other once the path outgrew the pane (board #185). */
   .bc-seg {
-    min-width: var(--control-height); min-height: var(--control-height);
+    min-width: var(--control-height); min-height: var(--control-height); flex-shrink: 0;
     padding: 2px 4px; border: none; background: none; color: var(--text2);
     cursor: pointer; white-space: nowrap; font-size: var(--fs-ui); font-family: inherit;
     transition: color var(--t-fast);

@@ -204,3 +204,16 @@ test('navRequest can ask for a FILE: land in its directory with the preview open
   assert.match(source, /error = \/No such file\|os error 2\/iu\.test\(e\.message \?\? ''\) \? `\$\{t\('fileMissing'\)\}: \$\{entry\.path\}` : e\.message;/u,
     'ENOENT on a file open reads as a sentence with the path');
 });
+
+test('the path row scrolls; its segments never squash (board #185)', () => {
+  // Owner 2026-09-12: "当文件预览路径超过预览框宽度的时候显示有问题，文字有上下重叠了".
+  // .bc-path-row is a flex row with overflow-x:auto that scrolls to its tail,
+  // but a flex item's explicit min-width REPLACES its automatic min-content
+  // floor: with min-width: var(--control-height) every segment shrank to
+  // 28 px (measured in Chromium at 390/520 px: 14 segments × 28 px, text
+  // 34–87 px wide) and the nowrap glyphs of neighbours painted over each
+  // other. A segment keeps its width; the ROW is what moves.
+  const seg = source.match(/\.bc-seg \{[^}]*\}/u)?.[0] ?? '';
+  assert.match(seg, /flex-shrink: 0;/u, 'a breadcrumb segment never shrinks below its text');
+  assert.match(source, /\.bc-path-row \{[^}]*overflow-x: auto;/u, 'the row scrolls instead');
+});
