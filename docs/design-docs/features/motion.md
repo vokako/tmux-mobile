@@ -340,6 +340,15 @@ sizes (owner declined).
 
 ## Rules and their reasons
 
+- **Completion lifetime is not an animation or a transport timer** (#167
+  batch 2, 2026-09-12): one 1500ms completion scheduler replaces private
+  Copied/short-success expiries. Errors, progress and actionable Open/Close
+  results do not expire. The Files 1.2-second in/out flash is retired; callers
+  may retain the existing intro atom, and anchored copy errors use `.pop-layer`
+  readiness. There is no layout animation or eased progress percentage.
+  Indeterminate progress uses the one spin keyframe and stops spinning under
+  reduced motion. Download retry/watchdog and keyboard-grace timers are
+  different jobs and remain unchanged.
 - **Confirmation failure is state, not a timed notification** (#167,
   2026-09-12): a caller's error remains inside the existing confirmation
   until retry or dismissal. It appears without a new animation or timer;

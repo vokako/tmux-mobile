@@ -334,6 +334,45 @@ The shared component's mounted regressions were red before the independent
 icon/error slots. Consumer execution and Back ownership are migrated in
 separate #167 commits; this component change alone does not prove those paths.
 
+### Local operation feedback (#167 batch 2, 2026-09-12)
+
+`ui/OperationFeedback` is the one presentation for local success, error,
+progress and actionable results. Files and Terminal both adopt it; their
+private toast paint and flash animation are removed. It reuses `menu-surface`,
+the shared error text role and CommandButton. Callers own position and actions;
+the component owns no transport, timer, queue or notification policy.
+
+`feedback-lifetime.ts` owns `COMPLETION_FEEDBACK_MS = 1500` and the completion
+scheduler. A local instance captures an attempt before awaiting and accepts
+only that attempt's outcome. A queued expiry also checks the displayed
+instance, so identical text does not make an old expiry current. Context exit
+and disposal invalidate callbacks and cancel their timer.
+
+Only an ordinary success/Copied notice expires. Errors and progress persist.
+A result offering Open/Close is an actionable prompt, not a notice: it persists
+until acted on or its operation context is replaced/exited. This qualifier was
+approved on 2026-09-12 at 18:08; shortening the old download result to 1.5 seconds
+would hide an action before it could be used. Unrelated jobs have separate local
+slots, so copying cannot erase a download prompt or a connection error.
+Plain success/progress does not gain a redundant Close button.
+
+A percentage reports measured transfer bytes only. Unknown Content-Length and
+the write phase are indeterminate, not a synthetic ramp. A browser download
+request does not claim that a file has been saved; a confirmed native write can.
+Copy reports success only after `core/clipboard` returns true, retaining its
+insecure-context fallback. Git errors do not expire as short success notices.
+
+Feed and Board share the existing message-action generation model, lifted
+mechanically before adoption, and use the common completion scheduler.
+Message identity, never body equality, owns the checkmark and expiry.
+Copy errors use the same OperationFeedback, anchored to the live Copy trigger
+by `feedback-position` through `menuPlacement`/`menuHeightLimit`. The box wears
+`.pop-layer`, is measured before showing, and is bounded by the message/notes
+scrollport so it flips above inputs. Local resize/scroll tracking is disposed
+with the box; the existing caller still owns dismissal. This replaces fixed
+corner placement that Chromium measured over short-tail Copy/Raw and Board
+input controls. It adds no flow row, reading-layout change or global listener.
+
 **Controlled icon tools (#157, 2026-09-10):** `CommandButton` accepts optional
 `pressed`, `expanded` and `controls`, reflected as native `aria-pressed`,
 `aria-expanded` and `aria-controls`. Explicit false remains `"false"`; absent

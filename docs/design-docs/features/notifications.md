@@ -47,6 +47,15 @@ Web Notification support varies by browser/webview and normally requires a runni
 
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
 
+### Local outcomes are not away-message alerts (#167, 2026-09-12)
+
+Copy, download, Git and confirmation outcomes use the local feedback contract
+in design-language.md. They do not call this module, request notification
+permission, play a cue or create tray notifications. Natural mutation results
+need no extra success notification. The local 1500ms completion scheduler and
+attempt generations do not replace this module's message identity, away gate,
+deduplication or cooldown. `hub/notifications.ts` is unchanged.
+
 ### New-message alerts remember BEFORE they notify
 
 (board #57): `hub/notifications.ts` keys every observed message row by id (fallback `from/ts/body`) in a bounded seen set before the first/history/watched/muted/news gates, so inclusive polls and cache restores never replay or backfill alerts. Only an away running client alerts; own/sys/ambient-status rows drop, `[tmm done]` remains news.
