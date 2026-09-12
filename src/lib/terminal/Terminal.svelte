@@ -7,6 +7,8 @@
   import AgentChip from '../ui/AgentChip.svelte';
   import PanePicker from '../sessions/PanePicker.svelte';
   import ContextMenu from '../ui/ContextMenu.svelte';
+  import OperationFeedback from '../ui/OperationFeedback.svelte';
+  import { createFeedbackLifetime } from '../ui/feedback-lifetime.ts';
   import { anchorOf } from '../ui/placement.ts';
   import { flip } from 'svelte/animate';
   import { moveMs } from '../ui/motion.ts';
@@ -108,7 +110,25 @@
   // re-run an effect. Reset at the top of the subscription effect.
   let lastContent = '';
   let lastCursor = null;
-  let toastMsg = $state('');
+  let copyFeedback = $state(null);
+  let connectionFeedback = $state(null);
+  const copyFeedbackLifetime = createFeedbackLifetime(value => { copyFeedback = value; });
+  const connectionFeedbackLifetime = createFeedbackLifetime(value => { connectionFeedback = value; });
+
+  function clearTerminalFeedback() {
+    copyFeedbackLifetime.clear();
+    connectionFeedbackLifetime.clear();
+    sendFailCount = 0;
+  }
+
+  $effect(() => {
+    target; session; visible; termGen;
+    untrack(clearTerminalFeedback);
+  });
+  $effect(() => () => {
+    copyFeedbackLifetime.dispose();
+    connectionFeedbackLifetime.dispose();
+  });
   const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
   // Visual width of xterm's overlay scrollbar (passed to the Terminal ctor
   // below). It floats ON TOP of the content's right edge and does NOT
@@ -181,11 +201,6 @@
       kbTa.focus();
     }
     window.__dbg?.('kb: unlock + focus');
-  }
-
-  function showToast(msg) {
-    toastMsg = msg;
-    setTimeout(() => { toastMsg = ''; }, 1500);
   }
 
   let theme = $state(document.documentElement.getAttribute('data-theme') || 'dark');
@@ -1047,12 +1062,21 @@
     };
 
     copySelection = async () => {
-      if (!term?.hasSelection()) return;
-      const text = term.getSelection();
+      const copiedTerm = term;
+      const copiedSelection = selection;
+      const copiedTarget = target;
+      const copiedSession = session;
+      if (!copiedTerm?.hasSelection() || !visible || document.visibilityState !== 'visible') return;
+      const text = copiedTerm.getSelection();
       if (!text) return;
+      const token = copyFeedbackLifetime.begin();
       const ok = await copyText(text);
-      showToast(ok ? t('copied') : t('copyFailed'));
-      clearSelection();
+      if (!copyFeedbackLifetime.current(token) || term !== copiedTerm || selection !== copiedSelection
+        || target !== copiedTarget || session !== copiedSession || !visible || document.visibilityState !== 'visible') return;
+      copyFeedbackLifetime.update(token, {
+        kind: ok ? 'success' : 'error', message: ok ? t('copied') : t('copyFailed'),
+      });
+      if (ok) clearSelection();
     };
 
     // ─── Selection extension helpers ────────────────────────────────────────
@@ -1182,6 +1206,7 @@
     let resumeGeneration = 0;
     const onVisible = () => {
       if (document.visibilityState !== 'visible') {
+        clearTerminalFeedback();
         followedTailBeforeHide = termAtBottom;
         resumeGeneration++;
         return;
@@ -1502,6 +1527,7 @@
 
     return () => {
       responseFilter.reset();
+      clearTerminalFeedback();
       resizeObs.disconnect();
       clearTimeout(resizeSendTimer);
       window.removeEventListener('app-zoom-change', onAppZoom);
@@ -1551,18 +1577,23 @@
     }
   });
 
-  // Track consecutive send failures so the user gets a visible "unstable" toast
+  // Track consecutive send failures so the user gets a visible connection error
   // well before the heartbeat detector fires its 10-15s disconnect. One stray
   // failure is ignored (could be a single dropped packet). Two in a row on any
-  // channel (shortcut, Enter, or raw key-through) surfaces a toast.
+  // channel (shortcut, Enter, or raw key-through) surfaces a persistent error.
   let sendFailCount = 0;
   function noteSendFailure(label) {
     sendFailCount++;
     window.__dbg?.(`send fail (${label}) #${sendFailCount}`);
-    if (sendFailCount === 2) showToast(t('connectionUnstable'));
+    if (sendFailCount === 2 && visible && document.visibilityState === 'visible') {
+      connectionFeedbackLifetime.update(connectionFeedbackLifetime.begin(), {
+        kind: 'error', message: t('connectionUnstable'),
+      });
+    }
   }
   function noteSendSuccess() {
     if (sendFailCount > 0) sendFailCount = 0;
+    connectionFeedbackLifetime.clear();
   }
 
   // ─── Keystroke send queue ────────────────────────────────────────────────
@@ -1656,8 +1687,11 @@
 </script>
 
 <div class="terminal">
-  {#if toastMsg}
-    <div class="toast appear">{toastMsg}</div>
+  {#if copyFeedback || connectionFeedback}
+    <div class="terminal-feedback appear">
+      <OperationFeedback value={connectionFeedback} ondismiss={connectionFeedbackLifetime.clear} />
+      <OperationFeedback value={copyFeedback} ondismiss={copyFeedback?.kind === 'error' ? copyFeedbackLifetime.clear : undefined} />
+    </div>
   {/if}
   {#if showSwitcher}
     {#if showWindowCmd || embedded}
@@ -2006,18 +2040,17 @@
     zoom: calc(1 / var(--ui-zoom, 1));
   }
 
-  .toast {
+  .terminal-feedback {
     position: absolute;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    background: rgba(0, 0, 0, 0.8);
-    color: #fff;
-    padding: 8px 20px;
-    border-radius: var(--ui-radius-row);
-    font-size: var(--fs-body);
+    display: flex;
+    flex-direction: column;
+    gap: calc(2 * var(--ui-gap));
+    width: max-content;
+    max-width: calc(100% - 4 * var(--ui-gap));
     z-index: 20;
-    pointer-events: none;
   }
 
   /* No transition here, ever: this is xterm's container (motion.md

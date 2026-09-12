@@ -58,6 +58,53 @@ ordering, resize, cursor/blank-row restoration and the bounded history.
 
 with `extended-keys on`, tmux DROPS raw C0 bytes (`send-keys -l $'\x03'`) sent to panes in extended key mode (`#{pane_key_mode}`=`Ext` — every modern agent TUI). `tmux::send_keys` literal mode therefore splits C0 bytes into named keys (`C-c`, `M-C-x`); don't bypass it.
 
+### Operation feedback belongs to its operation and visible context (#167, 2026-09-12)
+
+Terminal uses `ui/OperationFeedback` and `createFeedbackLifetime`, not a
+private toast or timer. Copy and connection errors have separate local slots
+in one unframed, centered stack at the former toast position. A successful
+copy expires after the shared `COMPLETION_FEEDBACK_MS` and stays passive,
+without Close. Review of #167 rejected a new focus/click target that vanishes
+after 1500ms; only copy errors and the connection error expose Close.
+Errors persist until
+retry succeeds, dismissal or context invalidation. Copying cannot dismiss an
+unrelated connection error, including when its success timer expires.
+Two consecutive send failures publish `connectionUnstable` as an error;
+one failure is still ignored, and a successful send clears that slot.
+No notification, audio, transport retry or input queue is introduced here.
+
+Capture the xterm instance, selection object, target, session and attempt
+token before awaiting `copyText`. Only a still-current successful result may
+clear that selection. Failure retains both selection and the Copy command
+for retry; a stale result neither clears the new selection nor replaces its
+feedback. Target/session changes, xterm lifecycle changes, the page becoming
+hidden and document suspension invalidate feedback. Teardown cancels timers
+and invalidates outstanding copies. This does not cancel an OS clipboard
+request that already started. Desktop native copy remains native; the explicit
+Copy toolbar is still the existing touch-capability path.
+
+The original bugs were reproduced before changing production code with the
+real Terminal and xterm **6.0.0**, Chromium **152.0.7977.64**, Svelte
+**5.55.5**, Vite **6.4.2** and Node **22.23.2**: rejecting modern clipboard
+copy and its fallback cleared `bravo`, and a first success timer erased a
+later `Copied` before its own lifetime ended. The browser fixture controls
+only RPC/clipboard boundaries and traces real xterm public APIs; the jsdom
+mount tier's xterm prohibition is unchanged. Source contracts pin shared
+ownership and identity guards; browser checks execute completions, context
+changes and cleanup. The English/reduced-motion matrix passes 43 checks:
+390x844 touch in light/DOM and dark/WebGL, 1440x900 pointer in light/DOM
+and dark/WebGL, plus 1440x900 touch in dark/DOM. Pointer cases verify
+connection feedback and rendering; touch cases also exercise the existing
+Copy toolbar. Screenshots and pixel checks confirm nonblank real renderers;
+the two feedback rectangles do not overlap. A build-only negative control
+restoring unconditional selection clearing fails the copy-retry check while
+the old-timer check stays green. Playwright **1.62.1** drives an isolated
+agent-browser **0.35.2** session; all contexts, its daemon and the ephemeral
+HTTP server close in `finally`. Evidence and runner are in
+`temp/167-terminal/`.
+These off-device tests do not establish Android/WebView clipboard activation,
+IME ordering, physical touch or OS suspension behavior.
+
 ### xterm DA filtering
 
 Filter device-attribute and device-status replies before forwarding to tmux.
@@ -93,6 +140,6 @@ pins the filter before forwarding and outside the callback.
 
 ### Motion: the terminal's box never animates, only the chrome around it
 
-[motion.md](../features/motion.md) principle 9. `.term-wrap`, `.xterm-wrap` and a split `.cell`'s body carry no transform, transition or animation — a resting transform makes them a containing block (every fixed popover breaks) and a transitioning size makes the fit run on a mid-flight measurement; the retired `.xterm-wrap { transition: margin-top }` had one writer and it set 0. What moves is the chrome: the toast, the selection handles and toolbar and the expanded chip strip fade in (`.appear`; their positions stay inline and instant), the to-tail button pops (app.css gives `.to-tail` its `pop-in`), the shortcut pills cross-fade colour on `--t-fast` with `transform` kept OUT of the list so the press `translateY(1px)` lands under the finger, and the window chips are keyed by window index with `animate:flip` on `moveMs()` so a renumbering moves the chip instead of repainting it. The collapse control is still a cut: the expanded bar and the collapsed chip are two different elements in two `{#if}` branches (pinned by `Terminal.source.test.ts`), so there is no one glyph to turn. A split cell's frame (`SplitView .cell`) cross-fades only its border colour and ring — colour is neither a containing block nor a size.
+[motion.md](../features/motion.md) principle 9. `.term-wrap`, `.xterm-wrap` and a split `.cell`'s body carry no transform, transition or animation — a resting transform makes them a containing block (every fixed popover breaks) and a transitioning size makes the fit run on a mid-flight measurement; the retired `.xterm-wrap { transition: margin-top }` had one writer and it set 0. What moves is the chrome: the feedback stack, the selection handles and toolbar and the expanded chip strip fade in (`.appear`; their positions stay inline and instant), the to-tail button pops (app.css gives `.to-tail` its `pop-in`), the shortcut pills cross-fade colour on `--t-fast` with `transform` kept OUT of the list so the press `translateY(1px)` lands under the finger, and the window chips are keyed by window index with `animate:flip` on `moveMs()` so a renumbering moves the chip instead of repainting it. The collapse control is still a cut: the expanded bar and the collapsed chip are two different elements in two `{#if}` branches (pinned by `Terminal.source.test.ts`), so there is no one glyph to turn. A split cell's frame (`SplitView .cell`) cross-fades only its border colour and ring — colour is neither a containing block nor a size.
 
 Hover / unfold / highlight (#86, 2026-09-04): resting on a window chip opens the ONE hover card (`use:hoverInfo` on the `.win-chip` wrapper — `index:name`, command, pane count, agent tag; the chip is passed `title={null}`, which AgentChip honours as "no native title", so the card is not doubled), and the to-tail button's card is a single note ("Back to the newest output"). Nothing unfolds and no highlight travels here: the chip strip scrolls and its chips are AgentChips, so the active chip is not a `.slide-pill` candidate, and the terminal's box stays untouched (principle 9 — the card is its own fixed layer and the action only adds listeners).

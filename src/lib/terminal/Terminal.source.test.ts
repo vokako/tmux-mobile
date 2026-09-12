@@ -6,6 +6,53 @@ import ts from 'typescript';
 
 const source = await readFile(new URL('./Terminal.svelte', import.meta.url), 'utf8');
 
+test('copy and connection feedback have separate shared lifetimes and one unframed placement (#167)', () => {
+  assert.match(source, /import OperationFeedback from '\.\.\/ui\/OperationFeedback\.svelte';/u);
+  assert.match(source, /import \{ createFeedbackLifetime \} from '\.\.\/ui\/feedback-lifetime\.ts';/u);
+  for (const slot of ['copy', 'connection']) {
+    assert.match(source, new RegExp(`const ${slot}FeedbackLifetime = createFeedbackLifetime\\(value => \\{ ${slot}Feedback = value; \\}\\);`, 'u'));
+    assert.match(source, new RegExp(`${slot}FeedbackLifetime\\.dispose\\(\\)`, 'u'));
+  }
+  assert.match(source, /<OperationFeedback value=\{connectionFeedback\} ondismiss=\{connectionFeedbackLifetime\.clear\}/u);
+  assert.match(source, /<OperationFeedback value=\{copyFeedback\} ondismiss=\{copyFeedback\?\.kind === 'error' \? copyFeedbackLifetime\.clear : undefined\}/u,
+    'Copied is passive: an auto-expiring success must not create a temporary Close target');
+  assert.doesNotMatch(source, /toastMsg|showToast|\.toast\s*\{/u, 'the replaced timer and private paint are removed whole');
+  const placement = /\.terminal-feedback \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
+  assert.match(placement, /display: flex;[\s\S]*flex-direction: column;/u);
+  assert.doesNotMatch(placement, /background:|border:|border-radius:|color:|font-size:/u, 'caller positions only; shared component owns chrome');
+});
+
+test('copy captures identity before await and only success clears the same selection (#167)', () => {
+  const copy = /copySelection = async \(\) => \{([\s\S]*?)\n    \};/u.exec(source)?.[1] ?? '';
+  const [before, after] = copy.split('await copyText(text)');
+  assert.ok(before && after, 'the real clipboard await separates capture from completion');
+  for (const binding of ['copiedTerm = term', 'copiedSelection = selection', 'copiedTarget = target', 'copiedSession = session']) {
+    assert.ok(before.includes(binding), binding);
+  }
+  assert.match(before, /const token = copyFeedbackLifetime\.begin\(\);/u);
+  assert.match(after, /!copyFeedbackLifetime\.current\(token\)/u);
+  for (const guard of ['term !== copiedTerm', 'selection !== copiedSelection', 'target !== copiedTarget', 'session !== copiedSession', '!visible']) {
+    assert.ok(after.includes(guard), guard);
+  }
+  assert.match(after, /document\.visibilityState !== 'visible'/u);
+  assert.match(after, /kind: ok \? 'success' : 'error'/u);
+  assert.match(after, /if \(ok\) clearSelection\(\);/u, 'failed copy retains selection and its retry command');
+});
+
+test('feedback invalidates on context and teardown; only the second send failure publishes (#167)', () => {
+  assert.match(source, /\$effect\(\(\) => \{\s*target; session; visible; termGen;\s*untrack\(clearTerminalFeedback\);/u);
+  const hide = source.slice(source.indexOf('const onVisible ='), source.indexOf('const generation = ++resumeGeneration;'));
+  assert.match(hide, /clearTerminalFeedback\(\);/u);
+  assert.match(source, /return \(\) => \{\s*responseFilter\.reset\(\);\s*clearTerminalFeedback\(\);/u);
+  const fail = /function noteSendFailure\(label\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
+  assert.match(fail, /sendFailCount === 2/u);
+  assert.match(fail, /kind: 'error', message: t\('connectionUnstable'\)/u);
+  assert.doesNotMatch(fail, /setTimeout|vibrate|Notification|Audio/u);
+  const success = /function noteSendSuccess\(\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
+  assert.match(success, /connectionFeedbackLifetime\.clear\(\);/u);
+  assert.doesNotMatch(success, /copyFeedback/u, 'send completion cannot dismiss copy feedback');
+});
+
 test('full snapshots use one queued frame without an out-of-band clear (#109)', () => {
   assert.match(source, /import \{ writeTerminalFrame \} from '\.\/terminal-frame\.ts';/u);
   assert.match(source, /writeTerminalFrame\(term, body \+ padAft/u, 'the existing frame body/cursor pipeline uses the tested writer');
