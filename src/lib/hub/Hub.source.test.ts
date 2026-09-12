@@ -135,7 +135,8 @@ test('Hub keeps selection, Back and consequential actions around the extracted S
   assert.match(sidebar, /onselect=\{\(session\) => \{ selectProject\(session\); sideOpen = false; \}\}/u);
   assert.match(sidebar, /onmenu=\{\(row, at\) => openCtx\(at, row\.project\.name, projectItems\(row\)\)\}/u,
     'context actions use the clicked row, never selectedRow');
-  assert.match(sidebar, /onrestore=\{restoreProject\} onpurge=\{\(row\) => \{ trashAsk = row; \}\}/u);
+  assert.match(sidebar, /onrestore=\{restoreProject\} onpurge=\{\(row\) => \{ if \(!purging\) \{ purgeError = ''; trashAsk = row; \} \}\}/u,
+    '#167: a pending purge cannot be retargeted and a new intent clears its own error');
   assert.match(sidebar, /oncreate=\{\(\) => \{ createOpen = true; sideOpen = false; \}\}/u);
   assert.match(sidebar, /onclose=\{\(\) => \{ sideOpen = false; \}\}/u);
   assert.match(source, /backLayers\.register\('sidebar', \(\) => \{ if \(compact && !sideOpen\)/u);
@@ -184,13 +185,13 @@ test('Hub keeps Composer transport and capture listeners at the coordinator boun
   assert.doesNotMatch(source, /let (recipientOpen|paletteOff|intArm|composerEl)|function growComposer/u);
 });
 
-test('Back registers the original live guards and publishes one local dispatcher (#119)', () => {
+test('Back keeps the original priority and current live guards in one dispatcher (#119/#167)', () => {
   const region = source.slice(source.indexOf('const backLayers ='), source.indexOf('function agentItems'));
   const guards = {
     lightbox: "if (shotView) { shotView = ''; return true; }",
     contextMenu: 'if (ctxAt) { closeCtx(); return true; }',
-    action: 'if (pendingAct && !acting) { pendingAct = null; return true; }',
-    trash: 'if (trashAsk) { trashAsk = null; return true; }',
+    action: 'if (!pendingAct) return false; if (!acting) pendingAct = null; return true;',
+    trash: 'if (!trashAsk) return false; if (!purging) trashAsk = null; return true;',
     picker: 'if (pickerOpen) { pickerOpen = false; return true; }',
     create: 'if (createOpen) { createOpen = false; return true; }',
     rename: 'if (renaming) { renaming = false; return true; }',
@@ -200,8 +201,10 @@ test('Back registers the original live guards and publishes one local dispatcher
     sidebar: 'if (compact && !sideOpen) { sideOpen = true; return true; }',
   };
   for (const [layer, guard] of Object.entries(guards)) {
-    assert.ok(region.includes(`backLayers.register('${layer}', () => { ${guard} return false; })`),
-      `${layer} keeps its original guard/action inside a live callback`);
+    // #167 deliberately replaces the busy fallthrough while keeping priority.
+    const suffix = layer === 'action' || layer === 'trash' ? '' : ' return false;';
+    assert.ok(region.includes(`backLayers.register('${layer}', () => { ${guard}${suffix} })`),
+      `${layer} keeps its current guard/action inside a live callback`);
   }
   assert.equal([...region.matchAll(/backLayers\.register\(/g)].length, 11);
   assert.match(source, /registerBack=\{onGoBack \? backLayers\.register : null\}/u,
@@ -312,7 +315,7 @@ test('history paging: anchored prepend, guarded rooms, parked cursors (board #9)
 });
 
 test('the gap walk keeps captured inputs and validates its added return boundary (#118)', () => {
-  const poll = source.slice(source.indexOf('async function loadFeed()'), source.indexOf('async function loadActivity()'));
+  const poll = source.slice(source.indexOf('async function loadFeed('), source.indexOf('async function loadActivity('));
   assert.match(source, /import \{ walkFeedGap \} from '\.\/hub-history\.ts';/u);
   assert.match(poll, /const floorTs = lastTs;/u, 'the floor is captured before the initial poll');
   assert.match(poll, /else if \(res\.has_more && \(res\.oldest_seq \?\? 0\) > 0\)/u,
@@ -376,12 +379,15 @@ test('a confirmed project verb runs on the row it was asked on, never on `select
   // The context menu opens on ANY sidebar row; the confirm dialog then fired
   // `rows.find(… === selected)`, closing whichever project was OPEN instead of
   // the one long-pressed (owner, 2026-08-24: "关的不是我选中的 是其他的").
-  // The target is frozen at ask time: askAction carries the row's session and
-  // runAction resolves with it.
+  // #167 freezes the project ID as well: a later poll cannot redirect the
+  // mutation or its partial close/archive retry.
   assert.match(source, /askAction = \(kind, name, session = selected\)/u);
+  const ask = source.slice(source.indexOf('const askAction'), source.indexOf('async function refreshActionView'));
+  assert.match(ask, /rows\.find\(r => r\.project\.session === session\)/u);
+  assert.match(ask, /projectId: row\?\.project\.id/u);
   const run = source.slice(source.indexOf('async function runAction'), source.indexOf('function restoreProject'));
-  assert.match(run, /rows\.find\(\(r\) => r\.project\.session === session\)/u);
-  assert.doesNotMatch(run, /rows\.find\(\(r\) => r\.project\.session === selected\)/u);
+  assert.match(run, /await projectDown\(projectId\)/u);
+  assert.doesNotMatch(run, /rows\.find/u);
   // The context menu's two destructive verbs both pass their row's identity.
   assert.match(source, /askAction\('down', name, session\)/u);
   assert.match(source, /askAction\('delete', name, session\)/u);

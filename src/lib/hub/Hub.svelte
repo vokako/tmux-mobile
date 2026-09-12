@@ -25,7 +25,7 @@
   import CommandButton from '../ui/CommandButton.svelte';
   import './hub-atoms.css';
   import Icon from '../ui/Icon.svelte';
-  import { tick as settled } from 'svelte';
+  import { onDestroy, tick as settled } from 'svelte';
   import { t } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectDown, projectDelete, projectArchive, projectCreate, projectRename, listSessionsWithPanes,
@@ -74,6 +74,8 @@
   let talkMap = $state({});         // room -> newest message ts (ms) — sidebar row times
   let agentStates = $state({});     // "<session>:<window>" -> derived state, all projects
   let selected = $state('');        // selected project session
+  let selectionGeneration = 0, alive = true;
+  onDestroy(() => { alive = false; selectionGeneration++; });
   let agents = $state([]);          // HubAgent[] for selected session (all windows)
   let feed = $state([]);            // chat messages, oldest first
   let activity = $state([]);        // telemetry events (in-memory ring on the server)
@@ -197,7 +199,9 @@
   // Declared but not running — a stopped agent still belongs to the room.
   const stopped = $derived(stoppedAgents(selectedRow?.slots, managedAgents));
 
-  async function reload() {
+  let projectReadSequence = 0, rosterReadSequence = 0;
+  async function reload(report = false) {
+    const request = ++projectReadSequence;
     try {
       // The sidebar is ordered by CONVERSATION, so the list needs one more fact:
       // when each room last had a message. One grouped query server-side.
@@ -206,6 +210,7 @@
         listSessionsWithPanes(),
         hubRooms().catch(() => ({ rooms: {}, states: {} })),
       ]);
+      if (!alive || request !== projectReadSequence) return;
       const talk = roomsRes.rooms ?? {};
       // Kept for the rows themselves: the same map that orders the sidebar
       // answers "when did this project last say something" on each row, and
@@ -233,7 +238,7 @@
           : rows[0].project.session;
         selectProject(remembered);
       }
-    } catch { /* server without projects — the Hub tab is hidden anyway */ }
+    } catch (e) { if (report && alive && request === projectReadSequence) throw e; }
   }
 
   // A room you have visited before renders INSTANTLY from memory when you
@@ -287,6 +292,8 @@
   }
 
   async function selectProject(session) {
+    selectionGeneration++;
+    actionReadError = ''; actionRefreshing = false;
     // An unsent line belongs to the conversation it was written for. Park it on
     // the project we are leaving and pick up whatever was waiting in the new one
     // — carrying the text across would put it in front of the wrong agents.
@@ -361,7 +368,7 @@
     }
   }
 
-  async function loadFeed() {
+  async function loadFeed(report = false) {
     if (!selected) return;
     // The answer must still be about the question: every poller here freezes
     // the project it asked ABOUT and drops the reply if the user has switched
@@ -409,7 +416,7 @@
         notifyNews(messages, { first, away: isAway(visible), project: s });
         if (following) scrollFeed(); else newBelow = true;
       }
-    } catch { /* hub not available */ }
+    } catch (e) { if (report) throw e; /* hub not available */ }
   }
 
   async function loadActivity() {
@@ -440,14 +447,16 @@
     } catch { /* hub not available */ }
   }
 
-  async function loadAgents() {
+  async function loadAgents(report = false) {
     if (!selected) return;
     const s = selected;
+    const request = ++rosterReadSequence;
     try {
       const got = (await hubAgents(s)).agents ?? [];
       // A stale success is as wrong as a stale feed: the OLD project's roster
       // must not dress the NEW project (and then re-pick its recipient).
       if (selected !== s) return;
+      if (!alive || request !== rosterReadSequence) return;
       agents = got;
       // The sidebar chips share this truth (board #8): the roster is the
       // freshest reading for THIS project, so its states overwrite the
@@ -459,6 +468,8 @@
       if (recipient && recipient !== ALL_TARGET && !agents.some((a) => a.managed && a.name === recipient)) recipient = '';
       if (!recipient) recipient = pickLead(agents, registry, hubPrefs.lead(selected));
     } catch (e) {
+      if (!alive || request !== rosterReadSequence || selected !== s) return;
+      if (report) throw e;
       // "I could not ask" is not "there is nobody". Emptying the roster on a
       // failed poll is what made the cards — and with them the model and context
       // readings — blink away whenever the socket hiccuped or an RPC timed out
@@ -1067,59 +1078,79 @@
   // Copy for the one confirmation dialog, keyed by action. Four consequential
   // verbs share it: stop/remove an agent, close/delete a project.
   const ACT_COPY = {
-    stop:   { title: 'hubStopTitle',       note: 'hubStopNote',       go: 'hubStop' },
-    remove: { title: 'hubRemoveTitle',     note: 'hubRemoveNote',     go: 'hubRemove' },
-    down:   { title: 'projectDownTitle',   note: 'projectDownNote',   go: 'projectDown' },
-    delete: { title: 'projectDeleteTitle', note: 'projectDeleteNote', go: 'projectDelete' },
+    stop:   { title: 'hubStopTitle',       note: 'hubStopNote',       go: 'hubStop', icon: 'stop' },
+    remove: { title: 'hubRemoveTitle',     note: 'hubRemoveNote',     go: 'hubRemove', icon: 'trash' },
+    down:   { title: 'projectDownTitle',   note: 'projectDownNote',   go: 'projectDown', icon: 'stop' },
+    delete: { title: 'projectDeleteTitle', note: 'projectDeleteNote', go: 'projectDelete', icon: 'trash' },
   };
   let pendingAct = $state(null);   // { kind: keyof ACT_COPY, name, session }
   let acting = $state(false);
+  let actionError = $state(''), purgeError = $state(''), purging = $state(false);
+  let actionReadError = $state(''), actionRefreshing = $state(false);
+  let actionRefreshSequence = 0;
   /** Freeze the TARGET at ask time. `name` is what the dialog shows; `session`
    * is what the action runs on. The context menu opens on ANY row, so the verb
    * must carry that row's identity — resolving `selected` at confirm time
    * closed whichever project happened to be open, not the one long-pressed
    * (owner, 2026-08-24: "关的不是我选中的 是其他的"). Agent verbs keep the
    * default: the roster only shows the selected project's agents. */
-  const askAction = (kind, name, session = selected) => { pendingAct = { kind, name, session }; };
+  const askAction = (kind, name, session = selected) => {
+    if (acting || purging) return;
+    const row = rows.find(r => r.project.session === session);
+    actionError = '';
+    pendingAct = { kind, name, session, projectId: row?.project.id, closed: !row?.live };
+  };
+  async function refreshActionView(afterMutation = false) {
+    if (actionRefreshing && !afterMutation) return;
+    const generation = selectionGeneration;
+    const request = ++actionRefreshSequence;
+    const current = () => alive && generation === selectionGeneration && request === actionRefreshSequence;
+    actionRefreshing = true;
+    try {
+      await Promise.all([reload(true), loadAgents(true), loadFeed(true)]);
+      if (current()) actionReadError = '';
+    }
+    catch (e) {
+      if (current())
+        actionReadError = t('operationRefreshFailed').replace('{error}', String(e?.message ?? e));
+    } finally { if (current()) actionRefreshing = false; }
+  }
 
   async function runAction() {
     if (!pendingAct || acting) return;
-    const { kind, name, session } = pendingAct;
-    acting = true;
+    const act = pendingAct, generation = selectionGeneration;
+    const { kind, name, session, projectId } = act;
+    let step = t(ACT_COPY[kind].go);
+    acting = true; actionError = '';
     try {
       if (kind === 'down' || kind === 'delete') {
-        const row = rows.find((r) => r.project.session === session);
-        if (row) {
-          if (kind === 'delete') {
-            // "Delete" is the RECYCLE BIN, not destruction (owner, 2026-08-21:
-            // "把project里删掉进入archive … 在archive里可以彻底删除"): close the
-            // session if one is live, then archive the declaration. Everything
-            // survives — restore is one tap in the trash section, and the only
-            // irreversible verb lives THERE, behind its own confirmation.
-            if (row.live) await projectDown(row.project.id).catch(() => {});
-            await projectArchive(row.project.id, true);
-          } else {
-            await projectDown(row.project.id);
-          }
+        if (!projectId) throw new Error(t('operationUnavailable'));
+        // Delete is close then archive, not purge. Remember the completed
+        // step on this captured intent so a retry never closes it again.
+        if (kind === 'down' || !act.closed) {
+          step = t('projectDown');
+          await projectDown(projectId);
+          act.closed = true;
         }
-        if (kind === 'delete' && session === selected) {
-          // The OPEN project left the working list: land on whatever is left
-          // rather than an empty conversation pointing at nothing. Deleting a
-          // NON-selected row from its context menu moves nothing.
-          selected = '';
+        if (kind === 'delete') {
+          step = t('projectArchive');
+          await projectArchive(projectId, true);
         }
       } else if (kind === 'remove') {
         await hubAgentRemove(session, name);
       } else {
         await hubAgentStop(session, name);
       }
-      await Promise.all([reload(), loadAgents(), loadFeed()]);
     } catch (e) {
-      console.warn(kind === 'down' ? 'close project failed' : 'stop failed', e);
-    } finally {
-      acting = false;
-      pendingAct = null;
-    }
+      if (alive && pendingAct === act)
+        actionError = t('operationStepFailed').replace('{action}', step).replace('{error}', String(e?.message ?? e));
+      return;
+    } finally { if (alive) acting = false; }
+    if (!alive || pendingAct !== act) return;
+    pendingAct = null;
+    if (generation !== selectionGeneration) return;
+    if (kind === 'delete' && session === selected) selected = '';
+    await refreshActionView(true);
   }
 
   /** Out of the recycle bin: un-archive. Destroys nothing, so it asks nothing
@@ -1136,12 +1167,18 @@
    * User files and the chat history survive even this (server contract). */
   async function purgeProject() {
     const row = trashAsk;
-    trashAsk = null;
-    if (!row) return;
+    if (!row || purging) return;
+    const generation = selectionGeneration;
+    purging = true; purgeError = '';
     try {
       await projectDelete(row.project.id);
-      await reload();
-    } catch (e) { console.warn('purge project failed', e); }
+    } catch (e) {
+      if (alive && trashAsk === row) purgeError = String(e?.message ?? e);
+      return;
+    } finally { if (alive) purging = false; }
+    if (!alive || trashAsk !== row) return;
+    trashAsk = null;
+    if (generation === selectionGeneration) await refreshActionView(true);
   }
 
   /** Restart a live agent, or bring a stopped one back. The RPC tolerates there
@@ -1294,8 +1331,8 @@
     const disposers = [
       backLayers.register('lightbox', () => { if (shotView) { shotView = ''; return true; } return false; }),
       backLayers.register('contextMenu', () => { if (ctxAt) { closeCtx(); return true; } return false; }),
-      backLayers.register('action', () => { if (pendingAct && !acting) { pendingAct = null; return true; } return false; }),
-      backLayers.register('trash', () => { if (trashAsk) { trashAsk = null; return true; } return false; }),
+      backLayers.register('action', () => { if (!pendingAct) return false; if (!acting) pendingAct = null; return true; }),
+      backLayers.register('trash', () => { if (!trashAsk) return false; if (!purging) trashAsk = null; return true; }),
       backLayers.register('picker', () => { if (pickerOpen) { pickerOpen = false; return true; } return false; }),
       backLayers.register('create', () => { if (createOpen) { createOpen = false; return true; } return false; }),
       backLayers.register('rename', () => { if (renaming) { renaming = false; return true; } return false; }),
@@ -1515,7 +1552,7 @@
       oncreate={() => { createOpen = true; sideOpen = false; }}
       onclose={() => { sideOpen = false; }}
       onmenu={(row, at) => openCtx(at, row.project.name, projectItems(row))}
-      onrestore={restoreProject} onpurge={(row) => { trashAsk = row; }} />
+      onrestore={restoreProject} onpurge={(row) => { if (!purging) { purgeError = ''; trashAsk = row; } }} />
     </div>
 
     <!-- ── Main: the conversation ─────────── -->
@@ -1616,6 +1653,12 @@
           onclick={() => termOpen && drawerView === 'term' && !compact ? closeDrawer() : (drawerView = 'term', openDrawer())} />
       </div>
 
+      {#if actionReadError}
+        <div class="config-error action-read-error" role="alert">
+          <span>{actionReadError}</span>
+          <CommandButton icon="refresh" label={t('refresh')} pending={actionRefreshing} onclick={() => refreshActionView()} />
+        </div>
+      {/if}
       {#snippet emptyFeed()}
           {#if selected && !managedAgents.length && registry.length}
             <!-- Nothing to talk to yet: start from a preset. One tap = that
@@ -1706,6 +1749,7 @@
        the shared one (src/lib/ui/ConfirmDialog.svelte) — this page had the only
        good version of it, so it was lifted out rather than copied. -->
   <ConfirmDialog open={!!pendingAct} busy={acting} compact={compact}
+    error={actionError} confirmIcon={pendingAct ? ACT_COPY[pendingAct.kind].icon : 'check'}
     title={pendingAct ? t(ACT_COPY[pendingAct.kind].title).replace('{name}', pendingAct.name) : ''}
     note={pendingAct ? t(ACT_COPY[pendingAct.kind].note) : ''}
     confirmLabel={pendingAct ? t(ACT_COPY[pendingAct.kind].go) : ''}
@@ -1717,7 +1761,7 @@
 
   <!-- Forgetting a PROJECT for good — only reachable from the recycle bin,
        the two-step rule: hide first, destroy there. -->
-  <ConfirmDialog open={!!trashAsk} compact={compact}
+  <ConfirmDialog open={!!trashAsk} compact={compact} busy={purging} error={purgeError} confirmIcon="trash"
     title={trashAsk ? t('projectPurgeTitle').replace('{name}', trashAsk.project.name) : ''}
     note={t('projectPurgeNote')}
     confirmLabel={t('hubPurgeGo')}
@@ -1777,6 +1821,8 @@
 </div>
 
 <style>
+  .action-read-error { display: flex; align-items: center; gap: var(--tool-gap); padding: calc(2 * var(--ui-gap)) calc(3 * var(--ui-gap)); }
+  .action-read-error span { min-width: 0; overflow-wrap: anywhere; }
   .hub-root {
     height: 100%; display: flex; flex-direction: column; min-height: 0;
     background: var(--bg); position: relative;

@@ -7,6 +7,39 @@ per-agent interruption. The feed is `hub-feed.md`.
 
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
 
+### Confirmed actions retain their outcome (#167, 2026-09-12)
+
+Response interruption remains immediate and amber. Process Stop/Close stays
+behind the single danger confirmation, with an explicit stop glyph; removal,
+archive-as-delete and purge use trash. The confirmation captures its project
+ID, session and agent at request time. Pending Back is consumed by that
+confirmation rather than falling through to the drawer/sidebar; this
+deliberately replaces the old fallthrough assertion in `hub-back.test.ts`.
+
+Failure stays in that dialog and retries the same intent. Project deletion
+is still close then archive, not purge; a completed close is recorded on the
+intent so an archive retry cannot close a newly resumed session again. A
+failed step is named instead of swallowed. Purge keeps its own pending guard
+and captured row. Success closes only its own confirmation, and room
+generation checks prevent late success from navigating a newer view.
+
+A successful mutation followed by a failed read is not a failed mutation.
+The existing read functions can report an explicit action refresh failure
+without changing silent background polling. That error uses the shared text
+role and a read-only Refresh command in the chat pane, never another Delete
+or Stop confirmation. A retry keeps that error and its disabled/pending
+Refresh command visible until the read succeeds. There is no success toast,
+timer or notification.
+Real-Hub mounted regressions cover rejection/retry, duplicate activation,
+pending Back, partial close/archive completion and refresh-only retry.
+Review also caught a race exposed by separating mutation from refresh: a
+second successful action could lose its refresh behind `actionRefreshing`,
+then an older snapshot could restore obsolete cards. Each completed mutation
+now starts its own read; project/roster snapshots and refresh feedback publish
+only for their current request identity. A manual retry still cannot repeat
+while pending. Ordered promises pin newer results arriving before older ones.
+This adds no queue, timer or mutation replay.
+
 ### Controls are the paragraph's signature (#186, 2026-09-12)
 
 Owner, 15:39, verbatim:

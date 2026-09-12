@@ -67,14 +67,15 @@ test('repeated Back reaches the compact list floor without cycling it closed', (
   assert.equal(registry.back(), false, 'desktop has no compact floor lift');
 });
 
-test('a busy confirmation falls through; the next call reads its live busy state', () => {
+test('a busy confirmation consumes Back; the next call reads its live busy state (#167)', () => {
   const registry = createHubBackRegistry();
   let pending = true;
   let acting = true;
   let drawerOpen = true;
   registry.register('action', () => {
-    if (pending && !acting) { pending = false; return true; }
-    return false;
+    if (!pending) return false;
+    if (!acting) pending = false;
+    return true;
   });
   registry.register('drawer', () => {
     if (!drawerOpen) return false;
@@ -83,10 +84,15 @@ test('a busy confirmation falls through; the next call reads its live busy state
   });
   assert.equal(registry.back(), true);
   assert.equal(pending, true);
-  assert.equal(drawerOpen, false);
+  // #167 deliberately reverses fallthrough: a pending action must not close
+  // the drawer under its own confirmation.
+  assert.equal(drawerOpen, true);
   acting = false;
   assert.equal(registry.back(), true);
   assert.equal(pending, false);
+  assert.equal(drawerOpen, true);
+  assert.equal(registry.back(), true);
+  assert.equal(drawerOpen, false);
   assert.equal(registry.back(), false);
 });
 

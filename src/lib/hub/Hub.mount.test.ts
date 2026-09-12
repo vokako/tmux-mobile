@@ -78,6 +78,186 @@ const selectedCard = (document: Document) =>
 const stripCard = (document: Document, name: string) =>
   document.querySelector<HTMLElement>(`.acard[data-agent="${name}"]`)!;
 
+test('process Stop keeps a failed confirmation retryable and pending Back cannot peel its parent (#167)', { timeout: 60000 }, async context => {
+  const { rpc } = roomFixture();
+  let back!: () => boolean;
+  let reject!: (error: Error) => void;
+  let calls = 0;
+  const app = await (await compiledHub()).mount(context, {
+    props: { visible: true, mobile: true, onGoBack: (fn: typeof back) => back = fn },
+    setup(window) { window.Element.prototype.getAnimations = () => []; },
+    modules: [{ ...rpc, hubAgentStop: () => ++calls === 1 ? new Promise((_, no) => reject = no) : Promise.resolve({}) }],
+  });
+  try {
+    for (let i = 0; i < 12 && !stripCard(app.document, 'alice'); i++) await app.flush();
+    stripCard(app.document, 'alice').querySelector('.agent-select')!
+      .dispatchEvent(new app.window.MouseEvent('contextmenu', { bubbles: true }));
+    await app.flush();
+    const stop = [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')]
+      .find(button => button.textContent?.trim() === 'Stop')!;
+    assert.ok(stop); stop.click(); await app.flush();
+    const confirm = app.document.querySelector<HTMLButtonElement>('.dlg-actions button:last-child')!;
+    confirm.click(); confirm.click(); await app.flush();
+    assert.equal(calls, 1);
+    assert.equal(back(), true); await app.flush();
+    assert.equal(app.document.querySelector('.sidebar.open'), null, 'pending Back does not reach the sidebar floor');
+    assert.ok(app.document.querySelector('[role=alertdialog]'));
+    reject(new Error('Denied'));
+    for (let i = 0; i < 5; i++) await app.flush();
+    assert.match(app.document.querySelector('[role=alertdialog] [role=alert]')?.textContent ?? '', /Denied/);
+    app.document.querySelector<HTMLButtonElement>('.dlg-actions button:last-child')!.click();
+    for (let i = 0; i < 8; i++) await app.flush();
+    assert.equal(calls, 2);
+    assert.equal(app.document.querySelector('[role=alertdialog]'), null);
+  } finally { await app.close(); }
+});
+
+test('project archive retry resumes after the successful close, not before it (#167)', { timeout: 60000 }, async context => {
+  const { rpc } = roomFixture();
+  const calls: string[] = [];
+  let archives = 0;
+  const app = await (await compiledHub()).mount(context, {
+    props: { visible: true },
+    setup(window) { window.Element.prototype.getAnimations = () => []; },
+    modules: [{ ...rpc,
+      projectDown: async (id: string) => { calls.push(`close:${id}`); return {}; },
+      projectArchive: async (id: string) => {
+        calls.push(`archive:${id}`);
+        if (++archives === 1) throw new Error('Archive unavailable');
+        return {};
+      },
+    }],
+  });
+  try {
+    for (let i = 0; i < 12 && !app.document.querySelector('.proj-row'); i++) await app.flush();
+    app.document.querySelector<HTMLButtonElement>('.proj-row .row-menu')!.click(); await app.flush();
+    [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')]
+      .find(button => button.textContent?.trim() === 'Delete')!.click(); await app.flush();
+    app.document.querySelector<HTMLButtonElement>('.dlg-actions button:last-child')!.click();
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.match(app.document.querySelector('[role=alertdialog] [role=alert]')?.textContent ?? '', /Archive unavailable/);
+    app.document.querySelector<HTMLButtonElement>('.dlg-actions button:last-child')!.click();
+    for (let i = 0; i < 8; i++) await app.flush();
+    assert.deepEqual(calls, ['close:fixture', 'archive:fixture', 'archive:fixture']);
+    assert.equal(app.document.querySelector('[role=alertdialog]'), null);
+  } finally { await app.close(); }
+});
+
+test('a successful process Stop with a failed refresh retries only the read (#167)', { timeout: 60000 }, async context => {
+  const { rpc } = roomFixture();
+  let stopped = 0, reads = 0, failRefresh = true;
+  let finishRead!: (value: unknown) => void;
+  const app = await (await compiledHub()).mount(context, {
+    props: { visible: true },
+    setup(window) { window.Element.prototype.getAnimations = () => []; },
+    modules: [{ ...rpc,
+      projectList: async () => {
+        reads++;
+        if (stopped && failRefresh) throw new Error('Read unavailable');
+        return stopped ? new Promise(yes => finishRead = yes) : rpc.projectList();
+      },
+      hubAgentStop: async () => { stopped++; return {}; },
+    }],
+  });
+  try {
+    for (let i = 0; i < 12 && !stripCard(app.document, 'alice'); i++) await app.flush();
+    stripCard(app.document, 'alice').querySelector('.agent-select')!
+      .dispatchEvent(new app.window.MouseEvent('contextmenu', { bubbles: true }));
+    await app.flush();
+    [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')]
+      .find(button => button.textContent?.trim() === 'Stop')!.click(); await app.flush();
+    app.document.querySelector<HTMLButtonElement>('.dlg-actions button:last-child')!.click();
+    for (let i = 0; i < 8; i++) await app.flush();
+    assert.equal(app.document.querySelector('[role=alertdialog]'), null, 'the mutation succeeded');
+    const error = app.document.querySelector('.action-read-error');
+    assert.match(error?.textContent ?? '', /Read unavailable/);
+    const before = reads;
+    failRefresh = false;
+    error!.querySelector<HTMLButtonElement>('button')!.click();
+    await app.flush();
+    const retry = app.document.querySelector<HTMLButtonElement>('.action-read-error button');
+    assert.ok(retry, 'the error and retry command stay while the read is pending');
+    assert.equal(retry.getAttribute('aria-label'), 'Refresh');
+    assert.equal(retry.disabled, true);
+    retry.click();
+    finishRead(await rpc.projectList());
+    for (let i = 0; i < 8; i++) await app.flush();
+    assert.equal(stopped, 1);
+    assert.ok(reads > before);
+    assert.equal(app.document.querySelector('.action-read-error'), null);
+  } finally { await app.close(); }
+});
+
+test('permanent project purge has the same pending and failed-confirmation boundary (#167)', { timeout: 60000 }, async context => {
+  const { rpc } = roomFixture();
+  let back!: () => boolean, reject!: (error: Error) => void, calls = 0;
+  const app = await (await compiledHub()).mount(context, {
+    props: { visible: true, onGoBack: (fn: typeof back) => back = fn },
+    setup(window) { window.Element.prototype.getAnimations = () => []; },
+    modules: [{ ...rpc,
+      projectList: async () => ({ projects: [
+        { project: { id: 'fixture', name: 'Fixture', session: 'fixture', path: '/fixture' }, live: true, slots: [] },
+        ...(calls > 1 ? [] : [{ project: { id: 'old', name: 'Old', session: 'old', path: '/old', archived: true }, live: false, slots: [] }]),
+      ] }),
+      projectDelete: () => ++calls === 1 ? new Promise((_, no) => reject = no) : Promise.resolve({}),
+    }],
+  });
+  try {
+    for (let i = 0; i < 12 && !app.document.querySelector('.trash-bar'); i++) await app.flush();
+    app.document.querySelector<HTMLButtonElement>('.trash-bar')!.click(); await app.flush();
+    app.document.querySelector<HTMLButtonElement>('.trash-row .t-act.danger')!.click(); await app.flush();
+    const button = app.document.querySelector<HTMLButtonElement>('.dlg-actions button:last-child')!;
+    button.click(); button.click(); await app.flush();
+    assert.equal(calls, 1);
+    assert.equal(back(), true); await app.flush();
+    assert.ok(app.document.querySelector('[role=alertdialog]'));
+    reject(new Error('Purge denied'));
+    for (let i = 0; i < 5; i++) await app.flush();
+    assert.match(app.document.querySelector('[role=alertdialog] [role=alert]')?.textContent ?? '', /Purge denied/);
+    app.document.querySelector<HTMLButtonElement>('.dlg-actions button:last-child')!.click();
+    for (let i = 0; i < 8; i++) await app.flush();
+    assert.equal(calls, 2);
+    assert.equal(app.document.querySelector('[role=alertdialog]'), null);
+  } finally { await app.close(); }
+});
+
+test('a second completed Hub mutation gets a newer refresh and old snapshots cannot overwrite it (#167)', { timeout: 60000 }, async context => {
+  const { rpc } = roomFixture();
+  const stopped: string[] = [];
+  const projects: ((value: unknown) => void)[] = [], rosters: ((value: unknown) => void)[] = [];
+  const app = await (await compiledHub()).mount(context, {
+    props: { visible: true },
+    setup(window) { window.Element.prototype.getAnimations = () => []; },
+    modules: [{ ...rpc,
+      projectList: () => stopped.length ? new Promise(yes => projects.push(yes)) : rpc.projectList(),
+      hubAgents: () => stopped.length ? new Promise(yes => rosters.push(yes)) : rpc.hubAgents(),
+      hubAgentStop: async (_session: string, name: string) => { stopped.push(name); return {}; },
+    }],
+  });
+  try {
+    for (let i = 0; i < 12 && !stripCard(app.document, 'alice'); i++) await app.flush();
+    for (const name of ['alice', 'bob']) {
+      stripCard(app.document, name).querySelector('.agent-select')!
+        .dispatchEvent(new app.window.MouseEvent('contextmenu', { bubbles: true }));
+      await app.flush();
+      [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')]
+        .find(button => button.textContent?.trim() === 'Stop')!.click(); await app.flush();
+      app.document.querySelector<HTMLButtonElement>('.dlg-actions button:last-child')!.click();
+      for (let i = 0; i < 5; i++) await app.flush();
+    }
+    assert.deepEqual(stopped, ['alice', 'bob']);
+    assert.equal(projects.length, 2, 'a newer mutation cannot lose its refresh behind an older one');
+    const latest = await rpc.projectList();
+    latest.projects[0]!.project.name = 'Fresh project';
+    projects[1]!(latest); rosters[1]!({ agents: [] });
+    for (let i = 0; i < 5; i++) await app.flush();
+    projects[0]!(await rpc.projectList()); rosters[0]!(await rpc.hubAgents());
+    for (let i = 0; i < 5; i++) await app.flush();
+    assert.equal(app.document.querySelector('.h1-text')?.textContent, 'Fresh project');
+    assert.equal(app.document.querySelectorAll('.agent-select').length, 0, 'old roster cannot resurrect stopped agents');
+  } finally { await app.close(); }
+});
+
 async function characterize(context: TestContext, fixture: Awaited<ReturnType<typeof compileMount>>) {
   const { pushed, rpc } = roomFixture();
   const app = await fixture.mount(context, {
