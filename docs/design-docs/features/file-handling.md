@@ -128,6 +128,10 @@ row reads `/ local / home / …` at one rhythm (after: 5/5/5). It keeps the
 row's touch height; its width is the glyph's — the root is one tap away by
 the row's own scroll and rarely the destination.
 
+Back/Forward sit on the toolbar's `--tool-gap` (2px), not a private 4px
+(board #195, owner 2026-09-13: "后退前进按钮为啥这么大，要紧凑一点" — their size is
+the `compact-tools` metric, #192/#193; the pair's spacing is the tool group's).
+
 A crumb HUGS ITS TEXT (board #191, owner 2026-09-12: "文件路径显示可以紧凑一点"):
 the control min-width that #185 left on `.bc-seg` made every short name a
 44 px box on the phone — measured at 390 coarse, `src`/`lib`/`files` sat in

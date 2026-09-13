@@ -2001,7 +2001,8 @@
 
   /* Path row */
   .bc-path-row {
-    display: flex; align-items: center; gap: 4px; padding: 4px 10px;
+    /* A dense tool group: Back/Forward sit on the toolbar's gap (board #195). */
+    display: flex; align-items: center; gap: var(--tool-gap); padding: 4px 10px;
     font-size: var(--fs-ui); font-family: var(--font-mono);
     border-bottom: 1px solid var(--border2); flex-shrink: 0;
   }
