@@ -26,6 +26,7 @@ test('a parent can exclude child gestures without swallowing their next tap (#16
     const element = {
       addEventListener: (name: string, handler: (event: any) => void) => handlers.set(name, handler),
       removeEventListener: (name: string) => handlers.delete(name),
+      getBoundingClientRect: () => ({ left: 0, top: 0, right: 0, bottom: 0 }),
     } as unknown as HTMLElement;
     return { element, fire: (name: string, event: unknown) => handlers.get(name)?.(event) };
   }
@@ -52,4 +53,31 @@ test('a parent can exclude child gestures without swallowing their next tap (#16
     child.fire('touchend', touch); parent.fire('touchend', touch);
     assert.equal(click(), false, 'the next genuine tap must reach the row');
   } finally { outer.destroy(); inner.destroy(); }
+});
+
+test('a press hands its menu the ELEMENT, left-aligned, not the finger (board #196)', context => {
+  // Owner 2026-09-13: "手机上展开选项卡不是以点击焦点展开选项卡，是以元素的左对齐展开，
+  // 手机长按之类的也类似，和鼠标操作不一样". A right-click opens at the pointer (OS
+  // convention); a hold opens at the thing held. The point still rides along
+  // for the two SURFACE callers (Files' directory background) that want it.
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  const handlers = new Map<string, (event: any) => void>();
+  const element = {
+    addEventListener: (name: string, handler: (event: any) => void) => handlers.set(name, handler),
+    removeEventListener: (name: string) => handlers.delete(name),
+    getBoundingClientRect: () => ({ left: 12, top: 700, right: 123, bottom: 746, width: 111, height: 46 }),
+  } as unknown as HTMLElement;
+  const got: unknown[] = [];
+  const action = longpress(element, { onlongpress: (at) => got.push(at) });
+  try {
+    handlers.get('touchstart')?.({ target: element, touches: [{ clientX: 60, clientY: 720 }] });
+    context.mock.timers.tick(500);
+    assert.equal(got.length, 1);
+    const at = got[0] as Record<string, unknown>;
+    assert.equal(at.x, 60); assert.equal(at.y, 720);
+    assert.equal(at.trigger, element);
+    assert.equal(at.align, 'left');
+    assert.equal(at.keepTriggerClear, true, 'the thing you held stays visible beside its menu');
+    assert.deepEqual(at.anchor, { left: 12, top: 700, right: 123, bottom: 746 }, 'anchorOf: the rect in the fixed layer\'s space');
+  } finally { action.destroy(); }
 });

@@ -1600,7 +1600,7 @@
 {#snippet listPanel()}
     <div class="toolbar compact-tools" role="group" aria-label={t('filesTools')} use:measureToolbar
       oncontextmenu={(event) => contextFile(event)}
-      use:longpress={{ onlongpress: (point) => openFileMenu(point, 'directory') }}>
+      use:longpress={{ onlongpress: ({ x, y }) => openFileMenu({ x, y }, 'directory') }}>
       {#each toolbarActions.slice(0, toolCount) as action (action.key)}
         <CommandButton variant="icon" icon={action.icon} label={action.label} pending={!!action.pending} disabled={!!action.disabled}
           pressed={action.pressed} expanded={action.expanded} controls={action.controls} onclick={action.run} />
@@ -1625,11 +1625,11 @@
       <div class="bc-scroll" bind:this={bcPathEl}>
       <button class="bc-seg bc-root" onclick={() => { if (!selecting()) navTo('/', 'back'); }}
         oncontextmenu={(event) => contextCrumb(event, { name: '/', path: '/' })}
-        use:longpress={{ onlongpress: (point) => openFileMenu(point, 'path', { name: '/', path: '/', type: 'dir' }) }}>/</button>
+        use:longpress={{ onlongpress: (at) => openFileMenu(at, 'path', { name: '/', path: '/', type: 'dir' }) }}>/</button>
       {#each breadcrumbs as bc, i (bc.path)}
         <button class="bc-seg" class:appear={i === breadcrumbs.length - 1} onclick={() => { if (!selecting()) navTo(bc.path, 'back'); }}
           oncontextmenu={(event) => contextCrumb(event, bc)}
-          use:longpress={{ onlongpress: (point) => openFileMenu(point, 'path', { name: bc.name, path: bc.path, type: 'dir' }) }}
+          use:longpress={{ onlongpress: (at) => openFileMenu(at, 'path', { name: bc.name, path: bc.path, type: 'dir' }) }}
           use:hoverInfo={() => ({ title: bc.name, text: bc.path })}>{bc.name}</button>
         <span class="bc-sep">/</span>
       {/each}
@@ -1723,7 +1723,7 @@
     <div class="file-list" class:panel-open={showBookmarks || showRecent} class:drop-hot={dragOver} class:busy={loading} class:reveal={!!revealDir}
       bind:this={fileListEl}
       oncontextmenu={(event) => { if (!event.target.closest('.file-row')) contextFile(event); }}
-      use:longpress={{ accept: directoryPress, onlongpress: (point) => openFileMenu(point, 'directory') }}
+      use:longpress={{ accept: directoryPress, onlongpress: ({ x, y }) => openFileMenu({ x, y }, 'directory') }}
       ondragover={onListDragOver} ondragleave={onListDragLeave} ondrop={onListDrop}>
       {#if dragOver}
         <div class="drop-hint appear"><Icon name="upload" size={16} />{t('dropToUpload')}</div>
@@ -1737,7 +1737,7 @@
       {:else}
         {#each entries as entry (entry.path)}
           <div class="file-row" class:broken={entry.type === 'broken'} oncontextmenu={(event) => contextFile(event, entry)}
-            use:longpress={{ onlongpress: (point) => openFileMenu(point, 'entry', entry) }}>
+            use:longpress={{ onlongpress: (at) => openFileMenu(at, 'entry', entry) }}>
             <button class="file-main" onclick={() => { if (!selecting()) rowHandlers.open(entry); }} use:hoverInfo={() => entryInfo(entry)}>
               <span class="file-icon" class:is-link={entry.is_symlink}>
                 <Icon name={fileIcon(entry)} size={16} />

@@ -9,17 +9,31 @@
 
 /** How long a stationary finger becomes a press. Android's own long-press is
  * ~500ms; matching it makes ours feel native rather than sluggish or trigger-happy. */
+import { anchorOf, type AnchorRect } from './placement.ts';
+
 const HOLD_MS = 500;
 /** Movement that means "this is a scroll, not a press". The same 10px the app's
  * other gesture code uses as its slop, and it is the whole reason a list can still
  * be flicked while its rows are long-pressable. */
 const SLOP_PX = 10;
 
+/** What a completed hold hands its menu: the ELEMENT held — its rect, read
+ * for the dropdown (left-aligned) and kept clear of the menu — plus the
+ * finger's point for the few SURFACE callers (a directory background) that
+ * have no element to align to. A right-click opens at the pointer, the OS
+ * convention; a hold opens at the thing held (owner, 2026-09-13: "手机上展开
+ * 选项卡不是以点击焦点展开选项卡，是以元素的左对齐展开，手机长按之类的也类似，和鼠标
+ * 操作不一样"; board #196). One place decides this for every long-press menu. */
+export interface PressAnchor {
+  x: number; y: number;
+  anchor: AnchorRect; align: 'left'; trigger: HTMLElement; keepTriggerClear: true;
+}
+
 export interface LongPressOptions {
   /** Nested surfaces may leave a child's gesture to that child without stopping propagation. */
   accept?: (target: EventTarget | null) => boolean;
-  /** Fired with the touch point once the hold completes. */
-  onlongpress?: (p: { x: number; y: number }) => void;
+  /** Fired once the hold completes, with the element anchor (see PressAnchor). */
+  onlongpress?: (at: PressAnchor) => void;
   ms?: number;
 }
 
@@ -61,7 +75,7 @@ export function longpress(node: HTMLElement, options: LongPressOptions = {}) {
       timer = null;
       if (!start) return;
       fired = true;
-      opts.onlongpress?.({ ...start });
+      opts.onlongpress?.({ ...start, anchor: anchorOf(node), align: 'left', trigger: node, keepTriggerClear: true });
     }, opts.ms ?? HOLD_MS);
   };
 

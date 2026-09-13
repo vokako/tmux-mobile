@@ -811,6 +811,17 @@ press-scale/brightness details below do not override it.
   click toggles instead of closing-and-reopening.
 - Right-click and long-press are ONE gesture (`ui/ContextMenu` +
   `ui/longpress`), offering the verbs the surface already has elsewhere.
+  **They anchor differently** (board #196, owner 2026-09-13: "手机上展开选项卡不是
+  以点击焦点展开选项卡，是以元素的左对齐展开，手机长按之类的也类似，和鼠标操作不一样"): a
+  right-click opens with its corner at the POINTER (the OS convention), a hold
+  opens at the ELEMENT held — left-aligned to it, the element kept clear
+  (`keepTriggerClear`) — the same reading a control that opens its own menu
+  gets (the All button, a stopped card, the title caret). `ui/longpress`
+  decides this once for every long-press menu: it hands
+  `{ anchor: anchorOf(node), align: 'left', trigger: node, keepTriggerClear }`
+  plus the finger's `x, y`; only a SURFACE with no element to align to (the
+  Files directory background) strips it back to the point. A menu opened by a
+  TAP on an already-selected object is element-anchored on both inputs.
   **Desktop browser chrome never surfaces**: App installs one capture-phase
   `contextmenu` guard; a surface with app verbs opens its shared ContextMenu,
   and a surface without one simply does nothing instead of showing the browser

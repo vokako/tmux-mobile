@@ -249,3 +249,12 @@ test('a crumb hugs its text — touch height, not a control-wide box (board #191
   assert.doesNotMatch(seg, /min-width: var\(--control-height\)/u, 'no control-wide crumb');
   assert.match(seg, /min-height: var\(--control-height\)/u, 'the touch height stays');
 });
+
+test('surface long-presses keep the finger point; element presses take the element (board #196)', () => {
+  // The directory background (toolbar, list) is a SURFACE — anchoring its menu
+  // to the whole list's left/bottom would put it off the finger. Rows and crumbs
+  // are elements and take what longpress hands them.
+  assert.equal([...source.matchAll(/onlongpress: \(\{ x, y \}\) => openFileMenu\(\{ x, y \}, 'directory'\)/gu)].length, 2);
+  assert.match(source, /onlongpress: \(at\) => openFileMenu\(at, 'entry', entry\)/u);
+  assert.match(source, /onlongpress: \(at\) => openFileMenu\(at, 'path', \{ name: bc\.name, path: bc\.path, type: 'dir' \}\)/u);
+});
