@@ -55,3 +55,9 @@ test('long code cannot expand the Files flex item beyond its allocated pane (#15
   assert.match(style, /\.files \{[^}]*min-width: 0/u);
   assert.match(style, /\.files-split \{[^}]*min-width: 0/u);
 });
+
+test('the session-directory tool wears the house (board #194)', () => {
+  // Owner 2026-09-13: "第一个按钮有歧义，应该变成小房子" — the terminal glyph reads as
+  // "open a terminal" everywhere else in the app.
+  assert.match(source, /\{ key: 'cwd', label: t\('filesSessionDir'\), icon: 'home', run: goSessionDir \}/u);
+});

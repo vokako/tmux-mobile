@@ -171,7 +171,10 @@ row tools, preview header — sits on a 32px pitch with the same 28px paint
 (#193, "最上边一行能显示全，不要...折叠了": the APK's ten tools fit at 360); More
 stays measured, not scheduled. The metric and its measurements live in
 design-language.md.) `file-tools.ts` owns the tested
-packing decision and the captured row-action definitions. The toolbar and its
+packing decision and the captured row-action definitions. The first tool,
+"Session directory", wears the HOUSE glyph (board #194, owner 2026-09-13:
+"第一个按钮有歧义，应该变成小房子"): the terminal glyph it used to wear means
+"open a terminal" everywhere else in the app. The toolbar and its
 overflow/directory menu share the same action list; row tools and the row menu
 share their own captured entry actions. Native targets are 28px on a pointer and 32px on touch inside `compact-tools`
 (#192/#193), while the shared paint is 20/28px. No second button implementation.

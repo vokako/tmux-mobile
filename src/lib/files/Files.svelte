@@ -360,7 +360,9 @@
   };
   const rowActions = (entry) => entryToolActions(entry, t, rowHandlers);
   const toolbarActions = $derived([
-    { key: 'cwd', label: t('filesSessionDir'), icon: 'terminal', run: goSessionDir },
+    // The house, not the terminal glyph: in this app "terminal" means "open a
+    // terminal" (owner, 2026-09-13: "第一个按钮有歧义，应该变成小房子"; board #194).
+    { key: 'cwd', label: t('filesSessionDir'), icon: 'home', run: goSessionDir },
     { key: 'refresh', label: t('filesRefresh'), icon: 'refresh', pending: loading, run: () => loadDir(cwd) },
     { key: 'new', label: t('filesNew'), icon: 'plus', expanded: !!newType, controls: newType ? `${panelId}-new` : undefined,
       run: () => { newType = newType ? '' : 'file'; newName = ''; } },
