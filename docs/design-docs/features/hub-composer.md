@@ -320,9 +320,22 @@ Owner, 08:41: "还有我觉得交互可以优化，比如应该打断方块可�
 Fine-pointer cards reveal Stop (busy only) and Watch on hover/focus-within,
 without moving their reserved native targets. Pending Stop remains visible
 so the existing keyboard interrupt has feedback. On coarse pointers Stop
-stays visible while busy and Watch stays in the long-press menu. Stop uses
-the shared plain `warn` command: the same glyph, amber mixed with foreground
-ink to meet the 3:1 glyph floor, no circular ground/shadow. Watch and the menu
+stays visible while busy and Watch stays in the long-press menu. Stop is the
+plain icon command (`variant="icon"`, `--text2` ink, no ground) in a
+`compact-tools` slot — 28px on a pointer, 32px on touch (board #195, owner
+2026-09-13: "agent卡片，也要紧凑一点，尤其是停止按钮，又大颜色也不好看"; measured 390
+coarse: the 44px slot made the busy card 111px wide, now 103). #173's amber
+mixed into foreground ink cleared the 3:1 glyph floor but read as mud on the
+light card; `--text2` clears the same floor on every card/theme combination
+(`CommandButton.source.test.ts`) and the `warn` variant is gone whole.
+
+The state dot lives INSIDE the name's line with `vertical-align: middle` —
+by definition the dot's midpoint on the baseline plus half the x-height, so it
+is centred on the lowercase letters whatever the font's ascent/descent — 5px
+after the last glyph. As a flex sibling it was centred on the LINE box (~1px
+off, font-dependent) and 1–2px from the name (owner, same message: "状态小点稍微
+有点挨得近了，而且上下不居中"; measured: dot centre 714 vs x-height centre 715,
+gap 1.3–2px; after: 765.1 vs 765, gap 4.2–5px). Watch and the menu
 share one parent adapter that selects the Terminal view before using the
 existing pane resolver; a compact terminal
 request uses the existing full-page Terminal callback. A missing requested

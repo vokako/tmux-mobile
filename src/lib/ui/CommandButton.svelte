@@ -4,7 +4,7 @@
 
   type Props = {
     label: string;
-    variant?: 'primary' | 'secondary' | 'icon' | 'danger' | 'warn';
+    variant?: 'primary' | 'secondary' | 'icon' | 'danger';
     iconOnly?: boolean;
     pressed?: boolean;
     expanded?: boolean;
@@ -36,7 +36,7 @@
 
 <button type="button" class="command-button"
   class:primary={solid} class:secondary={variant === 'secondary'}
-  class:danger={variant === 'danger'} class:warn={variant === 'warn'} class:icon-only={compact} class:solid class:pending class:engaged
+  class:danger={variant === 'danger'} class:icon-only={compact} class:solid class:pending class:engaged
   disabled={disabled || pending} aria-label={label} aria-busy={pending || undefined}
   aria-pressed={pressed} aria-expanded={expanded} aria-controls={controls} aria-haspopup={hasPopup}
   bind:this={element}
@@ -70,8 +70,6 @@
   .icon-only { width: var(--control-height); padding: 0; }
   .icon-only::before { inset: var(--control-paint-inset); }
   .danger { color: var(--danger-ink); }
-  .warn { color: color-mix(in srgb, var(--status-warn) 80%, var(--text)); }
-  .command-button.warn::before { background: none; box-shadow: none; }
   .solid { --command-paint: var(--accent-fill); color: var(--accent-fill-ink); }
   .solid.danger { --command-paint: var(--danger-fill); }
   .command-button:hover:not(:disabled) { --command-paint: var(--control-hover); }

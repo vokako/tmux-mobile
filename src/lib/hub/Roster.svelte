@@ -175,10 +175,7 @@
             <span class="avatar-slot">
               {#if backendIcon(a.agent)}<img class="ava" src={backendIcon(a.agent)} alt={a.agent} />{:else}<span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>{/if}
             </span>
-            <span class="a-name">{a.name}</span>
-            <span class="ac-top">
-              <span class="st" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span>
-            </span>
+            <span class="a-name">{a.name}<span class="ac-top"><span class="st" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span></span></span>
             <span class="agent-marks" class:unmarked={!mentioned && !unread.has(a.name)}>
               {#if mentioned}<span class="agent-mention" aria-hidden="true">@</span>{/if}
               {#if unread.has(a.name)}<span class="unread appear-pop" aria-hidden="true"></span>{/if}
@@ -186,8 +183,11 @@
             {#if expanded && a.vitals?.context_pct != null}<span class="ctx-value">{a.vitals.context_pct}%</span>{/if}
           </button>
           {#if renderedStops.includes(a.name)}
-            <span class="agent-stop" class:pending>
-              <CommandButton label={`${t('hubInterrupt')} ${a.name}`} icon="stop" variant="warn" iconOnly
+            <!-- A dense slot (compact-tools: 28/32px, board #192) and the plain icon ink:
+                 the card's colour is its state dot; the stop is a quiet action beside it
+                 (owner, 2026-09-13: "停止按钮，又大颜色也不好看"; board #195). -->
+            <span class="agent-stop compact-tools" class:pending>
+              <CommandButton label={`${t('hubInterrupt')} ${a.name}`} icon="stop" variant="icon" iconOnly
                 {pending} disabled={pending || !busyNames.includes(a.name)}
                 onclick={(e) => { e.stopPropagation(); interrupt(a.name); }} />
             </span>
@@ -303,7 +303,13 @@
     min-width: 0; white-space: normal; overflow-wrap: anywhere;
     padding-block: var(--control-paint-inset);
   }
-  .ac-top { display: inline-flex; flex: none; }
+  /* The dot lives INSIDE the name's line, 5px after its last glyph, with
+     vertical-align: middle — by definition the box's midpoint on the baseline
+     plus half the x-height, i.e. centred on the lowercase letters whatever
+     the font's ascent/descent. As a flex sibling it was centred on the LINE
+     box, ~1px off and font-dependent, 1–2px from the name (owner, 2026-09-13:
+     "状态小点稍微有点挨得近了，而且上下不居中"; board #195). */
+  .ac-top { display: inline-flex; vertical-align: middle; margin-inline-start: 5px; }
   .agent-marks { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-width: 1em; flex: none; }
   .agent-marks.unmarked { display: none; }
   .agent-mention { color: var(--accent-ink); font-family: var(--font-mono); font-size: var(--fs-meta); font-weight: 600; }

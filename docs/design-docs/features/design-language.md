@@ -31,8 +31,12 @@ in [hub-composer.md](hub-composer.md#one-roster-above-the-input-one-stop-operati
 One roster replaces the old delivery chip and delayed card menu. Selection
 uses the existing accent fill/border with `aria-pressed`, not an additional
 check glyph; body mentions use one `@` glyph, not a dashed card ring.
-Stop and attach/send use shared `CommandButton` paint and native 28px pointer /
-44px coarse targets. Stop response is recoverable interruption, not the
+Attach/send use shared `CommandButton` paint and native 28px pointer /
+44px coarse targets; the card's Stop is the plain icon command in a
+`compact-tools` slot (28/32px, #192/#195) with the ordinary `--text2` ink — the
+card's colour is its state dot, the stop a quiet action beside it (owner,
+2026-09-13: "停止按钮，又大颜色也不好看"; the #173 amber-mixed `warn` variant went
+with its only consumer). Stop response is recoverable interruption, not the
 destructive process-stop confirmation. Status remains `.live-dot` /
 `stateDotColor`; no extra busy-colour family or permanent stop-spinner.
 The owner's 07:09 final selection (quoted in hub-composer.md) is single-line,
@@ -77,16 +81,21 @@ in hover/ARIA and expanded cards. The ONE `ctxColor` maps <50 / 50-69 / 70-84 /
 The earlier edge-bar and ground-fill designs are historical, not alternatives
 to retain in production.
 
-**Plain interruption commands (2026-09-11, #173).** The owner rejected the
-card's black Stop square and circular ground: "还有终止按钮，不要圆形的阴影了，还有这个黑方块看着不知道是停止的意思，是不是换个颜色？让我能更容易够理解这个按钮的含义。"
-`CommandButton`'s `warn` variant mixes existing `--status-warn` (80%) with
-`--text` (20%): raw amber failed the 3:1 glyph floor on selected light cards,
-so the source test pins the corrected contrast in both themes. There is
-no painted ground or shadow at rest, hover or press. Its native 28/44px
-target, keyboard focus ring, controlled ARIA and pending/disabled contract
-remain. This is a scoped exception to icon hover paint, not a new colour or
-button renderer. Interruption is recoverable; kill/remove keep danger semantics.
-Chromium 152 measured 3.42:1 (light) and 10.26:1 (dark) on a selected card.
+**Plain interruption commands (2026-09-11, #173; revised 2026-09-13, #195).**
+The owner rejected the card's black Stop square and circular ground (#173:
+"还有终止按钮，不要圆形的阴影了，还有这个黑方块看着不知道是停止的意思，是不是换个颜色？让我能更容易够理解这个按钮的含义。").
+#173 answered with a `warn` variant of `CommandButton` — `--status-warn` mixed
+80/20 with `--text` (raw amber failed the 3:1 glyph floor on a selected light
+card; Chromium 152 measured 3.42:1 light / 10.26:1 dark), no ground at rest,
+hover or press. Two days later the owner found that ink ugly and the slot too
+big (#195: "尤其是停止按钮，又大颜色也不好看"), so the `warn` variant is GONE whole
+(type, class, rules, tests): Stop is the ordinary `icon` variant — `--text2`
+ink, the normal icon hover/press wash — in a `compact-tools` slot (28px
+pointer / 32px touch). The 3:1 guard stays and now checks `--text2` against
+every card/theme combination. Keyboard focus ring, controlled ARIA and the
+pending/disabled contract are unchanged. The card's colour is its state dot;
+Stop is a quiet action beside it. Interruption is recoverable; kill/remove keep
+danger semantics.
 
 - **Type scale, six chrome steps**: `--fs-micro 9 · --fs-meta 10.5 · --fs-sub
   11.5 · --fs-ui 12.5 · --fs-body 13.5 · --fs-title 15`. Connect card only:

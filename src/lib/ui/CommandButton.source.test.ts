@@ -44,26 +44,16 @@ test('command paint is inset inside the native target, with a visible keyboard r
   assert.match(style, /\.command-button:focus-visible::before \{ outline: 2px solid var\(--accent-ink\); outline-offset: 2px; \}/u);
 });
 
-test('warn interruption has token ink and no ground without removing the focus layer (#173)', () => {
-  assert.match(source, /variant\?: 'primary' \| 'secondary' \| 'icon' \| 'danger' \| 'warn'/u);
-  assert.match(source, /class:warn=\{variant === 'warn'\}/u);
-  const warn = style.match(/\.warn \{([^}]+)\}/u)?.[1] ?? '';
-  // Raw status amber failed the glyph floor on a selected light card. Keep
-  // the hue family, but mix existing foreground ink instead of adding a token.
-  assert.match(warn, /color: color-mix\(in srgb, var\(--status-warn\) 80%, var\(--text\)\)/u);
-  assert.doesNotMatch(warn, /height|width|padding|border-radius/u,
-    'warning semantics do not create a second target geometry');
-  // Hover/press change --command-paint. This more-specific pseudo rule must
-  // ignore that variable, not merely make the resting paint transparent.
-  const paint = style.match(/\.command-button\.warn::before \{([^}]+)\}/u)?.[1] ?? '';
-  assert.match(paint, /background: none/u);
-  assert.match(paint, /box-shadow: none/u);
-  assert.doesNotMatch(paint, /content|display|visibility|opacity|outline/u,
-    'the pseudo remains available to the existing keyboard focus ring');
+test('the warn variant is gone whole; icon commands keep the focus layer (#173 → #195)', () => {
+  // #173 mixed amber into the roster's Stop ink to clear 3:1 on a selected card;
+  // the owner found the result ugly ("颜色也不好看", 2026-09-13) and the Stop now
+  // wears the plain icon ink. A variant with one consumer is removed, not kept.
+  assert.match(source, /variant\?: 'primary' \| 'secondary' \| 'icon' \| 'danger';/u);
+  assert.doesNotMatch(source, /warn/u);
   assert.match(style, /\.command-button:focus-visible::before \{ outline: 2px solid var\(--accent-ink\); outline-offset: 2px; \}/u);
 });
 
-test('warning command glyphs clear 3:1 on normal and selected cards in both themes (#173)', async () => {
+test('icon-command ink clears 3:1 on normal and selected cards in both themes (#173 floor, #195 ink)', async () => {
   const css = await readFile(new URL('../../app.css', import.meta.url), 'utf8');
   const rgb = (body: string, name: string) => {
     const value = new RegExp(`${name}:\\s*([^;]+)`, 'u').exec(body)?.[1] ?? '';
@@ -83,16 +73,13 @@ test('warning command glyphs clear 3:1 on normal and selected cards in both them
   for (const theme of ['light', 'dark']) {
     const body = new RegExp(`html\\[data-theme="${theme}"\\] \\{([\\s\\S]*?)\\n\\}`, 'u').exec(css)?.[1];
     assert.ok(body);
-    const warn = rgb(body, '--status-warn'), ink = mix(warn, rgb(body, '--text'), 0.8);
+    const ink = rgb(body, '--text2');
     for (const base of ['--bg', '--bg2']) {
       for (const paint of ['--surface', '--accent-bg']) {
         const overlay = rgb(body, paint);
         const surface = mix(overlay, rgb(body, base), overlay[3]!);
         const ratio = contrast(ink, surface);
         assert.ok(ratio >= 3, `${theme} ${base}/${paint}: ${ratio.toFixed(2)}:1`);
-        if (theme === 'light' && paint === '--accent-bg') {
-          assert.ok(contrast(warn, surface) < 3, 'negative control: raw amber is insufficient');
-        }
       }
     }
   }

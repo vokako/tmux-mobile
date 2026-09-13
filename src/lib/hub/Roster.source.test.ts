@@ -50,7 +50,7 @@ test('actual busy Stop is resident; no invisible action slots widen the card (#1
   assert.doesNotMatch(source, /agent-watch|card-quick|onwatch/u);
   assert.doesNotMatch(rule('.agent-stop'), /opacity: 0|position: absolute/u);
   assert.doesNotMatch(rule('.acard'), /grid-template-columns/u);
-  assert.match(source, /icon="stop" variant="warn" iconOnly/u);
+  assert.match(source, /icon="stop" variant="icon" iconOnly/u);
 });
 
 test('one controlled roster replaces the delayed tap menu whole (#168)', () => {
@@ -76,7 +76,7 @@ test('Stop consumes parent busy and pending sets through the shared command', ()
   assert.doesNotMatch(source, /interrupting\.includes\(ALL_TARGET\)/u,
     'pending contains captured member names, never a second all-job sentinel');
   assert.match(source, /interrupting\.includes\(a\.name\)/u);
-  assert.equal([...source.matchAll(/icon="stop" variant="warn" iconOnly/gu)].length, 1);
+  assert.equal([...source.matchAll(/icon="stop" variant="icon" iconOnly/gu)].length, 1);
   assert.equal([...source.matchAll(/e\.stopPropagation\(\); interrupt\(/gu)].length, 1);
   assert.doesNotMatch(source, /hubAgentStop|hubAgentInterrupt|busyTargetsFor|\.state\s*===\s*'(?:running|working|waiting|blocked)'/u,
     'the parent owns target membership and dispatch, not a second local busy classifier');
@@ -178,4 +178,14 @@ test('one in-flow disclosure controls one list without remounting its cards', ()
 test('idle cards keep no padding for absent commands (#180)', () => {
   assert.doesNotMatch(source, /padding-right: calc|grid-column: 1 \/ 3/u);
   assert.match(rule('.agent-select'), /padding: 0 var\(--roster-card-inset\)/u);
+});
+
+test('the stop is a quiet dense action and the dot sits clear of the name, on the x-height (board #195)', () => {
+  // Owner 2026-09-13: "agent卡片，也要紧凑一点，尤其是停止按钮，又大颜色也不好看，状态小点
+  // 稍微有点挨得近了，而且上下不居中". Measured 390 coarse before: stop 44×44 in a
+  // 46px card (card 111px wide), name→dot gap 1.3–2px, dot on the line-box centre.
+  assert.match(source, /class="agent-stop compact-tools"/u, 'the shared dense slot, not a private size');
+  assert.doesNotMatch(source, /variant="warn"/u, 'the amber-mixed ink is gone with its variant');
+  assert.match(source, /<span class="a-name">\{a\.name\}<span class="ac-top"><span class="st"/u, 'the dot is in the name\'s line');
+  assert.match(rule('.ac-top'), /vertical-align: middle; margin-inline-start: 5px;/u);
 });

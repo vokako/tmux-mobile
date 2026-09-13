@@ -46,7 +46,8 @@ test('Roster renders the controlled destination strip (#168)', { timeout: RENDER
     assert.equal(card(root, 'waiting').querySelector('.st.live-dot'), null);
     assert.equal(stop(root, 'runner')?.parentElement?.parentElement, card(root, 'runner'));
     assert.equal(stop(root, 'runner')?.getAttribute('aria-label'), 'Interrupt runner');
-    assert.ok(stop(root, 'runner')?.classList.contains('warn'));
+    assert.ok(stop(root, 'runner')?.classList.contains('icon-only'));
+    assert.equal(stop(root, 'runner')?.classList.contains('danger'), false, '#195: a quiet action, no warn/danger ink');
     assert.equal(stop(root, 'runner')?.classList.contains('secondary'), false);
     assert.equal(root.querySelector('.agent-watch'), null, '#180: Watch remains in the existing ContextMenu, not a reserved slot');
     assert.equal(select(root, 'runner').querySelector('button'), null);

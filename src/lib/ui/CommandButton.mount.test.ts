@@ -94,12 +94,12 @@ test('icon commands expose a name without a competing native title', async conte
   } finally { await app.close(); }
 });
 
-test('warn icons retain native command, pending and controlled ARIA semantics (#173)', async context => {
+test('the icon-only stop retains native command, pending and controlled ARIA semantics (#173, icon variant since #195)', async context => {
   for (const state of [{}, { disabled: true }, { pending: true }]) {
     let calls = 0;
     const app = await (await compiled).mount(context, {
       props: {
-        label: 'Interrupt alice', variant: 'warn', iconOnly: true, icon: 'stop',
+        label: 'Interrupt alice', variant: 'icon', iconOnly: true, icon: 'stop',
         pressed: false, expanded: true, controls: 'agent-actions',
         ...state, onclick: () => { calls++; },
       },
@@ -107,11 +107,12 @@ test('warn icons retain native command, pending and controlled ARIA semantics (#
     });
     try {
       const button = app.document.querySelector('button')!;
-      assert.equal(button.classList.contains('warn'), true);
+      assert.equal(button.classList.contains('warn'), false, '#195: the warn variant is gone');
       assert.equal(button.classList.contains('icon-only'), true);
-      for (const name of ['primary', 'secondary', 'danger', 'solid', 'engaged']) {
+      for (const name of ['primary', 'secondary', 'danger', 'solid']) {
         assert.equal(button.classList.contains(name), false, name);
       }
+      assert.equal(button.classList.contains('engaged'), true, 'an icon command that is expanded wears the engaged wash');
       assert.equal(button.getAttribute('type'), 'button');
       assert.equal(button.getAttribute('aria-label'), 'Interrupt alice');
       assert.equal(button.getAttribute('title'), null);
