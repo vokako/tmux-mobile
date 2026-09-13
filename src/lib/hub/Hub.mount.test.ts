@@ -284,7 +284,16 @@ async function characterize(context: TestContext, fixture: Awaited<ReturnType<ty
     await click('bob');
     assert.equal(recipient(), 'bob');
     await click('bob');
-    assert.equal(recipient(), '', 'reselecting a card immediately chooses record-only');
+    assert.equal(recipient(), 'bob', "#196: a second tap on the recipient's card is not a deselect");
+    const menu = app.document.querySelector('[role=menu]');
+    assert.ok(menu, "…it opens the card's menu");
+    const items = [...menu.querySelectorAll<HTMLButtonElement>('.menu-item')].map(b => b.textContent!.trim());
+    assert.equal(items[0], 'Record only', 'Record only leads, as it does for All (#168)');
+    assert.ok(!items.includes('Talk to'), 'no offer to talk to the one already addressed');
+    menu.querySelector<HTMLButtonElement>('.menu-item')!.click();
+    await app.flush();
+    assert.equal(recipient(), '', 'Record only is how a card is deselected now');
+    assert.equal(app.document.querySelector('[role=menu]'), null);
     await click('all');
     assert.equal(recipient(), 'all');
     await click('alice');
@@ -718,8 +727,12 @@ async function composerFixture(context: TestContext, extra: Record<string, (...a
     const target = name === 'everyone' ? 'all' : name === 'note' ? '' : name;
     const current = selectedCard(app.document);
     if (current === target) return;
-    if (!target && current === 'all') {
-      app.document.querySelector<HTMLButtonElement>('.all-choice button')!.click();
+    if (!target) {
+      // Record only is reached through the menu — All's (#168) and, since #196,
+      // a named card's too: a second click on the recipient opens it.
+      const opener = current === 'all' ? app.document.querySelector<HTMLButtonElement>('.all-choice button')
+        : stripCard(app.document, current)?.querySelector<HTMLButtonElement>('.agent-select');
+      opener!.click();
       await app.flush();
       [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')]
         .find(button => button.textContent?.trim() === 'Record only')!.click();

@@ -58,7 +58,7 @@ test('one controlled roster replaces the delayed tap menu whole (#168)', () => {
   assert.match(source, /const ranked = \$derived\(sortAgentsForRoster\(managedAgents\)\)/u,
     'owner 07:09 replaces team adjacency with turn-edge recency');
   assert.match(source, /onselect: setRecipient = \(\) => \{\}/u);
-  assert.match(source, /setRecipient\(recipient === name \? '' : name\)/u);
+  assert.match(source, /function selectTarget\(name\) \{\s*setRecipient\(name\);/u, '#196: a click selects; Record only in the menu deselects');
   assert.doesNotMatch(source, /selectTarget\(ALL_TARGET\)/u);
   assert.match(source, /onclick=\{\(e\) => clickAgent\(e, a\.name\)\}/u);
   assert.doesNotMatch(source.slice(source.indexOf('} = $props();')), /\brecipient\s*=(?!=)/u,
@@ -99,7 +99,7 @@ test('native selection owns hover and context; stopped slots never select or res
   assert.match(source, /use:hoverInfo=\{\(\) => cardInfo\(a\)\}/u);
   assert.match(source, /use:hoverInfo=\{\(\) => offCardInfo\(name\)\}/u);
   assert.match(source, /oncontextmenu=\{\(e\) => \{ e\.preventDefault\(\); oncontext\(pointOf\(e\), a\.name\); \}\}/u);
-  assert.match(source, /use:longpress=\{\{ onlongpress: \(pt\) => oncontext\(pt, a\.name\) \}\}/u);
+  assert.match(source, /use:longpress=\{\{ onlongpress: \(at\) => oncontext\(at, a\.name\) \}\}/u);
   const off = source.slice(source.indexOf('class="acard off"'), source.indexOf('{/each}', source.indexOf('class="acard off"')));
   assert.match(off, /onclick=\{\(e\) => stoppedMenu\(e, name\)\}/u);
   assert.match(off, /disabled=\{acting\}/u);
@@ -188,4 +188,12 @@ test('the stop is a quiet dense action and the dot sits clear of the name, on th
   assert.doesNotMatch(source, /variant="warn"/u, 'the amber-mixed ink is gone with its variant');
   assert.match(source, /<span class="a-name">\{a\.name\}<span class="ac-top"><span class="st"/u, 'the dot is in the name\'s line');
   assert.match(rule('.ac-top'), /vertical-align: middle; margin-inline-start: 5px;/u);
+});
+
+test("a second click on the recipient's card opens its menu at the card, never deselects (board #196)", () => {
+  // Owner 2026-09-13: "agent选中卡片时，再次点击不是取消选中，而且展开选项卡".
+  assert.match(source, /if \(recipient === name\) \{ oncontext\(cardAnchor\(event\.currentTarget\), name\); return; \}/u);
+  assert.match(source, /const cardAnchor = \(trigger\) => \(\{ anchor: anchorOf\(trigger\), align: 'left', trigger, keepTriggerClear: true \}\);/u);
+  assert.doesNotMatch(source, /recipient === name \? '' : name/u, 'the click toggle is gone');
+  assert.match(source, /use:longpress=\{\{ onlongpress: \(at\) => oncontext\(at, a\.name\) \}\}/u, 'a hold forwards the element anchor longpress hands it');
 });

@@ -74,12 +74,19 @@
   const slotBackend = (name) => (selectedRow?.slots ?? []).find((s) => s.window_name === name)?.command;
 
   function selectTarget(name) {
-    setRecipient(recipient === name ? '' : name);
+    setRecipient(name);
   }
   const isAddressed = (name) => recipient === ALL_TARGET || recipient === name;
   const coarsePointer = () => window.matchMedia('(any-pointer: coarse)').matches;
+  /* A menu opened FROM a card sits at the card — left-aligned, the card kept
+     visible — like the All button's (#168) and a stopped card's. */
+  const cardAnchor = (trigger) => ({ anchor: anchorOf(trigger), align: 'left', trigger, keepTriggerClear: true });
   function clickAgent(event, name) {
     if (!coarsePointer() && event.detail > 1) return;
+    // The recipient's own card: a second click opens its menu (Record only
+    // leads), it does not deselect (owner, 2026-09-13: "agent选中卡片时，再次点击
+    // 不是取消选中，而且展开选项卡"; board #196). Under All, a click narrows to the card.
+    if (recipient === name) { oncontext(cardAnchor(event.currentTarget), name); return; }
     selectTarget(name);
   }
   function focusAgent(event, name, stopped = false) {
@@ -90,8 +97,7 @@
   }
   function stoppedMenu(event, name) {
     if (!coarsePointer() && event.detail > 1) return;
-    const trigger = event.currentTarget;
-    oncontext({ anchor: anchorOf(trigger), align: 'left', trigger, keepTriggerClear: true }, name);
+    oncontext(cardAnchor(event.currentTarget), name);
   }
 
   function destinationNote(name) {
@@ -171,7 +177,7 @@
             use:hoverInfo={() => cardInfo(a)}
             onclick={(e) => clickAgent(e, a.name)} ondblclick={(e) => focusAgent(e, a.name)}
             oncontextmenu={(e) => { e.preventDefault(); oncontext(pointOf(e), a.name); }}
-            use:longpress={{ onlongpress: (pt) => oncontext(pt, a.name) }}>
+            use:longpress={{ onlongpress: (at) => oncontext(at, a.name) }}>
             <span class="avatar-slot">
               {#if backendIcon(a.agent)}<img class="ava" src={backendIcon(a.agent)} alt={a.agent} />{:else}<span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>{/if}
             </span>
@@ -211,7 +217,7 @@
             use:hoverInfo={() => offCardInfo(name)}
             onclick={(e) => stoppedMenu(e, name)} ondblclick={(e) => focusAgent(e, name, true)}
             oncontextmenu={(e) => { e.preventDefault(); oncontext(pointOf(e), name); }}
-            use:longpress={{ onlongpress: (pt) => oncontext(pt, name) }}>
+            use:longpress={{ onlongpress: (at) => oncontext(at, name) }}>
             <span class="avatar-slot">
               {#if backendIcon(backend)}<img class="ava dim" src={backendIcon(backend)} alt={backend} />{:else}<span class="ava dim">{name.slice(0, 1).toUpperCase()}</span>{/if}
             </span>

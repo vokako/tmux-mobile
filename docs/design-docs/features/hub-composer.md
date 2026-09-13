@@ -164,8 +164,17 @@ roster All card, its private styling and resident All Stop are removed whole.
 First activation selects `ALL_TARGET`; another activation opens the existing
 Hub ContextMenu. Constructive Record only comes first and clears All
 directly; the amber interrupt command appears only while members are busy,
-disabled during an in-flight interrupt. Named-card deselection still chooses
-record-only too.
+disabled during an in-flight interrupt. A NAMED card follows the same shape
+since #196 (owner, 2026-09-13: "agent选中卡片时，再次点击不是取消选中，而且展开选项卡"):
+a click selects it; a second click on the card that IS the recipient opens the
+Hub agent menu anchored to the card (left-aligned, card kept clear) with
+Record only leading in place of "Talk to" — that is how a card is deselected
+now; a click on any other card, or under All, moves the recipient. The click
+toggle (`recipient === name ? '' : name`) is gone. A long-press opens the same
+menu at the card too (`ui/longpress`, design-language.md § menus); a mouse
+right-click keeps the pointer. `Hub.mount.test.ts` walks select → second click
+→ Record only; Chromium 390: the menu's left edge = the card's (113), a hold at
+finger x=77 on a card at 12 opens at 12.
 
 The menu captures its opening room in the existing context-menu record and
 closes if that room or destination changes. Its items follow current

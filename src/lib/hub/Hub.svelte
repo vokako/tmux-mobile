@@ -1367,7 +1367,11 @@
     }
     const a = managedAgents.find((x) => x.name === name);
     return [
-      { label: t('hubTalkTo'), icon: 'chat', onselect: () => setRecipient(name) },
+      // The current recipient's card offers to stop addressing it (Record
+      // only leads, as for All); any other card offers to talk to it (#196).
+      recipient === name
+        ? { label: t('hubRecordOnly'), icon: 'chat', onselect: () => { if (recipient === name) setRecipient(''); } }
+        : { label: t('hubTalkTo'), icon: 'chat', onselect: () => setRecipient(name) },
       { label: t('hubWatch'), icon: 'terminal', onselect: () => { if (a) watchAgent(a); } },
       filterItem(name),
       ...config,
