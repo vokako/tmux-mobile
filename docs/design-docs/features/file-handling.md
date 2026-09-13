@@ -167,13 +167,14 @@ in the shared ContextMenu. Nine 44px targets alone exceed 390px; forcing two
 toolbar rows is not the solution. More is a real overflow control, not a
 speculative menu. (#192, owner 2026-09-13, reversed the "never shrink touch
 reach" half of this: on the phone every Files tool group — toolbar, path row,
-row tools, preview header — sits on a 36px pitch with the same 28px paint;
-nine tools then fit at 390 and More stays measured, not scheduled. The metric
-and its measurements live in design-language.md.) `file-tools.ts` owns the tested
+row tools, preview header — sits on a 32px pitch with the same 28px paint
+(#193, "最上边一行能显示全，不要...折叠了": the APK's ten tools fit at 360); More
+stays measured, not scheduled. The metric and its measurements live in
+design-language.md.) `file-tools.ts` owns the tested
 packing decision and the captured row-action definitions. The toolbar and its
 overflow/directory menu share the same action list; row tools and the row menu
-share their own captured entry actions. Native targets are 28px on a pointer and 36px on touch inside `compact-tools`
-(#192), while the shared paint is 20/28px. No second button implementation.
+share their own captured entry actions. Native targets are 28px on a pointer and 32px on touch inside `compact-tools`
+(#192/#193), while the shared paint is 20/28px. No second button implementation.
 
 Owner, same message, verbatim:
 > 另外文件管理里的桌边操作的右键菜单帮我也加上吧。对了右键的菜单风格都检查统一。

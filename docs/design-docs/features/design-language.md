@@ -263,7 +263,7 @@ unchanged until its consumers migrate.
 | `--control-paint-inset` (each vertical side) | 2px | 6px |
 | `--control-field-inset` (each vertical side) | 2px | 8px |
 | `--control-icon-size` | 16px | 17px |
-| `compact-tools` paint height (#164) / pitch (#192) | 20px inside 28px target | 28px inside 36px target |
+| `compact-tools` paint height (#164) / pitch (#192, #193) | 20px inside 28px target | 28px inside 32px target |
 | `--config-header-height` (minimum) | 48px | 56px |
 | `--config-nav-height` (minimum row) | 40px | 44px |
 | `config-compact` header / navigation minimum (#162) | 44 / 36px | 56 / 44px |
@@ -276,16 +276,19 @@ unchanged until its consumers migrate.
 
 Input capability, not a narrow viewport alone, selects touch sizes.
 
-**Dense tool groups on the phone sit on a 36px pitch** (board #192, owner
-2026-09-13: "文件浏览器的尤其是手机上的按钮可以紧凑一些，现在按钮太大了，在手机上体验
-不好空间利用不够"). This is the ONE deliberate exception to the 44px icon hit
-box, scoped to `.compact-tools` under `(any-pointer: coarse)`: the 28px paint
-and the 17px icon are unchanged, only the pitch shrinks. Measured at 390 on
-Files: nine toolbar commands needed a More menu at 44 (412px) and all fit at
-36 (352px); three inline row tools took 136px of the row, now 108; toolbar
-48 → 40, path row 52 → 44, the list starts at 84 instead of 100. The file row
-itself keeps its 44px `--files-row-height`. `controls.source.test.ts` pins the
-metric and which Files groups carry the class.
+**Dense tool groups on the phone sit on a 32px pitch** (boards #192/#193,
+owner 2026-09-13: "文件浏览器的尤其是手机上的按钮可以紧凑一些，现在按钮太大了，在手机上
+体验不好空间利用不够", then "最上边一行能显示全，不要...折叠了"). This is the ONE
+deliberate exception to the 44px icon hit box, scoped to `.compact-tools`
+under `(any-pointer: coarse)`: the 28px paint and the 17px icon are unchanged,
+only the pitch shrinks. Measured on Files: nine toolbar commands needed a
+More menu at 44 (412px at 390); #192's 36px let nine fit at 390 but the APK
+has TEN (Git, Downloads) — 390px, still 8 + More on a 360–384px phone; at 32
+the ten take 338px and fit at 360 (348 available). Three inline row tools
+136 → 96px; toolbar 48 → 36, path row 52 → 40, the list starts at 76 instead
+of 100. The file row itself keeps its 44px `--files-row-height`.
+`controls.source.test.ts` pins the metric and which Files groups carry the
+class.
 Single-line controls are border-box sized with an 18px line box. Layout,
 hover, pending icons and disabled states cannot resize them. Command
 labels use display/ui-step 500; values/options use the content face;
