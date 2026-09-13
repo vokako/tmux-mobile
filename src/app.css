@@ -116,7 +116,13 @@ html {
 @media (any-pointer: coarse) {
   :root { --menu-row-height: 44px; --menu-font-size: var(--fs-body); }
   :root { --files-row-height: 44px; }
-  .compact-tools { --control-paint-inset: 8px; }
+  /* A dense tool group on the phone keeps the 28 px paint and 17 px icon but
+     sits on a 36 px pitch, not 44 (owner, 2026-09-13: "手机上的按钮可以紧凑一些，
+     现在按钮太大了…空间利用不够"; board #192). Measured at 390: nine Files
+     tools needed a More menu at 44 (412 px) and fit at 36 (352 px); three row
+     tools took 136 px of the row, now 108. The deliberate exception to the
+     44 px icon hit box: only inside .compact-tools, only on touch. */
+  .compact-tools { --control-height: 36px; --control-paint-inset: 4px; }
 }
 
 @media (any-pointer: coarse) {

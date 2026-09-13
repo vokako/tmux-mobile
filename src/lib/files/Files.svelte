@@ -1617,7 +1617,7 @@
          390 (#164). Back retraces the user's steps (#17), Forward undoes a
          Back; both rest disabled at their end. The crumbs scroll in their own
          strip so the pair stays put. -->
-    <div class="bc-path-row">
+    <div class="bc-path-row compact-tools">
       <CommandButton variant="icon" icon="arrow-left" label={t('back')} disabled={!canGoBack} onclick={popDir} />
       <CommandButton variant="icon" icon="arrow-right" label={t('forward')} disabled={!canGoForward} onclick={fwdDir} />
       <div class="bc-scroll" bind:this={bcPathEl}>

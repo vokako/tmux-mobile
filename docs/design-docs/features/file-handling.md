@@ -163,13 +163,17 @@ The independent listing width and linked-preview Back history are unchanged.
 Toolbar packing follows measured content width, the native target size and
 the gap, not a device-specific item count. If all actions fit, all remain
 visible. Otherwise reserve one target for More and put only trailing actions
-in the shared ContextMenu. Nine 44px targets alone exceed 390px; shrinking
-touch reach or forcing two toolbar rows is not the solution. More is a real
-overflow control, not a speculative menu. `file-tools.ts` owns the tested
+in the shared ContextMenu. Nine 44px targets alone exceed 390px; forcing two
+toolbar rows is not the solution. More is a real overflow control, not a
+speculative menu. (#192, owner 2026-09-13, reversed the "never shrink touch
+reach" half of this: on the phone every Files tool group — toolbar, path row,
+row tools, preview header — sits on a 36px pitch with the same 28px paint;
+nine tools then fit at 390 and More stays measured, not scheduled. The metric
+and its measurements live in design-language.md.) `file-tools.ts` owns the tested
 packing decision and the captured row-action definitions. The toolbar and its
 overflow/directory menu share the same action list; row tools and the row menu
-share their own captured entry actions. Native targets remain 28/44px while
-the shared `compact-tools` paint is 20/28px. No second button implementation.
+share their own captured entry actions. Native targets are 28px on a pointer and 36px on touch inside `compact-tools`
+(#192), while the shared paint is 20/28px. No second button implementation.
 
 Owner, same message, verbatim:
 > 另外文件管理里的桌边操作的右键菜单帮我也加上吧。对了右键的菜单风格都检查统一。
