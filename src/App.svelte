@@ -1,5 +1,5 @@
 <script>
-  import { onDestroy, tick } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import { activeModal } from './lib/ui/modal.ts';
   import Settings from './lib/app/Settings.svelte';
   import Sessions from './lib/sessions/Sessions.svelte';
@@ -18,6 +18,8 @@
   import { createFeedbackLifetime } from './lib/ui/feedback-lifetime.ts';
   import { hubRooms, systemStatus } from './lib/core/ws.ts';
   import SystemStatus from './lib/system/SystemStatus.svelte';
+  import { hubPrefs } from './lib/hub/hub-prefs.svelte.ts';
+  import { moveTrack, pinTrack } from './lib/hub/reveal.ts';
   import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable, listPanes, listSessions, backendsList } from './lib/core/ws.ts';
   import { setServedBackends } from './lib/core/agents.ts';
   import { t } from './lib/core/i18n.svelte.ts';
@@ -1440,6 +1442,25 @@
   // 2026-09-14: "左侧的选项卡已经选中二次再点击的时候，也是自动帮我展开侧边栏"; board
   // #199). Pages register theirs the way they register their back chain.
   const pageReselect = {};
+  // ONE primary-sidebar state for the whole shell (board #200, owner
+  // 2026-09-14: "这个折叠收起在不同的页面是同步的，不然我点击chat terminal board，展开状态
+  // 不一致"): the Hub's toggle writes hubPrefs.sidebarCollapsed; the Terminal
+  // page's and the Board's sidebars and the system-status bar follow it, and a
+  // rail reselect on any of the three pages opens it again (#199).
+  const shellSideCollapsed = $derived(connected && !layout.isTouchDevice && hubPrefs.sidebarCollapsed);
+  pageReselect.terminal = pageReselect.board = () => hubPrefs.setSidebarCollapsed(false);
+  // The Terminal page moves its track the way the Hub does (reveal.ts): the
+  // sidebar pinned at its width, the factor moving, xterm fitted once at rest.
+  let termPageEl = $state(null);
+  let termSideWasCollapsed = untrack(() => shellSideCollapsed); // the rest state at mount; the effect moves from it
+  $effect(() => {
+    const collapsed = shellSideCollapsed;
+    if (collapsed === termSideWasCollapsed) return;
+    termSideWasCollapsed = collapsed;
+    if (page !== 'terminal' || !termPageEl || !termSideEl) return;
+    const unpin = pinTrack(termSideEl, 'end');
+    void moveTrack(termPageEl, '--side-open', collapsed ? 1 : 0).then(unpin);
+  });
   function railActivate(slot) {
     if (railClickGuard) { railClickGuard = false; return; }
     if (slot === 'prefs') togglePrefs();
@@ -1582,7 +1603,7 @@
   });
 </script>
 
-<main class:with-rail={connected && !layout.isTouchDevice} class:touch-layout={connected && layout.isTouchDevice}>
+<main class:with-rail={connected && !layout.isTouchDevice} class:touch-layout={connected && layout.isTouchDevice} class:side-collapsed={shellSideCollapsed}>
   <!-- Shell chrome. Every nav item is in the Tab order (no tabindex="-1" —
        review, 2026-09-03: the whole nav was unreachable by keyboard) and wears
        the global button:focus-visible ring; the current page is aria-current.
@@ -1810,10 +1831,10 @@
     </div>
     <div class="page-layer" class:hidden={page !== 'board'}>
       {#if hubEligible}
-        <Board session={filesSession} visible={page === 'board'} onGoBack={(fn) => boardGoBack = fn} issueRequest={boardIssueReq} jumped={!!jumpedFrom} />
+        <Board session={filesSession} visible={page === 'board'} sideCollapsed={shellSideCollapsed} onGoBack={(fn) => boardGoBack = fn} issueRequest={boardIssueReq} jumped={!!jumpedFrom} />
       {/if}
     </div>
-    <div class="page-layer term-page" class:hidden={page !== 'terminal'}>
+    <div class="page-layer term-page" class:hidden={page !== 'terminal'} bind:this={termPageEl}>
       <!-- The session/window list: a column beside the terminal on a wide
            screen, a slide-over sheet on a phone (opened from the switcher's
            session tag). Kept MOUNTED so its polling and expansion state
@@ -2152,6 +2173,15 @@
     border-top: 1px solid var(--border);
     border-right: 1px solid var(--border);
     z-index: 11;
+    overflow: hidden; box-sizing: border-box;
+    transition: width var(--t-move) ease-out, padding var(--t-move) ease-out, visibility 0s linear 0s;
+  }
+  /* Collapsed with the sidebar it belongs to (owner, 2026-09-14: "左侧边栏收起的
+     时候，底下的系统状态显示也要收起"; board #200): it retracts into the rail's
+     edge on the partition's tempo and is unreachable at rest. */
+  .with-rail.side-collapsed .sys-sidebar {
+    width: 0; padding-inline: 0; border-right-color: transparent; visibility: hidden;
+    transition: width var(--t-move) ease-out, padding var(--t-move) ease-out, visibility 0s linear var(--t-move);
   }
 
   /* Touch keeps the SAME singleton but parks it until one of the shared
@@ -2278,7 +2308,15 @@
      was pinned at 280px because this column used to render project CARDS
      with a tray of pane pills that wrapped one-per-line at 240 — dense mode
      retired both, so the exception expired with them (owner, 2026-08-19). */
-  .page-layer.term-page { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 0; }
+  /* The sessions sidebar is a REVEAL track on the shell-wide --side-open
+     factor (app.css; board #200), moved by reveal.ts like the Hub's: pinned
+     at its width, hugging the edge that stays, clipped by the page while the
+     track uncovers or withdraws it; unreachable (visibility) at rest collapsed. */
+  .page-layer.term-page { display: grid; --side-open: 1; grid-template-columns: minmax(0, calc(var(--sidebar-w) * var(--side-open))) minmax(0, 1fr); min-height: 0; overflow: hidden; }
+  .page-layer.term-page:global(.moving) { transition: --side-open var(--t-move) ease-out; }
+  .with-rail.side-collapsed .page-layer.term-page { --side-open: 0; }
+  .with-rail.side-collapsed .page-layer.term-page:not(:global(.moving)) > .term-side { visibility: hidden; }
+  .term-side:global(.pin-end) { justify-self: end; }
   .term-side { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--border); background: var(--bg2); }
   .term-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   @media (max-width: 760px) {

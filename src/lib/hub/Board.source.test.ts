@@ -157,7 +157,7 @@ test('create lives in the head, and compact gets the hamburger drawer (reopened 
   // scrim, and the back gesture closes the drawer FIRST.
   assert.match(source, /class="icon-btn side-toggle"[^>]*\n?[^>]*onclick=\{\(\) => \(sideOpen = !sideOpen\)\}/u,
     'the hamburger toggles the drawer');
-  assert.match(source, /<aside class="sidebar" class:side-sheet=\{narrowVp\} class:open=\{narrowVp && sideOpen\}>/u,
+  assert.match(source, /<aside class="sidebar" class:side-sheet=\{narrowVp\} class:open=\{narrowVp && sideOpen\} bind:this=\{sideEl\}>/u,
     'the sidebar wears the SHARED sheet dialect, CLASS-driven by the page\u2019s own narrow condition');
   assert.match(source, /class="side-scrim" onclick=\{\(\) => \(sideOpen = false\)\}/u, 'the scrim dismisses');
   // Back does NOT close the drawer: the drawer is the compact FLOOR — Hub's
@@ -245,7 +245,7 @@ test('a feed jump opens its issue in its OWN session (board #13 follow-up)', () 
 
 test('the board embeds in the Hub drawer without its sidebar (board #13 follow-up)', () => {
   assert.match(source, /embedded = false/u, 'embedded is a prop');
-  assert.match(source, /<div class="board-root" class:embedded>/u, 'the root wears it');
+  assert.match(source, /<div class="board-root" class:embedded class:side-collapsed=\{sideCollapsed && !narrowVp && !embedded\} bind:this=\{rootEl\}>/u, 'the root wears it');
   assert.match(source, /\{#if !embedded\}\s*\n\s*<aside class="sidebar"/u, 'no project sidebar in the drawer');
   const style = source.slice(source.indexOf('<style>'));
   assert.match(style, /\.board-root\.embedded \{ grid-template-columns: minmax\(0, 1fr\); \}/u,
@@ -857,4 +857,16 @@ test('an armed confirm is a FILLED accent button — the one .go rule, confirms 
   const agents = await readFile(new URL('./AgentsPage.svelte', import.meta.url), 'utf8');
   assert.ok(!/\.icon-btn\.go[^}]*var\(--accent\)/u.test(agents),
     'no page redefines the go colour locally');
+});
+
+test("the Board's sidebar follows the shell-wide collapse with the Hub's reveal (board #200)", () => {
+  const style = source.slice(source.indexOf('<style>'));
+  assert.match(source, /sideCollapsed = false/u, 'a prop from the shell');
+  assert.match(source, /const unpin = pinTrack\(sideEl, 'end'\);\s*\n\s*void moveTrack\(rootEl, '--side-open', collapsed \? 1 : 0\)\.then\(unpin\);/u);
+  assert.match(source, /if \(!visible \|\| embedded \|\| narrowVp \|\| !rootEl \|\| !sideEl\) return;/u, 'no motion off-screen, in the drawer or on the phone sheet');
+  assert.match(style, /\.board-root \{[^}]*--side-open: 1; grid-template-columns: minmax\(0, calc\(var\(--sidebar-w\) \* var\(--side-open\)\)\) minmax\(0, 1fr\);[^}]*overflow: hidden;/u);
+  assert.match(style, /\.board-root:global\(\.moving\) \{ transition: --side-open var\(--t-move\) ease-out; \}/u);
+  assert.match(style, /\.board-root\.side-collapsed \{ --side-open: 0; \}/u);
+  assert.match(style, /\.board-root\.side-collapsed:not\(:global\(\.moving\)\) > \.sidebar \{ visibility: hidden; \}/u);
+  assert.match(style, /\.sidebar:global\(\.pin-end\) \{ justify-self: end; \}/u);
 });

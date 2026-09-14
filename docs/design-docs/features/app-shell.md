@@ -225,6 +225,28 @@ the same `setSidebar(false)` the toggle uses — one motion, one state. Desktop
 only: the phone has no rail, and its sheet has its own opener. Pins:
 `App.source.test.ts`, `Hub.source.test.ts`.
 
+**ONE sidebar state for the whole shell (2026-09-14, board #200).** Owner: "左侧边栏
+收起的时候，底下的系统状态显示也要收起，而且这个折叠收起在不同的页面是同步的，不然我点击chat
+terminal board，展开状态不一致". `hubPrefs.sidebarCollapsed` was app-wide by intent
+(#174) but only the Hub's grid read it: the Terminal page's `term-side` and the
+Board's `.sidebar` were fixed `--sidebar-w` tracks and the fixed system-status
+bar (#85) was always shown, so Chat collapsed and Terminal/Board did not. Now
+App derives `shellSideCollapsed` (desktop, connected) and puts `.side-collapsed`
+on `<main>`; the Terminal page and the Board are REVEAL tracks on the same
+`--side-open` factor as the Hub — registered ONCE in `app.css` — moved by
+`hub/reveal.ts` (pin at width, gate, hidden at rest) when the state changes
+while they are on screen; the system-status bar retracts to width 0 on
+`--t-move` and is unreachable at rest. Collapsing happens in the Hub (its
+toggle, #197); expanding also on the Terminal and Board pages through the rail
+reselect (#199) — `pageReselect.terminal = pageReselect.board = () =>
+hubPrefs.setSidebarCollapsed(false)`. Measured at 1440 on a live server:
+collapse in Chat → Terminal and Board tracks at factor 0, sidebars hidden,
+status bar 1px/hidden, on every page; reselect on Board → `.moving` with the
+sidebar pinned at 240px, factor 0 → 0.99 at 188ms → 1 unpinned by 279ms, the
+status bar 1 → 237 → 240 in step; the Terminal page likewise (0 → 0.77 at
+111ms → 1 by 211ms). Pins: `App.source.test.ts`, `Board.source.test.ts`,
+`Hub.source.test.ts` (no second `@property`).
+
 ### The chosen tab is marked by ONE highlight that travels (2026-09-04, #86)
 
 **Current scope:** the desktop rail retains its travelling wash. The phone

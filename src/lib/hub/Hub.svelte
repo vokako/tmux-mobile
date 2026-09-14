@@ -1884,7 +1884,7 @@
      uncovers it and an xterm inside is fitted once. What the track has not
      uncovered yet is clipped by the grid. Engines without @property
      interpolation fall back to the cut this always was. */
-  @property --side-open { syntax: '<number>'; inherits: false; initial-value: 1; }
+  /* --side-open is registered once in app.css (shell-wide since #200). */
   @property --drawer-open { syntax: '<number>'; inherits: false; initial-value: 0; }
   .cols {
     flex: 1; display: grid; min-height: 0; --side-open: 1; --drawer-open: 0; position: relative;

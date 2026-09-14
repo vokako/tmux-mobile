@@ -16,6 +16,7 @@
   import Icon from '../ui/Icon.svelte';
   import Select from '../ui/Select.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
+  import { moveTrack, pinTrack } from './reveal.ts';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import OperationFeedback from '../ui/OperationFeedback.svelte';
   import { feedbackPosition } from '../ui/feedback-position.ts';
@@ -30,7 +31,21 @@
   import { slideIndicator } from '../ui/indicator.ts';
   import { selectionClickGuard } from '../ui/native-context-menu.ts';
 
-  let { session = '', visible = true, onGoBack = null, issueRequest = null, embedded = false, createRequest = null, jumped = false }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null; issueRequest?: { session: string; id: number; n: number } | null; embedded?: boolean; createRequest?: { n: number } | null; jumped?: boolean } = $props();
+  let { session = '', visible = true, onGoBack = null, issueRequest = null, embedded = false, createRequest = null, jumped = false, sideCollapsed = false }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null; issueRequest?: { session: string; id: number; n: number } | null; embedded?: boolean; createRequest?: { n: number } | null; jumped?: boolean; sideCollapsed?: boolean } = $props();
+
+  // The project sidebar follows the shell-wide collapse (board #200) with the
+  // Hub's reveal: pinned at its width, the track's factor moving (reveal.ts).
+  let rootEl = $state<HTMLElement | null>(null);
+  let sideEl = $state<HTMLElement | null>(null);
+  let sideWasCollapsed = untrack(() => sideCollapsed); // the rest state at mount; the effect moves from it
+  $effect(() => {
+    const collapsed = sideCollapsed;
+    if (collapsed === sideWasCollapsed) return;
+    sideWasCollapsed = collapsed;
+    if (!visible || embedded || narrowVp || !rootEl || !sideEl) return;
+    const unpin = pinTrack(sideEl, 'end');
+    void moveTrack(rootEl, '--side-open', collapsed ? 1 : 0).then(unpin);
+  });
 
   // Every project has its OWN board (issues are session-scoped like the chat
   // room), so the page carries the shared project sidebar (owner, 2026-08-29:
@@ -617,9 +632,9 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="board-root" class:embedded>
+<div class="board-root" class:embedded class:side-collapsed={sideCollapsed && !narrowVp && !embedded} bind:this={rootEl}>
   {#if !embedded}
-  <aside class="sidebar" class:side-sheet={narrowVp} class:open={narrowVp && sideOpen}>
+  <aside class="sidebar" class:side-sheet={narrowVp} class:open={narrowVp && sideOpen} bind:this={sideEl}>
     <SideHandle />
     <div class="side-scroll subtle-scroll" use:scrollFade>
       <div class="side-h">{t('hubProjects')}</div>
@@ -944,8 +959,14 @@
   /* Page skeleton (ui-unification §1): the shared sidebar + a main column.
      Compact is the same drill-down every page speaks: the list is the first
      screen, a picked project takes it (the back gesture peels it off). */
-  .board-root { height: 100%; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 0; background: var(--bg); }
-  .sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  /* The sidebar is a REVEAL track on the shell-wide --side-open factor
+     (app.css; board #200), moved by reveal.ts like the Hub's. */
+  .board-root { height: 100%; display: grid; --side-open: 1; grid-template-columns: minmax(0, calc(var(--sidebar-w) * var(--side-open))) minmax(0, 1fr); min-height: 0; background: var(--bg); overflow: hidden; }
+  .board-root:global(.moving) { transition: --side-open var(--t-move) ease-out; }
+  .board-root.side-collapsed { --side-open: 0; }
+  .board-root.side-collapsed:not(:global(.moving)) > .sidebar { visibility: hidden; }
+  .sidebar:global(.pin-end) { justify-self: end; }
+  .sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
   /* The same 8px scroll inset the Chat sidebar wears — the row/header INSET
      is .side-h/.side-row's own 10px in app.css, but the container padding
      was Board's silent 0 and the whole list sat 8px left of Chat's (board

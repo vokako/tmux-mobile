@@ -646,7 +646,7 @@ test('the drawer REVEALS, it never resizes: pinned content, one moving gate, no 
   // Owner, 2026-09-11: "右侧边栏 … 点击展开最好也是有动画展开". motion.md 3 and 9
   // stay true by technique: the track moves through an animatable @property
   // factor; the content is pinned at its final width for the whole move.
-  assert.match(source, /@property --side-open \{\s*syntax: '<number>';\s*inherits: false;\s*initial-value: 1;\s*\}/u);
+  assert.doesNotMatch(source, /@property --side-open/u, '#200: registered once, in app.css, for every page');
   assert.match(source, /@property --drawer-open \{\s*syntax: '<number>';\s*inherits: false;\s*initial-value: 0;\s*\}/u);
   // The transition exists in ONE place, gated, and names only the two factors.
   const moving = rule('.cols:global(.moving)');

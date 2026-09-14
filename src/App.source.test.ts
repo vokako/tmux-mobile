@@ -71,7 +71,7 @@ test('Terminal navigation and page layer exist without an active target', () => 
   );
   assert.match(
     source,
-    /<div class="page-layer term-page" class:hidden=\{page !== 'terminal'\}>/u,
+    /<div class="page-layer term-page" class:hidden=\{page !== 'terminal'\} bind:this=\{termPageEl\}>/u,
   );
   // The empty state keeps the page HEADER (ui-unification: every page's head
   // survives an empty detail pane — Chat, Agents, Settings all do), so the
@@ -94,7 +94,8 @@ test('the Terminal page uses the shared sidebar geometry', () => {
   // ui-unification.md §1: wherever a sidebar exists it is THE sidebar — one
   // width variable, one resize affordance. Terminal was the last holdout
   // (a hardcoded 280px column with no handle).
-  assert.match(source, /\.page-layer\.term-page \{[^}]*grid-template-columns: var\(--sidebar-w\)/u);
+  assert.match(source, /\.page-layer\.term-page \{[^}]*grid-template-columns: minmax\(0, calc\(var\(--sidebar-w\) \* var\(--side-open\)\)\)/u,
+    '#200: the same variable, as a REVEAL track');
   const aside = source.match(/<aside class="term-side"[\s\S]*?<\/aside>/u)?.[0] ?? '';
   assert.match(aside, /<SideHandle \/>/u, 'the sidebar carries the shared handle');
   assert.doesNotMatch(source, /grid-template-columns: 280px/u);
@@ -603,4 +604,27 @@ test('a second click on the active rail tab hands the page a reselect — the Hu
   assert.match(source, /function railActivate\(slot\) \{[\s\S]*?if \(slot === page\) \{ pageReselect\[slot\]\?\.\(\); return; \}/u);
   assert.match(source, /const pageReselect = \{\};/u);
   assert.match(source, /onReselect=\{\(fn\) => \{ pageReselect\.hub = fn; \}\}/u, 'the Hub registers its reselect like its back chain');
+});
+
+test('one shell-wide sidebar state: the Terminal page and the system status follow the Hub\'s collapse; reselect opens it on every page (board #200)', async () => {
+  // Owner 2026-09-14: "左侧边栏收起的时候，底下的系统状态显示也要收起，而且这个折叠收起在不同的
+  // 页面是同步的，不然我点击chat terminal board，展开状态不一致".
+  assert.match(source, /const shellSideCollapsed = \$derived\(connected && !layout\.isTouchDevice && hubPrefs\.sidebarCollapsed\);/u);
+  assert.match(source, /<main class:with-rail=\{[^}]+\} class:touch-layout=\{[^}]+\} class:side-collapsed=\{shellSideCollapsed\}>/u);
+  assert.match(source, /pageReselect\.terminal = pageReselect\.board = \(\) => hubPrefs\.setSidebarCollapsed\(false\);/u, '#199 on every page');
+  assert.match(source, /<Board session=\{filesSession\} visible=\{page === 'board'\} sideCollapsed=\{shellSideCollapsed\}/u);
+  // The Terminal page's track is the Hub's technique: factor, gate, pin, hidden at rest.
+  assert.match(source, /const unpin = pinTrack\(termSideEl, 'end'\);\s*\n\s*void moveTrack\(termPageEl, '--side-open', collapsed \? 1 : 0\)\.then\(unpin\);/u);
+  assert.match(source, /\.page-layer\.term-page:global\(\.moving\) \{ transition: --side-open var\(--t-move\) ease-out; \}/u);
+  assert.match(source, /\.with-rail\.side-collapsed \.page-layer\.term-page \{ --side-open: 0; \}/u);
+  assert.match(source, /\.with-rail\.side-collapsed \.page-layer\.term-page:not\(:global\(\.moving\)\) > \.term-side \{ visibility: hidden; \}/u);
+  assert.match(source, /\.term-side:global\(\.pin-end\) \{ justify-self: end; \}/u);
+  // The system status retracts with it, on the same tempo, unreachable at rest.
+  const sys = source.match(/\.with-rail\.side-collapsed \.sys-sidebar \{([^}]+)\}/u)?.[1] ?? '';
+  assert.match(sys, /width: 0; padding-inline: 0;[^;]*; visibility: hidden;/u);
+  assert.match(sys, /transition: width var\(--t-move\) ease-out, padding var\(--t-move\) ease-out, visibility 0s linear var\(--t-move\);/u);
+  // The factor is registered once, in app.css.
+  const css = await readFile(new URL('./app.css', import.meta.url), 'utf8');
+  assert.equal([...css.matchAll(/@property --side-open \{/gu)].length, 1);
+  assert.match(css, /@property --side-open \{ syntax: '<number>'; inherits: false; initial-value: 1; \}/u);
 });

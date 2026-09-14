@@ -77,7 +77,9 @@ export const hubPrefs = {
     state.feedLevel = v;
     localStorage.setItem(FEED_LEVEL_KEY, v);
   },
-  /** The desktop sidebar is collapsed (board #174). App-wide; false = open. */
+  /** The desktop primary sidebar is collapsed (board #174) — SHELL-wide: the
+   * Hub's, the Terminal page's and the Board's sidebars and the system-status
+   * bar all read it (board #200). false = open. */
   get sidebarCollapsed() { return state.sidebarCollapsed; },
   setSidebarCollapsed(v: boolean) {
     state.sidebarCollapsed = v;

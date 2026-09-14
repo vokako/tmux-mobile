@@ -355,6 +355,13 @@ button:disabled {
    Small primitives every desktop page reuses instead of forking copies.
    Page-specific LAYOUT stays in component styles; the vocabulary lives here. */
 
+/* The primary sidebar's REVEAL factor (board #174 technique, shell-wide since
+   #200): a grid track is `calc(var(--sidebar-w) * var(--side-open))`, only the
+   factor transitions, under a `.moving` gate raised by hub/reveal.ts for one
+   move; content is pinned at its final width so the track merely uncovers it.
+   Registered ONCE here — the Hub, the Terminal page and the Board read it. */
+@property --side-open { syntax: '<number>'; inherits: false; initial-value: 1; }
+
 :root {
   --sidebar-w: 240px;
   --page-head-h: 42px; /* a page header's row; the Hub's riding sidebar toggle sits on it (#197) */
