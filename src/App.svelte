@@ -1435,9 +1435,15 @@
     railPress = null;
     railDrag = null;
   }
+  // A second click on the ACTIVE tab is not nothing: the page gets a
+  // "reselect" — the Hub expands its collapsed project sidebar (owner,
+  // 2026-09-14: "左侧的选项卡已经选中二次再点击的时候，也是自动帮我展开侧边栏"; board
+  // #199). Pages register theirs the way they register their back chain.
+  const pageReselect = {};
   function railActivate(slot) {
     if (railClickGuard) { railClickGuard = false; return; }
     if (slot === 'prefs') togglePrefs();
+    else if (slot === page) { pageReselect[slot]?.(); return; }
     else switchTab(slot);
   }
   // Escape abandons a drag and a resize invalidates its snapshotted rects —
@@ -1751,7 +1757,7 @@
            switches. Desktop-eligible only (needs width + the desktop server):
            mobile keeps the tab layout untouched. -->
       <div class="page-layer" class:hidden={page !== 'hub'}>
-        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} openAgentConfig={(name) => openAgentsConfig(name)} openFilesTab={(s, path, file) => { if (s) filesSession = s; if (path || file) filesNavReq = { path, file, n: (filesNavReq?.n ?? 0) + 1 }; switchTab('files'); jumpedFrom = 'hub'; }} openBoardTab={(s, issue) => { if (s) filesSession = s; if (issue) boardIssueReq = { session: s, id: issue, n: (boardIssueReq?.n ?? 0) + 1 }; switchTab('board'); jumpedFrom = 'hub'; }} />
+        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} onReselect={(fn) => { pageReselect.hub = fn; }} openAgentConfig={(name) => openAgentsConfig(name)} openFilesTab={(s, path, file) => { if (s) filesSession = s; if (path || file) filesNavReq = { path, file, n: (filesNavReq?.n ?? 0) + 1 }; switchTab('files'); jumpedFrom = 'hub'; }} openBoardTab={(s, issue) => { if (s) filesSession = s; if (issue) boardIssueReq = { session: s, id: issue, n: (boardIssueReq?.n ?? 0) + 1 }; switchTab('board'); jumpedFrom = 'hub'; }} />
       </div>
     {/if}
     <!-- The Agents PAGE exists where Agents is a page: the desktop rail. On

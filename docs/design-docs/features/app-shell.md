@@ -215,6 +215,16 @@ at 180°. Guards: `Hub.source.test.ts` (rendered once, the ride rule, the
 factor on `.cols`, the header indent), `Sidebar.source.test.ts` (no handed-in
 control), `CommandButton.source.test.ts` (`arrow-to-bar` turns).
 
+**A second click on the active rail tab brings the sidebar back (2026-09-14,
+board #199).** Owner: "我应该在左侧的选项卡已经选中二次再点击的时候，也是自动帮我展开侧边栏".
+`switchTab` returns when the target is the current page, so the rail used to
+swallow the click. Now `railActivate` hands the ACTIVE page a "reselect"
+(`pageReselect[page]`), registered by the page the way it registers its back
+chain (`onReselect`); the Hub's expands a collapsed project sidebar through
+the same `setSidebar(false)` the toggle uses — one motion, one state. Desktop
+only: the phone has no rail, and its sheet has its own opener. Pins:
+`App.source.test.ts`, `Hub.source.test.ts`.
+
 ### The chosen tab is marked by ONE highlight that travels (2026-09-04, #86)
 
 **Current scope:** the desktop rail retains its travelling wash. The phone

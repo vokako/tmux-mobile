@@ -52,7 +52,7 @@
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import { activeModal } from '../ui/modal.ts';
 
-  let { visible = false, fontSize = 14, mobile = false, openTerminal = () => {}, onSelectSession = (_s) => {}, onGoBack = null, openAgentConfig = null, openFilesTab = null, openBoardTab = null } = $props();
+  let { visible = false, fontSize = 14, mobile = false, openTerminal = () => {}, onSelectSession = (_s) => {}, onGoBack = null, onReselect = null, openAgentConfig = null, openFilesTab = null, openBoardTab = null } = $props();
   const drawerId = $props.id();
 
   // Layout follows the viewport, not the device class (a squeezed desktop
@@ -1327,6 +1327,13 @@
   // so a back never looks like the browser leaving. On a phone the project
   // LIST is the level above the conversation (the Files analogy: cwd = '/'
   // is the floor); with the list open, back has reached the floor.
+  // The rail's second click on this page (board #199): a collapsed project
+  // sidebar comes back. Desktop only — the phone has no rail; its sheet has
+  // its own opener in the header.
+  $effect(() => {
+    onReselect?.(() => { if (!compact && sideCollapsed) void setSidebar(false); });
+  });
+
   // The lightbox is the topmost transient layer: back peels it first.
   let shotView = $state('');
   const backLayers = createHubBackRegistry();

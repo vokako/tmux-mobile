@@ -708,3 +708,9 @@ test('the toggle rides the partition on the grid\'s own factor and the header in
   assert.match(source, /\.hub-root \.chat-head \{ transition: padding-left var\(--t-move\) ease-out; \}/u);
   assert.match(source, /\.hub-root\.side-collapsed \.chat-head \{ padding-left: calc\(2 \* var\(--menu-item-padding-x\) \+ var\(--control-height\)\); \}/u);
 });
+
+test("re-selecting the Hub's rail tab expands a collapsed sidebar (board #199)", () => {
+  assert.match(source, /onReselect = null/u, 'a registration prop, like onGoBack');
+  assert.match(source, /onReselect\?\.\(\(\) => \{ if \(!compact && sideCollapsed\) void setSidebar\(false\); \}\);/u,
+    'desktop only — the phone has no rail; a sheet has its own opener');
+});

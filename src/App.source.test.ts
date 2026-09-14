@@ -596,3 +596,11 @@ test('the rail keeps the ONE travelling highlight; the tab bar is foreground-onl
   // The atom's look lives in app.css; App only positions it.
   assert.doesNotMatch(style, /\.slide-pill[^{]*\{[^}]*(background|width|height|transition)/u);
 });
+
+test('a second click on the active rail tab hands the page a reselect — the Hub expands its sidebar (board #199)', () => {
+  // Owner 2026-09-14: "我应该在左侧的选项卡已经选中二次再点击的时候，也是自动帮我展开侧边栏".
+  // switchTab returns when target === page; the rail used to swallow the click.
+  assert.match(source, /function railActivate\(slot\) \{[\s\S]*?if \(slot === page\) \{ pageReselect\[slot\]\?\.\(\); return; \}/u);
+  assert.match(source, /const pageReselect = \{\};/u);
+  assert.match(source, /onReselect=\{\(fn\) => \{ pageReselect\.hub = fn; \}\}/u, 'the Hub registers its reselect like its back chain');
+});
