@@ -1448,7 +1448,8 @@
   // page's and the Board's sidebars and the system-status bar follow it, and a
   // rail reselect on any of the three pages opens it again (#199).
   const shellSideCollapsed = $derived(connected && !layout.isTouchDevice && hubPrefs.sidebarCollapsed);
-  pageReselect.terminal = pageReselect.board = () => hubPrefs.setSidebarCollapsed(false);
+  // A reselect TOGGLES (owner, 2026-09-14: "选中点击也能展开，也能折叠"; board #201).
+  pageReselect.terminal = pageReselect.board = () => hubPrefs.setSidebarCollapsed(!hubPrefs.sidebarCollapsed);
   // The Terminal page moves its track the way the Hub does (reveal.ts): the
   // sidebar pinned at its width, the factor moving, xterm fitted once at rest.
   let termPageEl = $state(null);

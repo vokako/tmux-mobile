@@ -1327,11 +1327,11 @@
   // so a back never looks like the browser leaving. On a phone the project
   // LIST is the level above the conversation (the Files analogy: cwd = '/'
   // is the floor); with the list open, back has reached the floor.
-  // The rail's second click on this page (board #199): a collapsed project
-  // sidebar comes back. Desktop only — the phone has no rail; its sheet has
-  // its own opener in the header.
+  // The rail's second click on this page toggles the project sidebar (board
+  // #199 opened it; #201 makes it a toggle: "选中点击也能展开，也能折叠"). Desktop
+  // only — the phone has no rail; its sheet has its own opener in the header.
   $effect(() => {
-    onReselect?.(() => { if (!compact && sideCollapsed) void setSidebar(false); });
+    onReselect?.(() => { if (!compact) void setSidebar(!sideCollapsed); });
   });
 
   // The lightbox is the topmost transient layer: back peels it first.

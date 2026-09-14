@@ -220,9 +220,11 @@ board #199).** Owner: "我应该在左侧的选项卡已经选中二次再点击
 `switchTab` returns when the target is the current page, so the rail used to
 swallow the click. Now `railActivate` hands the ACTIVE page a "reselect"
 (`pageReselect[page]`), registered by the page the way it registers its back
-chain (`onReselect`); the Hub's expands a collapsed project sidebar through
-the same `setSidebar(false)` the toggle uses — one motion, one state. Desktop
-only: the phone has no rail, and its sheet has its own opener. Pins:
+chain (`onReselect`); the Hub's TOGGLES the project sidebar through the same
+`setSidebar` the corner control uses — one motion, one state (#199 opened it
+only; #201, owner 14:10 "选中点击也能展开，也能折叠", made it a toggle, and the
+Terminal/Board reselect flips the shared state the same way). Desktop only:
+the phone has no rail, and its sheet has its own opener. Pins:
 `App.source.test.ts`, `Hub.source.test.ts`.
 
 **ONE sidebar state for the whole shell (2026-09-14, board #200).** Owner: "左侧边栏
@@ -236,10 +238,10 @@ on `<main>`; the Terminal page and the Board are REVEAL tracks on the same
 `--side-open` factor as the Hub — registered ONCE in `app.css` — moved by
 `hub/reveal.ts` (pin at width, gate, hidden at rest) when the state changes
 while they are on screen; the system-status bar retracts to width 0 on
-`--t-move` and is unreachable at rest. Collapsing happens in the Hub (its
-toggle, #197); expanding also on the Terminal and Board pages through the rail
-reselect (#199) — `pageReselect.terminal = pageReselect.board = () =>
-hubPrefs.setSidebarCollapsed(false)`. Measured at 1440 on a live server:
+`--t-move` and is unreachable at rest. The Hub's corner control (#197) and
+the rail reselect on any of the three pages (#199/#201, a toggle) change it —
+`pageReselect.terminal = pageReselect.board = () =>
+hubPrefs.setSidebarCollapsed(!hubPrefs.sidebarCollapsed)`. Measured at 1440 on a live server:
 collapse in Chat → Terminal and Board tracks at factor 0, sidebars hidden,
 status bar 1px/hidden, on every page; reselect on Board → `.moving` with the
 sidebar pinned at 240px, factor 0 → 0.99 at 188ms → 1 unpinned by 279ms, the

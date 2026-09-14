@@ -709,8 +709,9 @@ test('the toggle rides the partition on the grid\'s own factor and the header in
   assert.match(source, /\.hub-root\.side-collapsed \.chat-head \{ padding-left: calc\(2 \* var\(--menu-item-padding-x\) \+ var\(--control-height\)\); \}/u);
 });
 
-test("re-selecting the Hub's rail tab expands a collapsed sidebar (board #199)", () => {
+test("re-selecting the Hub's rail tab toggles the sidebar (boards #199, #201)", () => {
+  // Owner 2026-09-14 14:10: "左侧选项卡图标，选中点击也能展开，也能折叠".
   assert.match(source, /onReselect = null/u, 'a registration prop, like onGoBack');
-  assert.match(source, /onReselect\?\.\(\(\) => \{ if \(!compact && sideCollapsed\) void setSidebar\(false\); \}\);/u,
+  assert.match(source, /onReselect\?\.\(\(\) => \{ if \(!compact\) void setSidebar\(!sideCollapsed\); \}\);/u,
     'desktop only — the phone has no rail; a sheet has its own opener');
 });
