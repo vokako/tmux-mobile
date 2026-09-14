@@ -1462,6 +1462,12 @@
     const unpin = pinTrack(termSideEl, 'end');
     void moveTrack(termPageEl, '--side-open', collapsed ? 1 : 0).then(unpin);
   });
+  // The rail's toggle and a reselect are the same act: the page's delegate
+  // if it has one (the Hub animates with its reading anchor), else the shared
+  // state directly.
+  function toggleShellSidebar() {
+    (pageReselect[page] ?? (() => hubPrefs.setSidebarCollapsed(!hubPrefs.sidebarCollapsed)))();
+  }
   function railActivate(slot) {
     if (railClickGuard) { railClickGuard = false; return; }
     if (slot === 'prefs') togglePrefs();
@@ -1646,6 +1652,13 @@
            being dragged and re-placed on release. -->
       <span class="slide-pill soft" aria-hidden="true"></span>
       <img class="rail-brand" src={iconSrc} alt="" width="26" height="26" draggable="false" />
+      <!-- THE sidebar toggle (board #202): one shell-level control that never
+           moves, on every desktop page, under the brand. It writes the shared
+           state through the page's own delegate (#199/#201) — the Hub keeps
+           its reading anchor, Terminal/Board their reveal effects (#200). -->
+      <CommandButton variant="icon" icon="panel-left" expanded={!hubPrefs.sidebarCollapsed} inside
+        label={hubPrefs.sidebarCollapsed ? t('hubSidebarExpand') : t('hubSidebarCollapse')}
+        onclick={toggleShellSidebar} />
       {#each railSlots as slot (slot)}
         <!-- One wrapper per slot so the list can `animate:flip` (Svelte wants
              the animated element to be the each block's only child). It also
@@ -2080,6 +2093,9 @@
     z-index: 12;
   }
   .rail-brand { border-radius: var(--ui-radius-control); margin-bottom: 8px; flex: none; }
+  /* The sidebar toggle sits under the brand at the rail's own 34px pitch,
+     apart from the page slots so the travelling pill never lands on it. */
+  .rail > :global(.command-button.icon-only) { margin-bottom: 8px; }
   /* The per-slot wrapper mirrors the rail's own column so the layout is the
      one it had before the wrapper existed: a page slot is its 34px button,
      the gap slot stretches (flex: 1) and stacks the spacer over the server

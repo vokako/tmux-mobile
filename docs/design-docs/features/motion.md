@@ -184,7 +184,7 @@ and terminal ancestor restrictions remain unchanged.
 | atom | meaning | tempo |
 |---|---|---|
 | `.chev` + `.open` | disclosure caret turns 90° (closed ▸ → open ▾) | `--t-move` |
-| `.flip` + `.on` | up↔down arrow, or the `→|` panel toggle (#197), turns 180° — on ONE node that persists across the state change, or nothing turns | `--t-move` |
+| `.flip` + `.on` | up↔down arrow, or the rail's drawn `panel-left` toggle (#202): its inner chevron, not the stable panel frame, turns 180° on `--t-move` | `--t-move` |
 | `.quarter-turn` + `.on` | a 180°-symmetric swap trigger turns a visible 90° | `--t-move` |
 | `.appear` | something enters: fade in | `--t-fast` |
 | `.appear-rise` | a block/banner enters: fade + rise 6px | `--t-move` |

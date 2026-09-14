@@ -1554,20 +1554,8 @@
   }
 </script>
 
-<!-- The ONE sidebar collapse/expand control (boards #174, #197): ONE node that
-     RIDES the partition — absolutely placed in .cols, its left driven by the
-     same --side-open factor the grid animates — so it slides from the
-     sidebar's top-right corner to the header's left edge while its →| glyph
-     turns 180° (motion.md 4). #174 rendered one snippet in two slots, which
-     is two DOM nodes: the glyph was swapped, never seen turning. -->
-{#snippet sideToggle()}
-  <CommandButton variant="icon" icon="arrow-to-bar" expanded={!sideCollapsed} inside controls="hub-sidebar"
-    label={sideCollapsed ? t('hubSidebarExpand') : t('hubSidebarCollapse')}
-    onclick={() => setSidebar(!sideCollapsed)} />
-{/snippet}
 <div class="hub-root" class:compact class:drawer-open={termOpen && !compact} class:side-collapsed={sideCollapsed && !compact}>
   <div class="cols" bind:this={colsEl}>
-    {#if !compact}<div class="side-toggle-ride">{@render sideToggle()}</div>{/if}
     <!-- The .track is the grid item the reveal pins; the Sidebar inside never
          changes size while the track moves (board #174). -->
     <div class="track side" bind:this={sideTrackEl}>
@@ -1589,9 +1577,6 @@
           <CommandButton variant="icon" icon="menu" label={t('hubProjects')}
             expanded={sideOpen} controls="hub-sidebar" onclick={() => sideOpen = true} />
         {/if}
-        <!-- Collapsed, the riding toggle rests at this header's left edge —
-             where the phone's menu button stands (board #174); the head
-             indents for it (.side-collapsed .chat-head). -->
         <!-- Name and menu stay one tight group (board #32). The name is
              selectable prose; its sibling command owns the full hit target. -->
         <div class="title-group">
@@ -1886,24 +1871,7 @@
      interpolation fall back to the cut this always was. */
   /* --side-open is registered once in app.css (shell-wide since #200). */
   @property --drawer-open { syntax: '<number>'; inherits: false; initial-value: 0; }
-  .cols {
-    flex: 1; display: grid; min-height: 0; --side-open: 1; --drawer-open: 0; position: relative;
-    /* Where the riding toggle stands (board #197), computed HERE because the
-       registered --side-open does not inherit: from the sidebar's top-right
-       corner (its right edge one .side-h inset in) to the header's left inset. */
-    --side-toggle-x: max(var(--menu-item-padding-x), calc(var(--sidebar-w) * var(--side-open) - 10px - var(--control-height)));
-  }
-  /* The toggle rides the partition: its left follows the same --side-open
-     factor as the sidebar's grid track, so it moves with the edge on the same
-     tempo while its glyph turns. It sits on the header row, above both columns. */
-  .side-toggle-ride {
-    position: absolute; z-index: 3; top: calc((var(--page-head-h) - var(--control-height)) / 2);
-    left: var(--side-toggle-x);
-  }
-  /* Collapsed, the header makes room for the resting toggle; the indent moves
-     on the partition's tempo so the title slides with it. */
-  .hub-root .chat-head { transition: padding-left var(--t-move) ease-out; }
-  .hub-root.side-collapsed .chat-head { padding-left: calc(2 * var(--menu-item-padding-x) + var(--control-height)); }
+  .cols { flex: 1; display: grid; min-height: 0; --side-open: 1; --drawer-open: 0; }
   .hub-root:not(.compact) .cols { grid-template-columns: minmax(0, calc(var(--sidebar-w) * var(--side-open))) minmax(280px, 1fr) minmax(0, calc(var(--hub-drawer-w, 520px) * var(--drawer-open))); overflow: hidden; }
   .hub-root.compact .cols { grid-template-columns: minmax(0, 1fr); }
   /* :global — these classes are raised by reveal.ts, not by the markup. */

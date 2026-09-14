@@ -683,30 +683,11 @@ test('the sidebar collapses and expands by the same reveal, from ONE control tha
   // state, flush, pin at the FINAL width, move from 0 (placed first).
   assert.match(source, /const unpin = pinTrack\(sideTrackEl, 'end'\);\s*\n\s*await withReadingAnchor\(\(\) => hubPrefs\.setSidebarCollapsed\(true\)\);\s*\n\s*await moveTrack\(colsEl, '--side-open', 1\);\s*\n\s*unpin\(\);/u);
   assert.match(source, /await withReadingAnchor\(\(\) => hubPrefs\.setSidebarCollapsed\(false\)\);\s*\n\s*const unpin = pinTrack\(sideTrackEl, 'end'\);\s*\n\s*await moveTrack\(colsEl, '--side-open', 0\);\s*\n\s*unpin\(\);/u);
-  // ONE control, ONE node (board #197): a CommandButton with the →| glyph
-  // that turns, rendered once and riding the partition — #174's one snippet in
-  // two slots was two DOM nodes, so the turn was never seen.
-  assert.equal([...source.matchAll(/\{#snippet sideToggle\(\)\}/gu)].length, 1);
-  assert.match(source, /<CommandButton variant="icon" icon="arrow-to-bar" expanded=\{!sideCollapsed\} inside controls="hub-sidebar"\s+label=\{sideCollapsed \? t\('hubSidebarExpand'\) : t\('hubSidebarCollapse'\)\}\s+onclick=\{\(\) => setSidebar\(!sideCollapsed\)\} \/>/u);
-  assert.equal([...source.matchAll(/\{@render sideToggle\(\)\}/gu)].length, 1, 'rendered ONCE');
-  assert.match(source, /\{#if !compact\}<div class="side-toggle-ride">\{@render sideToggle\(\)\}<\/div>\{\/if\}/u, 'inside .cols, regardless of the collapsed state');
+  // The control moved to the rail (board #202): the Hub renders no toggle of
+  // its own; it keeps the animated writer the rail reaches through onReselect.
+  assert.doesNotMatch(source, /sideToggle|side-toggle-ride|arrow-to-bar|--side-toggle-x/u);
   assert.doesNotMatch(source, /collapse=\{/u, 'the sidebar is handed no control');
-});
-
-test('the toggle rides the partition on the grid\'s own factor and the header indents for it at rest (board #197)', () => {
-  // Owner 2026-09-14: "改成类似这种一个展开和折叠的按钮，如果变化后这个按钮 180 度旋转，
-  // 过渡自然一些 →|". Measured before at 1440: open node at x=239, collapsed node
-  // at x=56 — different nodes, the chevron swapped ‹→› with no turn.
-  const ride = source.match(/\.side-toggle-ride \{([^}]+)\}/u)?.[1] ?? '';
-  assert.match(ride, /position: absolute/u);
-  assert.match(ride, /top: calc\(\(var\(--page-head-h\) - var\(--control-height\)\) \/ 2\)/u, 'on the header row');
-  assert.match(ride, /left: var\(--side-toggle-x\)/u);
-  const cols = source.match(/\.cols \{([^}]+)\}/u)?.[1] ?? '';
-  assert.match(cols, /position: relative/u);
-  assert.match(cols, /--side-toggle-x: max\(var\(--menu-item-padding-x\), calc\(var\(--sidebar-w\) \* var\(--side-open\) - 10px - var\(--control-height\)\)\)/u,
-    'computed on .cols — the registered --side-open does not inherit — from the same factor the grid track animates');
-  assert.match(source, /\.hub-root \.chat-head \{ transition: padding-left var\(--t-move\) ease-out; \}/u);
-  assert.match(source, /\.hub-root\.side-collapsed \.chat-head \{ padding-left: calc\(2 \* var\(--menu-item-padding-x\) \+ var\(--control-height\)\); \}/u);
+  assert.match(source, /async function setSidebar\(collapsed\)/u);
 });
 
 test("re-selecting the Hub's rail tab toggles the sidebar (boards #199, #201)", () => {

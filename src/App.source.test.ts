@@ -628,3 +628,14 @@ test('one shell-wide sidebar state: the Terminal page and the system status foll
   assert.equal([...css.matchAll(/@property --side-open \{/gu)].length, 1);
   assert.match(css, /@property --side-open \{ syntax: '<number>'; inherits: false; initial-value: 1; \}/u);
 });
+
+test('THE sidebar toggle lives in the rail, under the brand, on every desktop page (board #202)', () => {
+  // Owner 2026-09-14 17:08: other pages had no toggle; the Hub's riding node
+  // "点上去手感非常怪，感觉卡卡的" — it slid ~190px away from under the pointer on
+  // the click that pressed it — and its glyph was the typed →|.
+  assert.match(source, /<img class="rail-brand"[^>]*\/>\s*\n(?:\s*<!--[\s\S]*?-->\s*\n)?\s*<CommandButton variant="icon" icon="panel-left" expanded=\{!hubPrefs\.sidebarCollapsed\} inside\s+label=\{hubPrefs\.sidebarCollapsed \? t\('hubSidebarExpand'\) : t\('hubSidebarCollapse'\)\}\s+onclick=\{toggleShellSidebar\} \/>/u);
+  assert.match(source, /function toggleShellSidebar\(\) \{\s*\n\s*\(pageReselect\[page\] \?\? \(\(\) => hubPrefs\.setSidebarCollapsed\(!hubPrefs\.sidebarCollapsed\)\)\)\(\);/u,
+    'the same act as a reselect: the page\'s delegate, else the shared state');
+  const style = source.match(/<style>[\s\S]*<\/style>/u)?.[0] ?? '';
+  assert.match(style, /\.rail > :global\(\.command-button\.icon-only\) \{ margin-bottom: 8px; \}/u);
+});

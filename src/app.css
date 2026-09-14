@@ -757,6 +757,11 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 .chev, .flip, .quarter-turn { display: inline-flex; flex: none; transition: transform var(--t-move) ease; }
 .chev.open { transform: rotate(90deg); }
 .flip.on { transform: rotate(180deg); }
+/* A glyph with a `.turn` PART (the panel toggle's inner chevron, #202) keeps
+   its frame still and turns only that part — the same 180° on the same tempo. */
+.flip:has(.turn) { transform: none; }
+.flip .turn { transition: transform var(--t-move) ease; transform-box: fill-box; transform-origin: center; }
+.flip.on .turn { transform: rotate(180deg); }
 .quarter-turn.on { transform: rotate(90deg); }
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes rise-in { from { opacity: 0; transform: translateY(6px); } }
@@ -879,7 +884,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 }
 .skel-wrap { animation: fade-in var(--t-fast) ease-out backwards; animation-delay: 150ms; }
 @media (prefers-reduced-motion: reduce) {
-  .chev, .flip, .quarter-turn, .state-ctl, .pop-layer.ready, .slide-pill.ready { transition: none; }
+  .chev, .flip, .flip .turn, .quarter-turn, .state-ctl, .pop-layer.ready, .slide-pill.ready { transition: none; }
   .appear, .appear-rise, .appear-pop, .side-scrim, .to-tail, .to-tail.news::after,
   .reveal > *, .reveal-tail > *, .skel::after, .skel-wrap { animation: none; }
 }

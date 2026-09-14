@@ -186,46 +186,53 @@ flip measures from under the pointer and the icon SETTLES into its new slot
 on `moveMs()` instead of jumping back and sliding. `transform` is deliberately
 absent from `.rail-btn`'s transition list for the same reason.
 
-### The desktop Hub's project sidebar collapses, from ONE control that turns (2026-09-11, board #174)
+### The desktop primary sidebar collapses from the rail (2026-09-11 #174; revised 2026-09-14 #202)
 
-Owner: "现在左侧侧边栏可以加一个折叠展开的按钮，在左侧边栏右上角的位置，折叠展开最好是有动画，不是直接跳". The Hub's project sidebar (desktop only — the phone has its sheet + scrim) collapses to a 0 track and expands again, both on `--t-move` by the REVEAL technique motion.md principle 8 describes (content pinned at its final width, the grid track's `@property` factor moves; `hub/reveal.ts`). ONE control: a `CommandButton` (`variant="icon"`, `chevron-right`, `expanded={!collapsed}`, `inside`) defined once in Hub as the `sideToggle` snippet and rendered in the sidebar head's right end while open and at the header's left edge — where the phone's menu button stands — while collapsed; the glyph is one chevron that turns 180° (principle 4), never two icons. `inside` keeps the control at rest in both states: standing inside the region it discloses, the visible region is the whole signal, so it does not wear the engaged wash the roster's disclosure (content elsewhere) does — at rest is achromatic. The state is app-wide (`hubPrefs.sidebarCollapsed`, `tmux_hub_sidebar`), not per project: where the project list is, is a property of the window. Collapsed at rest the content is UNREACHABLE, not narrowed — `visibility: hidden` takes it out of sight, tab order and assistive tech; it is visible only while the move uncovers or withdraws it. Measured at 1440: collapse 240→2.9px over 12 moving frames, `.sidebar` box {240} throughout, hidden at rest; expand 0→237px, {240}; with the drawer open the chat column ends exactly where it rests (920 = 920). Guards: `Hub.source.test.ts` (rest factor, hidden rule, pin/anchor/move order both ways, one snippet rendered in two slots), `Sidebar.source.test.ts` (the head carries the handed-in control, no second button species), `hub-prefs.test.ts`, `CommandButton.mount.test.ts` (horizontal chevrons turn; `inside` = no wash).
+The desktop primary sidebar (the Hub's projects, Terminal's sessions and the
+Board's projects; the phone has its sheet + scrim) is one app-wide state:
+`hubPrefs.sidebarCollapsed` / `tmux_hub_sidebar`. Every page is a REVEAL track
+on `--side-open`: its content is pinned at the final width,
+`hub/reveal.ts` moves only the registered factor on `--t-move`, and at rest
+collapsed content is `visibility: hidden` — unreachable, not narrowed.
+The system-status bar retracts with it (#200).
 
-**Revised 2026-09-14 (board #197) — ONE NODE that rides the partition.** Owner:
-"左侧边栏折叠按钮的样式给我改一下，改成类似这种一个展开和折叠的按钮，如果变化后这个按钮 180
-度旋转，过渡自然一些 →|". Measured on the desktop at 1440: #174's one snippet in two
-slots was two DOM NODES — open at x=239 in the sidebar head, collapsed a fresh
-node at x=56 in the header — so the "glyph that turns" was in fact swapped
-(‹ → ›) at another position; no turn was ever visible. Now the toggle is
-rendered ONCE, in `.cols` as `.side-toggle-ride`, absolutely placed on the
-header row (`--page-head-h`) with its left computed on `.cols` from the SAME
-`--side-open` factor the grid track animates (`--side-toggle-x`; computed
-there because the registered property does not inherit): open, its right edge
-one `.side-h` inset in from the sidebar's edge — the sidebar's top-right
-corner #174 asked for; collapsed, the header's own inset
-(`--menu-item-padding-x`), where the phone's menu button stands. It slides
-with the edge on the partition's tempo while its glyph turns 180° — the
-`→|` panel toggle (`Icon` `arrow-to-bar`, a disclosure glyph like the
-chevrons): `|←` while open (collapse to the edge), `→|` collapsed (push out).
-The header indents its title for the resting toggle
-(`.side-collapsed .chat-head` padding-left, same `--t-move ease-out`). The
-sidebar no longer takes a `collapse` snippet. Measured at 1440 (harness): the
-same node throughout (marked before the move), x 202 → 85 (mid, 76°) → 10 at
-0°, header padding 10 → 48, title left 250 → 48; back 10 → 104 (127°) → 202
-at 180°. Guards: `Hub.source.test.ts` (rendered once, the ride rule, the
-factor on `.cols`, the header indent), `Sidebar.source.test.ts` (no handed-in
-control), `CommandButton.source.test.ts` (`arrow-to-bar` turns).
+#174 put the control in the Hub sidebar head; #197 moved one node with the
+partition to make a 180° turn visible. That node existed only on Chat and,
+crucially, moved about 190px away from the pointer on the click that pressed
+it — the owner reported "点上去手感非常怪，感觉卡卡的". Board #202 removes that
+whole mechanism: **THE one control lives in the desktop rail, under the
+brand**, so it is stable under the pointer and present on every page.
+
+The icon is drawn, not the owner's typed `→|`: `Icon`'s `panel-left` is a
+window frame with a left pane and a `.turn` chevron in its content area. The
+frame remains still; the chevron alone turns 180° on `--t-move`: it points
+at the pane while it is open (collapse), away while it is closed (expand).
+It is the normal rail icon command (achromatic at rest, the existing hover /
+press wash), outside the travelling page-tab pill. Its click calls the active
+page's `pageReselect` delegate — the same act as reselecting that rail tab:
+the Hub retains `setSidebar`'s reading-anchor sequence; Terminal and Board
+flip the shared preference and their reveal effects follow. The phone gets no
+rail control because its sheet has its own opener. Owner #202: "除了 chat
+以外，其他几个页面的折叠展开按钮好像还没有" and "现在这个按钮你要重新给我画。不是说把我打的
+那个字符写上去，是给我画一个 icon 呀，对不对？".
+
+Measured at 1440: the rail button stays at x=9/y=48 on Hub, Terminal and
+Board while it changes state; its frame has no transform, chevron 180° → 14°
+mid-turn → 0°. Guards: `App.source.test.ts` (rail location, shell delegate),
+`Hub.source.test.ts` (no local control), `CommandButton.source.test.ts`
+(drawn icon and `.turn` atom).
 
 **A second click on the active rail tab brings the sidebar back (2026-09-14,
 board #199).** Owner: "我应该在左侧的选项卡已经选中二次再点击的时候，也是自动帮我展开侧边栏".
 `switchTab` returns when the target is the current page, so the rail used to
 swallow the click. Now `railActivate` hands the ACTIVE page a "reselect"
 (`pageReselect[page]`), registered by the page the way it registers its back
-chain (`onReselect`); the Hub's TOGGLES the project sidebar through the same
-`setSidebar` the corner control uses — one motion, one state (#199 opened it
-only; #201, owner 14:10 "选中点击也能展开，也能折叠", made it a toggle, and the
-Terminal/Board reselect flips the shared state the same way). Desktop only:
-the phone has no rail, and its sheet has its own opener. Pins:
-`App.source.test.ts`, `Hub.source.test.ts`.
+chain (`onReselect`); the **rail's stable panel control** invokes that same
+delegate. #199 opened it only; #201 (owner 14:10 "选中点击也能展开，也能折叠") made
+a reselect a toggle, and #202 makes the rail icon the direct, all-page way to
+perform the same toggle. Terminal/Board flip the shared state; Hub uses its
+`setSidebar` writer. Desktop only: the phone has no rail, and its sheet has
+its own opener. Pins: `App.source.test.ts`, `Hub.source.test.ts`.
 
 **ONE sidebar state for the whole shell (2026-09-14, board #200).** Owner: "左侧边栏
 收起的时候，底下的系统状态显示也要收起，而且这个折叠收起在不同的页面是同步的，不然我点击chat
@@ -238,9 +245,9 @@ on `<main>`; the Terminal page and the Board are REVEAL tracks on the same
 `--side-open` factor as the Hub — registered ONCE in `app.css` — moved by
 `hub/reveal.ts` (pin at width, gate, hidden at rest) when the state changes
 while they are on screen; the system-status bar retracts to width 0 on
-`--t-move` and is unreachable at rest. The Hub's corner control (#197) and
-the rail reselect on any of the three pages (#199/#201, a toggle) change it —
-`pageReselect.terminal = pageReselect.board = () =>
+`--t-move` and is unreachable at rest. The rail's stable panel control (#202)
+and the rail reselect on any of the three pages (#199/#201, a toggle) change
+it — `pageReselect.terminal = pageReselect.board = () =>
 hubPrefs.setSidebarCollapsed(!hubPrefs.sidebarCollapsed)`. Measured at 1440 on a live server:
 collapse in Chat → Terminal and Board tracks at factor 0, sidebars hidden,
 status bar 1px/hidden, on every page; reselect on Board → `.moving` with the
