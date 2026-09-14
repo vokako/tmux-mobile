@@ -150,6 +150,26 @@ dispose the listener.
 - The `pendingCols/Rows/Ts` server-echo reconciliation in
   `writeToXterm`. Unchanged.
 
+### Two instances, one pane: the one that becomes visible asserts its size (2026-09-14, board #198)
+
+Owner: "从 terminal 的右侧边栏点击 扩展到 terminal 面板后，画面的尺寸不对，应该加一次窗口尺寸的
+设置到新的尺寸". The Hub drawer's Terminal and the Terminal page's Terminal can show
+the SAME pane, and App keeps the page mounted in a hidden layer whose box never
+changes on a tab switch. Each instance sends `resizePane` only from its
+ResizeObserver, and only when its fit differs from its own xterm dims. So:
+page shows codex (136×35) → Hub, drawer re-targets codex and sizes tmux to its
+box (61×35) → Maximize: the page's target is unchanged, its box unchanged, no
+observer tick, fit == dims → nothing sent → tmux stays 61×35 under a 1154px
+box (reproduced on the desktop at 1440 against the live server). The rule:
+**a terminal that becomes visible asserts its size once** — the `visible`
+effect (which already replays the newest frame) calls `doResize({ assert:
+true })`, which sends `resizePane` even when fit equals dims. Symmetric for the
+drawer on the way back. Measured after: maximize with an unchanged target →
+144×53 (that session's metrics); back to the Hub → the drawer's 64×53. The
+equation above holds for whichever instance is on screen; the hidden one stays
+silent (its observer does not fire, and it never asserts). `Terminal.source.test.ts`
+pins the signature, the assert branch and the call in the visible effect.
+
 ## Implementation sketch
 
 ```js

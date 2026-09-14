@@ -319,6 +319,11 @@
     if (!visible) { wasVisible = false; return; }
     if (wasVisible) return;
     wasVisible = true;
+    // Our box did not change while hidden (the page layer keeps its layout),
+    // so no ResizeObserver tick will come — but tmux may now hold another
+    // instance's size for this pane. Assert ours once (owner, 2026-09-14:
+    // "应该加一次窗口尺寸的设置到新的尺寸"; board #198).
+    doResizeRef?.({ assert: true });
     if (!term || lastContent == null) return;
     if (termAtBottom) {
       writeToXterm(lastContent, lastCursor);
@@ -1335,7 +1340,10 @@
       }, 120);
     }
 
-    function doResize() {
+    // `assert`: send the size even when it equals ours — another instance of
+    // this pane (the Hub drawer's / the page's) may have sized tmux to ITS box
+    // while we were hidden and our box never changed (board #198).
+    function doResize({ assert = false } = {}) {
       syncCompactLineGeometry();
       // Remember the height the terminal has with NO keyboard. While the
       // keyboard is up and we are in overlay mode the element is pinned to this
@@ -1348,6 +1356,7 @@
       if (!fit) return;
       window.__dbg?.(`resize: fit=${fit.cols}x${fit.rows} cur=${term.cols}x${term.rows} elH=${termEl.clientHeight}`);
       if (fit.cols === term.cols && fit.rows === term.rows) {
+        if (assert) queuePaneResize(fit.cols, fit.rows);
         // Same dims but cell metrics may have changed (font size); refresh
         // selection UI either way.
         if (selection) recomputeSelUI();

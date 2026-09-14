@@ -133,7 +133,7 @@ test('the keyboard is an overlay for agent TUIs, not a resize', () => {
 test('the pinned height is captured only while the keyboard is down', () => {
   // Capturing it with the keyboard up would pin the SHRUNK height, which is the
   // bug rather than the fix.
-  const body = /function doResize\(\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1];
+  const body = /function doResize\(\{ assert = false \} = \{\}\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1];
   assert.ok(body, 'doResize must exist');
   assert.match(
     body,
@@ -470,4 +470,18 @@ test('input never retargets: each queued key carries its pane; the paste fallbac
   assert.match(source, /const forThisPane = \(pane, note\) => \{ if \(pane === target\) note\(\); \};/u);
   assert.match(source, /onSuccess: \(pane\) => forThisPane\(pane, noteSendSuccess\),\s*onFailure: \(pane\) => forThisPane\(pane, \(\) => noteSendFailure\('key'\)\),/u);
   assert.match(source, /onFailure: \(kind, pane\) => forThisPane\(pane, \(\) => noteSendFailure\(kind\)\),/u);
+});
+
+test('a terminal that becomes visible re-asserts its pane size, even when its own dims did not change (board #198)', () => {
+  // Owner 2026-09-14: "从 terminal 的右侧边栏点击 扩展到 terminal 面板后，画面的尺寸不对，
+  // 应该加一次窗口尺寸的设置到新的尺寸". Two instances show one pane (the Hub
+  // drawer's, the page's in its hidden layer); each sends resizePane only from
+  // its ResizeObserver when fit != dims. Maximize: the drawer had sized tmux to
+  // its box; the page's box never changed, so nothing was sent and tmux kept
+  // the drawer's cols×rows.
+  assert.match(source, /function doResize\(\{ assert = false \} = \{\}\)/u);
+  assert.match(source, /if \(fit\.cols === term\.cols && fit\.rows === term\.rows\) \{\s*\n\s*if \(assert\) queuePaneResize\(fit\.cols, fit\.rows\);/u,
+    'same dims: the size is still SENT when asserting');
+  assert.match(source, /wasVisible = true;\s*\n(?:\s*\/\/[^\n]*\n)*\s*doResizeRef\?\.\(\{ assert: true \}\);\s*\n\s*if \(!term \|\| lastContent == null\) return;/u,
+    'the visible effect asserts before it replays the frame');
 });
