@@ -84,3 +84,7 @@ test('icon-command ink clears 3:1 on normal and selected cards in both themes (#
     }
   }
 });
+
+test('the →| panel toggle is a disclosure glyph that turns like a chevron (board #197)', () => {
+  assert.match(source, /icon\.startsWith\('chevron-'\) \|\| icon === 'arrow-to-bar'/u);
+});

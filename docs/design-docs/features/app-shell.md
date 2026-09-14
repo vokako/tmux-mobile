@@ -190,6 +190,31 @@ absent from `.rail-btn`'s transition list for the same reason.
 
 Owner: "现在左侧侧边栏可以加一个折叠展开的按钮，在左侧边栏右上角的位置，折叠展开最好是有动画，不是直接跳". The Hub's project sidebar (desktop only — the phone has its sheet + scrim) collapses to a 0 track and expands again, both on `--t-move` by the REVEAL technique motion.md principle 8 describes (content pinned at its final width, the grid track's `@property` factor moves; `hub/reveal.ts`). ONE control: a `CommandButton` (`variant="icon"`, `chevron-right`, `expanded={!collapsed}`, `inside`) defined once in Hub as the `sideToggle` snippet and rendered in the sidebar head's right end while open and at the header's left edge — where the phone's menu button stands — while collapsed; the glyph is one chevron that turns 180° (principle 4), never two icons. `inside` keeps the control at rest in both states: standing inside the region it discloses, the visible region is the whole signal, so it does not wear the engaged wash the roster's disclosure (content elsewhere) does — at rest is achromatic. The state is app-wide (`hubPrefs.sidebarCollapsed`, `tmux_hub_sidebar`), not per project: where the project list is, is a property of the window. Collapsed at rest the content is UNREACHABLE, not narrowed — `visibility: hidden` takes it out of sight, tab order and assistive tech; it is visible only while the move uncovers or withdraws it. Measured at 1440: collapse 240→2.9px over 12 moving frames, `.sidebar` box {240} throughout, hidden at rest; expand 0→237px, {240}; with the drawer open the chat column ends exactly where it rests (920 = 920). Guards: `Hub.source.test.ts` (rest factor, hidden rule, pin/anchor/move order both ways, one snippet rendered in two slots), `Sidebar.source.test.ts` (the head carries the handed-in control, no second button species), `hub-prefs.test.ts`, `CommandButton.mount.test.ts` (horizontal chevrons turn; `inside` = no wash).
 
+**Revised 2026-09-14 (board #197) — ONE NODE that rides the partition.** Owner:
+"左侧边栏折叠按钮的样式给我改一下，改成类似这种一个展开和折叠的按钮，如果变化后这个按钮 180
+度旋转，过渡自然一些 →|". Measured on the desktop at 1440: #174's one snippet in two
+slots was two DOM NODES — open at x=239 in the sidebar head, collapsed a fresh
+node at x=56 in the header — so the "glyph that turns" was in fact swapped
+(‹ → ›) at another position; no turn was ever visible. Now the toggle is
+rendered ONCE, in `.cols` as `.side-toggle-ride`, absolutely placed on the
+header row (`--page-head-h`) with its left computed on `.cols` from the SAME
+`--side-open` factor the grid track animates (`--side-toggle-x`; computed
+there because the registered property does not inherit): open, its right edge
+one `.side-h` inset in from the sidebar's edge — the sidebar's top-right
+corner #174 asked for; collapsed, the header's own inset
+(`--menu-item-padding-x`), where the phone's menu button stands. It slides
+with the edge on the partition's tempo while its glyph turns 180° — the
+`→|` panel toggle (`Icon` `arrow-to-bar`, a disclosure glyph like the
+chevrons): `|←` while open (collapse to the edge), `→|` collapsed (push out).
+The header indents its title for the resting toggle
+(`.side-collapsed .chat-head` padding-left, same `--t-move ease-out`). The
+sidebar no longer takes a `collapse` snippet. Measured at 1440 (harness): the
+same node throughout (marked before the move), x 202 → 85 (mid, 76°) → 10 at
+0°, header padding 10 → 48, title left 250 → 48; back 10 → 104 (127°) → 202
+at 180°. Guards: `Hub.source.test.ts` (rendered once, the ride rule, the
+factor on `.cols`, the header indent), `Sidebar.source.test.ts` (no handed-in
+control), `CommandButton.source.test.ts` (`arrow-to-bar` turns).
+
 ### The chosen tab is marked by ONE highlight that travels (2026-09-04, #86)
 
 **Current scope:** the desktop rail retains its travelling wash. The phone

@@ -357,6 +357,7 @@ button:disabled {
 
 :root {
   --sidebar-w: 240px;
+  --page-head-h: 42px; /* a page header's row; the Hub's riding sidebar toggle sits on it (#197) */
   /* Backend IDENTITY colours — who is who, at a glance, on the avatar of an
      agent whose backend has no icon. Theme-independent (identity, not state:
      the state language is --status-* / .live-dot). Named by `backendColor()`
@@ -520,7 +521,7 @@ button:disabled {
 
 .page-head {
   display: flex; align-items: center; gap: 10px;
-  min-height: 42px; padding: 6px 16px; box-sizing: border-box;
+  min-height: var(--page-head-h); padding: 6px 16px; box-sizing: border-box;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }

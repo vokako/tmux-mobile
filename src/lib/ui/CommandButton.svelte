@@ -29,9 +29,10 @@
   const compact = $derived(iconOnly || variant === 'icon');
   const solid = $derived(variant === 'primary' || (variant === 'danger' && destructiveConfirm));
   const engaged = $derived((variant === 'icon' || (variant === 'secondary' && iconOnly)) && (pressed === true || (expanded === true && !inside)));
-  // A disclosure chevron turns instead of swapping (motion.md 4) — vertical
-  // for a roster, horizontal for a side partition (board #174).
-  const disclosure = $derived(!pending && expanded !== undefined && icon.startsWith('chevron-'));
+  // A disclosure glyph turns instead of swapping (motion.md 4) — a chevron,
+  // vertical for a roster, or the →| panel toggle of a side partition
+  // (boards #174, #197).
+  const disclosure = $derived(!pending && expanded !== undefined && (icon.startsWith('chevron-') || icon === 'arrow-to-bar'));
 </script>
 
 <button type="button" class="command-button"

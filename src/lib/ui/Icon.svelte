@@ -45,6 +45,10 @@
     <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>
   {:else if name === 'chevron-right'}
     <polyline points="9 18 15 12 9 6"/>
+  {:else if name === 'arrow-to-bar'}
+    <!-- →| : a panel toggle that turns 180° between "out to the edge" and
+         "back to the edge" (owner, 2026-09-14, board #197). -->
+    <line x1="3" y1="12" x2="14" y2="12"/><polyline points="9 7 14 12 9 17"/><line x1="20" y1="5" x2="20" y2="19"/>
   {:else if name === 'chevron-down'}
     <polyline points="6 9 12 15 18 9"/>
   {:else if name === 'chevron-up'}
