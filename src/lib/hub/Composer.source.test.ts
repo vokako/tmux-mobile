@@ -164,7 +164,13 @@ test('measured signature actions reuse shared commands without hardcoded avoidan
   assert.match(source, /<div class="composer-actions" bind:this=\{actionsEl\}>/u);
   assert.match(rule('.composer-actions'), /display: flex/u);
   assert.match(rule('.composer-actions'), /position: absolute; right: 0; bottom: 0/u);
-  assert.match(rule('.compose-shell'), /border-radius: 16px/u);
+  // #203: an input's radius and the row content inset — 16px on a 32px desktop
+  // shell was a semicircle (owner: "在电脑上这个输入框左边是一个半圆").
+  assert.match(rule('.compose-shell'), /border-radius: var\(--ui-radius-control\)/u);
+  assert.match(rule('.compose-shell'), /padding: var\(--tool-inset-block\) var\(--menu-item-padding-x\)/u);
+  assert.match(source, /const paintInset = parseFloat\(actionsStyle\.getPropertyValue\('--control-paint-inset'\)\) \|\| 0;/u);
+  assert.match(source, /const inkInset = Math\.max\(0, \(\(parseFloat\(style\.lineHeight\) \|\| 0\) - \(parseFloat\(style\.fontSize\) \|\| 0\)\) \/ 2\);/u);
+  assert.match(source, /controlsWidth, controlsHeight, gap, empty, paintInset, inkInset,/u);
   const appCss = await readFile(new URL('../../app.css', import.meta.url), 'utf8');
   assert.doesNotMatch(appCss, /\.compose-shell\b/u, 'native round corners do not opt into the shared squircle list');
   assert.doesNotMatch(source, /corner-shape:/u, 'this property stays in its shared owner; the Svelte CSS service does not support it yet');

@@ -68,12 +68,27 @@ ARIA-hidden; it cannot add scrollable space and is removed on unmount.
 `signatureLayout` in hub-composer.ts owns the allocation decision from those
 measured boxes and the actual command cluster dimensions. If the bottom-right
 command rectangle is clear, it shares the last line. A real intersection
-reserves one command-height band below the textarea. Check the whole rectangle:
-a 44px touch target can hit a long preceding line even when the last line is
-short. At the scroll ceiling the commands keep their own bottom band outside
+reserves one command-height band below the textarea. What collides is INK
+with PAINT (board #203, owner 2026-09-17: "到了第二行 这 3 个按钮好像就被撑到下一行了
+中间多出了空白的一行"): a line's rectangle carries its half-leading
+(`inkInset` = (line-height − font-size) / 2) and a command's hit box extends
+`--control-paint-inset` beyond what it paints. Measured at 1440: a 28px pointer
+command beside 20.25px lines dipped 2px of hit box into the preceding line's
+leading — nothing visible touched — and every two-line draft with a full
+first line reserved a 28px band; now `reserved` is 0 there, still 28 when the
+last line runs under the commands (right 1101 > 1068). A 44px touch command's
+paint (inset 6) does reach the preceding line's ink, so the phone keeps its
+band — the #186 rule that a tall touch target can hit a long preceding line
+even when the last line is short still holds, measured against paint. At the scroll ceiling the commands keep their own bottom band outside
 the scrolling text; no typed line loses a permanent right column. Only an
 empty placeholder gives width to the controls, and the empty field stays
 one native control high.
+
+The shell wears an input's radius (`--ui-radius-control`) and the row content
+inset (`--menu-item-padding-x`) since #203: its 16px radius on a 32px desktop
+shell was a full semicircle and the first glyph, 6px from the border, read as
+squeezed into it (owner: "尤其是文字在靠近边缘的位置 感觉被挤到了半圆里面一样"); the
+50px phone shell had read as a rounded rectangle all along.
 
 This explicitly reverses the #168/#180 no-mirror/side-column layout rule:
 the mirror was unnecessary for a separate row, but is necessary for the

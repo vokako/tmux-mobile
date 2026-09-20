@@ -96,13 +96,16 @@
       el.style.overflowY = 'hidden';
       const style = getComputedStyle(el);
       const controlsWidth = actionsEl.offsetWidth, controlsHeight = actionsEl.offsetHeight;
-      const gap = parseFloat(getComputedStyle(actionsEl).columnGap) || 0;
+      const actionsStyle = getComputedStyle(actionsEl);
+      const gap = parseFloat(actionsStyle.columnGap) || 0;
+      const paintInset = parseFloat(actionsStyle.getPropertyValue('--control-paint-inset')) || 0;
+      const inkInset = Math.max(0, ((parseFloat(style.lineHeight) || 0) - (parseFloat(style.fontSize) || 0)) / 2);
       const empty = !el.value;
       if (empty && measureValue) measureValue.data = '';
       const layout = signatureLayout({
         width: parseFloat(style.width) || el.clientWidth, naturalHeight: el.scrollHeight,
         maxHeight: parseFloat(style.maxHeight) || Infinity,
-        controlsWidth, controlsHeight, gap, empty,
+        controlsWidth, controlsHeight, gap, empty, paintInset, inkInset,
         textRects: empty ? [] : textBoxes(el, style),
       });
       if (empty) el.style.paddingRight = `${controlsWidth + gap}px`;
@@ -367,9 +370,14 @@
     position: relative; z-index: 15; flex: none; min-width: 0;
     padding: 0 12px 10px;
   }
+  /* An input's radius (--ui-radius-control), not 16px: on a 32px desktop
+     shell 16px was a full semicircle and text near the edge read as squeezed
+     into it (owner, 2026-09-17: "在电脑上这个输入框左边是一个半圆…感觉被挤到了半圆里面
+     一样"; board #203). The inline inset is the row content inset so the first
+     glyph stands clear of the corner. */
   .compose-shell {
-    position: relative; border: 1px solid var(--border); border-radius: 16px;
-    background: var(--bubble-in); padding: var(--tool-inset-block) var(--tool-inset-inline);
+    position: relative; border: 1px solid var(--border); border-radius: var(--ui-radius-control);
+    background: var(--bubble-in); padding: var(--tool-inset-block) var(--menu-item-padding-x);
   }
   .compose-shell:focus-within { border-color: var(--accent-line); }
   .compose-shell.cmd { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 6%, var(--bubble-in)); }

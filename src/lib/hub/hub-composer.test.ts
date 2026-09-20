@@ -28,6 +28,26 @@ test('a tall touch target checks the previous line too (#186)', () => {
   }), { inputHeight: 84, reserved: 44, overflow: false, collision: true });
 });
 
+test('ink collides with paint: a pointer command beside a two-line draft shares the last line (board #203)', () => {
+  // Owner 2026-09-17: "到了第二行 这 3 个按钮好像就被撑到下一行了 中间多出了空白的一行".
+  // Desktop: 28px commands (paint inset 2) beside 20.25px lines (ink inset
+  // 3.375): the first line's RECT dips 2px into the hit box, its ink does not.
+  const desktop = {
+    width: 1156, naturalHeight: 48, maxHeight: 240, controlsWidth: 88, controlsHeight: 28, gap: 2,
+    paintInset: 2, inkInset: 3.375,
+    textRects: [{ left: 0, right: 1140, top: 3.875, bottom: 24.125 }, { left: 0, right: 40, top: 24.125, bottom: 44.375 }],
+  };
+  assert.deepEqual(signatureLayout(desktop), { inputHeight: 48, reserved: 0, overflow: false, collision: false });
+  assert.equal(signatureLayout({ ...desktop, paintInset: 0, inkInset: 0 }).reserved, 28, 'negative control: hit box vs rect reserved the empty band');
+  // A last line that runs under the commands still reserves the band.
+  assert.equal(signatureLayout({ ...desktop, textRects: [desktop.textRects[0]!, { left: 0, right: 1101, top: 24.125, bottom: 44.375 }] }).reserved, 28);
+  // Touch: a 44px command's paint (inset 6) does reach the previous line's ink.
+  assert.equal(signatureLayout({
+    width: 320, naturalHeight: 64.25, maxHeight: 240, controlsWidth: 136, controlsHeight: 44, gap: 2, paintInset: 6, inkInset: 3.375,
+    textRects: [{ left: 0, right: 310, top: 11.875, bottom: 32.125 }, { left: 0, right: 40, top: 32.125, bottom: 52.375 }],
+  }).reserved, 44, 'the phone keeps its band (#186)');
+});
+
 test('scroll-capped drafts keep full width and a separate bottom action band (#186)', () => {
   const layout = signatureLayout({
     width: 320, naturalHeight: 600, maxHeight: 240, controlsWidth: 136, controlsHeight: 44, gap: 2,
