@@ -36,7 +36,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { stateDotColor, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, unreadSenders, stoppedAgents, slashCommand, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
+  import { stateDotColor, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, pickDrawerAgent, addressed, unreadSenders, stoppedAgents, slashCommand, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
   import { resolvePathRef } from '../core/path-links.ts';
   import { ALL_TARGET, attachmentBody, attachToken, busyTargetsFor } from './hub-composer.ts';
   import { walkFeedGap } from './hub-history.ts';
@@ -345,8 +345,10 @@
     // The old room's pane must never leak into this one's terminal partition
     // — and the unfold is a transient reading of THAT room's bar (board #92).
     termTarget = ''; termCommand = ''; winsExpanded = false;
+    // Seat the recipient's pane (board #209): the card the user left selected
+    // and the pane beside it are ONE choice — same rule as openDrawer/#91.
     if (dv === 'term') {
-      const pick = agents.find((x) => x.managed) ?? agents[0];
+      const pick = pickDrawerAgent(agents, recipient);
       if (pick) pickWindow(pick);
     }
     // Entering a room lands at its tail, cached or not — a parked scrollTop
@@ -365,9 +367,9 @@
     }
     // A restored terminal partition may have had NO roster to pick from (a
     // first visit after reload restores before any cache exists) — seat it
-    // once the fresh roster is in.
+    // once the fresh roster is in, beside the recipient (#209).
     if (selected === session && termOpen && drawerView === 'term' && !termTarget) {
-      const pick = agents.find((x) => x.managed) ?? agents[0];
+      const pick = pickDrawerAgent(agents, recipient);
       if (pick) pickWindow(pick);
     }
   }
@@ -880,11 +882,9 @@
 
   async function openDrawer(a = null) {
     // No explicit agent → the one you are TALKING TO (board #76: "应该优先跳转到
-    // 当前所选的 agent 的 terminal window"), then the first managed, then anything.
-    const pick = a
-      ?? agents.find((x) => x.managed && x.name === recipient)
-      ?? agents.find((x) => x.managed)
-      ?? agents[0];
+    // 当前所选的 agent 的 terminal window"), then the first managed, then anything
+    // — pickDrawerAgent, the one definition every seat of the pane shares (#209).
+    const pick = a ?? pickDrawerAgent(agents, recipient);
     if (pick) {
       const p = panes.find((p) => p.session === selected && p.window === pick.window && p.active)
         ?? panes.find((p) => p.session === selected && p.window === pick.window);

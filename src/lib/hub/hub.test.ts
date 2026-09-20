@@ -2,7 +2,7 @@ import test from 'node:test';
 import { ALL_TARGET } from './hub-composer.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
+import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 import { sortAgentsForRoster } from './hub.ts';
 
@@ -462,6 +462,24 @@ test('pickLead: an explicit ROOM choice is kept; only "nobody chose" seats a lea
   assert.equal(pickLead(agents, [], null), 'dev', 'nobody chose → the rule seats a lead');
   assert.equal(pickLead(agents, []), 'dev', 'absent is the same as null');
   assert.equal(pickLead([ag({ name: 'solo' })], [], ''), '', 'even a one-agent room, once the user said so');
+});
+
+test('pickDrawerAgent: the recipient\'s pane when the recipient is a named managed agent, else the old default (#209)', () => {
+  // Owner 2026-09-20: "选中的 agent card 好像保留了，但是右边侧边栏对应的 terminal 好像
+  // 没有保留到我选的 agent，这样左右不同步了" — the room-switch restore picked the
+  // first managed agent on its own; now every seat of the pane asks this.
+  const shell = ag({ name: 'sh', window: 0, managed: false });
+  const dev = ag({ name: 'dev', window: 1 });
+  const qa = ag({ name: 'qa', window: 2 });
+  const agents = [shell, dev, qa];
+  assert.equal(pickDrawerAgent(agents, 'qa'), qa, 'the selected card and the pane beside it are one choice');
+  assert.equal(pickDrawerAgent(agents, 'dev'), dev);
+  for (const nobody of ['', ALL_TARGET, 'gone']) {
+    assert.equal(pickDrawerAgent(agents, nobody), dev, `no single recipient (${JSON.stringify(nobody)}) → the first managed agent`);
+  }
+  assert.equal(pickDrawerAgent(agents, 'sh'), dev, 'an unmanaged window is never the recipient\'s pane');
+  assert.equal(pickDrawerAgent([shell], 'dev'), shell, 'no managed agent at all → anything');
+  assert.equal(pickDrawerAgent([], 'dev'), undefined);
 });
 
 test('pickLead: a saved all choice survives roster changes, including an empty roster (#171)', () => {

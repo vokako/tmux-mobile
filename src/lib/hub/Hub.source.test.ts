@@ -24,6 +24,17 @@ test('All menu actions keep their opening identity while items follow live state
 const rule = (selector: string) =>
   source.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
 
+test('whose pane the partition shows has ONE definition: pickDrawerAgent, at every seat (#209)', () => {
+  // Owner 2026-09-20: "选中的 agent card 好像保留了，但是右边侧边栏对应的 terminal 好像没有
+  // 保留到我选的 agent" — the room-switch restore and the late seat chose the
+  // first managed agent themselves while openDrawer/#91 followed the recipient.
+  assert.match(source, /import \{[^}]*\bpickDrawerAgent\b[^}]*\} from '\.\/hub\.ts'/u);
+  assert.equal([...source.matchAll(/pickDrawerAgent\(agents, recipient\)/gu)].length, 3,
+    'openDrawer, the room-switch restore and the late seat after a fresh roster');
+  assert.doesNotMatch(source, /agents\.find\(\(x\) => x\.managed\) \?\? agents\[0\]/u, 'no private copy of the rule');
+  assert.doesNotMatch(source, /agents\.find\(\(x\) => x\.managed && x\.name === recipient\)/u);
+});
+
 test('Watch always selects the terminal view and shares one route between menu and card (#173)', () => {
   assert.match(source, /function watchAgent\(agent\) \{\s*drawerView = 'term';\s*openDrawer\(agent\);/u);
   assert.match(source, /if \(a\) watchAgent\(a\)/u, '#180: Watch is the existing menu verb, not a reserved card slot');

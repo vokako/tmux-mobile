@@ -182,6 +182,21 @@ export function pickLead(
   return managed.slice().sort((a, b) => a.window - b.window)[0]!.name;
 }
 
+/** Whose pane the terminal partition shows — ONE definition (board #209).
+ * The recipient's, when the recipient is a named managed agent (#76: "应该优先
+ * 跳转到当前所选的 agent 的 terminal window"); otherwise (room, ALL, nobody) the
+ * first managed agent, then anything. `openDrawer`, `setRecipient`'s retarget
+ * (#91), the room-switch restore and the late seat after a fresh roster all
+ * ask this — the last two used to pick the first managed agent on their own,
+ * so returning to a room showed the selected card beside another agent's pane
+ * (owner, 2026-09-20: "选中的 agent card 好像保留了，但是右边侧边栏对应的 terminal
+ * 好像没有保留到我选的 agent，这样左右不同步了"). */
+export function pickDrawerAgent(agents: readonly HubAgent[], recipient: string): HubAgent | undefined {
+  return (recipient && recipient !== ALL_TARGET ? agents.find((a) => a.managed && a.name === recipient) : undefined)
+    ?? agents.find((a) => a.managed)
+    ?? agents[0];
+}
+
 /** Busy first, then newest state edge; window order breaks ties (#168). */
 export function sortAgentsForRoster(agents: readonly HubAgent[]): HubAgent[] {
   const busy = new Set(busyTargetsFor(ALL_TARGET, agents));
