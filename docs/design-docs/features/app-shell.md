@@ -278,7 +278,12 @@ at y=81 (8px gap), pill 34×32 at y=81/117 as Chat/Terminal are chosen and
 never over the toggle (bottom 66); rest ink `rgba(26,26,46,0.35)` =
 `--text3`, hover `rgb(26,26,46)` = `--text`; chevron `matrix(-1,0,0,-1)` ↔
 `none` across a collapse and back. Pins: `App.source.test.ts` (#202 pin
-updated, #215 pin).
+updated, #215 pin). Review of #215 also fixed the chevron's DIRECTION: the
+base `panel-left` polyline pointed left, and `.flip.on` (sidebar open) turned
+it to point right — the reverse of the rule above and of the common
+convention. The base now points right (closed = "expand"), so the open
+state turns it left, at the pane (measured: open `<`, closed `>`); pin in
+`CommandButton.source.test.ts`.
 
 ### The chosen tab is marked by ONE highlight that travels (2026-09-04, #86)
 

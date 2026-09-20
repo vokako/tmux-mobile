@@ -98,8 +98,8 @@ test('icon-command ink clears 3:1 on normal and selected cards in both themes (#
 test('the panel toggle is a disclosure glyph whose inner chevron alone turns (boards #197 → #202)', async () => {
   assert.match(source, /icon\.startsWith\('chevron-'\) \|\| icon === 'panel-left'/u);
   const icon = await readFile(new URL('./Icon.svelte', import.meta.url), 'utf8');
-  assert.match(icon, /name === 'panel-left'[\s\S]*?<rect x="3" y="4" width="18" height="16" rx="2"\/><line x1="9" y1="4" x2="9" y2="20"\/>\s*<polyline class="turn" points="16\.5 9\.5 14 12 16\.5 14\.5"\/>/u,
-    'a drawn window with its left pane, the chevron a .turn part');
+  assert.match(icon, /name === 'panel-left'[\s\S]*?<rect x="3" y="4" width="18" height="16" rx="2"\/><line x1="9" y1="4" x2="9" y2="20"\/>\s*<polyline class="turn" points="14 9\.5 16\.5 12 14 14\.5"\/>/u,
+    'a drawn window with its left pane, the chevron a .turn part — base points RIGHT (closed = expand); .on turns it to the pane (#215)');
   assert.doesNotMatch(icon, /arrow-to-bar/u, 'the typed →| is gone');
   const css = await readFile(new URL('../../app.css', import.meta.url), 'utf8');
   assert.match(css, /\.flip:has\(\.turn\) \{ transform: none; \}\s*\n\.flip \.turn \{ transition: transform var\(--t-move\) ease; transform-box: fill-box; transform-origin: center; \}\s*\n\.flip\.on \.turn \{ transform: rotate\(180deg\); \}/u);
