@@ -394,6 +394,10 @@ pub(crate) fn kiro_reply_from_session(jsonl: &str) -> Option<String> {
 
 /// Locate and read the session's reply — `sessions_root` is `~/.kiro/sessions`
 /// in production and a temp dir in tests. `None` when nothing is found.
+/// Desktop only, like the rest of the spawn/observe surface: the mobile shell
+/// never reads an agent's session store (the Android build broke on the
+/// desktop-only `Path` import, 2026-09-20, the first APK after #207).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn session_reply(sessions_root: &Path, session_id: &str) -> Option<String> {
     if session_id.is_empty() || session_id.contains(['/', '\\']) || session_id.starts_with('.') {
         return None;
