@@ -19,6 +19,11 @@
      * second layer of the same hover. Hit box, focus ring, pending and
      * disabled are unchanged; meaningless with `primary`/solid paint. */
     bare?: boolean;
+    /** The ONE circular command: the composer's Send (owner, 2026-09-20, board
+     * #218: "除了 agent 自己的原型 logo，发送按钮以外，都要圆角矩形的按钮设计"). Every
+     * other command — icon or text, quiet or solid — is a rounded rectangle on
+     * `--ui-radius-control`. */
+    round?: boolean;
     controls?: string;
     hasPopup?: 'menu' | 'dialog' | 'listbox';
     disabled?: boolean;
@@ -28,7 +33,7 @@
   } & ({ pending?: false; icon?: string } | { pending: boolean; icon: string });
   let {
     label, icon = '', variant = 'secondary', iconOnly = false,
-    pressed, expanded, inside = false, bare = false, controls, hasPopup,
+    pressed, expanded, inside = false, bare = false, round = false, controls, hasPopup,
     disabled = false, pending = false, destructiveConfirm = false,
     onclick = () => {}, element = $bindable(null),
   }: Props = $props();
@@ -43,7 +48,7 @@
 
 <button type="button" class="command-button"
   class:primary={solid} class:secondary={variant === 'secondary'}
-  class:danger={variant === 'danger'} class:icon-only={compact} class:solid class:bare={bare && !solid} class:pending class:engaged
+  class:danger={variant === 'danger'} class:icon-only={compact} class:solid class:bare={bare && !solid} class:round class:pending class:engaged
   disabled={disabled || pending} aria-label={label} aria-busy={pending || undefined}
   aria-pressed={pressed} aria-expanded={expanded} aria-controls={controls} aria-haspopup={hasPopup}
   bind:this={element}
@@ -61,7 +66,7 @@
   .command-button {
     position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; gap: 8px;
     box-sizing: border-box; height: var(--control-height); min-width: var(--control-height);
-    padding: 0 12px; border: 0; border-radius: var(--ui-radius-pill);
+    padding: 0 12px; border: 0; border-radius: var(--ui-radius-control);
     background: transparent; color: var(--text); cursor: pointer; letter-spacing: 0;
     font: 500 var(--fs-ui)/var(--control-line-height) var(--font-display);
     transition: color var(--t-fast);
@@ -69,11 +74,13 @@
   }
   .command-button::before {
     content: ''; position: absolute; inset: var(--control-paint-inset) 0;
-    border-radius: inherit; background: var(--command-paint, transparent); pointer-events: none;
+    border-radius: var(--control-paint-radius); background: var(--command-paint, transparent); pointer-events: none;
     box-shadow: inset 0 0 0 100px var(--command-overlay, transparent);
     transition: background var(--t-fast), box-shadow var(--t-fast);
   }
   .secondary { --command-paint: var(--control-surface); }
+  /* Buttons are rounded rectangles (board 218); the composer's Send alone stays a circle. */
+  .round, .round::before { border-radius: var(--ui-radius-pill); }
   .icon-only { width: var(--control-height); padding: 0; }
   .icon-only::before { inset: var(--control-paint-inset); }
   .danger { color: var(--danger-ink); }

@@ -775,13 +775,14 @@
     flex-shrink: 0;
   }
   .icon-btn {
-    /* Local override keeps only the touch SIZE and pill shape; the skin is
-       the shared borderless grammar (owner, 2026-08-28). */
+    /* Local override keeps only the touch SIZE; the skin is the shared
+       borderless grammar (owner, 2026-08-28) and the shape the shared button
+       radius (board #218: every button a rounded rectangle). */
     flex-shrink: 0;
     width: var(--ui-control-height);
     height: var(--ui-control-height);
     padding: 0;
-    border-radius: var(--ui-radius-pill);
+    border-radius: var(--ui-radius-control);
     color: var(--text3);
   }
   .icon-btn:active {

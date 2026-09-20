@@ -58,3 +58,60 @@ test('the scale itself is six chrome steps plus the named exceptions', async () 
   // The control alias must resolve to a step, never to its own number.
   assert.match(css, /--ui-font-control:\s*var\(--fs-[a-z]+\)/u);
 });
+
+
+/** Where a full-round shape (`--ui-radius-pill`, `999px`, `50%`) may still
+ *  appear, BY REASON (board #218, owner 2026-09-20: "这个图标按钮应该都用圆角矩形，
+ *  不要用圆圈…除了 agent 自己的原型 logo，发送按钮以外，都要圆角矩形的按钮设计"). Buttons
+ *  are rounded rectangles on `--ui-radius-control`; a circle or capsule is
+ *  one of these, or it is a regression. */
+const ROUND_ALLOWED: { file: string; match: string; why: string }[] = [
+  { file: 'app.css', match: '--ui-radius-pill: 999px;', why: 'the token itself' },
+  { file: 'app.css', match: '.subtle-scroll::-webkit-scrollbar-thumb', why: 'scrollbar thumb' },
+  { file: 'app.css', match: '.to-tail.news::after', why: 'the news dot on the to-tail button' },
+  { file: 'app.css', match: '.side-win-dot', why: 'a dot' },
+  { file: 'app.css', match: '.proj-row .dot', why: 'a dot' },
+  { file: 'lib/app/Preferences.svelte', match: '.addr-dot', why: 'a dot' },
+  { file: 'lib/ui/CommandButton.svelte', match: '.round, .round::before {', why: 'the composer Send — the one circular command' },
+  { file: 'lib/ui/Switch.svelte', match: '', why: 'the switch knob and track' },
+  { file: 'lib/ui/OperationFeedback.svelte', match: 'progress', why: 'a progress bar' },
+  { file: 'lib/ui/AgentChip.svelte', match: '', why: 'a chip (membership/destination), not a button' },
+  { file: 'lib/hub/Feed.svelte', match: '.day-pill', why: 'a date tag' },
+  { file: 'lib/hub/Feed.svelte', match: '.filter-pill', why: 'a state tag' },
+  { file: 'lib/hub/Feed.svelte', match: 'width: 5px; height: 5px', why: 'a dot' },
+  { file: 'lib/hub/Feed.svelte', match: '.s-live', why: 'a dot' },
+  { file: 'lib/hub/AgentsPage.svelte', match: 'object-fit: cover', why: 'an avatar' },
+  { file: 'lib/hub/Roster.svelte', match: '.ava', why: 'an avatar' },
+  { file: 'lib/hub/Roster.svelte', match: '.unread', why: 'a dot' },
+  { file: 'lib/hub/Roster.svelte', match: '.ctx-ring', why: 'the context ring around an avatar' },
+  { file: 'lib/hub/hub-atoms.css', match: '.st', why: 'the status dot' },
+  { file: 'lib/sessions/Sessions.svelte', match: '.search-bar', why: 'an input capsule' },
+  { file: 'lib/sessions/Sessions.svelte', match: '.group-count', why: 'a count badge' },
+  { file: 'lib/sessions/Sessions.svelte', match: '.dot', why: 'a dot' },
+  { file: 'lib/system/SystemStatus.svelte', match: '.sv::before', why: 'a dot' },
+  { file: 'lib/files/Files.svelte', match: '.file-icon.is-link::after', why: 'a badge on an icon' },
+  { file: 'lib/app/Settings.svelte', match: '.spinner', why: 'a spinner' },
+  { file: 'App.svelte', match: 'border-top-color', why: 'a spinner' },
+  { file: 'lib/projects/Projects.svelte', match: 'width: 7px; height: 7px', why: 'a dot' },
+  { file: 'lib/terminal/Terminal.svelte', match: '.sel-handle::after', why: 'the selection handle dot' },
+];
+
+test('no button is a circle or a capsule: full-round shapes are the listed non-buttons (board #218)', async () => {
+  const offenders: string[] = [];
+  for await (const file of walk(SRC)) {
+    if (/\.test\.(svelte|css)$/u.test(file.pathname)) continue;
+    const rel = decodeURIComponent(file.pathname.slice(SRC.pathname.length));
+    const text = await readFile(file, 'utf8');
+    const lines = text.split('\n');
+    lines.forEach((line, i) => {
+      if (!/border-radius:\s*(?:var\(--ui-radius-pill\)|999px|50%)/u.test(line)) return;
+      // The rule's selector: the nearest preceding line that opens a block.
+      let head = i;
+      while (head > 0 && !/\{\s*$/u.test(lines[head]!) && !/\{/u.test(lines[head]!)) head--;
+      const context = lines.slice(Math.max(0, head - 1), i + 1).join('\n');
+      const allowed = ROUND_ALLOWED.some((a) => rel === a.file && (a.match === '' || context.includes(a.match) || line.includes(a.match)));
+      if (!allowed) offenders.push(`${rel}:${i + 1}  ${line.trim()}`);
+    });
+  }
+  assert.deepEqual(offenders, [], `a button is a rounded rectangle (--ui-radius-control); list a non-button here by reason:\n${offenders.join('\n')}`);
+});

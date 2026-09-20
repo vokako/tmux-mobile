@@ -377,6 +377,10 @@ test('a tapped bubble reveals Copy/Raw under it — and still never an app conte
     'the action row is the shared .m-acts overlay, revealed per message');
   assert.match(source, /copyMsg\(key, m\.body, event\.currentTarget\)/u, '#167 captures identity, raw body and the live Copy trigger');
   assert.match(source, /rawOpen = rawOpen === key \? '' : key/u, 'Raw toggles the source view');
+  // Owner 2026-09-20 (board #218): "raw 的图标我理解不了，可以用类似源码的图标" — the ⌘
+  // read as a key; `code` is </>, the source glyph.
+  assert.match(source, /<CommandButton iconOnly icon="code" label=\{t\('hubRaw'\)\} pressed=\{rawOpen === key\}/u, 'Raw wears the source glyph');
+  assert.doesNotMatch(source, /icon="command"/u);
   assert.match(source, /<pre class="raw">\{m\.body\}<\/pre>/u, 'raw view shows the bytes as written');
   // For the system gesture to have anything to select, the message body must
   // be selectable at all — the app shell's global user-select:none reaches it

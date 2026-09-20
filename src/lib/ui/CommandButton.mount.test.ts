@@ -6,7 +6,7 @@ const compiled = compileMount(new URL('./CommandButton.svelte', import.meta.url)
 
 test('quiet painted tools expose controlled pressed and popup states (#166)', async context => {
   const app = await (await compiled).mount(context, {
-    props: { label: 'Raw', icon: 'command', iconOnly: true, variant: 'secondary', pressed: true, hasPopup: 'menu' },
+    props: { label: 'Raw', icon: 'code', iconOnly: true, variant: 'secondary', pressed: true, hasPopup: 'menu' },
     modules: [],
   });
   try {

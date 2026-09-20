@@ -809,7 +809,7 @@
             <div class="m-acts appear">
               <CommandButton iconOnly icon={messageActs.copied ? 'check' : 'copy'}
                 label={messageActs.copied ? t('hubCopied') : t('hubCopy')} onclick={(event) => copyMsg(key, m.body, event.currentTarget)} />
-              <CommandButton iconOnly icon="command" label={t('hubRaw')} pressed={rawOpen === key}
+              <CommandButton iconOnly icon="code" label={t('hubRaw')} pressed={rawOpen === key}
                 onclick={() => { rawOpen = rawOpen === key ? '' : key; }} />
             </div>
           {/if}

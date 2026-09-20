@@ -72,6 +72,13 @@ html {
      still belongs to unmigrated chrome, including terminal tools. */
   --control-height: 28px;
   --control-paint-inset: 2px;
+  /* The corner of a command's PAINT (the inset layer inside the hit box):
+     a rounded rectangle at every paint size — 7px on the desktop's 24px
+     square, on a text command's 24px-tall capsule-that-is-not, on the
+     phone's 32px square. --control-radius (12px) is a FIELD's corner; on a
+     24px square it is a circle, which is what the owner stopped (board 218:
+     "这个图标按钮应该都用圆角矩形，不要用圆圈"). Only the composer's Send stays round. */
+  --control-paint-radius: 7px;
   --control-field-inset: 2px;
   --control-radius: 12px;
   --control-menu-radius: 16px;
@@ -636,7 +643,7 @@ button:disabled {
    ::before overlay grows the 38px visual box past the 44px touch floor. */
 .to-tail {
   position: absolute;
-  width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
+  width: 38px; height: 38px; border-radius: var(--ui-radius-control); display: grid; place-items: center;
   background: var(--surface); border: 1px solid var(--border); color: var(--text2);
   cursor: pointer; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
   -webkit-tap-highlight-color: transparent;
@@ -874,7 +881,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 }
 .slide-pill.soft { box-shadow: none; }
 /* Compact Segmented paint; the existing indicator still owns all geometry. */
-.slide-pill.control { background: none; box-shadow: none; border-radius: var(--ui-radius-pill); }
+.slide-pill.control { background: none; box-shadow: none; border-radius: var(--control-paint-radius); }
 .slide-pill.control::before {
   content: ''; position: absolute; inset: calc(var(--control-paint-inset) + 2px) 2px;
   border-radius: inherit; background: var(--control-selected);
@@ -969,9 +976,9 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 ) {
   corner-shape: squircle;
 }
-/* Pill variants of listed classes go back to the circular arc: a superellipse
-   flattens a stadium's caps. */
-.sessions .icon-btn { corner-shape: round; }
+/* Circular variants of listed classes go back to the circular arc: a
+   superellipse squares off a circle. (The Sessions icon-btn's pill variant
+   was reset here until #218 made it a rounded rectangle like every button.) */
 .hub-root .roster .ava, .hub-root .ctx-ring { corner-shape: round; }
 /* #166: window-choice paint follows the compact control's inset arcs. */
 .hub-root .win-pill { corner-shape: round; }

@@ -44,6 +44,49 @@ test('command paint is inset inside the native target, with a visible keyboard r
   assert.match(style, /\.command-button:focus-visible::before \{ outline: 2px solid var\(--accent-ink\); outline-offset: 2px; \}/u);
 });
 
+test('every command is a rounded rectangle; `round` is the composer Send\'s one circle (board #218)', async () => {
+  // Owner 2026-09-20: "这个图标按钮应该都用圆角矩形，不要用圆圈…除了 agent 自己的原型 logo，
+  // 发送按钮以外，都要圆角矩形的按钮设计，还有像 file 里什么的…弹出窗口确认的按键等等".
+  const button = style.match(/\.command-button \{([^}]+)\}/u)?.[1] ?? '';
+  assert.match(button, /border-radius: var\(--ui-radius-control\)/u, 'the hit box');
+  const paint = style.match(/\.command-button::before \{([^}]+)\}/u)?.[1] ?? '';
+  assert.match(paint, /border-radius: var\(--control-paint-radius\)/u,
+    'the PAINT corner is its own token: --ui-radius-control (10) on a 24px square is a circle');
+  assert.doesNotMatch(paint, /border-radius: inherit/u);
+  assert.match(source, /round\?: boolean;/u);
+  assert.match(source, /class:round\b/u);
+  assert.match(style, /\.round, \.round::before \{ border-radius: var\(--ui-radius-pill\); \}/u);
+  assert.equal([...style.matchAll(/ui-radius-pill/gu)].length, 1, 'the pill appears once: the round modifier');
+  // Exactly one wearer in the app: the composer's Send.
+  const { readdir } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  const root = new URL('../', import.meta.url);
+  async function walk(dir: string): Promise<string[]> {
+    const out: string[] = [];
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) out.push(...await walk(path));
+      else if (entry.name.endsWith('.svelte') && !entry.name.endsWith('.test.svelte')) out.push(path);
+    }
+    return out;
+  }
+  const wearers: string[] = [];
+  for (const file of await walk(root.pathname)) {
+    const text = await readFile(file, 'utf8');
+    if (/<CommandButton[^>]*\bround\b/u.test(text)) wearers.push(file.slice(root.pathname.length));
+  }
+  assert.deepEqual(wearers, ['hub/Composer.svelte'], 'only Send is round');
+  assert.match(await readFile(new URL('../hub/Composer.svelte', import.meta.url), 'utf8'),
+    /<CommandButton variant="primary" iconOnly round icon="send-up"/u);
+});
+
+test('the source glyph `code` replaces ⌘ for Raw; the unused `command` glyph is gone (board #218)', async () => {
+  const icon = await readFile(new URL('./Icon.svelte', import.meta.url), 'utf8');
+  assert.match(icon, /name === 'code'[\s\S]*?<polyline points="16 18 22 12 16 6"\/><polyline points="8 6 2 12 8 18"\/><line x1="14" y1="4" x2="10" y2="20"\/>/u,
+    '</> in the set\'s stroke style');
+  assert.doesNotMatch(icon, /name === 'command'/u, 'one consumer, replaced — the glyph goes with it');
+});
+
 test('bare is a modifier, not a variant: no paint in any state, never on solid, focus ring kept (board #211)', () => {
   // Owner 2026-09-20: "停止按钮就不用加背景了，就红色方块我直接点就行". Every variant
   // carries a hover wash, so "no paint at all" cannot be said with a variant;

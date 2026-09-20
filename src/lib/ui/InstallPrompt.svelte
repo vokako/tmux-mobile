@@ -205,7 +205,7 @@
   .install-btn {
     padding: 7px 14px;
     border: none;
-    border-radius: 999px;
+    border-radius: var(--ui-radius-control);
     background: var(--accent-fill);
     color: var(--accent-fill-ink);
     font-size: var(--fs-ui);
@@ -219,7 +219,7 @@
   .install-dismiss {
     padding: 7px 10px;
     border: none;
-    border-radius: 999px;
+    border-radius: var(--ui-radius-control);
     background: transparent;
     color: var(--text3);
     font-size: var(--fs-ui);

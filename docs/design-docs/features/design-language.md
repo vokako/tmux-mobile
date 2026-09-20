@@ -122,9 +122,19 @@ danger semantics.
   `--ui-radius-row 12` (cards, rows) · `--ui-radius-panel 14` (menus, panels)
   · specials: bubbles 18/6, composer 16/15, dialogs 18 · true pills
   (`--ui-radius-pill`) only for micro tags, the switch track and historical
-  non-configuration chips. The compact control revision uses circular icon
-  paint and capsule text commands/segmented tracks inside stable native hit
-  boxes; field/menu/dialog radii are `--control-radius 12`,
+  non-configuration chips. **Every button is a rounded rectangle** (board
+  #218, owner 2026-09-20: "这个图标按钮应该都用圆角矩形，不要用圆圈…除了 agent 自己的原型
+  logo，发送按钮以外，都要圆角矩形的按钮设计，还有像 file 里什么的…弹出窗口确认的按键等等"):
+  a command's PAINT — the inset layer inside its hit box — takes
+  `--control-paint-radius 7`, icon squares, text commands and the segmented
+  track alike (on a 24px paint square `--ui-radius-control 10` or
+  `--control-radius 12` IS a circle, which is what the owner stopped). The
+  circle/capsule exceptions, by reason: agent avatars, the composer's Send
+  (`CommandButton round`, its only wearer), the switch knob/track, tags and
+  chips (day/filter pills, count badges, `.pick`/AgentChip membership), input
+  capsules (the sessions search), dots, spinners, progress bars. The list is
+  the allowlist of `tokens.source.test.ts` — a new circle or capsule on a
+  button fails it. Field/menu/dialog radii stay `--control-radius 12`,
   `--control-menu-radius 16`, `--control-dialog-radius 22`.
   These replace the migrated controls' 10/14/18px treatment, not the legacy
   terminal, bubble or card geometry. Configuration boolean/multiple choices
@@ -303,8 +313,10 @@ hover, pending icons and disabled states cannot resize them. Command
 labels use display/ui-step 500; values/options use the content face;
 code/numeric readouts use mono. Configuration letter spacing is zero.
 Commands paint through an inert inset pseudo-element inside the native
-button: icon paint is circular, text commands are capsules. Hit rectangles
-remain in flow, nonoverlapping, and active even outside the paint.
+button: a rounded rectangle on `--control-paint-radius` for icon squares and
+text commands alike (#218 — they were circles and capsules until the owner
+asked for rounded rectangles everywhere but Send and the avatars). Hit
+rectangles remain in flow, nonoverlapping, and active even outside the paint.
 Native fields use transparent vertical borders and `background-clip:
 padding-box`, retaining the same input/button as the click, focus and menu
 anchor. The outer vertical radius includes the inset, so the painted inner
@@ -327,7 +339,7 @@ existing thumb/track. No blanket pill conversion of cards, rows or fields.
 | `Stepper` | Named minus/plus commands, mono value, clamped limits and disabled end stops. |
 | `Slider` | Native range keyboard/input semantics, visible value and a named reset command. Provisional native values reset until the caller commits. Set min/max/step before value: Chromium otherwise rounds a fractional initial value against its default integer step. |
 | `Select` | One fixed measured popover, native 28/44px trigger with 24/28px field paint; unique combobox/list relationships, active-descendant cursor and focus return. IME keys do not select/commit; disabling closes its menu and blocks queued choices. Uses its full border-box height, 6px trigger gap and 8px viewport inset. `dense` only retains the legacy text-size role, never another height. |
-| `Segmented` | One quiet neutral track, equal option targets and one travelling selection surface (`.slide-pill.control`); selected text also has weight 600. No independently framed option buttons or unused tail inside the group. |
+| `Segmented` | One quiet neutral track, equal option targets and one travelling selection surface (`.slide-pill.control`), all on `--control-paint-radius` (a rounded rectangle since #218, not a capsule); selected text also has weight 600. No independently framed option buttons or unused tail inside the group. |
 | `ConfirmDialog` | Same confirmation mechanism, shared command buttons; caller supplies the verb, icon and failure text. Danger is severity, not a trash-icon classifier. Starts on Cancel, traps Tab inside, restores connected trigger focus, and does not cancel or resubmit while busy. Only the active modal handles keys. |
 
 ### Confirmation outcomes (#167, 2026-09-12)

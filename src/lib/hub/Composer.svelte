@@ -313,7 +313,7 @@
   <div class="composer-actions" bind:this={actionsEl}>
     <CommandButton variant="icon" icon="plus" label={t('hubAttach')} disabled={!selected || attaching}
       pending={attaching} onclick={() => fileEl?.click()} />
-    <CommandButton variant="primary" iconOnly icon="send-up" label={t('hubSend')}
+    <CommandButton variant="primary" iconOnly round icon="send-up" label={t('hubSend')}
       disabled={!selected || attaching || failed || !sendable} onclick={send} />
   </div>
   </div>
@@ -400,7 +400,7 @@
   .pend-why { max-width: 15em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pend-x {
     display: grid; place-items: center; width: var(--control-height); height: var(--control-height);
-    flex: none; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit;
+    flex: none; padding: 0; border: 0; border-radius: var(--ui-radius-control); background: transparent; color: inherit;
   }
   .pend-thumb { display: flex; align-items: center; position: relative; }
   .pend-view { padding: 0; border: 0; background: transparent; }

@@ -2023,7 +2023,7 @@
     width: var(--ui-control-height); height: var(--ui-control-height);
     padding: 0;
     border: none;
-    border-radius: var(--ui-radius-pill);
+    border-radius: var(--ui-radius-control);
     background: transparent;
     color: var(--text3);
     cursor: pointer;
@@ -2255,7 +2255,7 @@
     padding: 0;
     box-sizing: border-box;
     border: 1px solid var(--input-border);
-    border-radius: var(--ui-radius-pill);
+    border-radius: var(--ui-radius-control);
     background: var(--input-bg);
     color: var(--text2);
     font-size: var(--ui-font-control);

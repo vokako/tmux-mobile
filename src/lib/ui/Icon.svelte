@@ -41,8 +41,11 @@
     <polyline points="15 18 9 12 15 6"/>
   {:else if name === 'arrow-right'}
     <polyline points="9 18 15 12 9 6"/>
-  {:else if name === 'command'}
-    <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>
+  {:else if name === 'code'}
+    <!-- Source — the feed's "raw" (board #218, owner 2026-09-20: "raw 的图标我理解
+         不了，可以用类似源码的图标"): two angle brackets and a slash, the ⌘ it replaces
+         read as a key, not as "show the source". -->
+    <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/><line x1="14" y1="4" x2="10" y2="20"/>
   {:else if name === 'chevron-right'}
     <polyline points="9 18 15 12 9 6"/>
   {:else if name === 'panel-left'}

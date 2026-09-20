@@ -37,7 +37,7 @@
   /* position: relative — the pill's containing block; the buttons sit above it. */
   .segmented {
     position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 0; flex-shrink: 0;
-    height: var(--control-height); border-radius: var(--ui-radius-pill);
+    height: var(--control-height); border-radius: var(--control-paint-radius);
   }
   .segmented::before {
     content: ''; position: absolute; inset: var(--control-paint-inset) 0;
@@ -46,7 +46,7 @@
   .segmented button {
     position: relative; z-index: 1;
     height: var(--control-height); min-width: var(--control-height); padding: 0 8px;
-    border: 0; border-radius: var(--ui-radius-pill);
+    border: 0; border-radius: var(--control-paint-radius);
     background: transparent; color: var(--text);
     font: var(--fs-body)/var(--control-line-height) var(--font-ui);
     white-space: nowrap; cursor: pointer;

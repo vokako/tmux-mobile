@@ -25,7 +25,8 @@ test('the to-tail atoms live in app.css, once', async () => {
   const css = await readFile(new URL('app.css', SRC), 'utf8');
   assert.equal(css.match(/^\.to-tail \{/gmu)?.length, 1, 'one definition');
   const block = /\.to-tail \{([\s\S]*?)\}/u.exec(css)?.[1] ?? '';
-  assert.match(block, /width: 38px; height: 38px; border-radius: 50%/u, 'one circle');
+  assert.match(block, /width: 38px; height: 38px; border-radius: var\(--ui-radius-control\)/u,
+    'one rounded square — every button is a rounded rectangle (board #218; it was a circle)');
   assert.match(block, /background: var\(--surface\); border: 1px solid var\(--border\); color: var\(--text2\)/u,
     'surface ground, quiet ink — tokens, not rgba literals');
   assert.match(css, /\.to-tail:hover \{ color: var\(--accent\); border-color: var\(--accent\); \}/u,
