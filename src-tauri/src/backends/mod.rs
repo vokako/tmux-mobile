@@ -168,6 +168,17 @@ impl Backend {
         }
     }
 
+    /// True when a tool event is the CLI's own HOUSEKEEPING rather than the
+    /// agent's work — kiro v3's post-turn `memory` auto-capture (board #227).
+    /// The consumer records such a call only inside an open turn; outside one
+    /// it must not reopen the turn. Only kiro has one today.
+    pub fn is_housekeeping_tool(self, payload: &serde_json::Value) -> bool {
+        match self {
+            Backend::Kiro => kiro::is_housekeeping_tool(payload),
+            _ => false,
+        }
+    }
+
     /// The child thread id when a hook payload comes from a SUB-AGENT thread
     /// of this window's agent rather than the agent itself (board #169). Only
     /// codex spawns in-process sub-agents whose hooks fire on the parent's

@@ -535,6 +535,22 @@ pub fn record_interrupt(session: &str, window: &str) {
 /// A hook tool event (isolated-home agents only, Phase B+): `("Edit",
 /// "foo.rs")`. The event keeps the two parts apart for rendering; the status
 /// record keeps the joined line, which is what "working — Edit foo.rs" shows.
+/// A tool call that is the CLI's housekeeping (kiro v3's post-turn `memory`
+/// auto-capture, board #227): recorded as a tool ONLY while this window's
+/// turn is open — then it is the agent using the tool mid-turn — and dropped
+/// otherwise, so it never reopens a finished turn. Returns whether it counted.
+pub fn record_housekeeping_tool(session: &str, window: &str, tool: &str, detail: &str) -> bool {
+    let open = store()
+        .lock()
+        .unwrap()
+        .get(&(session.to_string(), window.to_string()))
+        .is_some_and(|r| matches!(derive_from(r, 0, now()).state.as_str(), "running" | "waiting"));
+    if open {
+        record_tool(session, window, tool, detail);
+    }
+    open
+}
+
 pub fn record_tool(session: &str, window: &str, tool: &str, detail: &str) {
     // A tool call is proof the model answered: whatever transient-error retry
     // budget this window was burning refills (recovery rule 3).
@@ -1170,6 +1186,32 @@ mod tests {
         // Only a new turn clears it.
         r.prompt = Some(1100);
         assert_eq!(derive_from(&r, 0, 1200).state, "running");
+    }
+
+    /// kiro v3 runs its memory auto-capture as `memory` tool calls AFTER the
+    /// Stop (board #227; measured on two agents, three calls 10–30 s after
+    /// `completed`, no new prompt). Recorded as work they reopened the turn and
+    /// the card said "working" until the next message. A housekeeping call
+    /// counts only inside an open turn — there it is the agent's own use of
+    /// the tool — and is dropped after the end.
+    #[test]
+    fn housekeeping_after_the_stop_does_not_reopen_the_turn() {
+        let session = format!("hk-{}", uuid::Uuid::new_v4());
+        record_prompt(&session, "w1", "[tmm chat 10:42] human: @aws-expert 1000 字也不用这么大");
+        assert!(record_housekeeping_tool(&session, "w1", "memory", ""), "mid-turn the agent may use the tool");
+        assert_eq!(derive(&session, "w1", 0).state, "running");
+        record_tool(&session, "w1", "execute_bash", "python3 compile.py");
+        record_notification(&session, "w1", "completed", now());
+        assert_eq!(derive(&session, "w1", 0).state, "idle");
+        let rows = recent_events(&session, 0).len();
+        for _ in 0..3 {
+            assert!(!record_housekeeping_tool(&session, "w1", "memory", ""), "the auto-capture is not work");
+        }
+        assert_eq!(derive(&session, "w1", 0).state, "idle", "three memory calls after the Stop leave the agent idle");
+        assert_eq!(recent_events(&session, 0).len(), rows, "and leave no rows in the feed");
+        // A window that never spoke has no open turn either.
+        assert!(!record_housekeeping_tool(&session, "w2", "memory", ""));
+        assert_eq!(recent_events(&session, 0).len(), rows);
     }
 
     #[test]

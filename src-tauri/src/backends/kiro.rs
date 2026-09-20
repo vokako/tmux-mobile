@@ -800,6 +800,23 @@ pub(crate) fn normalize_kind(
 
 /// kiro marks a new user turn with `hook_event_name: userPromptSubmit`
 /// (case-insensitive) — resets the auto-post dedup flag.
+/// kiro-cli v3 (KAS) runs its memory auto-capture as `memory` TOOL calls AFTER
+/// the turn's Stop — measured 2026-09-20 in state.db on two agents
+/// (kiro-v3-roll:kiro 03:58, kirocrew-ppt:aws-expert 10:42): prompt → tools →
+/// `completed` → three `memory` calls 10–30 s apart with no new prompt. Read
+/// as work, the newest tool reopened the turn and the card said "working"
+/// until the next message (board #227; the owner: "结束了还一直显示在工作").
+/// The agent also calls `memory` INSIDE a turn (`memory list/add`), so the
+/// name alone is not the verdict — the consumer records it only while a turn
+/// is open. This names the tool whose calls are the harness's housekeeping.
+pub(crate) fn is_housekeeping_tool(payload: &Value) -> bool {
+    payload
+        .get("tool_name")
+        .or_else(|| payload.get("toolName"))
+        .and_then(Value::as_str)
+        .is_some_and(|t| t == "memory")
+}
+
 pub(crate) fn is_user_prompt_submit(payload: &Value) -> bool {
     payload
         .get("hook_event_name")
@@ -810,6 +827,16 @@ pub(crate) fn is_user_prompt_submit(payload: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// v3's post-turn `memory` auto-capture is the housekeeping tool (board
+    /// #227); every other tool, in either key spelling, is the agent's work.
+    #[test]
+    fn memory_is_the_housekeeping_tool() {
+        assert!(is_housekeeping_tool(&json!({"hook_event_name":"postToolUse","tool_name":"memory","tool_input":{}})));
+        assert!(is_housekeeping_tool(&json!({"hookEventName":"postToolUse","toolName":"memory"})));
+        assert!(!is_housekeeping_tool(&json!({"hook_event_name":"postToolUse","tool_name":"execute_bash","tool_input":{"command":"ls"}})));
+        assert!(!is_housekeeping_tool(&json!({"hook_event_name":"stop"})));
+    }
 
     /// Board #207: the engine door edits the recorded launch line exactly.
     #[test]

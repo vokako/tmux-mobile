@@ -206,7 +206,19 @@ impl AgentNotificationHub {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 let (session, window, _) = tmux::resolve_pane_id(&envelope.pane_id)?;
-                crate::projects::telemetry::record_tool(&session, &window, &tool, &detail);
+                // The CLI's own housekeeping (kiro v3's post-turn `memory`
+                // auto-capture, board #227) counts as work only inside an
+                // open turn; after the Stop it is dropped, or the finished
+                // agent reads "working" until its next message.
+                let housekeeping = crate::backends::Backend::parse(&envelope.backend)
+                    .is_some_and(|b| b.is_housekeeping_tool(&envelope.payload));
+                if housekeeping {
+                    if !crate::projects::telemetry::record_housekeeping_tool(&session, &window, &tool, &detail) {
+                        return Ok(());
+                    }
+                } else {
+                    crate::projects::telemetry::record_tool(&session, &window, &tool, &detail);
+                }
                 // The pane just painted a tool row — the freshest moment to
                 // read its status furniture. Throttled + async inside.
                 crate::projects::vitals::sniff_window_soon(&session, &window);
