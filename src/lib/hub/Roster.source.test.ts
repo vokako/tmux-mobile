@@ -197,3 +197,9 @@ test("a second click on the recipient's card opens its menu at the card, never d
   assert.doesNotMatch(source, /recipient === name \? '' : name/u, 'the click toggle is gone');
   assert.match(source, /use:longpress=\{\{ onlongpress: \(at\) => oncontext\(at, a\.name\) \}\}/u, 'a hold forwards the element anchor longpress hands it');
 });
+
+test('Everyone stands at the head of the EXPANDED strip, avatar-sized (board #204)', () => {
+  assert.match(source, /\{#if expanded\}\s*\n\s*<span class="all-choice">\s*\n\s*<CommandButton variant="icon" icon="collab" label=\{t\('hubEveryone'\)\} pressed=\{recipient === ALL_TARGET\}/u);
+  assert.match(rule('.all-choice'), /--control-icon-size: var\(--roster-avatar-size\)/u, 'the glyph is an avatar\'s size; the hit box stays the row\'s');
+  assert.doesNotMatch(source, /data-agent="all"/u, '#180: never a card');
+});

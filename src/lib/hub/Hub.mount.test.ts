@@ -8,6 +8,17 @@ const compiledHub = () => compilation ??= compileMount(new URL('./Hub.svelte', i
   new URL('../core/ws.ts', import.meta.url),
 ]);
 
+/** Everyone lives at the head of the EXPANDED roster (#204): expand first when needed. */
+async function allButton(app: { document: Document; flush: () => Promise<void> }): Promise<HTMLButtonElement> {
+  let button = app.document.querySelector<HTMLButtonElement>('.all-choice button');
+  if (!button) {
+    app.document.querySelector<HTMLButtonElement>('.roster-toggle button')!.click();
+    await app.flush();
+    button = app.document.querySelector<HTMLButtonElement>('.all-choice button');
+  }
+  return button!;
+}
+
 function roomFixture() {
   const pushed = new Set<unknown>();
   return {
@@ -268,8 +279,9 @@ async function characterize(context: TestContext, fixture: Awaited<ReturnType<ty
     for (let i = 0; i < 10 && app.document.querySelectorAll('.acard:not(.add)').length < 2; i++) {
       await app.flush();
     }
+    const allBtn = await allButton(app);
     const card = (name: string) => {
-      const found = name === 'all' ? app.document.querySelector<HTMLButtonElement>('.all-choice button')
+      const found = name === 'all' ? allBtn
         : stripCard(app.document, name)?.querySelector<HTMLButtonElement>('.agent-select');
       assert.ok(found, `${name} is rendered by the real Hub`);
       return found;
@@ -730,7 +742,7 @@ async function composerFixture(context: TestContext, extra: Record<string, (...a
     if (!target) {
       // Record only is reached through the menu — All's (#168) and, since #196,
       // a named card's too: a second click on the recipient opens it.
-      const opener = current === 'all' ? app.document.querySelector<HTMLButtonElement>('.all-choice button')
+      const opener = current === 'all' ? await allButton(app)
         : stripCard(app.document, current)?.querySelector<HTMLButtonElement>('.agent-select');
       opener!.click();
       await app.flush();
@@ -739,7 +751,7 @@ async function composerFixture(context: TestContext, extra: Record<string, (...a
       await app.flush();
       return;
     }
-    const button = target === 'all' ? app.document.querySelector<HTMLButtonElement>('.all-choice button')
+    const button = target === 'all' ? await allButton(app)
       : stripCard(app.document, target || current)?.querySelector<HTMLButtonElement>('.agent-select');
     assert.ok(button, name);
     button.click();
@@ -1072,7 +1084,7 @@ test('Composer All selects once, then opens scoped Stop and record-only actions 
     hubAgentInterrupt: (...args: unknown[]) => { calls.push(args); return job.promise; },
   });
   try {
-    const all = app.document.querySelector<HTMLButtonElement>('.all-choice button')!;
+    const all = await allButton(app);
     assert.ok(all);
     assert.equal(app.document.querySelector('.roster [data-agent="all"]'), null, 'one All, no roster copy');
     all.click(); await app.flush();
@@ -1113,7 +1125,7 @@ test('an open All menu follows live busy membership without reopening (#180)', {
   const interrupt = () => [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')]
     .find(button => button.textContent?.trim() === 'Interrupt');
   try {
-    const all = app.document.querySelector<HTMLButtonElement>('.all-choice button')!;
+    const all = await allButton(app);
     all.click(); await app.flush(); all.click(); await app.flush();
     assert.equal(interrupt(), undefined);
     agents[0]!.state = 'running';

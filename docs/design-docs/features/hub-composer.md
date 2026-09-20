@@ -173,13 +173,16 @@ then leaves a 61px tail gap. The row hold is removed in `finally` before
 the shell-height notification. It is not a mirror, timer or Feed correction.
 
 All is the single circular icon CommandButton — in the composer's signature
-from #168 to #203, and since board #204 at the roster strip's tail beside
-Spawn, reached the way the + is (owner, 2026-09-17: "发送给 everyone 的这个按钮其实
-我觉得还是有点大了 放在文本框里有点占地方 你能不能把这个按钮藏到展开 Agent 卡片的列表里 就像你
-的那个加号一样"): it is a destination like the cards, so it stands with them and
-the composer's signature keeps only Attach and Send. Same command, same
-28/44px native target, same props (`pressed`, `hasPopup`, `expanded` for the
-All menu), now wired into `Roster` (`allMenuOpen`, `onall`). Selected All wears the shared pressed
+from #168 to #203, and since board #204 at the HEAD of the roster strip, only
+while the list is expanded, its glyph an avatar's size (owner, 2026-09-15:
+"这个按钮就小一点，和其他agent的icon一样大就行，固定在最左边"; 2026-09-17: "藏到展开
+Agent 卡片的列表里 就像你的那个加号一样…展开之后再显示"): it is a destination like
+the cards, so it stands with them, first, and the composer's signature keeps
+only Attach and Send. Same command, same 28/44px native target (`.all-choice`
+sets `--control-icon-size: var(--roster-avatar-size)` — 20px like the
+avatars; the hit box stays the row's), same props (`pressed`, `hasPopup`,
+`expanded` for the All menu), now wired into `Roster` (`allMenuOpen`,
+`onall`). #180's "never a card" holds: no `data-agent="all"`. Selected All wears the shared pressed
 control-surface/accent-ink treatment; Send is the only solid CTA. The old
 roster All card, its private styling and resident All Stop are removed whole.
 First activation selects `ALL_TARGET`; another activation opens the existing

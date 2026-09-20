@@ -166,6 +166,19 @@
         </div>
       {/if}
 
+      <!-- Everyone: a destination, so it stands with the destinations — at the
+           strip's head, only while the list is expanded, its glyph the size of
+           an agent's avatar (owner, 2026-09-15: "这个按钮就小一点，和其他agent的icon一样
+           大就行，固定在最左边"; 2026-09-17: "藏到展开 Agent 卡片的列表里 就像你的那个加号一样
+           …展开之后再显示"; board #204). Same shared command it was in the composer. -->
+      {#if expanded}
+        <span class="all-choice">
+          <CommandButton variant="icon" icon="collab" label={t('hubEveryone')} pressed={recipient === ALL_TARGET}
+            hasPopup={recipient === ALL_TARGET ? 'menu' : undefined}
+            expanded={recipient === ALL_TARGET ? allMenuOpen : undefined}
+            disabled={!selected || !roomReady} onclick={onall} />
+        </span>
+      {/if}
       {#each orderedAgents as a (a.name)}
         {@const mentioned = extras.includes(a.name) || extras.includes(ALL_TARGET)}
         {@const pending = interrupting.includes(a.name)}
@@ -226,19 +239,8 @@
           </button>
         </div>
       {/each}
-      <!-- The strip's tail: Everyone and Spawn. Everyone left the composer's
-           signature (owner, 2026-09-17: "发送给 everyone 的这个按钮…放在文本框里有点占地方
-           …藏到展开 Agent 卡片的列表里 就像你的那个加号一样"; board #204) — it is a
-           destination like the cards, so it stands with them, reached the way
-           the + is. Spawning opens a closed project too; keep its entry even in
-           an empty room. -->
+      <!-- Spawning opens a closed project too; keep its entry even in an empty room. -->
       <div class="roster-add">
-        <span class="all-choice">
-          <CommandButton variant="icon" icon="collab" label={t('hubEveryone')} pressed={recipient === ALL_TARGET}
-            hasPopup={recipient === ALL_TARGET ? 'menu' : undefined}
-            expanded={recipient === ALL_TARGET ? allMenuOpen : undefined}
-            disabled={!selected || !roomReady} onclick={onall} />
-        </span>
         <CommandButton icon="plus" variant="icon" label={t('hubSpawn')} onclick={onadd} />
       </div>
     </div>
@@ -342,7 +344,7 @@
   .off { color: var(--text2); }
   .ava.dim { background: var(--surface2); color: var(--text3); }
   img.ava.dim { background: none !important; filter: grayscale(1); opacity: 0.55; }
-  .roster-add { display: flex; align-items: center; gap: var(--roster-gap); flex: none; min-height: var(--control-height); }
-  .all-choice { display: flex; flex: none; }
+  .roster-add { display: flex; align-items: center; flex: none; min-height: var(--control-height); }
+  .all-choice { display: flex; flex: none; --control-icon-size: var(--roster-avatar-size); }
   .roster-toggle { display: flex; align-self: end; align-items: center; height: calc(var(--roster-paint-height) + 2 * var(--control-paint-inset) + 4px); }
 </style>
