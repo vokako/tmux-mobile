@@ -364,7 +364,8 @@ button:disabled {
 
 :root {
   --sidebar-w: 240px;
-  --page-head-h: 42px; /* a page header's row; the Hub's riding sidebar toggle sits on it (#197) */
+  --page-head-h: 42px; /* a page header's row; the shell's sidebar toggle is centred on it (#197 → #217) */
+  --side-toggle-x: 8px; /* the sidebar toggle's inset from the content area's left edge (#217) */
   /* Backend IDENTITY colours — who is who, at a glance, on the avatar of an
      agent whose backend has no icon. Theme-independent (identity, not state:
      the state language is --status-* / .live-dot). Named by `backendColor()`
@@ -532,6 +533,24 @@ button:disabled {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
+/* The shell's sidebar toggle (#217) stands fixed at the content area's top-left,
+   on the page-head row. The row it visually joins makes room for its 28px
+   square plus the same inset on both sides: open, the first head of every
+   desktop sidebar (`.side-toggle-row` — Chat's projects head, Terminal's
+   projects group, Board's projects head) is pulled up to the page-head row
+   and indented; collapsed, the page head indents instead. The sidebar
+   scrollers pad 8px = --side-toggle-x, which the head absorbs (margin-top,
+   and one inset less on the left) so its text centre is the page head's and
+   its text starts where the collapsed title does — 8px after the square. The
+   indent moves on --t-move with the track, so the title slides, never jumps. */
+.with-rail:not(.side-collapsed) .side-toggle-row {
+  min-height: var(--page-head-h); box-sizing: border-box; margin-top: calc(-1 * var(--side-toggle-x));
+  padding-top: 0; padding-bottom: 0; padding-left: calc(var(--side-toggle-x) + var(--control-height));
+  display: flex; align-items: center;
+}
+.with-rail .page-head { transition: padding-left var(--t-move) ease-out; }
+.with-rail.side-collapsed .page-head { padding-left: calc(var(--side-toggle-x) * 2 + var(--control-height)); }
+@media (prefers-reduced-motion: reduce) { .with-rail .page-head { transition: none; } }
 /* The title NEVER becomes a squeezed vertical strip: it keeps one line and
    ellipsizes (a 4-character name wrapped to four 36px-wide lines between
    five action buttons — owner report, skill editor on a phone). */

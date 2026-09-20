@@ -261,7 +261,7 @@
 
 {#if supported && sorted.length > 0}
   <section class="projects" class:dense class:reveal={firstFill}>
-    <div class="group-label" class:side-h={dense}>
+    <div class="group-label" class:side-h={dense} class:side-toggle-row={dense}>
       {#if dense}
         <!-- A sidebar section header is a LABEL, not a control: the Chat
              sidebar has no chevron to collapse its projects, and a list this

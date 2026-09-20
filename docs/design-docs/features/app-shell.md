@@ -186,7 +186,45 @@ flip measures from under the pointer and the icon SETTLES into its new slot
 on `moveMs()` instead of jumping back and sliding. `transform` is deliberately
 absent from `.rail-btn`'s transition list for the same reason.
 
-### The desktop primary sidebar collapses from the rail (2026-09-11 #174; revised 2026-09-14 #202)
+### The desktop primary sidebar collapses from its own head row (2026-09-11 #174; 2026-09-14 #202; revised 2026-09-20 #217)
+
+**Current (board #217).** Owner, 2026-09-20, with two reference frames
+(`.tmm/uploads/mu9nqemo-804b2fd0.webp`, `mu9nqlt0-f7bda893.webp`): "折叠按钮放到
+侧边栏上吧，类似这个设计我觉得挺好的" — the toggle at the sidebar head's LEFT end
+beside its title; collapsed, the same square at the same screen point leading
+the page head. Four placements led here: #174 head-right (two nodes), #197 one
+node riding the partition right→left (~190px from under the pointer: "手感卡卡
+的"), #202 the rail, #215 the rail grouped and dimmed. The left end is what
+makes the owner's frames work: the sidebar track shrinks from the RIGHT with
+its content pinned left, so a control at the left edge has the same screen
+coordinates open and collapsed — "on the sidebar" and "under the pointer" at
+once, which no earlier seat managed. Mechanism: ONE shell node (`App.svelte`
+`.side-toggle`, rendered beside the rail under the same desktop-connected
+guard), `position: fixed` at `left: 46px + --side-toggle-x` (8px), centred on
+the `--page-head-h` row; the same `CommandButton` `panel-left` glyph whose
+chevron turns (open `<`, closed `>`, #215), as `secondary iconOnly` so its
+quiet surface reads over a terminal; the same `toggleShellSidebar` delegate
+(#199/#201/#200). It does NOT ride `--side-open`. The rows it visually joins
+make room through one app.css rule set keyed on the shell state: open, each
+desktop sidebar's first head wears `.side-toggle-row` (Chat's projects head,
+Terminal's projects group label, Board's projects head) and becomes the
+page-head row — `min-height: --page-head-h`, `margin-top: -8px` absorbing the
+scroller's padding so its text centre is the page head's, `padding-left: 8px +
+28px` so its text starts 8px after the square; collapsed, `.page-head` takes
+`padding-left: 44px` on `--t-move`, so the title slides with the track. The
+Terminal page with an open terminal already has a `.page-head` row above the
+grid (the window title), so the square never covers terminal cells and the
+grid's geometry is untouched. The rail is brand + tabs again; #215's head
+group and rule went with the toggle (a rule with no reason is not kept).
+Measured at 1440 on Chat, Terminal and Board, open → collapsed → open: the
+square at x=54/y=7 (28×28) in every state; head text centre 21 = square
+centre 21 = h1 centre 20.5; open, head text at x=90; collapsed, h1 (or the
+terminal's window title) at x=90 with `padding-left` 44px, sidebar track 240 →
+0; the terminal's `.xterm-screen` stays at y=42, h=848 throughout. Pins:
+`App.source.test.ts` (one node, fixed seat, no ride, rail without toggle,
+app.css rules, the three head classes), `Sidebar.source.test.ts`.
+
+**History (#174 → #202), kept for the reasons.**
 
 The desktop primary sidebar (the Hub's projects, Terminal's sessions and the
 Board's projects; the phone has its sheet + scrim) is one app-wide state:

@@ -46,10 +46,12 @@ test('the sidebar keeps the shared sheet and delegates consequential actions', (
     'unrelated private Hub atoms are not copied into this component');
 });
 
-test('the sidebar owns no collapse control — the Hub\'s single toggle rides over its head (boards #174, #197)', () => {
+test('the sidebar owns no collapse control — the shell\'s single toggle stands in its head row (boards #174, #197, #217)', () => {
   // #174 handed the head a snippet; #197 replaced the two-slot snippet with
-  // one node that rides the partition (Hub.svelte .side-toggle-ride).
+  // one node that rode the partition; #202 moved it to the rail; #217 seats
+  // the shell's fixed node at the head row's left — the head only makes room
+  // (`.side-toggle-row`, app.css), it renders nothing.
   assert.doesNotMatch(source, /collapse\?: Snippet|@render collapse/u);
-  assert.match(source, /<div class="side-h side-head"><span>\{t\('hubProjects'\)\}<\/span><\/div>/u);
+  assert.match(source, /<div class="side-h side-head side-toggle-row"><span>\{t\('hubProjects'\)\}<\/span><\/div>/u);
   assert.doesNotMatch(source, /CommandButton/u, 'no second button species in the sidebar');
 });

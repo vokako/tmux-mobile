@@ -62,7 +62,7 @@
 <aside class="sidebar" class:side-sheet={compact} class:sheet={compact} class:open={compact && open}>
   {#if !compact}<SideHandle />{/if}
   <div class="side-scroll subtle-scroll" use:scrollFade>
-    <div class="side-h side-head"><span>{t('hubProjects')}</span></div>
+    <div class="side-h side-head side-toggle-row"><span>{t('hubProjects')}</span></div>
     {#each rows as row (row.project.id)}
       <div class="side-row proj-row" role="group" aria-label={row.project.name} class:open={row.project.session === selected}
         class:appear={!!rowsBase && !rowsBase.has(row.project.id)}

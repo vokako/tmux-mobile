@@ -637,7 +637,7 @@
   <aside class="sidebar" class:side-sheet={narrowVp} class:open={narrowVp && sideOpen} bind:this={sideEl}>
     <SideHandle />
     <div class="side-scroll subtle-scroll" use:scrollFade>
-      <div class="side-h">{t('hubProjects')}</div>
+      <div class="side-h side-toggle-row">{t('hubProjects')}</div>
       <!-- The Chat sidebar's two-line row, atom for atom (board #39: "board
            侧边栏的样式也要和 chat terminal 的侧边栏对齐"): dot + name + age up
            top from the SHARED .proj-row/.p-* atoms in app.css, and the quiet
