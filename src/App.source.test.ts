@@ -637,5 +637,27 @@ test('THE sidebar toggle lives in the rail, under the brand, on every desktop pa
   assert.match(source, /function toggleShellSidebar\(\) \{\s*\n\s*\(pageReselect\[page\] \?\? \(\(\) => hubPrefs\.setSidebarCollapsed\(!hubPrefs\.sidebarCollapsed\)\)\)\(\);/u,
     'the same act as a reselect: the page\'s delegate, else the shared state');
   const style = source.match(/<style>[\s\S]*<\/style>/u)?.[0] ?? '';
-  assert.match(style, /\.rail > :global\(\.command-button\.icon-only\) \{ margin-bottom: 8px; \}/u);
+  assert.match(style, /\.rail-head > :global\(\.command-button\.icon-only\) \{ --control-icon-size: 15px; color: var\(--text3\); \}/u);
+});
+
+test('the rail head is chrome: brand + toggle in one group closed by a rule, apart from the tabs (board #215)', () => {
+  // Owner 2026-09-20: "左侧的折叠展开按钮放到了侧边栏上 好像和其他图标混淆在一起了…费解".
+  // The toggle sat at the tabs' pitch with a BRIGHTER rest ink than theirs
+  // and read as one more tab. Same species, told apart by grouping.
+  const rail = source.match(/<nav\s+class="rail"[\s\S]*?<\/nav>/u)?.[0] ?? '';
+  assert.match(rail, /<div class="rail-head">\s*<img class="rail-brand"[^>]*\/>\s*<CommandButton variant="icon" icon="panel-left"[\s\S]*?\/>\s*<\/div>\s*\{#each railSlots as slot \(slot\)\}/u,
+    'brand and toggle are the head group; the page slots follow it');
+  const style = source.match(/<style>[\s\S]*<\/style>/u)?.[0] ?? '';
+  const head = style.match(/\.rail-head \{([^}]*)\}/u)?.[1] ?? '';
+  assert.match(head, /border-bottom: 1px solid var\(--border\)/u, 'the divider is the group\'s own border, not an element');
+  assert.match(head, /width: 30px/u, 'shorter than the 46px rail: a divider, not a frame');
+  assert.match(head, /padding-bottom: 6px; margin-bottom: 4px/u, 'the first tab and its wash/pill start 8px below the rule');
+  assert.match(head, /gap: 2px/u, 'brand and toggle read as one group');
+  assert.doesNotMatch(style, /\.rail-brand \{[^}]*margin-bottom/u, 'the brand no longer spaces itself');
+  assert.match(style, /\.rail-head > :global\(\.command-button\.icon-only:hover:not\(:disabled\)\) \{ color: var\(--text\); \}/u,
+    'rest --text3 like a tab, hover --text like a tab — not brighter');
+  // The travelling pill can only ever find a page tab; the toggle is not one.
+  assert.match(rail, /use:slideIndicator=\{\{ key: page, active: '\.rail-btn\.active', hidden: !!railDrag \}\}/u);
+  assert.doesNotMatch(rail.match(/<div class="rail-head">[\s\S]*?<\/div>/u)?.[0] ?? '', /rail-btn|data-rail-slot|onpointerdown/u,
+    'nothing in the head is a tab, a drop anchor or a drag handle');
 });

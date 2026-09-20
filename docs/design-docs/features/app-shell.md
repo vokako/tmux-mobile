@@ -256,6 +256,30 @@ status bar 1 → 237 → 240 in step; the Terminal page likewise (0 → 0.77 at
 111ms → 1 by 211ms). Pins: `App.source.test.ts`, `Board.source.test.ts`,
 `Hub.source.test.ts` (no second `@property`).
 
+**The rail head is chrome: brand + toggle in one group, closed by a rule
+(2026-09-20, board #215).** Owner: "左侧的折叠展开按钮放到了侧边栏上 好像和其他图标混淆在
+一起了 你看帮我优化一下吧 感觉这个按钮显示得有点让人费解了". #202 put the toggle under
+the brand at the tabs' pitch, in the tabs' column, with the icon variant's
+default `--text` ink — BRIGHTER than a tab at rest (`--text3`) — so it read
+as one more page tab, though it is a different kind of control (a sidebar
+state toggle, not a destination). No new icon and no second mechanism: the
+brand and the toggle now sit in `.rail-head`, a 30px-wide group (gap 2px)
+whose `border-bottom: 1px solid var(--border)` is the divider — shorter than
+the 46px rail so it reads as a rule, not a frame — with 6px padding above it
+and 4px + the rail's 4px gap below, so the first tab, its hover wash and the
+travelling pill start 8px under the rule. The toggle keeps its 28px hit box,
+the wash-family hover and the `panel-left` glyph whose chevron turns; at rest
+it is the tabs' `--text3` with a 15px glyph (a tab's is 17px), hover `--text`
+like a tab — told apart by its group and the rule, never by being brighter.
+The pill only ever finds `.rail-btn.active`, and nothing in the head is a
+`.rail-btn`, a drop anchor or a drag handle. Measured at 1440: toggle at
+x=8.5/y=38 (28×28, glyph 15) in every state, rule at y=73 width 30, first tab
+at y=81 (8px gap), pill 34×32 at y=81/117 as Chat/Terminal are chosen and
+never over the toggle (bottom 66); rest ink `rgba(26,26,46,0.35)` =
+`--text3`, hover `rgb(26,26,46)` = `--text`; chevron `matrix(-1,0,0,-1)` ↔
+`none` across a collapse and back. Pins: `App.source.test.ts` (#202 pin
+updated, #215 pin).
+
 ### The chosen tab is marked by ONE highlight that travels (2026-09-04, #86)
 
 **Current scope:** the desktop rail retains its travelling wash. The phone

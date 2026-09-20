@@ -1651,14 +1651,19 @@
            and a mid-flip transform do not enter; collapsed while an icon is
            being dragged and re-placed on release. -->
       <span class="slide-pill soft" aria-hidden="true"></span>
-      <img class="rail-brand" src={iconSrc} alt="" width="26" height="26" draggable="false" />
-      <!-- THE sidebar toggle (board #202): one shell-level control that never
-           moves, on every desktop page, under the brand. It writes the shared
-           state through the page's own delegate (#199/#201) — the Hub keeps
-           its reading anchor, Terminal/Board their reveal effects (#200). -->
-      <CommandButton variant="icon" icon="panel-left" expanded={!hubPrefs.sidebarCollapsed} inside
-        label={hubPrefs.sidebarCollapsed ? t('hubSidebarExpand') : t('hubSidebarCollapse')}
-        onclick={toggleShellSidebar} />
+      <!-- The rail's HEAD is chrome, not navigation: the brand and THE sidebar
+           toggle, one group closed by a short rule (board #215, owner
+           2026-09-20: "左侧的折叠展开按钮…好像和其他图标混淆在一起了…费解"). The toggle
+           (board #202) is one shell-level control that never moves, on every
+           desktop page, under the brand. It writes the shared state through
+           the page's own delegate (#199/#201) — the Hub keeps its reading
+           anchor, Terminal/Board their reveal effects (#200). -->
+      <div class="rail-head">
+        <img class="rail-brand" src={iconSrc} alt="" width="26" height="26" draggable="false" />
+        <CommandButton variant="icon" icon="panel-left" expanded={!hubPrefs.sidebarCollapsed} inside
+          label={hubPrefs.sidebarCollapsed ? t('hubSidebarExpand') : t('hubSidebarCollapse')}
+          onclick={toggleShellSidebar} />
+      </div>
       {#each railSlots as slot (slot)}
         <!-- One wrapper per slot so the list can `animate:flip` (Svelte wants
              the animated element to be the each block's only child). It also
@@ -2092,10 +2097,23 @@
     border-right: 1px solid var(--border);
     z-index: 12;
   }
-  .rail-brand { border-radius: var(--ui-radius-control); margin-bottom: 8px; flex: none; }
-  /* The sidebar toggle sits under the brand at the rail's own 34px pitch,
-     apart from the page slots so the travelling pill never lands on it. */
-  .rail > :global(.command-button.icon-only) { margin-bottom: 8px; }
+  .rail-brand { border-radius: var(--ui-radius-control); flex: none; }
+  /* The head is a group of chrome (brand + sidebar toggle), closed by a rule
+     shorter than the rail so it reads as a divider, not a frame; the page
+     tabs start after their own gap below it. Before (#202) the toggle sat at
+     the tabs' pitch in the tabs' column with a BRIGHTER rest ink than theirs
+     (--text vs --text3) and read as one more tab (board #215). Now it is
+     dimmer-and-smaller than a tab at rest — same ink family, 15px glyph —
+     and told apart by its group and the rule, never by a new species. The
+     travelling pill only ever finds `.rail-btn.active`; the toggle is not a
+     `.rail-btn`. */
+  .rail-head {
+    display: flex; flex-direction: column; align-items: center; gap: 2px; flex: none;
+    width: 30px; padding-bottom: 6px; margin-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .rail-head > :global(.command-button.icon-only) { --control-icon-size: 15px; color: var(--text3); }
+  .rail-head > :global(.command-button.icon-only:hover:not(:disabled)) { color: var(--text); }
   /* The per-slot wrapper mirrors the rail's own column so the layout is the
      one it had before the wrapper existed: a page slot is its 34px button,
      the gap slot stretches (flex: 1) and stacks the spacer over the server
