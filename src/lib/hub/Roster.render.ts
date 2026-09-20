@@ -55,22 +55,26 @@ test('Roster renders the controlled destination strip (#168)', { timeout: RENDER
     assert.equal(card(root, 'waiting').querySelector('.agent-marks')!.classList.contains('unmarked'), true);
     assert.match(card(root, 'waiting').querySelector('.st')!.getAttribute('style')!, /--status-warn/u);
     assert.equal(card(root, 'waiting').querySelector('.st.live-dot'), null);
-    assert.equal(stop(root, 'runner')?.parentElement?.parentElement, card(root, 'runner'));
-    assert.equal(stop(root, 'runner')?.getAttribute('aria-label'), 'Interrupt runner');
-    assert.ok(stop(root, 'runner')?.classList.contains('icon-only'));
-    assert.equal(stop(root, 'runner')?.classList.contains('danger'), false, '#195: a quiet action, no warn/danger ink');
-    assert.equal(stop(root, 'runner')?.classList.contains('secondary'), false);
+    // #205: Stop is hidden until the card is hovered/focused (no pointer in SSR) or its interrupt is pending.
+    assert.equal(stop(root, 'runner'), null, 'busy but not hovered: the dot, not a Stop');
+    const armed = view({ interrupting: ['runner'] });
+    assert.equal(stop(armed, 'runner')?.parentElement?.parentElement, card(armed, 'runner'));
+    assert.equal(stop(armed, 'runner')?.getAttribute('aria-label'), 'Interrupt runner');
+    assert.ok(stop(armed, 'runner')?.classList.contains('icon-only'));
+    assert.ok(stop(armed, 'runner')?.classList.contains('danger'), '#205: red — "终止按钮应该是红色的吧，更符合语义"');
+    assert.ok(card(armed, 'runner').classList.contains('stop-shown'), 'the dot yields to the Stop standing on it');
+    assert.equal(card(root, 'runner').classList.contains('stop-shown'), false);
     assert.equal(root.querySelector('.agent-watch'), null, '#180: Watch remains in the existing ContextMenu, not a reserved slot');
     assert.equal(select(root, 'runner').querySelector('button'), null);
     assert.equal(root.querySelector('.a-menu, [role="menu"], [role="button"]'), null);
   });
 
   await ctx.test('Stop visibility follows busyNames, never a local state guess', () => {
-    const root = view({ busyNames: ['solo'] });
-    assert.equal(stop(root, 'runner'), null, 'working without parent membership has no Stop');
+    const root = view({ busyNames: ['solo'], interrupting: ['runner', 'solo'] });
+    assert.equal(stop(root, 'runner'), null, 'working without parent membership has no Stop, pending or not');
     assert.equal(stop(root, 'waiting'), null);
     assert.ok(stop(root, 'solo'), 'parent membership is authoritative even with a stale status label');
-    assert.equal(view({ busyNames: [] }).querySelector('.agent-stop'), null);
+    assert.equal(view({ busyNames: [], interrupting: ['runner'] }).querySelector('.agent-stop'), null);
   });
 
   await ctx.test('pending blocks its member without dimming selection or peers', () => {
@@ -79,12 +83,12 @@ test('Roster renders the controlled destination strip (#168)', { timeout: RENDER
       assert.ok(stop(root, name)?.hasAttribute('disabled'));
       assert.equal(stop(root, name)?.getAttribute('aria-busy'), 'true');
     }
-    assert.equal(stop(root, 'waiting')?.hasAttribute('disabled'), false);
+    assert.equal(stop(root, 'waiting'), null, 'a busy peer without hover or a pending job shows its dot');
     assert.equal(select(root, 'runner').hasAttribute('disabled'), false);
     const allPending = view({ interrupting: ['runner', 'waiting'] });
     for (const name of ['runner', 'waiting']) assert.ok(stop(allPending, name)?.hasAttribute('disabled'));
     const unrelated = view({ interrupting: ['removed'] });
-    assert.equal(stop(unrelated, 'runner')?.hasAttribute('disabled'), false);
+    assert.equal(stop(unrelated, 'runner'), null, "someone else's pending job shows nothing on this card");
   });
 
   await ctx.test('body extras mark only reached cards with @, without selecting them', () => {

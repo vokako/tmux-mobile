@@ -88,6 +88,17 @@ const selectedCard = (document: Document) =>
     : document.querySelector('.agent-select[aria-pressed="true"]')?.closest<HTMLElement>('.acard')?.dataset.agent ?? '';
 const stripCard = (document: Document, name: string) =>
   document.querySelector<HTMLElement>(`.acard[data-agent="${name}"]`)!;
+/** #205: Stop stands on the dot only while the card is hovered (fine pointer) or its interrupt is pending. */
+const hoverCard = async (app: { document: Document; window: Window & typeof globalThis; flush: () => Promise<void> }, name: string) => {
+  const event = new app.window.Event('pointerenter', { bubbles: false });
+  Object.defineProperty(event, 'pointerType', { value: 'mouse' });
+  stripCard(app.document, name).dispatchEvent(event);
+  await app.flush();
+};
+const unhoverCard = async (app: { document: Document; window: Window & typeof globalThis; flush: () => Promise<void> }, name: string) => {
+  stripCard(app.document, name).dispatchEvent(new app.window.Event('pointerleave', { bubbles: false }));
+  await app.flush();
+};
 
 test('process Stop keeps a failed confirmation retryable and pending Back cannot peel its parent (#167)', { timeout: 60000 }, async context => {
   const { rpc } = roomFixture();
@@ -954,12 +965,18 @@ test('roster disclosure keeps its cards, remembers each room, and holds order du
     agents[2]!.state = 'idle'; agents[2]!.since = 6000;
     await app.advance(5000);
     assert.deepEqual(order(), ['alice', 'bob', 'charlie'], 'an idle expanded monitor follows new turn order');
-    assert.ok(stripCard(app.document, 'alice').querySelector('.agent-stop button'));
+    await hoverCard(app, 'alice');
+    assert.ok(stripCard(app.document, 'alice').querySelector('.agent-stop button'), '#205: the hovered busy card shows its Stop');
+    await unhoverCard(app, 'alice');
+    assert.equal(stripCard(app.document, 'alice').querySelector('.agent-stop'), null, 'unhovered: the dot again');
+    await hoverCard(app, 'charlie');
     assert.equal(stripCard(app.document, 'charlie').querySelector('.agent-stop'), null,
-      'new turn state updates Stop availability');
+      'new turn state updates Stop availability: idle shows none even hovered');
+    await unhoverCard(app, 'charlie');
     toggle().click(); await app.flush();
     assert.deepEqual(order(), ['alice', 'bob', 'charlie'], 'collapse adopts the new turn order');
 
+    await hoverCard(app, 'bob');
     const bobStop = stripCard(app.document, 'bob').querySelector<HTMLButtonElement>('.agent-stop button')!;
     bobStop.dispatchEvent(new app.window.Event('pointerdown', { bubbles: true }));
     agents[1]!.since = 10000;
@@ -1020,6 +1037,7 @@ test('roster releases a touch press without click and reconciles focus after a c
     element.dispatchEvent(event);
   };
   try {
+    await hoverCard(app, 'bob');
     const stop = stripCard(app.document, 'bob').querySelector<HTMLButtonElement>('.agent-stop button')!;
     stop.click(); await app.flush();
     assert.equal(stop.disabled, true);
@@ -1050,7 +1068,7 @@ test('roster releases a touch press without click and reconciles focus after a c
   } finally { job.resolve({}); await app.close(); }
 });
 
-test('a pressed content-sized card holds action slots but never keeps a stale Stop enabled (#180)', { timeout: 60000 }, async context => {
+test('Stop follows hover and busy state: red on the hovered busy card, gone when the turn ends, never for an idle card (#180 → #205)', { timeout: 60000 }, async context => {
   const agents = [
     { name: 'alice', window: 0, managed: true, agent: 'kiro', state: 'running', since: 10 },
     { name: 'bob', window: 1, managed: true, agent: 'codex', state: 'idle', since: 20 },
@@ -1058,17 +1076,20 @@ test('a pressed content-sized card holds action slots but never keeps a stale St
   const app = await composerFixture(context, { hubAgents: async () => ({ agents }) });
   try {
     const alice = stripCard(app.document, 'alice'), bob = stripCard(app.document, 'bob');
+    assert.equal(alice.querySelector('.agent-stop'), null, 'at rest a busy card shows its dot, not a Stop');
+    await hoverCard(app, 'alice');
     const stop = alice.querySelector<HTMLButtonElement>('.agent-stop button')!;
-    stop.dispatchEvent(new app.window.Event('pointerdown', { bubbles: true }));
+    assert.ok(stop, 'hovering a busy card puts the Stop on the dot');
+    assert.ok(stop.classList.contains('danger'), 'red — "更符合语义"');
+    assert.ok(alice.classList.contains('stop-shown'), 'the dot yields to it');
+    assert.equal(bob.querySelector('.agent-stop'), null, 'an idle card has no Stop');
     agents[0]!.state = 'idle'; agents[1]!.state = 'running';
     await app.advance(5000);
-    assert.ok(stop.isConnected, 'layout cannot remove the pressed target');
-    assert.ok(stop.disabled, 'the retained target cannot interrupt an ended turn');
-    assert.equal(bob.querySelector('.agent-stop'), null, 'a new target waits for release rather than shifting the row');
-    stop.dispatchEvent(new app.window.Event('pointercancel', { bubbles: true }));
-    await app.flush();
-    assert.equal(alice.querySelector('.agent-stop'), null);
-    assert.ok(bob.querySelector('.agent-stop'), 'release adopts current action availability');
+    assert.equal(alice.querySelector('.agent-stop'), null, 'the turn ended: nothing to interrupt, the dot returns');
+    assert.equal(bob.querySelector('.agent-stop'), null, 'busy but not hovered: still the dot');
+    await unhoverCard(app, 'alice');
+    await hoverCard(app, 'bob');
+    assert.ok(bob.querySelector('.agent-stop button'), 'hover reveals the newly busy card\'s Stop');
   } finally { await app.close(); }
 });
 
@@ -1269,25 +1290,26 @@ test('a peer Stop captures its room, deduplicates pending clicks and never selec
     },
     hubAgentStop: () => assert.fail('Stop response must not kill the process'),
   });
-  const stop = (name: string) => stripCard(app.document, name).querySelector<HTMLButtonElement>('.agent-stop button')!;
+  // #205: a Stop stands only on the hovered card (or a pending one) — hover before each look.
+  const stop = async (name: string) => { await hoverCard(app, name); return stripCard(app.document, name).querySelector<HTMLButtonElement>('.agent-stop button')!; };
   try {
-    stop('bob').click();
-    stop('bob').click();
+    (await stop('bob')).click();
+    (await stop('bob')).click();
     await app.flush();
     assert.deepEqual(jobs.map(({ session, name }) => [session, name]), [['fixture', 'bob']]);
     assert.equal(selectedCard(app.document), 'alice');
-    assert.equal(stop('bob').disabled, true);
-    assert.equal(stop('alice').disabled, false);
+    assert.equal((await stop('bob')).disabled, true);
+    assert.equal((await stop('alice')).disabled, false);
     await app.room('other');
-    assert.equal(stop('bob').disabled, false, 'another room has its own pending identity');
-    stop('bob').click();
+    assert.equal((await stop('bob')).disabled, false, 'another room has its own pending identity');
+    (await stop('bob')).click();
     await app.flush();
     jobs[0]!.task.resolve({});
     await app.flush();
-    assert.equal(stop('bob').disabled, true, 'old room completion cannot clear the new job');
+    assert.equal((await stop('bob')).disabled, true, 'old room completion cannot clear the new job');
     jobs[1]!.task.resolve({});
     await app.flush();
-    assert.equal(stop('bob').disabled, false);
+    assert.equal((await stop('bob')).disabled, false);
     assert.equal(selectedCard(app.document), 'alice');
     assert.deepEqual(jobs.map(({ session, name }) => [session, name]), [['fixture', 'bob'], ['other', 'bob']]);
   } finally {

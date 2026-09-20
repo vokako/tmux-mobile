@@ -32,12 +32,12 @@ One roster replaces the old delivery chip and delayed card menu. Selection
 uses the existing accent fill/border with `aria-pressed`, not an additional
 check glyph; body mentions use one `@` glyph, not a dashed card ring.
 Attach/send use shared `CommandButton` paint and native 28px pointer /
-44px coarse targets; the card's Stop is the plain icon command in a
-`compact-tools` slot (28/32px, #192/#195) with the ordinary `--text2` ink — the
-card's colour is its state dot, the stop a quiet action beside it (owner,
-2026-09-13: "停止按钮，又大颜色也不好看"; the #173 amber-mixed `warn` variant went
-with its only consumer). Stop response is recoverable interruption, not the
-destructive process-stop confirmation. Status remains `.live-dot` /
+44px coarse targets; the card's Stop is the `danger` icon command in a 28px
+`compact-tools` slot standing ON the state dot while the card is hovered or
+focused on a fine pointer, never on touch (#205, owner 2026-09-20: "终止按钮应该
+是红色的吧，更符合语义，而且默认不显示"; #195's resident quiet `--text2` Stop and the
+#173 amber `warn` variant are history, see hub-composer.md). Stop response is
+recoverable interruption, not the destructive process-stop confirmation. Status remains `.live-dot` /
 `stateDotColor`; no extra busy-colour family or permanent stop-spinner.
 The owner's 07:09 final selection (quoted in hub-composer.md) is single-line,
 without visible state words. One chevron reveals the same list in flow, with

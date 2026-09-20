@@ -28,19 +28,37 @@
   let hovering = $state(false);
   let focused = $state(false);
   let pressing = $state(false);
-  let pressStops = $state.raw([]);
-  // Only layout is held during a press; current busyNames still gates actions.
-  const renderedStops = $derived(pressing ? pressStops : busyNames);
   let heldOrder = $state.raw({ session: '', names: [] });
   const holdOrder = $derived(hovering || focused || pressing);
   const ranked = $derived(sortAgentsForRoster(managedAgents));
-  function clearPress() {
-    pressing = false;
-    pressStops = [];
-  }
-  function beginPress() {
-    if (!pressing) pressStops = busyNames;
-    pressing = true;
+  function clearPress() { pressing = false; }
+  function beginPress() { pressing = true; }
+  // Stop stands ON the state dot of the one card the pointer (or focus) is on,
+  // fine pointers only (owner, 2026-09-20: "默认不显示，只有鼠标移到上边，把状态的小圆点变
+  // 为终止按钮。手机端就不要了…让用户用选项卡终止就好"; board #205). A pending interrupt
+  // keeps its Stop so the keyboard path has feedback (#173). Touch never renders
+  // one: the long-press menu's Interrupt is the touch path.
+  const coarse = typeof window !== 'undefined' && window.matchMedia('(any-pointer: coarse)').matches;
+  let armed = $state('');
+  function arm(name, pointerType = 'mouse') { if (!coarse && pointerType !== 'touch') armed = name; }
+  function disarm(name) { if (armed === name) armed = ''; }
+  const showStop = (name) => !coarse && busyNames.includes(name) && (armed === name || interrupting.includes(name));
+  /** Places the Stop's centre on the dot's centre — offsets are the card's own
+   * coordinate space (the select button is positioned; the card is too). */
+  function overDot(node) {
+    const card = node.closest('.acard');
+    const place = () => {
+      const dot = card?.querySelector('.ac-top');
+      if (!dot) return;
+      const host = dot.offsetParent;
+      const dx = host && host !== card ? host.offsetLeft : 0, dy = host && host !== card ? host.offsetTop : 0;
+      node.style.setProperty('--dot-x', `${dx + dot.offsetLeft + dot.offsetWidth / 2}px`);
+      node.style.setProperty('--dot-y', `${dy + dot.offsetTop + dot.offsetHeight / 2}px`);
+    };
+    place();
+    const observer = typeof ResizeObserver !== 'undefined' && card ? new ResizeObserver(place) : null;
+    observer?.observe(card);
+    return { destroy: () => observer?.disconnect() };
   }
   $effect(() => {
     void managedAgents; void busyNames; void selected;
@@ -183,8 +201,10 @@
         {@const mentioned = extras.includes(a.name) || extras.includes(ALL_TARGET)}
         {@const pending = interrupting.includes(a.name)}
         <!-- Selection and interruption are sibling native targets, never nested buttons. -->
-        <div class="acard" data-agent={a.name} class:sel={isAddressed(a.name)} class:filtered={filterAgent === a.name} class:has-stop={busyNames.includes(a.name)}
-          class:appear-pop={!!rosterBase && !rosterBase.has(a.name)} animate:flip={{ duration: moveMs() }}>
+        <div class="acard" role="group" data-agent={a.name} class:sel={isAddressed(a.name)} class:filtered={filterAgent === a.name} class:stop-shown={showStop(a.name)}
+          class:appear-pop={!!rosterBase && !rosterBase.has(a.name)} animate:flip={{ duration: moveMs() }}
+          onpointerenter={(e) => arm(a.name, e.pointerType)} onpointerleave={() => disarm(a.name)}
+          onfocusin={() => arm(a.name)} onfocusout={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) disarm(a.name); }}>
           <button type="button" class="agent-select"
             aria-pressed={isAddressed(a.name)}
             aria-label={[`${a.name} · ${stateLabel(a.state)}`, a.team, a.detail, vitalsLine(a.vitals), unread.has(a.name) ? t('hubUnread') : '', mentioned ? t('hubToAlsoHint').replace('{names}', `@${a.name}`) : '', filterAgent === a.name ? t('hubFilterItem') : ''].filter(Boolean).join(' · ')}
@@ -202,13 +222,14 @@
             </span>
             {#if expanded && a.vitals?.context_pct != null}<span class="ctx-value">{a.vitals.context_pct}%</span>{/if}
           </button>
-          {#if renderedStops.includes(a.name)}
-            <!-- A dense slot (compact-tools: 28/32px, board #192) and the plain icon ink:
-                 the card's colour is its state dot; the stop is a quiet action beside it
-                 (owner, 2026-09-13: "停止按钮，又大颜色也不好看"; board #195). -->
-            <span class="agent-stop compact-tools" class:pending>
-              <CommandButton label={`${t('hubInterrupt')} ${a.name}`} icon="stop" variant="icon" iconOnly
-                {pending} disabled={pending || !busyNames.includes(a.name)}
+          {#if showStop(a.name)}
+            <!-- The dot BECOMES the Stop: the danger icon command (a dense 28px
+                 slot, compact-tools) centred where the dot was, taking no width —
+                 the card never changes size (owner, 2026-09-20: "终止按钮应该是红色的
+                 吧，更符合语义"; board #205; replaces #195's resident quiet Stop). -->
+            <span class="agent-stop compact-tools" class:pending use:overDot>
+              <CommandButton label={`${t('hubInterrupt')} ${a.name}`} icon="stop" variant="danger" iconOnly
+                {pending} disabled={pending}
                 onclick={(e) => { e.stopPropagation(); interrupt(a.name); }} />
             </span>
           {/if}
@@ -333,7 +354,10 @@
   .agent-marks { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-width: 1em; flex: none; }
   .agent-marks.unmarked { display: none; }
   .agent-mention { color: var(--accent-ink); font-family: var(--font-mono); font-size: var(--fs-meta); font-weight: 600; }
-  .agent-stop { display: flex; align-items: center; flex: none; }
+  /* Stop stands on the dot: absolutely placed by overDot, so it never widens
+     the card (#180's concern) and the dot yields to it while shown. */
+  .agent-stop { position: absolute; z-index: 1; left: var(--dot-x, 50%); top: var(--dot-y, 50%); transform: translate(-50%, -50%); display: flex; align-items: center; }
+  .acard.stop-shown .ac-top { visibility: hidden; }
   @media (any-pointer: coarse) {
     .roster { --roster-paint-height: 34px; }
   }

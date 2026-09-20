@@ -46,11 +46,27 @@ test('card paint keeps its inset and the single measured scrolling edge (#180)',
   assert.match(source, /class="cards edge-fade"[^>]*use:scrollEdges=\{!expanded\}/u);
 });
 
-test('actual busy Stop is resident; no invisible action slots widen the card (#180)', () => {
+test('no invisible action slots widen the card; Stop stands ON the dot instead (#180 → #205)', () => {
   assert.doesNotMatch(source, /agent-watch|card-quick|onwatch/u);
-  assert.doesNotMatch(rule('.agent-stop'), /opacity: 0|position: absolute/u);
+  assert.doesNotMatch(rule('.agent-stop'), /opacity: 0/u, 'never an invisible reserved slot');
+  assert.match(rule('.agent-stop'), /position: absolute; z-index: 1; left: var\(--dot-x, 50%\); top: var\(--dot-y, 50%\); transform: translate\(-50%, -50%\)/u,
+    '#205: placed over the dot by overDot, taking no width — the card never changes size');
+  assert.match(rule('.acard.stop-shown .ac-top'), /visibility: hidden/u, 'the dot yields while the Stop stands on it');
   assert.doesNotMatch(rule('.acard'), /grid-template-columns/u);
-  assert.match(source, /icon="stop" variant="icon" iconOnly/u);
+  assert.match(source, /icon="stop" variant="danger" iconOnly/u);
+});
+
+test('Stop is red, hidden until hover/focus or a pending interrupt, and never on touch (board #205)', () => {
+  // Owner 2026-09-20: "终止按钮应该是红色的吧，更符合语义，而且默认不显示，只有鼠标移到上边，
+  // 把状态的小圆点变为终止按钮。手机端就不要了，节省空间，让用户用选项卡终止就好".
+  assert.match(source, /const coarse = typeof window !== 'undefined' && window\.matchMedia\('\(any-pointer: coarse\)'\)\.matches;/u);
+  assert.match(source, /const showStop = \(name\) => !coarse && busyNames\.includes\(name\) && \(armed === name \|\| interrupting\.includes\(name\)\);/u);
+  assert.match(source, /function arm\(name, pointerType = 'mouse'\) \{ if \(!coarse && pointerType !== 'touch'\) armed = name; \}/u);
+  assert.match(source, /onpointerenter=\{\(e\) => arm\(a\.name, e\.pointerType\)\} onpointerleave=\{\(\) => disarm\(a\.name\)\}/u);
+  assert.match(source, /onfocusin=\{\(\) => arm\(a\.name\)\} onfocusout=\{\(e\) => \{ if \(!e\.currentTarget\.contains\(e\.relatedTarget\)\) disarm\(a\.name\); \}\}/u);
+  assert.match(source, /\{#if showStop\(a\.name\)\}/u);
+  assert.match(source, /class="agent-stop compact-tools" class:pending use:overDot/u);
+  assert.doesNotMatch(source, /renderedStops|pressStops|has-stop/u, 'the resident slot and its press-hold layout are gone');
 });
 
 test('one controlled roster replaces the delayed tap menu whole (#168)', () => {
@@ -70,13 +86,12 @@ test('one controlled roster replaces the delayed tap menu whole (#168)', () => {
 
 test('Stop consumes parent busy and pending sets through the shared command', () => {
   assert.match(source, /busyNames = \[\], interrupting = \[\]/u);
-  assert.match(source, /const renderedStops = \$derived\(pressing \? pressStops : busyNames\)/u);
-  assert.match(source, /\{#if renderedStops\.includes\(a\.name\)\}/u);
-  assert.match(source, /disabled=\{pending \|\| !busyNames\.includes\(a\.name\)\}/u);
+  assert.match(source, /\{#if showStop\(a\.name\)\}/u);
+  assert.match(source, /\{pending\} disabled=\{pending\}/u);
   assert.doesNotMatch(source, /interrupting\.includes\(ALL_TARGET\)/u,
     'pending contains captured member names, never a second all-job sentinel');
   assert.match(source, /interrupting\.includes\(a\.name\)/u);
-  assert.equal([...source.matchAll(/icon="stop" variant="icon" iconOnly/gu)].length, 1);
+  assert.equal([...source.matchAll(/icon="stop" variant="danger" iconOnly/gu)].length, 1);
   assert.equal([...source.matchAll(/e\.stopPropagation\(\); interrupt\(/gu)].length, 1);
   assert.doesNotMatch(source, /hubAgentStop|hubAgentInterrupt|busyTargetsFor|\.state\s*===\s*'(?:running|working|waiting|blocked)'/u,
     'the parent owns target membership and dispatch, not a second local busy classifier');
@@ -184,7 +199,7 @@ test('the stop is a quiet dense action and the dot sits clear of the name, on th
   // Owner 2026-09-13: "agent卡片，也要紧凑一点，尤其是停止按钮，又大颜色也不好看，状态小点
   // 稍微有点挨得近了，而且上下不居中". Measured 390 coarse before: stop 44×44 in a
   // 46px card (card 111px wide), name→dot gap 1.3–2px, dot on the line-box centre.
-  assert.match(source, /class="agent-stop compact-tools"/u, 'the shared dense slot, not a private size');
+  assert.match(source, /class="agent-stop compact-tools" class:pending use:overDot/u, 'the shared dense slot, not a private size');
   assert.doesNotMatch(source, /variant="warn"/u, 'the amber-mixed ink is gone with its variant');
   assert.match(source, /<span class="a-name">\{a\.name\}<span class="ac-top"><span class="st"/u, 'the dot is in the name\'s line');
   assert.match(rule('.ac-top'), /vertical-align: middle; margin-inline-start: 5px;/u);

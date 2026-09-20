@@ -350,17 +350,21 @@ menu exclusion and the coarse-pointer long-press filter path.
 
 Owner, 08:41: "还有我觉得交互可以优化，比如应该打断方块可以不一直显示，可以鼠标移到卡片上后，可以显示打断按钮，还有 show terminal 的快捷按钮也要显示"
 
-Fine-pointer cards reveal Stop (busy only) and Watch on hover/focus-within,
-without moving their reserved native targets. Pending Stop remains visible
-so the existing keyboard interrupt has feedback. On coarse pointers Stop
-stays visible while busy and Watch stays in the long-press menu. Stop is the
-plain icon command (`variant="icon"`, `--text2` ink, no ground) in a
-`compact-tools` slot — 28px on a pointer, 32px on touch (board #195, owner
-2026-09-13: "agent卡片，也要紧凑一点，尤其是停止按钮，又大颜色也不好看"; measured 390
-coarse: the 44px slot made the busy card 111px wide, now 103). #173's amber
-mixed into foreground ink cleared the 3:1 glyph floor but read as mud on the
-light card; `--text2` clears the same floor on every card/theme combination
-(`CommandButton.source.test.ts`) and the `warn` variant is gone whole.
+**Stop stands on the dot, red, only while the pointer is on the card (board
+#205, owner 2026-09-20: "终止按钮应该是红色的吧，更符合语义，而且默认不显示，只有鼠标移到上边，
+把状态的小圆点变为终止按钮。手机端就不要了，节省空间，让用户用选项卡终止就好").** A busy
+card at rest shows its state dot. Hovering or focusing it (fine pointers)
+puts the `danger` icon command — the same shared `CommandButton`, 28px
+`compact-tools` slot — exactly on the dot (`overDot` reads the dot's offsets
+in the card's space; the dot hides underneath), so the card never changes
+width and the row never shifts; a pending interrupt keeps its Stop so the
+keyboard path has feedback (#173). Touch renders no Stop at all: the
+long-press menu's Interrupt is the touch path. Measured at 1440: hover →
+Stop centre (320, 841) = dot centre, card 71px wide before, during and after.
+History: #173 revealed a resident amber Stop on hover; #180/#195 made it
+resident while busy on both pointers, quiet `--text2` ink, with a press-hold
+of the row's layout (`renderedStops`/`pressStops`) so the slot could not
+shift under a finger — gone whole with the slot. Watch stays in the menu.
 
 The state dot lives INSIDE the name's line with `vertical-align: middle` —
 by definition the dot's midpoint on the baseline plus half the x-height, so it
