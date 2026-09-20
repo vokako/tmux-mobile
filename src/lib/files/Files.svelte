@@ -35,6 +35,7 @@
   import { createFileNavigation, directoryBackFloor } from './file-nav.ts';
   import { handlePathLinkClick, resolvePathRef } from '../core/path-links.ts';
   import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadHttp, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from '../core/ws.ts';
+  import { uploadProgress, uploadSummary, uploadSizeError } from './file-upload.ts';
 
   // Tauri plugin imports (tree-shaken in browser builds). The platform flags
   // come from the ONE module (rule 3); `tauriPlugins` is this file's own
@@ -1126,10 +1127,12 @@
 
   let copyFeedback = $state(null);
   let downloadFeedback = $state(null);
+  let uploadFeedback = $state(null);
   let downloadOperation = $state.raw(null);
   let downloadOutput = $state(null);
   const copyLifetime = createFeedbackLifetime(value => { copyFeedback = value; });
   const downloadLifetime = createFeedbackLifetime(value => { downloadFeedback = value; });
+  const uploadLifetime = createFeedbackLifetime(value => { uploadFeedback = value; });
 
   function feedbackContext() {
     const context = { session, root, cwd, view, file: currentFile?.path, request: navRequest };
@@ -1140,9 +1143,9 @@
   $effect(() => {
     // Context exits invalidate pending callbacks even if the same path reopens.
     session; root; cwd; view; currentFile?.path; navRequest; visible;
-    return () => { copyLifetime.clear(); dismissDownload(); };
+    return () => { copyLifetime.clear(); dismissDownload(); uploadLifetime.clear(); };
   });
-  $effect(() => () => { copyLifetime.dispose(); downloadLifetime.dispose(); });
+  $effect(() => () => { copyLifetime.dispose(); downloadLifetime.dispose(); uploadLifetime.dispose(); });
 
   async function openDownloaded(output) {
     if (!output || output !== downloadOutput || !output.operation.current() || output.opening) return;
@@ -1394,37 +1397,80 @@
     return btoa(binary);
   }
 
-  // Browser File objects (the picker's input, a drop's DataTransfer). A
-  // per-file try/catch: one unreadable item (a dropped DIRECTORY reads as a
-  // File whose FileReader errors) must not abandon the rest of the batch.
-  async function uploadBlobFiles(files) {
-    const dir = cwd; // the batch's target, fixed at the gesture
-    for (const file of files) {
+  // ONE batch runner for both transports (board #214: "文件上传要有个进度或者提示，
+  // 让我知道传上去了没有"). Per file: refuse over the server's message cap up
+  // front, read (the only phase with real byte progress), send — ONE atomic
+  // fs_upload RPC, shown as a discrete "sending" beat — and count it uploaded
+  // only when the server has answered. A per-file try/catch: one unreadable
+  // item (a dropped DIRECTORY reads as a File whose FileReader errors) must
+  // not abandon the rest of the batch; the closing line names every file
+  // that failed. The feedback follows the existing copy/download slot and
+  // its context rule: leave the directory and the line stops updating.
+  const uploadStrings = () => ({
+    uploading: t('uploading'), uploadReading: t('uploadReading'), uploadSending: t('uploadSending'),
+    uploaded: t('uploaded'), uploadedMany: t('uploadedMany'), uploadFailed: t('uploadFailed'), uploadPartial: t('uploadPartial'),
+  });
+  async function runUploadBatch(items, dir) {
+    const token = uploadLifetime.begin();
+    const contextCurrent = feedbackContext();
+    const current = () => uploadLifetime.current(token) && contextCurrent();
+    const s = uploadStrings();
+    const outcome = { ok: [], failed: [] };
+    const total = items.length;
+    items.forEach((item, i) => {
+      item.step = { name: item.name, index: i + 1, total, phase: 'reading', loaded: 0, size: item.size };
+    });
+    const show = (step) => { if (current()) uploadLifetime.update(token, uploadProgress(step, dir, s)); };
+    for (const item of items) {
+      const step = item.step;
       try {
-        const b64 = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result).split(',')[1]);
-          reader.onerror = () => reject(new Error(`cannot read: ${file.name}`));
-          reader.readAsDataURL(file);
-        });
-        await fsUpload(uploadDest(dir, file.name), b64);
-      } catch (e) { error = e.message; }
+        const tooLarge = uploadSizeError(item.size, t('uploadTooLarge'));
+        if (tooLarge) throw new Error(`${item.name}: ${tooLarge}`);
+        show(step);
+        const b64 = await item.read((loaded) => { step.loaded = loaded; show(step); });
+        step.phase = 'sending';
+        show(step);
+        await fsUpload(uploadDest(dir, item.name), b64);
+        outcome.ok.push(item.name);
+      } catch (e) {
+        outcome.failed.push({ name: item.name, error: e.message });
+        error = e.message;
+      }
     }
+    if (current()) uploadLifetime.update(token, uploadSummary(outcome, dir, s));
     refreshAfterBatch(dir);
   }
 
+  // Browser File objects (the picker's input, a drop's DataTransfer).
+  async function uploadBlobFiles(files) {
+    const dir = cwd; // the batch's target, fixed at the gesture
+    await runUploadBatch(files.map((file) => ({
+      name: file.name, size: file.size,
+      read: (onProgress) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded); };
+        reader.onload = () => resolve(String(reader.result).split(',')[1]);
+        reader.onerror = () => reject(new Error(`cannot read: ${file.name}`));
+        reader.readAsDataURL(file);
+      }),
+    })), dir);
+  }
+
   // Tauri filesystem paths (the native picker, the webview's drag-drop event).
+  // The plugin reads whole files, so the size is learned with the bytes and
+  // the cap is checked when they are in hand.
   async function uploadTauriPaths(paths) {
     const dir = cwd; // the batch's target, fixed at the gesture
     await tauriPlugins;
-    for (const filePath of paths) {
-      try {
-        const name = String(filePath).split('/').pop().split('\\').pop();
+    await runUploadBatch(paths.map((filePath) => ({
+      name: String(filePath).split('/').pop().split('\\').pop(), size: 0,
+      read: async () => {
         const bytes = new Uint8Array(await tauriFs.readFile(filePath));
-        await fsUpload(uploadDest(dir, name), bytesToB64(bytes));
-      } catch (e) { error = e.message; }
-    }
-    refreshAfterBatch(dir);
+        const tooLarge = uploadSizeError(bytes.length, t('uploadTooLarge'));
+        if (tooLarge) throw new Error(tooLarge);
+        return bytesToB64(bytes);
+      },
+    })), dir);
   }
 
   async function handleUpload() {
@@ -1929,7 +1975,7 @@
     {:else if view === 'git'}<GitPanel bind:this={gitPanelRef} {cwd} {fontSize} onOpenFile={(entry) => { fromGit = true; openEntry(entry); }} onClose={() => { view = 'list'; }} />
     {/if}
   {/if}
-  {#if copyFeedback || downloadFeedback}
+  {#if copyFeedback || downloadFeedback || uploadFeedback}
     {@const operation = downloadOperation}
     {@const output = downloadOutput}
     {#snippet downloadActions()}
@@ -1943,6 +1989,8 @@
       <OperationFeedback value={downloadFeedback} actions={output ? downloadActions : undefined}
         ondismiss={downloadFeedback?.kind === 'error' || downloadFeedback?.kind === 'result'
           ? () => dismissDownload(operation) : undefined} />
+      <OperationFeedback value={uploadFeedback}
+        ondismiss={uploadFeedback?.kind === 'error' ? uploadLifetime.clear : undefined} />
     </div>
   {/if}
 </div>

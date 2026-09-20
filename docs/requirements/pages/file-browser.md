@@ -25,7 +25,7 @@ directory, or the server's home directory when no session is open yet.
 - Recent files panel (last 20 opened files, scrollable, capped to 40vh)
 - File preview: Markdown (rendered through the shared safe renderer, `core/markdown.ts`, + mermaid + KaTeX), CSV (table), code (syntax highlighted; the lined view shows the first 3000 lines with a "Show all N lines" button), HTML (sandboxed iframe), PDF (pdf.js), images (tap → the fullscreen Lightbox with pinch/wheel zoom; a trackpad pinch on the inline image opens it instead of zooming the page), video (the browser's own `<video>` player streaming ranges from the signed `/dl` URL — mp4/m4v/webm/mov/mkv/ogv, any size). pdf.js, mermaid and highlight.js load on first use, not at startup.
 - Text editor with syntax highlighting, undo stack, save button
-- File operations: create file/folder, rename, delete, upload, download
+- File operations: create file/folder, rename, delete, upload (with per-file progress feedback: reading %, a sending beat, then `Uploaded …` or a line naming every failed file; single file ≤ 60 MB), download
 - File info panel: path (tap to copy), type, size, modified, permissions
 - Git integration: status view, per-file stage/unstage, diff viewer, commit log, add all/commit/push
 
@@ -80,7 +80,7 @@ directory, or the server's home directory when no session is open yet.
 - `fs_delete(path)` — delete file/directory
 - `fs_rename(from, to)` — rename/move
 - `fs_download(path)` — download as base64 (≤50MB)
-- `fs_upload(path, data)` — upload as base64
+- `fs_upload(path, data)` — upload as base64 (one atomic message per file; the client refuses files over 60 MB, the server's 80 MB message cap ÷ base64 growth)
 - `fs_convert(path, format?)` — convert file to HTML for preview (currently pptx only; extracted natively by the server, no external tooling required)
 - `git(subcmd, args, cwd)` — git operations
 - `get_bookmarks()` / `save_bookmarks(bookmarks)` — bookmark persistence

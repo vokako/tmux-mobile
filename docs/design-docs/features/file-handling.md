@@ -349,6 +349,46 @@ category and the gate bypass. Not verified here: actual playback on the
 owner's devices (the WebView's probe-and-decide, and codec support, are the
 browser's).
 
+### Upload feedback is the third slot of the same stack, and it never invents a percentage (board #214, 2026-09-20)
+
+Owner: "文件上传要有个进度或者提示，让我知道传上去了没有". A successful upload was a
+silent listing refresh; only a failure spoke, through the page's error bar.
+Now `uploadLifetime` is a third `createFeedbackLifetime` slot in the same
+`.files-feedback` stack (`{#if copyFeedback || downloadFeedback ||
+uploadFeedback}` — the guard was the bug the mount test caught first), with
+the same rules: errors offer Close, progress has no cancel, success expires
+by itself, and a context exit (directory, session, view) stops the line.
+
+What can honestly be shown. One file is ONE atomic `fs_upload` RPC — the
+whole base64 body in a single WebSocket message — and nothing observes the
+send, so a moving byte bar there would be fiction (`WebSocket.bufferedAmount`
+polling was considered and rejected: it bypasses ws.ts and, once the
+payload is E2E-encrypted, no longer maps to file bytes). The line therefore
+reads `Uploading name (i/n)` with two phases: **Reading** carries the real
+FileReader percentage (a native-path read is whole, so it shows none);
+**Sending** is a discrete beat with the indeterminate spinner. A file is
+counted *uploaded* only when the RPC resolves — the server has written it —
+never when the send returns. The closing line counts a clean batch
+(`Uploaded name` / `Uploaded n files`) and NAMES every file that failed
+(`k uploaded, m failed: a, b`, detail = the first error); the page's error
+bar keeps its per-file message as before.
+
+Both transports (browser Files from the picker or a drop; native paths from
+the Tauri picker or webview drag-drop) hand their batch to ONE
+`runUploadBatch(items, dir)`; the `dir` stays the gesture-time snapshot
+(#22) and the runner never reads `cwd`. The pure pieces — `uploadProgress`,
+`uploadSummary`, `uploadSizeError` — live in `file-upload.ts` and are
+unit-tested; the Files mount tests drive the picker with a deferred
+`fsUpload` and check the phase text, the "counted only after the answer"
+order, and the named failure.
+
+Size guard: the server refuses a WebSocket message over 80 MB
+(`WS_MAX_MESSAGE_BYTES`), and base64 grows a file by 4/3, so
+`UPLOAD_MAX_BYTES` = 60 MB is refused up front with "a single file can be at
+most 60 MB" — before, such a file sat in the 60 s request timeout and then
+took the connection down. Byte-level progress and files beyond 60 MB need a
+chunked or HTTP upload path; that is a separate issue, not this one.
+
 ### Base64 Chunking
 `btoa(String.fromCharCode(...spread))` crashes on files >100KB (JS argument limit). Use 8192-byte chunks.
 

@@ -685,3 +685,72 @@ test('crumb and row menus copy the NAME or the full PATH (board #191)', async co
     assert.deepEqual(copied, ['fixture', '/fixture', 'AGENTS.md']);
   } finally { await app.close(); }
 });
+
+
+test('an upload reports each file, counts it uploaded only when the server answers, and names failures (board #214)', async context => {
+  // Owner 2026-09-20: "文件上传要有个进度或者提示，让我知道传上去了没有". Before, a
+  // successful upload only refreshed the listing; the user could not tell.
+  const uploads: { path: string; done: ReturnType<typeof deferred<object>> }[] = [];
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, session: 'fixture' },
+    modules: [rpc({ fsUpload: (path: string) => { const done = deferred<object>(); uploads.push({ path, done }); return done.promise; } })],
+    setup(window) {
+      window.localStorage.setItem('tmux_layout_mode', 'desktop');
+      // A file input cannot be driven in a test; the batch is handed to the
+      // picker's onchange with the files defined on it.
+      const click = window.HTMLInputElement.prototype.click;
+      window.HTMLInputElement.prototype.click = function (this: HTMLInputElement) {
+        if (this.type !== 'file') return click.call(this);
+        const files = [new window.File(['abc'], 'one.txt'), new window.File(['defg'], 'two.txt')];
+        Object.defineProperty(this, 'files', { value: files });
+        this.onchange?.(new window.Event('change'));
+      };
+    },
+  });
+  const feedback = () => app.document.querySelector('.files-feedback [role=status], .files-feedback [role=alert]')?.textContent ?? '';
+  try {
+    await settle(app);
+    button(app, 'Upload files').click();
+    // jsdom's FileReader completes over setImmediate hops (a macrotask each).
+    const macrotask = () => new Promise<void>((resolve) => setImmediate(resolve));
+    for (let i = 0; i < 20 && uploads.length < 1; i++) { await macrotask(); await app.flush(); }
+    assert.equal(uploads.length, 1, 'files go one at a time');
+    assert.equal(uploads[0]!.path, '/fixture/one.txt');
+    assert.match(feedback(), /Uploading one\.txt \(1\/2\)/);
+    assert.match(feedback(), /Sending/, 'the read is done; the send is a discrete beat');
+    assert.equal(app.document.querySelector('.files-feedback progress'), null, 'no invented percentage while sending');
+    uploads[0]!.done.resolve({});
+    for (let i = 0; i < 20 && uploads.length < 2; i++) { await macrotask(); await app.flush(); }
+    assert.match(feedback(), /Uploading two\.txt \(2\/2\)/, 'the first is counted only after the server answered');
+    uploads[1]!.done.reject(new Error('disk full'));
+    await settle(app);
+    const alert = app.document.querySelector('.files-feedback [role=alert]');
+    assert.ok(alert, 'a failure is an alert, not a silent refresh');
+    assert.match(alert.textContent ?? '', /1 uploaded, 1 failed: two\.txt/, 'the failed file is named');
+    assert.match(alert.textContent ?? '', /disk full/);
+  } finally { for (const u of uploads) u.done.resolve({}); await app.close(); }
+});
+
+test('a clean upload batch ends in a success line that names the file (board #214)', async context => {
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, session: 'fixture' },
+    modules: [rpc({ fsUpload: async () => ({ ok: true }) })],
+    setup(window) {
+      window.localStorage.setItem('tmux_layout_mode', 'desktop');
+      window.HTMLInputElement.prototype.click = function (this: HTMLInputElement) {
+        Object.defineProperty(this, 'files', { value: [new window.File(['abc'], 'one.txt')] });
+        this.onchange?.(new window.Event('change'));
+      };
+    },
+  });
+  try {
+    await settle(app);
+    button(app, 'Upload files').click();
+    for (let i = 0; i < 20 && !/Uploaded one\.txt/.test(app.document.querySelector('.files-feedback')?.textContent ?? ''); i++) {
+      await new Promise<void>((resolve) => setImmediate(resolve)); await app.flush();
+    }
+    const status = app.document.querySelector('.files-feedback [role=status]');
+    assert.match(status?.textContent ?? '', /Uploaded one\.txt/);
+    assert.match(status?.textContent ?? '', /\/fixture/, 'and where it landed');
+  } finally { await app.close(); }
+});

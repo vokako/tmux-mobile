@@ -9,9 +9,25 @@ test('copy and download feedback share the UI owner and never restore private to
   // OperationFeedback owns paint; Files only composes a single in-flow stack.
   assert.match(source, /import OperationFeedback from '\.\.\/ui\/OperationFeedback\.svelte'/u);
   assert.match(source, /import \{ createFeedbackLifetime \} from '\.\.\/ui\/feedback-lifetime\.ts'/u);
-  assert.equal(source.match(/<OperationFeedback /gu)?.length, 2);
+  assert.equal(source.match(/<OperationFeedback /gu)?.length, 3, 'copy, download, upload — one owner');
   assert.match(source, /\.files-feedback \{[^}]*flex-direction: column/u);
   assert.doesNotMatch(source, /copyToast|copyTimer|downloadToast|downloadedPath|dlProgress|displayedDlProgress|copy-toast|download-toast|dl-ring|toast-fade/u);
+});
+
+test('upload feedback rides the same slot: one batch runner for both transports, honest phases, a size guard (board #214)', () => {
+  // Owner 2026-09-20: "文件上传要有个进度或者提示，让我知道传上去了没有". A success used
+  // to be a silent listing refresh.
+  assert.match(source, /import \{ uploadProgress, uploadSummary, uploadSizeError \} from '\.\/file-upload\.ts'/u);
+  assert.match(source, /const uploadLifetime = createFeedbackLifetime\(value => \{ uploadFeedback = value; \}\);/u);
+  assert.match(source, /\{#if copyFeedback \|\| downloadFeedback \|\| uploadFeedback\}/u, 'the slot renders for an upload too');
+  assert.match(source, /<OperationFeedback value=\{uploadFeedback\}\s*ondismiss=\{uploadFeedback\?\.kind === 'error' \? uploadLifetime\.clear : undefined\} \/>/u,
+    'errors are dismissable; progress has no cancel, success expires by itself');
+  assert.equal(source.match(/await runUploadBatch\(/gu)?.length, 2, 'picker/drop Files and native paths share ONE runner');
+  assert.doesNotMatch(source, /await fsUpload\(uploadDest\(dir, (?:file\.)?name\)/u, 'no transport uploads on its own');
+  // Uploaded = the server answered: the RPC resolves before the count.
+  assert.match(source, /await fsUpload\(uploadDest\(dir, item\.name\), b64\);\s*outcome\.ok\.push\(item\.name\);/u);
+  assert.match(source, /step\.phase = 'sending';\s*show\(step\);/u, 'the send is a discrete beat, not an invented percentage');
+  assert.match(source, /uploadLifetime\.clear\(\); \};/u, 'a context exit stops the line, like copy/download');
 });
 
 test('back retraces the USER\u2019s steps — a history, not a parent walk (board #17)', () => {
@@ -97,11 +113,15 @@ test('an OS drag onto the listing uploads into the CURRENT directory (board #22)
     const body = helper(name);
     assert.match(body, /const dir = cwd; \/\/ the batch's target, fixed at the gesture/u,
       `${name} snapshots its target ONCE, at entry`);
-    assert.match(body, /uploadDest\(dir, /u, `${name} uploads to the snapshot`);
-    assert.match(body, /refreshAfterBatch\(dir\);/u, `${name} refreshes via the snapshot rule`);
+    assert.match(body, /\}\)\), dir\);/u, `${name} hands the snapshot to the one batch runner (#214)`);
     assert.equal(body.split('cwd').length - 1, 1,
       `${name} reads cwd exactly once — the snapshot; nothing in the loop can see a navigation`);
   }
+  // The runner (#214) takes the dir as a PARAMETER and never looks at cwd.
+  const runner = helper('runUploadBatch');
+  assert.match(runner, /uploadDest\(dir, /u, 'uploads to the snapshot');
+  assert.match(runner, /refreshAfterBatch\(dir\);/u, 'refreshes via the snapshot rule');
+  assert.equal(runner.split('cwd').length - 1, 0, 'the runner cannot see a navigation');
   // The refresh rule: still looking at the target → show the arrivals; moved
   // on → touch NOTHING (reloading the snapshot dir would hijack the view
   // back, reloading the new dir would announce files that landed elsewhere).
