@@ -261,6 +261,19 @@ pub fn up(id: &str) -> Result<Value, String> {
     Ok(json!(report))
 }
 
+/// Restart ONE agent slot of a project (board #210): the window returns with
+/// its full recipe and exact conversation id; no other slot is touched and
+/// the project's `last_up_at` is not a project-level `up`, so it is left
+/// alone. `Ok(false)` = no such agent slot yet (the capture loop has not
+/// recorded it) or the window could not be created.
+pub fn up_agent(id: &str, window_name: &str) -> Result<bool, String> {
+    let (project, slots) = load(id)?;
+    Ok(match reconcile::up_agent(&project, &slots, window_name) {
+        Some(r) => r.status == "created" || r.status == "existing",
+        None => false,
+    })
+}
+
 pub fn down(id: &str) -> Result<Value, String> {
     let (project, _) = load(id)?;
     reconcile::down(&project)?;

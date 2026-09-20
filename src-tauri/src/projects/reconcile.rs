@@ -69,6 +69,20 @@ pub fn up(project: &Project, slots: &[Slot]) -> Result<UpReport, String> {
     })
 }
 
+/// Bring ONE agent slot up — the restart button's half of `up`. Same code
+/// path as `up` takes for a single slot (slot cwd, hooks refresh, the exact
+/// `agent_session_id` resume, staged script), for this slot ONLY: a restart of
+/// one stopped agent used to go through `up`, which also resumed every OTHER
+/// stopped agent in the project (owner, 2026-09-20, board #210). `None` when
+/// the project has no agent slot by that name — the caller falls back to a
+/// fresh resume spawn, as before.
+pub fn up_agent(project: &Project, slots: &[Slot], window_name: &str) -> Option<SlotResult> {
+    let slot = slots
+        .iter()
+        .find(|s| s.kind == SlotKind::Agent && s.window_name == window_name)?;
+    Some(create_or_keep(project, slot))
+}
+
 fn create_or_keep(project: &Project, slot: &Slot) -> SlotResult {
     if tmux::find_window_by_name(&project.session, &slot.window_name).is_some() {
         return SlotResult {
@@ -348,6 +362,75 @@ mod tests {
         down(&p).unwrap();
         assert!(!tmux::session_exists(&p.session));
         down(&p).unwrap_or_else(|e| panic!("down must be idempotent: {e}"));
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    /// Restarting ONE stopped agent must bring back THAT agent only. It used
+    /// to go through the project-wide `up`, which also resumed every other
+    /// stopped agent in the project (owner, 2026-09-20, board #210). The
+    /// single-slot path keeps the exact conversation id: `--resume-id <id>`,
+    /// never a degraded `--resume`.
+    #[test]
+    fn up_agent_restarts_only_the_named_agent_with_its_exact_conversation() {
+        let path = std::env::temp_dir().join(format!("tmm-proj-upagent-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&path).unwrap();
+        let ws = path.to_str().unwrap();
+        let p = project("tmm-test-upagent", ws);
+        let _ = tmux::kill_session(&p.session);
+
+        // Two managed agents, both with a recipe (a harmless `echo` stands in
+        // for the CLI) and both with a recorded conversation.
+        let mut slots = Vec::new();
+        for name in ["a", "b"] {
+            let home = crate::projects::spawn::agent_home(ws, name);
+            std::fs::create_dir_all(&home).unwrap();
+            crate::projects::spawn::LaunchRecipe {
+                backend: "kiro",
+                env: &[],
+                cmd: &format!("echo restarted-{name}"),
+                spawned_by: "",
+                team: None,
+                agent_def: "",
+                member: "",
+            }
+            .write(&home)
+            .unwrap();
+            let mut s = slot(name, "", true);
+            s.kind = SlotKind::Agent;
+            s.command = Some("kiro".into());
+            s.auto_run = true;
+            s.agent_session_id = Some(format!("conv-{name}"));
+            slots.push(s);
+        }
+        tmux::ensure_session(&p.session, ws).unwrap();
+        // Both stopped: neither window exists.
+        assert!(tmux::find_window_by_name(&p.session, "a").is_none());
+        assert!(tmux::find_window_by_name(&p.session, "b").is_none());
+
+        // An unknown name is nobody's slot — the caller falls back to spawn.
+        assert!(up_agent(&p, &slots, "nobody").is_none());
+
+        let r = up_agent(&p, &slots, "a").expect("a is a slot");
+        assert_eq!(r.status, "created", "{r:?}");
+        assert!(r.error.is_none(), "{r:?}");
+        assert!(tmux::find_window_by_name(&p.session, "a").is_some(), "a is back");
+        assert!(
+            tmux::find_window_by_name(&p.session, "b").is_none(),
+            "b was not asked for and must stay stopped"
+        );
+        // The staged relaunch line resumes a's EXACT conversation.
+        let staged =
+            std::fs::read_to_string(crate::projects::spawn::agent_home(ws, "a").join("launch-a.sh")).unwrap();
+        assert!(staged.contains("TMM_AGENT=a "), "identity: {staged}");
+        assert!(staged.contains("echo restarted-a --resume-id conv-a"), "exact id, not --resume: {staged}");
+
+        // A second call for a live agent changes nothing.
+        let again = up_agent(&p, &slots, "a").unwrap();
+        assert_eq!(again.status, "existing");
+        assert_eq!(tmux::list_named_windows(&p.session).iter().filter(|(n, _)| n == "a").count(), 1);
+        assert!(tmux::find_window_by_name(&p.session, "b").is_none(), "still stopped");
+
+        down(&p).unwrap();
         let _ = std::fs::remove_dir_all(&path);
     }
 

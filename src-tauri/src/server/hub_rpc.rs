@@ -521,9 +521,11 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
 
         // Stop / restart ONE agent. The window is the agent's life: killing it
         // ends the process and keeps the declaration, so `restart` is kill +
-        // `projects::up`, which recreates only what is missing and prefers the
-        // resume flags — the agent comes back to its own conversation rather
-        // than to a blank prompt. Managed-only: we stop what we started.
+        // `projects::up_agent`, which recreates THAT slot's window from its
+        // recipe and prefers the resume flags — the agent comes back to its
+        // own conversation rather than to a blank prompt. Never the project-
+        // wide `up`: that resumed every other stopped agent too (board #210).
+        // Managed-only: we stop what we started.
         // Interrupt: type Escape into the agent's own pane — the only channel
         // that reaches a BUSY agent, since a chat message is read between
         // turns. Named key, never a raw \x1b: with extended-keys on, tmux
@@ -591,10 +593,11 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
                 let _ = rooms::post(&room, agent, &format!("[tmm] stopped {agent}"));
                 return Ok(serde_json::json!({ "stopped": agent }));
             }
-            // Recreate from the declaration. A window younger than the capture
-            // loop's 120 s rule may not be in it yet, so fall back to a fresh
-            // spawn — that starts a new conversation instead of resuming one,
-            // which is still better than an agent that does not come back.
+            // Recreate THIS slot from the declaration. A window younger than
+            // the capture loop's 120 s rule may not be in it yet, so fall back
+            // to a fresh spawn — that starts a new conversation instead of
+            // resuming one, which is still better than an agent that does not
+            // come back.
             let mut resumed = false;
             if let Ok(Some(project)) = crate::projects::project_for_session(session) {
                 // Bring the agent's materials up to date with the CURRENT
@@ -608,7 +611,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
                 if !crate::projects::spawn::refresh_agent(&project.path, session, agent) {
                     crate::projects::spawn::refresh_hooks(&project.path, agent);
                 }
-                resumed = crate::projects::up(&project.id).is_ok()
+                resumed = crate::projects::up_agent(&project.id, agent).unwrap_or(false)
                     && window_of_agent(session, agent).is_some();
             }
             if !resumed {
