@@ -67,7 +67,7 @@
     position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; gap: 8px;
     box-sizing: border-box; height: var(--control-height); min-width: var(--control-height);
     padding: 0 12px; border: 0; border-radius: var(--ui-radius-control);
-    background: transparent; color: var(--text); cursor: pointer; letter-spacing: 0;
+    background: transparent; color: var(--text2); cursor: pointer; letter-spacing: 0;
     font: 500 var(--fs-ui)/var(--control-line-height) var(--font-display);
     transition: color var(--t-fast);
     -webkit-tap-highlight-color: transparent;
@@ -87,6 +87,12 @@
   .solid { --command-paint: var(--accent-fill); color: var(--accent-fill-ink); }
   .solid.danger { --command-paint: var(--danger-fill); }
   .command-button:hover:not(:disabled) { --command-paint: var(--control-hover); }
+  /* Ink: quiet at rest, full on hover — the .icon-btn / rail grammar. A
+     command's 2px strokes in full --text outweighed the text around them
+     (owner, 2026-09-20, board 220: "这些按钮上显示的线条太黑了，甚至有点喧宾夺主…tab 上
+     的文字，其实都没有那么黑"); tab --text3 < command --text2 < body --text.
+     Solid, danger and engaged keep their own inks in every state. */
+  .command-button:not(.solid):not(.danger):hover:not(:disabled) { color: var(--text); }
   .command-button.solid:hover:not(:disabled) {
     --command-paint: var(--accent-fill);
     --command-overlay: color-mix(in srgb, var(--control-overlay-light) 4%, transparent);

@@ -317,8 +317,14 @@ code/numeric readouts use mono. Configuration letter spacing is zero.
 Commands paint through an inert inset pseudo-element inside the native
 button: a rounded rectangle on `--control-paint-radius` for icon squares and
 text commands alike (#218 — they were circles and capsules until the owner
-asked for rounded rectangles everywhere but Send and the avatars). Hit
-rectangles remain in flow, nonoverlapping, and active even outside the paint.
+asked for rounded rectangles everywhere but Send and the avatars). A
+command's INK is `--text2` at rest and `--text` on hover — the `.icon-btn` /
+rail grammar (board #220, owner 2026-09-20: "这些按钮上显示的线条太黑了，甚至有点喧宾
+夺主…tab 上的文字，其实都没有那么黑"; rest had been `--text`, so every 2px stroke
+outweighed the words beside it): tab `--text3` < command `--text2` < body
+`--text`. Solid keeps its fill ink, danger its red, engaged its accent, in
+every state. Hit rectangles remain in flow, nonoverlapping, and active even
+outside the paint.
 Native fields use transparent vertical borders and `background-clip:
 padding-box`, retaining the same input/button as the click, focus and menu
 anchor. The outer vertical radius includes the inset, so the painted inner

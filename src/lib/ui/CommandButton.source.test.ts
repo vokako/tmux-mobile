@@ -44,6 +44,19 @@ test('command paint is inset inside the native target, with a visible keyboard r
   assert.match(style, /\.command-button:focus-visible::before \{ outline: 2px solid var\(--accent-ink\); outline-offset: 2px; \}/u);
 });
 
+test('command ink is quiet at rest and full on hover; solid, danger and engaged keep their own (board #220)', () => {
+  // Owner 2026-09-20: "这些按钮上显示的线条太黑了，甚至有点喧宾夺主。因为我系统里很多文字，
+  // 包括 tab 上的文字，其实都没有那么黑" — rest was --text, the darkest ink.
+  const button = style.match(/\.command-button \{([^}]+)\}/u)?.[1] ?? '';
+  assert.match(button, /color: var\(--text2\)/u, 'rest: the .icon-btn / secondary-text layer, not body ink');
+  assert.match(style, /\.command-button:not\(\.solid\):not\(\.danger\):hover:not\(:disabled\) \{ color: var\(--text\); \}/u,
+    'hover brightens to body ink; solid and danger are excluded so Send stays fill-ink and Stop stays red');
+  assert.match(style, /\.danger \{ color: var\(--danger-ink\); \}/u);
+  assert.match(style, /\.solid \{ --command-paint: var\(--accent-fill\); color: var\(--accent-fill-ink\); \}/u);
+  assert.match(style, /\.command-button\.engaged,\s*\.command-button\.engaged:hover:not\(:disabled\),\s*\.command-button\.engaged:active:not\(:disabled\) \{[^}]*color: var\(--accent-ink\);/u,
+    'engaged (pressed/expanded) keeps its state ink through hover');
+});
+
 test('every command is a rounded rectangle; `round` is the composer Send\'s one circle (board #218)', async () => {
   // Owner 2026-09-20: "这个图标按钮应该都用圆角矩形，不要用圆圈…除了 agent 自己的原型 logo，
   // 发送按钮以外，都要圆角矩形的按钮设计，还有像 file 里什么的…弹出窗口确认的按键等等".
