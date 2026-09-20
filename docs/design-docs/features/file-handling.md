@@ -280,6 +280,38 @@ answered with the viewer, where pinch and wheel zoom the image. Guards:
 viewer by click, closes it through the Back chain, and checks a ctrl+wheel is
 defaultPrevented and opens the viewer.
 
+### Reading mode: the preview takes the phone's whole screen (board #226, 2026-09-20)
+
+Owner: "在手机文件预览md等文件的时候，可以有一个放大按钮全屏显示，上下向上和向下隐藏起来，
+悬浮一个按钮，在回到普通模式". On the touch layout a preview is content between
+two strips of chrome — Files' `.preview-header` above (back, name, wrap /
+edit / download / refresh / info) and App's `.tabbar` below. Reading mode
+removes both. **One state, one signal**: `reading` in Files; the header hides
+with `.files.reading .preview-header { display: none }` — a cut, the same
+treatment the tab bar already gets under `html.keyboard-open` (motion
+principle 5: intros are classes, exits are cuts) — and Files reports
+`onimmersive(reading)` to App, which mirrors it into `main.immersive` while
+Files is the page on screen (`.immersive .tabbar { display: none }`, beside
+the keyboard rule; no second writer of the `<html>` class). The body then
+measures 0→844 on a 390×844 phone (Chromium, this build). **The way back**
+is a gesture or one control: Back exits reading mode first (the chain slot
+under the Lightbox, above the file menu — entering pushed an entry like
+`info` does), and a fixed `.reading-exit` node at the bottom-right,
+`calc(16px + var(--sab))` above the safe area, holds one 44px
+`CommandButton variant="secondary" iconOnly icon="minimize"`, `.appear` on
+mount, lifted with `--menu-shadow` (measured: without a shadow the quiet
+secondary paint vanished into a white page). **Where it is offered**: the
+touch layout only (the desktop keeps rail + wide screen; a follow-up if
+wanted), never for an image (its fullscreen is the one Lightbox, #188) or
+a video (the player). **Where it ends**: any view change, and the page
+going hidden — `$effect: if (!readingEligible || !visible) reading = false`
+— so the tab bar is back before a list or another page shows. Pins:
+`Files.mount` (enter → class + control + `onimmersive(true)`; Back and the
+control each return; leaving the preview resets; no offer for an image or
+on desktop), `Files.source` (the cut, the fixed node, the eligibility and
+reset effects, the Back order), `App.source` (the prop, the page gate, the
+rule beside the keyboard one).
+
 ### Two Download Paths
 | Path | Used for | Size limit | Transport |
 |------|----------|-----------|-----------|

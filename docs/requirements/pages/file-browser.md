@@ -32,6 +32,13 @@ directory, or the server's home directory when no session is open yet.
 ## Interactions
 - Tap directory → navigate into it
 - Tap file → preview (or info page if not previewable, or if file size > 5 MB and the kind is not streamed — video streams at any size)
+- On the phone, a text preview (markdown, code, csv, html, pdf, converted
+  documents) offers **Reading mode** (maximize in the header): the preview
+  header and the app's tab bar hide, the content takes the whole screen, and
+  one floating control (minimize, bottom-right, above the safe area) or the
+  Back gesture returns to the normal preview. Not offered for images (the
+  Lightbox) or video (the player), nor on the desktop layout. Leaving the
+  preview or the page ends it.
 - Tap a path reference in chat, Markdown, converted content, or an HTML
   preview → open it in Files, with the target's parent listing and a Back
   route to the source preview/list. Relative paths resolve against the

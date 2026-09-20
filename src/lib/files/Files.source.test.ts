@@ -278,3 +278,28 @@ test('surface long-presses keep the finger point; element presses take the eleme
   assert.match(source, /onlongpress: \(at\) => openFileMenu\(at, 'entry', entry\)/u);
   assert.match(source, /onlongpress: \(at\) => openFileMenu\(at, 'path', \{ name: bc\.name, path: bc\.path, type: 'dir' \}\)/u);
 });
+
+test('reading mode: the header hides as a cut, the return floats above the safe area, the host is told (board #226)', () => {
+  // Owner 2026-09-20: "放大按钮全屏显示，上下向上和向下隐藏起来，悬浮一个按钮，在回到普通模式".
+  // The header's exit is a cut — the same treatment the tab bar gets while the
+  // keyboard is up (motion principle 5); the floating control is one 44px
+  // CommandButton, no new visual species.
+  assert.match(source, /\.files\.reading \.preview-header \{ display: none; \}/u, 'the header steps away');
+  const exit = source.match(/\.reading-exit \{[^}]*\}/u)?.[0] ?? '';
+  assert.match(exit, /position: fixed;/u);
+  assert.match(exit, /bottom: calc\(16px \+ var\(--sab\)\);/u, 'above the phone\'s safe area');
+  assert.match(exit, /min-width: 44px; min-height: 44px;/u, 'a touch target');
+  assert.match(source, /<CommandButton variant="secondary" iconOnly icon="minimize" label=\{t\('filesReadingExit'\)\}/u);
+  assert.match(source, /<CommandButton variant="icon" icon="maximize" label=\{t\('filesReading'\)\} onclick=\{\(\) => \{ reading = true; navPush\(\); \}\}/u, 'entering is a layer: Back can leave it');
+  // Reading mode is offered on the touch layout only, never for an image or a
+  // video (the Lightbox / the player are their fullscreen), and it does not
+  // outlive the preview or the page.
+  assert.match(source, /let readingEligible = \$derived\(layout\.isTouchDevice && view === 'preview' && !!currentFile\n\s+&& !\['image', 'video'\]\.includes\(mimeCategory\(currentFile\.stat\?\.mime_hint\)\)\);/u);
+  assert.match(source, /\$effect\(\(\) => \{ if \(!readingEligible \|\| !visible\) reading = false; \}\);/u);
+  assert.match(source, /\$effect\(\(\) => \{ onimmersive\?\.\(reading\); \}\);/u, 'the host hides its chrome from this one signal');
+  // Back order: the viewer, then reading mode, then the file menu.
+  const back = source.indexOf("if (imageView) { imageView = ''; return true; }");
+  const reading = source.indexOf('if (reading) { reading = false; return true; }');
+  const menu = source.indexOf('if (fileMenu) { closeFileMenu(); return true; }');
+  assert.ok(back > 0 && back < reading && reading < menu, 'reading mode is the layer under the viewer');
+});

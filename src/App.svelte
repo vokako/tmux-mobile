@@ -1227,6 +1227,8 @@
   // Android back gesture via history API
   // Every navigation push a state, back pops it naturally
   let filesGoBack = $state(null);
+  /** Files' reading mode asks for the whole screen (board #226): the tab bar hides while it is on. */
+  let filesImmersive = $state(false);
   let hubGoBack = $state(null);
   let agentsGoBack = $state(null);
   let prefsGoBack = $state(null);
@@ -1617,7 +1619,7 @@
   });
 </script>
 
-<main class:with-rail={connected && !layout.isTouchDevice} class:touch-layout={connected && layout.isTouchDevice} class:side-collapsed={shellSideCollapsed} class:side-page={pageHasSidebar}>
+<main class:with-rail={connected && !layout.isTouchDevice} class:touch-layout={connected && layout.isTouchDevice} class:side-collapsed={shellSideCollapsed} class:side-page={pageHasSidebar} class:immersive={filesImmersive && page === 'files'}>
   <!-- Shell chrome. Every nav item is in the Tab order (no tabindex="-1" —
        review, 2026-09-03: the whole nav was unreachable by keyboard) and wears
        the global button:focus-visible ring; the current page is aria-current.
@@ -1859,7 +1861,7 @@
     </div>
     {/if}
     <div class="page-layer" class:hidden={page !== 'files'}>
-      <Files session={filesSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} navRequest={filesNavReq} jumped={!!jumpedFrom} />
+      <Files session={filesSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} onimmersive={(on) => filesImmersive = on} navRequest={filesNavReq} jumped={!!jumpedFrom} />
     </div>
     <div class="page-layer" class:hidden={page !== 'board'}>
       {#if hubEligible}
@@ -2256,6 +2258,10 @@
     z-index: 10;
   }
   :global(html.keyboard-open) .tabbar { display: none; }
+  /* …and while a page asks for the whole screen: Files' reading mode (board
+     #226) — the page reports it through `onimmersive`, App gates it on the
+     page being the visible one. Same hide, second explicit reason. */
+  .immersive .tabbar { display: none; }
   .tabbar button {
     flex: 1;
     display: flex; flex-direction: column; align-items: center; gap: 2px;

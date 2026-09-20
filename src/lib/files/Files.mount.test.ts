@@ -754,3 +754,76 @@ test('a clean upload batch ends in a success line that names the file (board #21
     assert.match(status?.textContent ?? '', /\/fixture/, 'and where it landed');
   } finally { await app.close(); }
 });
+
+test('reading mode: the header and the tab bar step away, one floating control or Back returns (board #226)', async context => {
+  // Owner 2026-09-20: "在手机文件预览md等文件的时候，可以有一个放大按钮全屏显示，上下向上和
+  // 向下隐藏起来，悬浮一个按钮，在回到普通模式".
+  const chain: { back: (() => boolean) | null } = { back: null };
+  const immersive: boolean[] = [];
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, session: 'fixture', onGoBack: (fn: () => boolean) => { chain.back = fn; }, onimmersive: (on: boolean) => { immersive.push(on); } },
+    modules: [rpc()],
+    setup(window) { window.localStorage.setItem('tmux_layout_mode', 'mobile'); },
+  });
+  try {
+    await settle(app);
+    assert.deepEqual(immersive, [false], 'a fresh page is not immersive');
+    app.document.querySelector<HTMLButtonElement>('.file-row .file-main')!.click();
+    await settle(app);
+    assert.ok(app.document.querySelector('.md-render'), 'the markdown preview is open');
+    const enter = button(app, 'Reading mode');
+    assert.ok(app.document.querySelector('.preview-header'), 'the header is there in normal mode');
+    assert.equal(app.document.querySelector('.reading-exit'), null);
+    enter.click(); await settle(app);
+    const files = app.document.querySelector('.files')!;
+    assert.ok(files.classList.contains('reading'), 'the page wears the reading class (Files.source pins the header hide)');
+    assert.ok(app.document.querySelector('.md-render'), 'the content stays');
+    const exit = button(app, 'Exit reading mode');
+    assert.ok(exit.closest('.reading-exit'), 'the floating control');
+    assert.equal(immersive.at(-1), true, 'the host was told to hide its chrome');
+    // Back is the gesture way out: reading mode is the layer above the preview.
+    assert.equal(chain.back!(), true, 'Back exits reading mode first');
+    await settle(app);
+    assert.ok(!files.classList.contains('reading'), 'the header is back');
+    assert.equal(app.document.querySelector('.reading-exit'), null);
+    assert.equal(immersive.at(-1), false, 'and the chrome returns');
+    assert.ok(app.document.querySelector('.md-render'), 'still on the preview, not back in the list');
+    // The floating control is the tap way out.
+    button(app, 'Reading mode').click(); await settle(app);
+    assert.equal(immersive.at(-1), true);
+    button(app, 'Exit reading mode').click(); await settle(app);
+    assert.ok(!files.classList.contains('reading'));
+    assert.equal(immersive.at(-1), false);
+    // Leaving the preview while reading resets it: the tab bar must be back
+    // before the list shows.
+    button(app, 'Reading mode').click(); await settle(app);
+    button(app, 'Back').click(); await settle(app);
+    assert.ok(app.document.querySelector('.file-row'), 'back in the list');
+    assert.equal(immersive.at(-1), false, 'reading mode did not outlive the preview');
+    assert.ok(!files.classList.contains('reading'));
+  } finally { await app.close(); }
+});
+
+test('reading mode is not offered for an image (the Lightbox is its fullscreen) nor on the desktop layout (board #226)', async context => {
+  const image = await (await compiled).mount(context, { props: { visible: true, session: 'fixture' }, modules: [rpc({
+    fsList: async () => ({ path: '/fixture', entries: [{ name: 'shot.png', path: '/fixture/shot.png', type: 'file', size: 10 }] }),
+    fsStat: async (path: string) => ({ path, is_text: false, writable: true, readable: true, size: 10, mime_hint: 'image/png' }),
+    fsDownload: async () => ({ data: 'eA==' }),
+  })], setup(window) { window.localStorage.setItem('tmux_layout_mode', 'mobile'); } });
+  try {
+    await settle(image);
+    image.document.querySelector<HTMLButtonElement>('.file-row .file-main')!.click();
+    await settle(image);
+    assert.ok(image.document.querySelector('.image-open'));
+    assert.equal(image.document.querySelector('button[aria-label="Reading mode"]'), null, 'an image has the Lightbox');
+  } finally { await image.close(); }
+  const desktop = await (await compiled).mount(context, { props: { visible: true, session: 'fixture' }, modules: [rpc()],
+    setup(window) { window.localStorage.setItem('tmux_layout_mode', 'desktop'); } });
+  try {
+    await settle(desktop);
+    desktop.document.querySelector<HTMLButtonElement>('.file-row .file-main')!.click();
+    await settle(desktop);
+    assert.ok(desktop.document.querySelector('.md-render'));
+    assert.equal(desktop.document.querySelector('button[aria-label="Reading mode"]'), null, 'the desktop keeps its chrome');
+  } finally { await desktop.close(); }
+});

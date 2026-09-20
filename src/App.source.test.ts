@@ -610,7 +610,7 @@ test('one shell-wide sidebar state: the Terminal page and the system status foll
   // Owner 2026-09-14: "左侧边栏收起的时候，底下的系统状态显示也要收起，而且这个折叠收起在不同的
   // 页面是同步的，不然我点击chat terminal board，展开状态不一致".
   assert.match(source, /const shellSideCollapsed = \$derived\(connected && !layout\.isTouchDevice && hubPrefs\.sidebarCollapsed\);/u);
-  assert.match(source, /<main class:with-rail=\{[^}]+\} class:touch-layout=\{[^}]+\} class:side-collapsed=\{shellSideCollapsed\} class:side-page=\{pageHasSidebar\}>/u);
+  assert.match(source, /<main class:with-rail=\{[^}]+\} class:touch-layout=\{[^}]+\} class:side-collapsed=\{shellSideCollapsed\} class:side-page=\{pageHasSidebar\}/u);
   assert.match(source, /pageReselect\.terminal = pageReselect\.board = \(\) => hubPrefs\.setSidebarCollapsed\(!hubPrefs\.sidebarCollapsed\);/u, '#199 on every page, a toggle since #201');
   assert.match(source, /<Board session=\{filesSession\} visible=\{page === 'board'\} sideCollapsed=\{shellSideCollapsed\}/u);
   // The Terminal page's track is the Hub's technique: factor, gate, pin, hidden at rest.
@@ -677,4 +677,14 @@ test('THE sidebar toggle is one fixed shell node at the content area\'s top-left
   ] as const) {
     assert.match(await readFile(new URL(file, import.meta.url), 'utf8'), pattern, `${file} makes room in its head row`);
   }
+});
+
+test('the phone tab bar hides for Files\' reading mode through one signal, gated on the visible page (board #226)', () => {
+  // Owner 2026-09-20: reading mode takes the whole screen; the bottom bar goes
+  // the way it goes for the keyboard — a cut — from one explicit prop, never a
+  // second class writer on <html>.
+  assert.match(source, /onimmersive=\{\(on\) => filesImmersive = on\}/u, 'Files reports, App mirrors');
+  assert.match(source, /class:immersive=\{filesImmersive && page === 'files'\}/u, 'only while Files is the page on screen');
+  assert.match(source, /\.immersive \.tabbar \{ display: none; \}/u);
+  assert.match(source, /:global\(html\.keyboard-open\) \.tabbar \{ display: none; \}/u, 'the keyboard hide it sits beside');
 });

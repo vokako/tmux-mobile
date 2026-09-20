@@ -75,7 +75,7 @@
   // agent in a worktree). Empty = no declaration (a direct/adopted session):
   // follow the pane cwd, the pre-#181 rule. The Session-directory tool
   // (goSessionDir) keeps offering the pane cwd explicitly either way.
-  let { session = '', root = '', onGoBack = null, visible = false, fontSize = 14, singlePane = false, navRequest = null, jumped = false, currentDir = $bindable('') } = $props();
+  let { session = '', root = '', onGoBack = null, onimmersive = null, visible = false, fontSize = 14, singlePane = false, navRequest = null, jumped = false, currentDir = $bindable('') } = $props();
   const panelId = $props.id();
   const LIST_WIDTH = { min: 320, max: 520, default: 400 };
   $effect(() => {
@@ -102,6 +102,7 @@
     if (onGoBack) onGoBack(() => {
       if (cancelPendingAct()) return true;
       if (imageView) { imageView = ''; return true; } // the viewer is the topmost layer (board #188)
+      if (reading) { reading = false; return true; } // reading mode is a layer over the preview (board #226)
       if (fileMenu) { closeFileMenu(); return true; }
       // navAnim('back') rides only the branches that CHANGE the view — the
       // git panel's internal peel and the unsaved-changes dialog move
@@ -849,6 +850,17 @@
   const PREVIEW_SIZE_LIMIT = 5 * 1024 * 1024;
   /** The picture open in the one fullscreen viewer (ui/Lightbox), board #188. */
   let imageView = $state('');
+
+  /** Reading mode (board #226, owner: "放大按钮全屏显示，上下隐藏起来，悬浮一个按钮
+   * 回到普通模式"): the preview header and the app's tab bar step away, the
+   * content takes the phone's whole screen, one floating control returns.
+   * A layer over the preview, so Back exits it first; it does not survive a
+   * view change or a page switch (the tab bar must be back before either). */
+  let reading = $state(false);
+  let readingEligible = $derived(layout.isTouchDevice && view === 'preview' && !!currentFile
+    && !['image', 'video'].includes(mimeCategory(currentFile.stat?.mime_hint)));
+  $effect(() => { if (!readingEligible || !visible) reading = false; });
+  $effect(() => { onimmersive?.(reading); });
 
 
   async function loadPreviewContent(file, my = fileNav.nextFile()) {
@@ -1828,11 +1840,21 @@
         <CommandButton variant="icon" icon="download" label={t('filesDownload')} onclick={() => handleDownload(currentFile.path)} />
         <CommandButton variant="icon" icon="refresh" label={t('filesRefresh')} onclick={reloadPreview} />
         <CommandButton variant="icon" icon="info" label={t('filesInfo')} onclick={() => { view = 'info'; navPush(); }} />
+        {#if readingEligible}
+          <CommandButton variant="icon" icon="maximize" label={t('filesReading')} onclick={() => { reading = true; navPush(); }} />
+        {/if}
       </div>
     </div>
     <FilePreview {currentFile} {fontSize} {wrapLines} {hljs}
       bind:showAllLines bind:previewBodyEl bind:previewEl bind:htmlPreviewEl bind:pdfContainer
       {previewLinkClick} {attachHtmlPreviewLinks} onview={(src) => { imageView = src; }} />
+    {#if reading}
+      <!-- The one way back that is not a gesture: a floating control above the
+           safe area, where the thumb is. -->
+      <div class="reading-exit appear">
+        <CommandButton variant="secondary" iconOnly icon="minimize" label={t('filesReadingExit')} onclick={() => { reading = false; }} />
+      </div>
+    {/if}
 {/snippet}
 
 {#snippet editPanel()}
@@ -1935,7 +1957,7 @@
 
 <!-- Touch handlers implement the edge-swipe back gesture; not an interactive element. -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="files" bind:this={filesEl}
+<div class="files" bind:this={filesEl} class:reading
   class:snap={swipeSnap} class:drill-fwd={navAnimClass === 'fwd'} class:drill-back={navAnimClass === 'back'}
   style:transform={swipeDX > 0 ? `translateX(${swipeDX}px)` : ''}
   style:--files-list-default={`${LIST_WIDTH.default}px`}
@@ -2203,6 +2225,19 @@
     white-space: pre-wrap; overflow-wrap: anywhere;
   }
   .preview-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; max-width: 100%; }
+  /* Reading mode (board #226): the header steps away as a cut — the same
+     treatment the tab bar gets while the keyboard is up (motion principle
+     5: exits are cuts) — and the floating return sits above the safe area,
+     one 44px target at the thumb. */
+  .files.reading .preview-header { display: none; }
+  .reading-exit {
+    position: fixed; right: 16px; bottom: calc(16px + var(--sab)); z-index: 12;
+    display: flex; align-items: center; justify-content: center;
+    min-width: 44px; min-height: 44px;
+  }
+  /* Floating over running text, the control lifts like a popover — the one
+     shadow token — or it vanishes into a white page (measured, 390×844). */
+  .reading-exit :global(.command-button) { box-shadow: var(--menu-shadow); }
 
   /* Editor */
   .editor-wrap {

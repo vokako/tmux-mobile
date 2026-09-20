@@ -29,7 +29,7 @@ Three shell shapes, chosen by context, never mixed:
 | context | chrome | why |
 |---|---|---|
 | connected desktop | **left icon rail** (46px, fixed): Hub / Sessions / Terminal / Agents / Files, gear at the bottom | the VSCode/Slack pattern — switching stays one always-visible click, the top edge belongs to content, and the rail composes with the Hub's own sidebar instead of stacking a second horizontal bar over it |
-| connected mobile | **bottom tab bar** (icons + labels, safe-area padded) | thumb reach; the top edge goes back to content. Hidden under `html.keyboard-open` so immersive typing (terminal, editor) costs nothing — the ONLY writer of that class is App's viewport handler, so there is no second source of truth |
+| connected mobile | **bottom tab bar** (icons + labels, safe-area padded) | thumb reach; the top edge goes back to content. Hidden under `html.keyboard-open` so immersive typing (terminal, editor) costs nothing — the ONLY writer of that class is App's viewport handler, so there is no second source of truth. The one other hide is `main.immersive`, set from a page's explicit `onimmersive` signal while that page is on screen (Files' reading mode, board #226) — the same cut, a second named reason, no second class writer on `<html>` |
 | disconnected | the old **top brand bar** with the gear (both platforms) | before auth there is nothing to navigate; brand + settings is the whole story |
 
 Desktop lands on the **Hub by default** (fresh state); a guard falls back to
