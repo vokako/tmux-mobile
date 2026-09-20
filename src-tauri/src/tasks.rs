@@ -21,6 +21,16 @@
 //!
 //! Task names are GLOBALLY unique (the name is the handle an agent holds), so
 //! lookups scan all sessions rather than just the current one.
+//!
+//! Retention is BOUNDED (board #206, owner 2026-09-20: "任务结束后窗口仍保留；停止任务
+//! 也不等于删除窗口，这样就导致大量冗余窗口堆积" — 39 of 40 task windows on the live
+//! server were dead, the oldest 7 days). A finished task's window lives
+//! `TTL` (30 min, `TMM_TASK_TTL_SECS` overrides) past `#{pane_dead_time}` —
+//! the epoch second of the LATEST death, empty while the pane is alive again
+//! after a respawn (verified on tmux 3.6a) — and every `tmm task` verb reaps
+//! what has expired at its door: one mechanism, local, no daemon, no timer, no
+//! file, working with the server down. `stop` closes the window once the
+//! process is dead (after printing the last lines), `--keep` retains it.
 
 use crate::tmux;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -33,6 +43,12 @@ pub const FALLBACK_SESSION: &str = "tmm-tasks";
 const OPT_TASK: &str = "@tmm_task";
 const OPT_CMD: &str = "@tmm_cmd";
 const OPT_STARTED: &str = "@tmm_started";
+
+/// How long a FINISHED task's window outlives its process before a `tmm task`
+/// verb reaps it (board #206). The env override exists for tests and for an
+/// operator who wants logs kept longer; 0 reaps at the next verb.
+pub const DEFAULT_TTL_SECS: u64 = 30 * 60;
+pub const TTL_ENV: &str = "TMM_TASK_TTL_SECS";
 
 /// How long `stop` waits for the C-c to land before escalating to signals.
 const STOP_GRACE_MS: u64 = 2_000;
@@ -87,6 +103,9 @@ pub struct Task {
     pub pid: String,
     /// Unix seconds, 0 when unknown.
     pub started: u64,
+    /// `#{pane_dead_time}`: unix seconds of the latest death, 0 while running
+    /// (tmux clears it on respawn) or when tmux does not report it.
+    pub dead_at: u64,
 }
 
 impl Task {
@@ -138,9 +157,40 @@ fn list_format() -> String {
         "#{pane_dead_signal}".to_string(),
         "#{pane_pid}".to_string(),
         format!("#{{{OPT_STARTED}}}"),
+        "#{pane_dead_time}".to_string(),
         format!("#{{{OPT_CMD}}}"),
     ]
     .join(SEP)
+}
+
+/// The retention TTL in seconds: `TMM_TASK_TTL_SECS` when set to a number,
+/// else 30 minutes.
+pub fn ttl_secs() -> u64 {
+    std::env::var(TTL_ENV).ok().and_then(|v| v.trim().parse().ok()).unwrap_or(DEFAULT_TTL_SECS)
+}
+
+/// Close every task window whose process died more than the TTL ago (board
+/// #206). Only windows carrying `@tmm_task` (that is all `list` returns) and
+/// only dead ones with a reported death time — a running task is never
+/// touched, nor a plain window that happens to be dead. `except` shields the
+/// verb's own target so `logs`/`status`/`rm` on an expired task still answer;
+/// callers reap AFTER their own work. Returns what was closed.
+pub fn reap_expired(except: Option<&str>) -> Vec<Task> {
+    let ttl = ttl_secs();
+    let now = unix_now();
+    let mut reaped = Vec::new();
+    for t in list() {
+        if t.is_running() || t.dead_at == 0 || Some(t.name.as_str()) == except {
+            continue;
+        }
+        if now.saturating_sub(t.dead_at) < ttl {
+            continue;
+        }
+        if tmux::kill_window(&t.pane).is_ok() {
+            reaped.push(t);
+        }
+    }
+    reaped
 }
 
 /// The task called `name`, wherever it lives.
@@ -224,7 +274,10 @@ pub fn logs(name: &str, limit: usize, grep: Option<&str>) -> Result<String> {
 /// Ask the task to stop, escalating only as far as it has to: C-c first (a real
 /// TTY, so the whole foreground process group gets it — this is what a
 /// `nohup`-ed process cannot be given), then TERM, then KILL to the pane's
-/// PROCESS GROUP. The window is left in place either way so the log survives.
+/// PROCESS GROUP. Then — board #206 — the last `STOP_TAIL_LINES` of output are
+/// read and the window is CLOSED unless `keep`: stopping is finishing, and a
+/// finished task's window is the agent's to close ("停止任务也不等于删除窗口" was the
+/// complaint). Stopping an already finished task closes it the same way.
 ///
 /// The group, not the pid: `#{pane_pid}` is the `sh -c` wrapper tmux runs the
 /// command with, and a TERM to the wrapper alone leaves its children — `npm run
@@ -233,11 +286,28 @@ pub fn logs(name: &str, limit: usize, grep: Option<&str>) -> Result<String> {
 /// pane as a session leader, so the wrapper's pgid is its own pid and the group
 /// is exactly the process tree the task started (minus anything that `setsid`
 /// itself away, which is its own choice).
-pub fn stop(name: &str) -> Result<Task> {
+pub const STOP_TAIL_LINES: usize = 20;
+
+/// What `stop` hands back: the task as it ended and the last lines of its
+/// output, read before the window went (empty when `keep` left it in place —
+/// `logs` still has it then).
+pub struct Stopped {
+    pub task: Task,
+    pub tail: String,
+    pub closed: bool,
+}
+
+pub fn stop(name: &str, keep: bool) -> Result<Stopped> {
     let task = need(name)?;
-    if !task.is_running() {
-        return Ok(task);
-    }
+    let dead = if task.is_running() { end_process(&task)? } else { task };
+    let tail = if keep { String::new() } else { logs(name, STOP_TAIL_LINES, None).unwrap_or_default() };
+    let closed = !keep && tmux::kill_window(&dead.pane).is_ok();
+    Ok(Stopped { task: dead, tail, closed })
+}
+
+/// C-c → TERM → KILL until the pane is dead; the task as it ended.
+fn end_process(task: &Task) -> Result<Task> {
+    let name = task.name.as_str();
     tmux::send_keys(&task.pane, "C-c", false).map_err(Error::Tmux)?;
     if let Some(t) = wait_dead(name, STOP_GRACE_MS) {
         return Ok(t);
@@ -399,7 +469,7 @@ fn join_cmd(argv: &[String]) -> String {
 /// (no `@tmm_task`) or rows tmux truncated.
 fn parse_line(line: &str) -> Option<Task> {
     let f: Vec<&str> = line.split(SEP).collect();
-    if f.len() < 10 || f[0].is_empty() {
+    if f.len() < 11 || f[0].is_empty() {
         return None;
     }
     let state = if f[4] != "1" {
@@ -419,9 +489,10 @@ fn parse_line(line: &str) -> Option<Task> {
         state,
         pid: f[7].to_string(),
         started: f[8].parse().unwrap_or(0),
+        dead_at: f[9].parse().unwrap_or(0),
         // The command can contain the separator only if a user put it there;
         // rejoin so it survives round-tripping regardless.
-        cmd: f[9..].join(SEP),
+        cmd: f[10..].join(SEP),
     })
 }
 
@@ -496,11 +567,11 @@ mod tests {
     }
 
     /// Field order: task, session, window, pane, dead, status, signal, pid,
-    /// started, cmd.
+    /// started, dead_time, cmd.
     #[test]
     fn parses_a_running_task() {
         let t = parse_line(&row(&[
-            "dev", "tmux", "3", "%518", "0", "", "", "4242", "1700000000", "npm run dev",
+            "dev", "tmux", "3", "%518", "0", "", "", "4242", "1700000000", "", "npm run dev",
         ]))
         .expect("row is a task");
         assert_eq!(t.name, "dev");
@@ -511,6 +582,7 @@ mod tests {
         assert_eq!(t.pid, "4242");
         assert_eq!(t.cmd, "npm run dev");
         assert!(t.is_running());
+        assert_eq!(t.dead_at, 0, "alive: tmux reports no death time");
         assert_eq!(t.age(1700000030), Some(30));
         // A task started "now" is 0s old, not unknown.
         assert_eq!(fmt_age(t.age(1700000000)), "0s");
@@ -519,12 +591,13 @@ mod tests {
     #[test]
     fn parses_exit_code_of_a_finished_task() {
         let t = parse_line(&row(&[
-            "build", "tmm-tasks", "1", "%9", "1", "7", "", "0", "0", "cargo build",
+            "build", "tmm-tasks", "1", "%9", "1", "7", "", "0", "0", "1700000900", "cargo build",
         ]))
         .expect("row is a task");
         assert_eq!(t.state, State::Exited(7));
         assert_eq!(t.state_str(), "exited:7");
         assert!(!t.is_running());
+        assert_eq!(t.dead_at, 1700000900, "#206: the death time rides along for the TTL");
         // Unknown start time must not become a bogus age.
         assert_eq!(t.age(1700000000), None);
     }
@@ -532,7 +605,7 @@ mod tests {
     #[test]
     fn a_signal_death_is_not_an_exit_code() {
         let t = parse_line(&row(&[
-            "x", "s", "1", "%1", "1", "", "kill", "0", "0", "sleep 30",
+            "x", "s", "1", "%1", "1", "", "kill", "0", "0", "1700000000", "sleep 30",
         ]))
         .unwrap();
         assert_eq!(t.state, State::Killed("kill".into()));
@@ -543,20 +616,20 @@ mod tests {
     #[test]
     fn ignores_windows_that_are_not_tasks() {
         // A plain window: @tmm_task is empty.
-        assert!(parse_line(&row(&["", "tmux", "1", "%1", "0", "", "", "1", "0", ""])).is_none());
+        assert!(parse_line(&row(&["", "tmux", "1", "%1", "0", "", "", "1", "0", "", ""])).is_none());
         assert!(parse_line("garbage").is_none());
     }
 
     #[test]
     fn dead_pane_without_a_status_is_not_reported_as_success() {
-        let t = parse_line(&row(&["x", "s", "1", "%1", "1", "", "", "0", "0", "c"])).unwrap();
+        let t = parse_line(&row(&["x", "s", "1", "%1", "1", "", "", "0", "0", "", "c"])).unwrap();
         assert_eq!(t.state, State::Exited(-1));
     }
 
     #[test]
     fn command_containing_the_separator_round_trips() {
         let t = parse_line(&row(&[
-            "x", "s", "1", "%1", "0", "", "", "1", "0", "echo <TMM_SEP> hi",
+            "x", "s", "1", "%1", "0", "", "", "1", "0", "", "echo <TMM_SEP> hi",
         ]))
         .unwrap();
         assert_eq!(t.cmd, "echo <TMM_SEP> hi");
@@ -628,7 +701,7 @@ mod tests {
         };
         assert!(alive(&child), "sleep {child} is running before stop");
 
-        let stopped = stop(&name).expect("stop reports the outcome");
+        let stopped = stop(&name, true).expect("stop reports the outcome").task;
         assert!(!stopped.is_running(), "the pane went dead: {}", stopped.state_str());
         // The point of the test: the child did not outlive the wrapper.
         let mut gone = false;
@@ -642,6 +715,108 @@ mod tests {
         assert!(gone, "sleep {child} was orphaned by stop — only the sh wrapper died");
 
         let _ = remove(&name);
+        let _ = tmux::kill_session(session);
+    }
+
+    /// A PRIVATE tmux server for tests that sweep: a TTL-0 reap on the shared
+    /// default server would close every dead task window the developer has —
+    /// the production effect, not a test's. Sequential tests (`--test-threads=1`)
+    /// share the socket global, so it is set and restored around the body.
+    struct PrivateTmux { previous: Option<String>, socket: String }
+    impl PrivateTmux {
+        fn start(tag: &str) -> Self {
+            let socket = std::env::temp_dir().join(format!("tmm-test-{tag}-{}.sock", std::process::id()));
+            let socket = socket.to_string_lossy().to_string();
+            let previous = tmux::get_socket();
+            tmux::set_socket(Some(socket.clone()));
+            let _ = tmux::run_tmux(&["kill-server"]);
+            Self { previous, socket }
+        }
+    }
+    impl Drop for PrivateTmux {
+        fn drop(&mut self) {
+            let _ = tmux::run_tmux(&["kill-server"]);
+            let _ = std::fs::remove_file(&self.socket);
+            tmux::set_socket(self.previous.clone());
+        }
+    }
+
+    /// Board #206: a finished task's window is closed by the next `tmm task`
+    /// verb once its death is older than the TTL — never a running task, never
+    /// a plain dead window, never the verb's own target. Real tmux, TTL 0.
+    #[test]
+    fn expired_finished_tasks_are_reaped_and_nothing_else_is() {
+        let _server = PrivateTmux::start("reap");
+        let session = "tmm-test-reap";
+        let pid = std::process::id();
+        let done = format!("tmm-test-done-{pid}");
+        let live = format!("tmm-test-live-{pid}");
+        let shielded = format!("tmm-test-shield-{pid}");
+        let sh = |c: &str| -> Vec<String> { vec!["sh".into(), "-c".into(), c.into()] };
+        start(&done, &sh("exit 0"), Some(session), true).expect("done starts");
+        start(&shielded, &sh("exit 0"), Some(session), true).expect("shielded starts");
+        let running = start(&live, &sh("sleep 300"), Some(session), true).expect("live starts");
+        // A plain window that dies with remain-on-exit but no @tmm_task: not ours.
+        let plain = tmux::run_tmux(&["new-window", "-d", "-t", session, "-n", "plain", "-P", "-F", "#{pane_id}"])
+            .expect("plain window").trim().to_string();
+        tmux::run_tmux(&["set-option", "-w", "-t", &plain, "remain-on-exit", "on"]).unwrap();
+        tmux::run_tmux(&["respawn-window", "-k", "-t", &plain, "sh -c 'exit 1'"]).unwrap();
+        for _ in 0..30 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let both_dead = !find(&done).map(|t| t.is_running()).unwrap_or(true)
+                && !find(&shielded).map(|t| t.is_running()).unwrap_or(true);
+            if both_dead { break; }
+        }
+        let dead = find(&done).expect("done is still registered");
+        assert!(!dead.is_running() && dead.dead_at > 0, "tmux reports the death time: {dead:?}");
+
+        std::env::set_var(TTL_ENV, "0");
+        let reaped = reap_expired(Some(&shielded));
+        std::env::remove_var(TTL_ENV);
+        let names: Vec<&str> = reaped.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, vec![done.as_str()], "only the expired, unshielded task");
+        assert!(find(&done).is_none(), "its window is gone");
+        assert!(find(&shielded).is_some(), "the verb's own target is read first, reaped later");
+        assert!(find(&live).map(|t| t.is_running()).unwrap_or(false), "a running task is never touched");
+        let plain_alive = tmux::run_tmux(&["display", "-p", "-t", &plain, "#{pane_dead}"]).map(|o| o.trim() == "1").unwrap_or(false);
+        assert!(plain_alive, "a dead window without @tmm_task is not ours to close");
+
+        // Default TTL: a fresh death is NOT expired.
+        assert!(reap_expired(None).is_empty(), "30 min have not passed for the shielded task");
+        let _ = stop(&live, false);
+        let _ = remove(&shielded);
+        let _ = tmux::kill_session(session);
+        let _ = running;
+    }
+
+    /// Board #206: `stop` ends the process, hands back the last lines and
+    /// closes the window; `--keep` leaves the window (and its log) in place.
+    #[test]
+    fn stop_closes_the_window_with_its_tail_unless_kept() {
+        let _server = PrivateTmux::start("stopclose");
+        let session = "tmm-test-stopclose";
+        let pid = std::process::id();
+        let closing = format!("tmm-test-close-{pid}");
+        let kept = format!("tmm-test-keep-{pid}");
+        let sh = |c: &str| -> Vec<String> { vec!["sh".into(), "-c".into(), c.into()] };
+        start(&closing, &sh("echo line-one; echo line-two; sleep 300"), Some(session), true).unwrap();
+        start(&kept, &sh("echo kept-output; sleep 300"), Some(session), true).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(400));
+
+        let out = stop(&closing, false).expect("stop reports");
+        assert!(!out.task.is_running());
+        assert!(out.closed, "the window is closed");
+        assert!(out.tail.contains("line-one") && out.tail.contains("line-two"), "the tail was read before closing: {:?}", out.tail);
+        assert!(find(&closing).is_none(), "no window left behind");
+
+        let kept_out = stop(&kept, true).expect("stop --keep reports");
+        assert!(!kept_out.closed && kept_out.tail.is_empty());
+        let still = find(&kept).expect("--keep leaves the window");
+        assert!(!still.is_running());
+        assert!(logs(&kept, 5, None).unwrap().contains("kept-output"), "the log is still readable");
+        // Stopping an already finished task closes it too.
+        let again = stop(&kept, false).expect("stop on a finished task");
+        assert!(again.closed && find(&kept).is_none());
         let _ = tmux::kill_session(session);
     }
 

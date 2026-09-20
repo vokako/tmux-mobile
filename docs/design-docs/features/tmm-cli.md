@@ -61,7 +61,7 @@ tmm mcp list|save|delete             central MCP server defs (RPC half)
 
 # background tasks — LOCAL tmux only, no server, never exits 2
 tmm task start <name> [--session <s>] [--replace] -- <cmd...>
-tmm task list | status <name> | logs <name> [--limit N] [--grep <t>] | stop | rm
+tmm task list | status <name> | logs <name> [--limit N] [--grep <t>] | stop [--keep] | rm
 
 # local MCP runtime (the mcp-cli skill; progressive tiers)
 tmm mcp servers | tools [<server>] | schema <server> <tool> | call … | add …
@@ -113,6 +113,9 @@ Agents and scripts branch on the class without parsing error prose.
 `tmm task *` opens no socket, so it can never return 2 — see below.
 
 ## Background tasks (`tmm task`) — local tmux, no server
+
+Retention is bounded since board #206 (30 min past death, every verb reaps;
+`stop` closes; see "Retention is bounded" below).
 
 The rest of `tmm` is a thin WS client: the hub subcommands go through
 `rpc()` and `state.db` is owned by the server process. `tmm task` is the one
@@ -238,6 +241,49 @@ Task names are globally unique — the name is the handle — so lookups scan al
 sessions, and `start` refuses a name a live task holds (`--replace` to take it
 over). Refusing rather than clobbering matches preflight's philosophy and keeps
 parallel subagents from silently stealing each other's tasks.
+
+### Retention is bounded (board #206, 2026-09-20)
+
+Owner: "当 agent 每轮都用新名称执行 tmm task start，它默认开启 remain-on-exit，任务结束后窗口
+仍保留；停止任务也不等于删除窗口，这样就导致大量冗余窗口堆积…只有特别长时的任务 异步任务 后台
+运行的任务采用 tmm task 执行". Measured on the live tmux 3.6a: 40 task windows, 39
+dead, aged 21h–7d, every name used once, never `rm`'d. Two layers were wrong:
+retention was unbounded and manual (`remain-on-exit` kept every finished window
+until someone ran `rm`; `stop` kept the window on purpose), and the skill
+prompt read as "run any command as a task".
+
+- **A finished task's window lives `TTL` past its death**, 30 minutes by
+  default (`tasks::DEFAULT_TTL_SECS`; `TMM_TASK_TTL_SECS` overrides, 0 for
+  tests). The clock is tmux's own `#{pane_dead_time}` — the epoch second of
+  the LATEST death; verified on 3.6a: set when the pane dies, EMPTY while it
+  is alive again after `respawn-window`, set anew on the next death — so a
+  reused name is never judged by an old death.
+- **Every `tmm task` verb reaps at its door**, ONE mechanism, local, no
+  daemon/timer/file, working with the server down: `tasks::reap_expired`
+  closes windows that carry `@tmm_task`, are `pane_dead`, and died more than
+  the TTL ago — never a running task, never a window without `@tmm_task`
+  (a plain dead window is not ours). A verb reaps AFTER its own work and
+  shields its own target, so `logs`/`status`/`rm` on an expired task still
+  answer; `list` reaps first so what it prints is what exists. Reaped names go
+  to stderr (`--json` stdout stays clean).
+- **`stop` finishes**: C-c → TERM → KILL as before, then it prints the last
+  20 lines (`STOP_TAIL_LINES`) and CLOSES the window; `--keep` leaves it (and
+  `logs` still reads it). Stopping an already finished task closes it too.
+  `rm` is unchanged: close now.
+- **The prompt reverses its default**: `assets/skills/tmm-cli/SKILL.md`
+  (embedded as a built-in skill by `projects/skills.rs`, materialised to
+  `<state dir>/skills/tmm-cli/SKILL.md` by `seed_builtin_skills()` at server
+  start, which is where agents load it — so a changed asset lands at the next
+  server start, not at merge) says the foreground is the default and `tmm
+  task` is for long-running / asynchronous / must-outlive-the-turn work only,
+  finished with `stop`/`rm` or reaped by the TTL.
+
+Tests (`tasks::tests`, real tmux on a PRIVATE socket — a TTL-0 sweep on the
+shared server would close the developer's own finished windows, which is the
+production effect and not a test's): the expired task is reaped, the verb's
+target is shielded, a running task and a dead non-task window are untouched,
+a fresh death is not expired at the default TTL; `stop` closes with its tail,
+`--keep` keeps, and `stop` on a finished task closes.
 
 ### Two things that read as bugs and are not
 

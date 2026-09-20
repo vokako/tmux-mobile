@@ -63,8 +63,11 @@ USAGE (background tasks — LOCAL tmux only, no server needed, never exits 2):
   tmm task list                       every task, in every session, + state
   tmm task status <name>              running | exited:<code>  (exit 4 if gone)
   tmm task logs <name> [--limit N] [--grep <text>]   default 50 lines, from the end
-  tmm task stop <name>                C-c, then TERM, then KILL; keeps the log
-  tmm task rm <name>                  close a finished task's window
+  tmm task stop <name> [--keep]       C-c, then TERM, then KILL; prints the last 20 lines
+                                      and closes the window (--keep leaves it)
+  tmm task rm <name>                  close a finished task's window now
+                                      (finished windows are reaped 30 min after they end;
+                                      TMM_TASK_TTL_SECS overrides)
 
 USAGE (human or agent — self-management):
   tmm agent list                      agents in this project and their states
@@ -875,9 +878,29 @@ fn cmd_mcp_local(rest: &[String], flags: &Flags, _json: bool) {
     }
 }
 
+/// Every `tmm task` verb reaps expired finished windows at its door (board
+/// #206) — AFTER its own work and never its own target, so `logs`/`status`/`rm`
+/// on an expired task still answer. `list` reaps first so what it prints is
+/// what exists. Reaped names go to stderr, so `--json` stdout stays clean.
+fn reap_at_the_door(except: Option<&str>, json: bool) {
+    let reaped = tasks::reap_expired(except);
+    if reaped.is_empty() {
+        return;
+    }
+    let names: Vec<&str> = reaped.iter().map(|t| t.name.as_str()).collect();
+    if json {
+        eprintln!("{}", json!({ "reaped": names }));
+    } else {
+        eprintln!("(reaped {} finished task window{}: {})", names.len(), if names.len() == 1 { "" } else { "s" }, names.join(", "));
+    }
+}
+
 fn cmd_task(rest: &[String], cmdv: &[String], flags: &Flags, json: bool) {
     let verb = rest.first().map(String::as_str).unwrap_or("");
     let arg = rest.get(1).map(String::as_str);
+    if verb == "list" {
+        reap_at_the_door(None, json);
+    }
     match verb {
         "start" => {
             let Some(name) = arg else {
@@ -895,6 +918,7 @@ fn cmd_task(rest: &[String], cmdv: &[String], flags: &Flags, json: bool) {
                 println!("✓ started {} in {} (pane {}, pid {})", t.name, t.target(), t.pane, t.pid);
                 println!("  logs: tmm task logs {}", t.name);
             }
+            reap_at_the_door(Some(name), json);
         }
         "list" => {
             let rows = tasks::list();
@@ -938,9 +962,11 @@ fn cmd_task(rest: &[String], cmdv: &[String], flags: &Flags, json: bool) {
                     } else {
                         println!("missing");
                     }
+                    reap_at_the_door(Some(name), json);
                     std::process::exit(EXIT_NOT_FOUND);
                 }
             }
+            reap_at_the_door(Some(name), json);
         }
         "logs" => {
             let Some(name) = arg else {
@@ -960,15 +986,29 @@ fn cmd_task(rest: &[String], cmdv: &[String], flags: &Flags, json: bool) {
             } else if !text.is_empty() {
                 println!("{text}");
             }
+            reap_at_the_door(Some(name), json);
         }
         "stop" => {
-            let Some(name) = arg else { fail(EXIT_USAGE, "task stop <name>") };
-            let t = tasks::stop(name).unwrap_or_else(|e| task_fail(e));
+            let Some(name) = arg else { fail(EXIT_USAGE, "task stop <name> [--keep]") };
+            let keep = flags.contains_key("keep");
+            let out = tasks::stop(name, keep).unwrap_or_else(|e| task_fail(e));
             if json {
-                println!("{}", task_value(&t));
+                let lines: Vec<&str> = out.tail.lines().collect();
+                let mut v = task_value(&out.task);
+                v["closed"] = json!(out.closed);
+                v["tail"] = json!(lines);
+                println!("{v}");
             } else {
-                println!("✓ stopped {} ({})", t.name, t.state_str());
+                if !out.tail.is_empty() {
+                    println!("{}", out.tail);
+                }
+                if out.closed {
+                    println!("✓ stopped {} ({}); window closed — pass --keep to keep it", out.task.name, out.task.state_str());
+                } else {
+                    println!("✓ stopped {} ({}); window kept — logs: tmm task logs {}", out.task.name, out.task.state_str(), out.task.name);
+                }
             }
+            reap_at_the_door(Some(name), json);
         }
         "rm" => {
             let Some(name) = arg else { fail(EXIT_USAGE, "task rm <name>") };
@@ -978,6 +1018,7 @@ fn cmd_task(rest: &[String], cmdv: &[String], flags: &Flags, json: bool) {
             } else {
                 println!("✓ removed {}", t.name);
             }
+            reap_at_the_door(Some(name), json);
         }
         _ => {
             eprint!("{USAGE}");
