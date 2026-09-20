@@ -1,6 +1,6 @@
 ---
 name: tmm-cli
-description: The full tmm CLI reference — project chat, background tasks, agent/project self-management, the central registry. Use when you need a tmm capability beyond the basics your system prompt teaches (send/log), e.g. running a long command as a background task, spawning a teammate, restarting a stuck agent, or managing projects and registry definitions from the command line.
+description: The full tmm CLI reference — project chat, the task board, agent/project self-management, the central registry, and tmm task for work that must outlive the turn (dev servers, watchers, deploys, remote jobs — NOT ordinary commands, which run in the foreground). Use when you need a tmm capability beyond the basics your system prompt teaches (send/log), e.g. spawning a teammate, restarting a stuck agent, managing projects and registry definitions, or keeping a long-running process alive in the background.
 ---
 
 # The tmm CLI
@@ -75,9 +75,15 @@ fixes and moves it back to `doing`.
 
 ## Background tasks — LOCAL tmux, no server needed
 
-The one subtree that works even when the server is down. Each task is a
-tmux window with window-scoped `remain-on-exit`, so status and logs
-survive the command exiting.
+**The foreground is the default.** A command that finishes within your turn
+— a test run, a build, a one-shot script, `git`, `curl` — runs in the
+foreground, where you read its output directly. Reach for `tmm task` ONLY for
+work that is long-running (minutes or more), asynchronous, or must outlive
+the turn: a dev server, a watcher, a deploy, a remote job. Every task is a
+tmux window; a window you start is yours to finish.
+
+Each task is a tmux window with window-scoped `remain-on-exit`, so status and
+logs survive the command exiting. It works even when the server is down.
 
 ```bash
 tmm task start <name> -- <cmd...>   # run detached in its own tmux window
@@ -86,13 +92,16 @@ tmm task start <name> -- <cmd...>   # run detached in its own tmux window
 tmm task list                       # every task, in every session, + state
 tmm task status <name>              # running | exited:<code>  (exit 4 if gone)
 tmm task logs <name> [--limit N] [--grep <text>]   # default 50 lines, tail
-tmm task stop <name>                # C-c, then TERM, then KILL; keeps the log
-tmm task rm <name>                  # close a finished task's window
+tmm task stop <name> [--keep]       # C-c, then TERM, then KILL; prints the last
+                                    # 20 lines and CLOSES the window (--keep keeps it)
+tmm task rm <name>                  # close a finished task's window now
 ```
 
-Use a task for anything long-running you would otherwise foreground: dev
-servers, watchers, builds. Prefer `--replace` over stop+start when
-retaking a name.
+Finish what you start: `stop` when you are done with a long-running task,
+`rm` after reading a finished one. A finished window you leave behind is
+reaped 30 minutes after its process ended (the next `tmm task` verb closes
+it; `TMM_TASK_TTL_SECS` overrides) — read its logs before then, or `--keep`.
+Reuse names (`--replace`) instead of inventing a new one per run.
 
 ## Agents — manage yourself and your teammates
 
