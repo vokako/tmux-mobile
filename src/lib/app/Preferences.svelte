@@ -773,11 +773,14 @@
                     <span class="addr-dot" class:live-dot={pending}></span><span class="addr-text">{address}</span>
                   </button>
                   {#if addresses.length && !active}
-                    <button type="button" class="addr-del" aria-label={`${t('delete')} ${address}`}
+                    <!-- The × is the shared danger icon command (rule 6), used
+                         exactly as the roster's Stop: the atom carries the hit
+                         box (44px on touch), the radius, the quiet→full ink and
+                         the focus ring; bare — the row under it already carries
+                         the hover. -->
+                    <CommandButton variant="danger" iconOnly bare icon="x" label={`${t('delete')} ${address}`}
                       disabled={!!pendingAddress || commands.address.pending}
-                      onclick={() => removeAddress(address)}>
-                      <Icon name="x" size={11} />
-                    </button>
+                      onclick={() => removeAddress(address)} />
                   {/if}
                 </div>
               {/each}
@@ -874,22 +877,18 @@
   .address-list button.active .addr-dot,.address-list button.pending .addr-dot{background:var(--accent)}
   /* The drag handle: quiet at rest, `touch-action: none` so a touch drag
      reorders instead of scrolling the page (the row itself stays a switch
-     command, so the gesture needs its own target). */
+     command, so the gesture needs its own target). A gesture target, not a
+     command — but the same hit box the commands get: --control-height is 28px
+     on the desktop and the 44px floor on touch. */
   .addr-grip {
-    flex: none; width: 28px; height: 28px; padding: 0; display: grid; place-items: center;
+    flex: none; width: var(--control-height); height: var(--control-height); padding: 0;
+    display: grid; place-items: center;
     border: none; border-radius: var(--ui-radius-control); background: none;
     color: var(--text3); cursor: grab; touch-action: none;
     -webkit-tap-highlight-color: transparent; transition: color var(--t-fast), background var(--t-fast);
   }
   .addr-grip:hover:not(:disabled) { color: var(--text2); background: var(--bg3); }
   .addr-grip:disabled { opacity: 0.4; cursor: default; }
-  .addr-del {
-    flex: none; padding: 8px 10px; border: none; background: none;
-    color: var(--text3); cursor: pointer; -webkit-tap-highlight-color: transparent;
-    transition: color var(--t-fast);
-  }
-  .addr-del:hover:not(:disabled) { color: var(--danger); }
-  .addr-del:disabled { opacity: 0.4; cursor: default; }
   /* Mid-drag the pointer's row wears the accent selection it already uses for
      "active"; the insertion point is an accent LINE on the edge the row would
      push down — the rail's drag grammar, unchanged. */
@@ -897,7 +896,7 @@
   .address-list.reordering .addr-grip { cursor: grabbing; }
   .address-row.lifted .address-choice {
     border-color: var(--accent-line); background: var(--accent-bg); color: var(--accent-ink);
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+    box-shadow: var(--menu-shadow);
   }
   .addr-drop {
     position: absolute; left: 0; right: 0; height: 2px;

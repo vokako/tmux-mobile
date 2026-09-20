@@ -691,20 +691,15 @@ mod relaunch_tests {
 // production code reaches it only through Backend's methods, so these
 // re-exports exist for the test module's `use super::*` alone.
 #[cfg(test)]
-pub(crate) use crate::backends::claude::{
-    claude_hooks, ensure_claude_env, ensure_claude_state, ensure_claude_status_line,
-    merge_missing_claude_env, render_claude,
-};
+pub(crate) use crate::backends::claude::{claude_hooks, ensure_claude_state, merge_missing_claude_env, render_claude};
 #[cfg(test)]
 pub(crate) use crate::backends::codex::{codex_hooks, render_codex};
 #[cfg(test)]
 pub(crate) use crate::backends::grok::{grok_config_toml_from, grok_hooks, render_grok};
 #[cfg(test)]
-pub(crate) use crate::backends::kiro::{
-    ensure_kiro_settings, kiro_cli_settings, kiro_hooks, migrate_launch_model, render_kiro,
-};
+pub(crate) use crate::backends::kiro::{ensure_kiro_settings, kiro_hooks, render_kiro};
 #[cfg(test)]
-pub(crate) use crate::backends::omp::{omp_telemetry_extension, render_omp};
+pub(crate) use crate::backends::omp::render_omp;
 
 pub(crate) struct Rendered {
     pub(crate) env: Vec<(String, String)>,

@@ -96,8 +96,8 @@ test('a failover address is removed through the one write path; the active addre
   try {
     const rows = [...app.document.querySelectorAll<HTMLElement>('[data-addr-row]')];
     assert.deepEqual(rows.map((r) => r.dataset.addrRow), ['ws://a:1', 'ws://b:2']);
-    assert.equal(rows[0]!.querySelector('.addr-del'), null, 'the live connection is not removable');
-    const del = rows[1]!.querySelector<HTMLButtonElement>('.addr-del')!;
+    assert.equal(rows[0]!.querySelector('.command-button.danger'), null, 'the live connection is not removable');
+    const del = rows[1]!.querySelector<HTMLButtonElement>('.command-button.danger')!;
     assert.equal(del.getAttribute('aria-label'), 'Delete ws://b:2');
     del.click();
     await app.flush();

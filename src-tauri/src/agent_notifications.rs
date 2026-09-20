@@ -785,7 +785,7 @@ mod tests {
     }
 
     /// omp payloads come from our OWN telemetry extension
-    /// (spawn::omp_telemetry_extension), which speaks claude's dialect by
+    /// (backends::omp::omp_telemetry_extension), which speaks claude's dialect by
     /// construction: UserPromptSubmit resets the turn flag, Stop is the
     /// completion carrying the reply and the session id.
     #[test]
@@ -1083,8 +1083,7 @@ mod tests {
             eprintln!("no tmux server — skipping");
             return;
         }
-        let panes = crate::tmux::list_panes(&session).unwrap_or_default();
-        let pane = panes.first().expect("the new session has a pane").clone();
+        // resolve_pane_id wants tmux's own `%N` id, which TmuxPane doesn't carry.
         let pane_id = String::from_utf8(
             std::process::Command::new("tmux")
                 .args(["display-message", "-p", "-t", &session, "#{pane_id}"])

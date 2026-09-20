@@ -137,8 +137,18 @@ test('failover addresses are removable and drag-reorderable through ONE write pa
   assert.match(source, /class="addr-grip" aria-label=\{t\('addressDrag'\)\}/u);
   assert.match(source, /onkeydown=\{\(e\) => addrGripKey\(e, address\)\}/u, 'the keyboard form of the same reorder');
   assert.match(style, /\.addr-grip \{[^}]*touch-action: none/u, 'the grip opts out of scrolling');
-  // The ACTIVE address is the live connection — it is never removable.
-  assert.match(source, /\{#if addresses\.length && !active\}[\s\S]{0,200}?class="addr-del"/u);
+  // A gesture target, but the same hit box the commands get: --control-height
+  // is the 44px floor on touch (review, board #222).
+  assert.match(style, /\.addr-grip \{[^}]*width: var\(--control-height\); height: var\(--control-height\)/u);
+  // The ACTIVE address is the live connection — it is never removable. The ×
+  // is the shared danger icon command (rule 6), exactly the roster's Stop:
+  // the atom carries the hit box, radius, ink and focus ring — never a local
+  // raw button (review, board #222).
+  assert.match(source, /\{#if addresses\.length && !active\}[\s\S]{0,400}?<CommandButton variant="danger" iconOnly bare icon="x" label=\{`\$\{t\('delete'\)\} \$\{address\}`\}/u);
+  assert.doesNotMatch(style, /\.addr-del/u, 'no local delete button — the atom owns the look');
+  // The lifted row's shadow is the menu token, never a literal rgba.
+  assert.match(style, /\.address-row\.lifted \.address-choice \{[^}]*box-shadow: var\(--menu-shadow\)/u);
+  assert.doesNotMatch(style, /rgba\(/u, 'no literal colors — tokens only');
   // The legacy agent-hooks management surface is gone whole (board #222): the
   // UI, its RPC wrappers and its state left together.
   assert.doesNotMatch(source, /agentHooks|hook-backends|hook-control|hookStatus/u);
