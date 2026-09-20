@@ -37,10 +37,26 @@ use tmux_mobile::server::{
 
 // --- Test harness ---
 
+/// This crate is built WITHOUT `cfg(test)` on the library, so the lib's
+/// test-process config dir does not apply here; `AgentNotificationHub::load()`
+/// would resolve to the operator's real `~/.config/tmux-mobile`. Point the
+/// XDG door — the one config-dir override the app has — at a temp dir once
+/// per process (board #216). Set before any config read; the tests here run
+/// in one process and this is the first thing each server does.
+fn isolate_config_dir() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let dir = std::env::temp_dir().join(format!("tmm-itest-config-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("XDG_CONFIG_HOME", &dir);
+    });
+}
+
 /// Spin up a one-shot server on a loopback port, return (addr, token).
 /// Accepts exactly one connection and then stops (enough for a single
 /// test client).
 async fn spawn_server_once(token: &str) -> SocketAddr {
+    isolate_config_dir();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let token = Arc::new(token.to_string());

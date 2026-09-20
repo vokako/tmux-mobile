@@ -160,6 +160,19 @@ flaky wall-clock assertions in the test.
   files: structure, emitted markup and executing behavior are different
   contracts. Use the cheapest tier that actually proves the claim.
 - Every regression fix starts with a failing test that reproduces it.
+- Rust tests never see the operator's `~/.config/tmux-mobile`. Under
+  `cfg(test)` the lib's `config::dirs_next()` is ONE empty temp directory
+  per test process (`/tmp/tmm-config-test-<pid>`), so every
+  `config_dir()` consumer (config.toml, AGENTS.md, the hooks helper,
+  skills-cache, the default state.db) reads defaults and writes scratch;
+  a test cannot forget to isolate itself. Integration test crates build
+  the lib without `cfg(test)` and point `XDG_CONFIG_HOME` — the app's one
+  config-dir override — at a temp dir once per process
+  (`isolate_config_dir` in `tests/concurrent_rpc.rs`). A test that WRITES
+  a config file uses its own subdirectory, never the shared root. Reason:
+  board #216 (2026-09-20) — the live `kiro_engine = "v3"` turned three
+  v2-default assertions red on every branch, and earlier the spawn tests
+  had pointed the whole process at the real `state.db`.
 
 ## Current source-contract inventory
 

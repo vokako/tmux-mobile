@@ -74,6 +74,7 @@ pub fn config_dir() -> PathBuf {
     dirs_next()
 }
 
+#[cfg(not(test))]
 fn dirs_next() -> PathBuf {
     // Follow the XDG Base Directory convention: $XDG_CONFIG_HOME if set,
     // else ~/.config. App state lives under the `tmux-mobile/` subdir.
@@ -83,6 +84,29 @@ fn dirs_next() -> PathBuf {
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
         .unwrap_or_else(|| PathBuf::from(".config"));
     base.join("tmux-mobile")
+}
+
+/// The unit-test process never sees the operator's config directory. Every
+/// `config_dir()` consumer (config.toml, AGENTS.md, the hooks helper,
+/// skills-cache, the default state.db) resolves to ONE empty temp directory
+/// created once per test process — so a test cannot forget to isolate
+/// itself, and the file defaults (`kiro_engine` = v2, no AGENTS.md, …) are
+/// what every test measures. Per-test opt-in had already failed once (the
+/// spawn tests once pointed the whole process at the real state.db, see
+/// `projects::tests::use_test_store`), and it failed again when the live
+/// `kiro_engine = "v3"` turned three v2-default assertions red on this host
+/// (board #216, 2026-09-20). Tests that WRITE config files use their own
+/// subdirectory under this one, not its root.
+#[cfg(test)]
+fn dirs_next() -> PathBuf {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let dir = std::env::temp_dir().join(format!("tmm-config-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create the test config dir");
+        dir
+    })
+    .clone()
 }
 
 fn optional_env_override(value: Option<String>, fallback: Option<String>) -> Option<String> {

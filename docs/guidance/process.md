@@ -103,6 +103,7 @@
 - 2026-08-05: shared tmux state made `adopt_then_down_then_up` flaky;
   use an isolated `-S` socket.
 - 2026-09-20 (board #208): `t07_capture_scrollback` waited a FIXED 1 s for 100 echo lines on the shared tmux and failed under a parallel cargo build (load ~6), passing alone. A test that waits for the terminal must poll for the expected paint with a deadline (`pane_shows` in `main.rs`), never sleep a guessed number; verified 5× green under a concurrent build at load ~15.
+- 2026-09-20 (board #216): a test suite must not read the operator's config. Opening the live `kiro_engine = "v3"` door turned three v2-default lib tests red on EVERY branch, because `config::kiro_engine()` fell back to the real `~/.config/tmux-mobile/config.toml`; the same class had earlier pointed the whole test process at the real `state.db`. Per-test opt-in (`use_test_store`) is forgettable; the isolation door belongs where the path is resolved (`cfg(test)` temp dir in `config::dirs_next()`, see testing.md), so green means the same thing on every host.
 - Board lessons: #19 took three rounds to find the cause; #97 had three
   kiro lang/stack changes before claude found font features; #56 treated
   click-through ("点击
