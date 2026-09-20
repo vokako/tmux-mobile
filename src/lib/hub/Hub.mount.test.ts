@@ -1648,8 +1648,8 @@ test('Chat picker commands retain choice, disabled start and the original spawn 
     }],
   });
   try {
-    for (let i = 0; i < 12 && !app.document.querySelector('.roster-add button'); i++) await app.flush();
-    app.document.querySelector<HTMLButtonElement>('.roster-add button')!.click();
+    for (let i = 0; i < 12 && !app.document.querySelector('.roster-add > button'); i++) await app.flush();
+    app.document.querySelector<HTMLButtonElement>('.roster-add > button')!.click();
     await app.flush();
     const start = app.document.querySelector<HTMLButtonElement>('.dlg-actions .command-button.primary')!;
     assert.ok(start);

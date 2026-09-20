@@ -13,7 +13,7 @@ test('All, attachment and Send are a measured last-line signature (#186)', () =>
   assert.match(rule('.composer-actions'), /position: absolute/u);
   assert.match(rule('.c-input'), /width: 100%/u);
   assert.match(rule('.c-input'), /min-width: 0/u);
-  assert.match(source, /class="all-choice"/u);
+  assert.doesNotMatch(source, /class="all-choice"|onall|allMenuOpen/u, '#204: Everyone lives in the roster, beside Spawn');
   assert.ok(source.indexOf("label={t('hubEveryone')}") < source.indexOf("label={t('hubAttach')}"));
   assert.doesNotMatch(source, /justify-content: space-between/u, 'no separate footer distributes the controls');
   assert.match(source, /signatureLayout\(/u);

@@ -9,7 +9,7 @@
 
   let {
     selected = '', compact = false, recipient = '', composerText = $bindable(''),
-    roomReady = false, allMenuOpen = false, onall = (_event) => {},
+    roomReady = false,
     agents = [], interruptible = false,
     pending = [], attaching = false, failed = false, sendable = false,
     onsend: send = () => {},
@@ -311,12 +311,6 @@
     onfocus={onfocus}
   ></textarea>
   <div class="composer-actions" bind:this={actionsEl}>
-    <span class="all-choice">
-      <CommandButton variant="icon" icon="collab" label={t('hubEveryone')} pressed={recipient === ALL_TARGET}
-        hasPopup={recipient === ALL_TARGET ? 'menu' : undefined}
-        expanded={recipient === ALL_TARGET ? allMenuOpen : undefined}
-        disabled={!selected || !roomReady} onclick={onall} />
-    </span>
     <CommandButton variant="icon" icon="plus" label={t('hubAttach')} disabled={!selected || attaching}
       pending={attaching} onclick={() => fileEl?.click()} />
     <CommandButton variant="primary" iconOnly icon="send-up" label={t('hubSend')}
@@ -391,7 +385,6 @@
   }
   .c-input::placeholder { color: var(--text3); }
   .composer-actions { position: absolute; right: 0; bottom: 0; display: flex; align-items: center; gap: var(--tool-gap); }
-  .all-choice { display: flex; flex: none; }
   .compose-line :global(.composer-measure) {
     position: absolute; top: 0; left: 0; width: 100%; height: 0;
     overflow: hidden; visibility: hidden; pointer-events: none;

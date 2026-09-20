@@ -172,8 +172,14 @@ and clamps its scrollTop during a width resize; restoring the textarea
 then leaves a 61px tail gap. The row hold is removed in `finally` before
 the shell-height notification. It is not a mirror, timer or Feed correction.
 
-All is the single circular icon CommandButton in the composer, with the
-existing 28/44px native target. Selected All wears the shared pressed
+All is the single circular icon CommandButton — in the composer's signature
+from #168 to #203, and since board #204 at the roster strip's tail beside
+Spawn, reached the way the + is (owner, 2026-09-17: "发送给 everyone 的这个按钮其实
+我觉得还是有点大了 放在文本框里有点占地方 你能不能把这个按钮藏到展开 Agent 卡片的列表里 就像你
+的那个加号一样"): it is a destination like the cards, so it stands with them and
+the composer's signature keeps only Attach and Send. Same command, same
+28/44px native target, same props (`pressed`, `hasPopup`, `expanded` for the
+All menu), now wired into `Roster` (`allMenuOpen`, `onall`). Selected All wears the shared pressed
 control-surface/accent-ink treatment; Send is the only solid CTA. The old
 roster All card, its private styling and resident All Stop are removed whole.
 First activation selects `ALL_TARGET`; another activation opens the existing

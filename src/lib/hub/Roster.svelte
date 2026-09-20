@@ -20,6 +20,7 @@
     stateLabel = (state) => state, stateTone = () => undefined,
     onselect: setRecipient = () => {}, oninterrupt: interrupt = () => {}, onfilter = () => {},
     expanded = false, onexpand = () => {}, onadd = () => {}, oncontext = () => {},
+    allMenuOpen = false, onall = (_event) => {},
   } = $props();
 
   const cardsId = $props.id();
@@ -225,8 +226,19 @@
           </button>
         </div>
       {/each}
-      <!-- Spawning opens a closed project too; keep its entry even in an empty room. -->
+      <!-- The strip's tail: Everyone and Spawn. Everyone left the composer's
+           signature (owner, 2026-09-17: "发送给 everyone 的这个按钮…放在文本框里有点占地方
+           …藏到展开 Agent 卡片的列表里 就像你的那个加号一样"; board #204) — it is a
+           destination like the cards, so it stands with them, reached the way
+           the + is. Spawning opens a closed project too; keep its entry even in
+           an empty room. -->
       <div class="roster-add">
+        <span class="all-choice">
+          <CommandButton variant="icon" icon="collab" label={t('hubEveryone')} pressed={recipient === ALL_TARGET}
+            hasPopup={recipient === ALL_TARGET ? 'menu' : undefined}
+            expanded={recipient === ALL_TARGET ? allMenuOpen : undefined}
+            disabled={!selected || !roomReady} onclick={onall} />
+        </span>
         <CommandButton icon="plus" variant="icon" label={t('hubSpawn')} onclick={onadd} />
       </div>
     </div>
@@ -330,6 +342,7 @@
   .off { color: var(--text2); }
   .ava.dim { background: var(--surface2); color: var(--text3); }
   img.ava.dim { background: none !important; filter: grayscale(1); opacity: 0.55; }
-  .roster-add { display: flex; align-items: center; flex: none; min-height: var(--control-height); }
+  .roster-add { display: flex; align-items: center; gap: var(--roster-gap); flex: none; min-height: var(--control-height); }
+  .all-choice { display: flex; flex: none; }
   .roster-toggle { display: flex; align-self: end; align-items: center; height: calc(var(--roster-paint-height) + 2 * var(--control-paint-inset) + 4px); }
 </style>

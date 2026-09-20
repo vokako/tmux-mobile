@@ -36,7 +36,16 @@ test('Roster renders the controlled destination strip (#168)', { timeout: RENDER
     assert.doesNotMatch(root.textContent!, /State:|stopped|@all/u, 'state words live only in hover/ARIA');
     assert.equal(select(root, 'runner').getAttribute('aria-pressed'), 'true');
     assert.equal(select(root, 'waiting').getAttribute('aria-pressed'), 'false');
-    assert.equal(root.querySelector('[data-agent="all"]'), null, '#180: All belongs to Composer, never the roster');
+    assert.equal(root.querySelector('[data-agent="all"]'), null, '#180: All is never a CARD');
+    // #204: Everyone stands at the strip's tail beside Spawn, the same shared command it was in the composer.
+    const all = (r: DocumentFragment) => r.querySelector<HTMLButtonElement>('.roster-add .all-choice button')!;
+    assert.equal(all(root).getAttribute('aria-label'), 'everyone');
+    assert.equal(all(root).getAttribute('aria-pressed'), 'false');
+    assert.equal(all(view({ recipient: 'all' })).getAttribute('aria-pressed'), 'true');
+    assert.equal(all(view({ recipient: 'all' })).getAttribute('aria-haspopup'), 'menu');
+    assert.equal(all(view({ recipient: 'all', allMenuOpen: true })).getAttribute('aria-expanded'), 'true');
+    assert.equal(all(view({ roomReady: false })).disabled, true);
+    assert.equal(root.querySelector('.roster-add')!.lastElementChild!.getAttribute('aria-label'), 'agent');
     assert.match(select(root, 'runner').getAttribute('aria-label')!, /unread/iu);
     assert.ok(card(root, 'runner').querySelector('.st.live-dot'));
     assert.ok(card(root, 'runner').querySelector('.unread'));

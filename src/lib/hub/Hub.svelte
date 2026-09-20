@@ -1725,13 +1725,14 @@
         {recipient} {filterAgent} {composerText} {managedNames} {busyNames} {interrupting}
         {unread} {acting} {tick} {roomReady} {justLoaded} {rosterBase}
         expanded={rosterExpanded} onexpand={toggleRoster}
+        allMenuOpen={!!ctxAt?.allSession && ctxAt.allSession === selected} onall={activateAll}
         {stateLabel} {stateTone} onselect={setRecipient} oninterrupt={interrupt}
         onfilter={(name) => { closeCtx(); toggleFilter(name); }}
         onadd={() => openPicker('add')}
         oncontext={(at, name) => openCtx(at, name, agentItems(name))} />
 
       <Composer bind:this={composer} bind:composerText {selected} {compact} {recipient}
-        {roomReady} allMenuOpen={!!ctxAt?.allSession && ctxAt.allSession === selected} onall={activateAll}
+        {roomReady}
         {agents} {pending} {attaching} {failed} {sendable} {interruptible}
         onsend={send} onstage={stageFiles} onremove={removeAttachment}
         onmodels={modelsList} oninterrupt={interrupt} onpreview={(path) => { shotView = path; }}
