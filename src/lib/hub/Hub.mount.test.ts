@@ -89,13 +89,14 @@ const selectedCard = (document: Document) =>
 const stripCard = (document: Document, name: string) =>
   document.querySelector<HTMLElement>(`.acard[data-agent="${name}"]`)!;
 /** #205: Stop stands on the dot only while the card is hovered (fine pointer) or its interrupt is pending. */
-const hoverCard = async (app: { document: Document; window: Window & typeof globalThis; flush: () => Promise<void> }, name: string) => {
+type HoverApp = { document: Document; window: { Event: typeof Event }; flush: () => Promise<void> };
+const hoverCard = async (app: HoverApp, name: string) => {
   const event = new app.window.Event('pointerenter', { bubbles: false });
   Object.defineProperty(event, 'pointerType', { value: 'mouse' });
   stripCard(app.document, name).dispatchEvent(event);
   await app.flush();
 };
-const unhoverCard = async (app: { document: Document; window: Window & typeof globalThis; flush: () => Promise<void> }, name: string) => {
+const unhoverCard = async (app: HoverApp, name: string) => {
   stripCard(app.document, name).dispatchEvent(new app.window.Event('pointerleave', { bubbles: false }));
   await app.flush();
 };
