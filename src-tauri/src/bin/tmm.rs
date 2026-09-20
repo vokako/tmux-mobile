@@ -727,7 +727,7 @@ async fn main() {
             }
         }
         _ => {
-            eprint!("{USAGE}");
+            eprint!("{}", usage());
             std::process::exit(EXIT_USAGE);
         }
     }
@@ -1032,7 +1032,7 @@ fn cmd_task(rest: &[String], cmdv: &[String], flags: &Flags, json: bool) {
             reap_at_the_door(Some(name), json);
         }
         _ => {
-            eprint!("{USAGE}");
+            eprint!("{}", usage());
             std::process::exit(EXIT_USAGE);
         }
     }
