@@ -132,6 +132,39 @@ pub fn spawned_by(workspace: Option<&str>, window_name: &str) -> Option<String> 
     (!by.is_empty()).then_some(by)
 }
 
+/// Type ONE stamped chat line into ONE named agent's pane — the targeted
+/// sibling of `deliver_mentions` (same gates: live window, managed, never a
+/// shell; same `record_delivery` bookkeeping, so the agent's turn-start echo
+/// acks it and the reply edge names the line's sender). Quiet on every miss:
+/// a dead window or an unmanaged name simply has nobody to wake. Used by the
+/// done-summary feedback edge, the board's review handoff, the `[reply]`
+/// return and — since board #224 — a spawn whose backend takes its first
+/// prompt TYPED (kimi): all DELIVERIES the server decides on, never mention
+/// scans, so the record-only invariant of hook-sourced posts stays intact.
+pub fn deliver_chat_line(session: &str, target_name: &str, line: &str) -> bool {
+    use crate::projects::agents;
+
+    let ws = crate::projects::project_for_session(session).ok().flatten().map(|p| p.path);
+    let Ok(panes) = crate::tmux::list_panes(session) else { return false };
+    for p in &panes {
+        if !p.active || p.window_name != target_name {
+            continue;
+        }
+        let is_agent = agents::detect_pane(ws.as_deref(), p).is_some();
+        if !is_agent || !crate::projects::is_managed_in(ws.as_deref(), &p.window_name) {
+            return false;
+        }
+        let target = format!("{}:{}.{}", session, p.window, p.pane);
+        if crate::tmux::send_command(&target, line).is_ok() {
+            crate::projects::telemetry::record_delivery(session, &p.window_name, line);
+            crate::projects::vitals::sniff_window_soon(session, &p.window_name);
+            return true;
+        }
+        return false;
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::tests::use_test_store;

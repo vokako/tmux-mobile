@@ -403,26 +403,78 @@ pub(crate) fn startup_already_ready(content: &str, confirmation: &StartupConfirm
         .any(|marker| content.contains(marker))
 }
 
+/// What one pane capture tells the startup waiter to do next.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum StartupStep {
+    /// The first-use dialog is on screen and has not been answered: send the
+    /// accept keys.
+    Accept,
+    /// The CLI's own furniture is on screen: the pane is ready.
+    Ready,
+    /// Neither yet.
+    Wait,
+}
+
+/// The pure decision behind `confirm_startup_prompt`: the dialog is answered
+/// once (`accepted` remembers it — the accepted screen lingers a repaint or
+/// two, and a second Enter would submit an empty composer line), and readiness
+/// is the CLI's ready markers.
+pub(crate) fn startup_step(content: &str, confirmation: &StartupConfirmation, accepted: bool) -> StartupStep {
+    if !accepted && startup_prompt_visible(content, confirmation) {
+        StartupStep::Accept
+    } else if startup_already_ready(content, confirmation) {
+        StartupStep::Ready
+    } else {
+        StartupStep::Wait
+    }
+}
+
 /// Confirm a known first-use dialog without serializing the launch loop. No
 /// key is sent when the workspace is already trusted or the UI differs.
-pub(crate) fn confirm_startup_prompt(pane: String, confirmation: StartupConfirmation) {
+///
+/// `on_ready` runs ONCE when the CLI's ready markers are on screen (after
+/// the dialog, if there was one) — the door for a backend whose first prompt
+/// is TYPED rather than passed on the launch line (`Backend::first_prompt`,
+/// kimi, board #224). Without it the waiter stops as soon as the dialog is
+/// answered, exactly as before. A pane that never becomes ready within the
+/// timeout is logged: typing a brief into whatever is there (a shell, after
+/// a failed launch) would be worse than dropping it.
+pub(crate) fn confirm_startup_prompt(
+    pane: String,
+    confirmation: StartupConfirmation,
+    on_ready: Option<Box<dyn FnOnce() + Send + 'static>>,
+) {
     std::thread::spawn(move || {
         let deadline = std::time::Instant::now() + confirmation.timeout;
+        let mut accepted = false;
+        let mut on_ready = on_ready;
         while std::time::Instant::now() < deadline {
             if let Ok(content) = tmux::capture_pane_plain(&pane, Some(80)) {
-                if startup_prompt_visible(&content, &confirmation) {
-                    println!("🜂 team: confirming folder trust in new pane {}", pane);
-                    for key in &confirmation.accept_keys {
-                        let _ = tmux::send_keys(&pane, key, false);
-                        std::thread::sleep(Duration::from_millis(100));
+                match startup_step(&content, &confirmation, accepted) {
+                    StartupStep::Accept => {
+                        println!("🜂 team: confirming folder trust in new pane {}", pane);
+                        for key in &confirmation.accept_keys {
+                            let _ = tmux::send_keys(&pane, key, false);
+                            std::thread::sleep(Duration::from_millis(100));
+                        }
+                        accepted = true;
+                        if on_ready.is_none() {
+                            return;
+                        }
                     }
-                    return;
-                }
-                if startup_already_ready(&content, &confirmation) {
-                    return;
+                    StartupStep::Ready => {
+                        if let Some(f) = on_ready.take() {
+                            f();
+                        }
+                        return;
+                    }
+                    StartupStep::Wait => {}
                 }
             }
             std::thread::sleep(Duration::from_millis(500));
+        }
+        if on_ready.is_some() {
+            eprintln!("projects: pane {pane} never showed its ready markers — the first prompt was not typed");
         }
     });
 }
@@ -430,6 +482,26 @@ pub(crate) fn confirm_startup_prompt(pane: String, confirmation: StartupConfirma
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The waiter's decision, on kimi's measured screens (board #224): the
+    /// trust dialog is accepted once, a lingering dialog after the accept is
+    /// not accepted again, the welcome box is ready, anything else waits.
+    #[test]
+    fn startup_step_accepts_once_then_waits_for_ready() {
+        let c = StartupConfirmation {
+            markers: vec!["Trust this folder?", "Don't trust"],
+            ready_markers: vec!["Welcome to Kimi Code", "No session yet"],
+            accept_keys: vec!["Enter"],
+            timeout: Duration::from_secs(1),
+        };
+        let dialog = "  Trust this folder?\n  ↑↓ navigate · Enter select · Esc exit\n   ❯ Trust this folder\n     Don't trust\n";
+        assert_eq!(startup_step(dialog, &c, false), StartupStep::Accept);
+        assert_eq!(startup_step(dialog, &c, true), StartupStep::Wait, "the accepted dialog lingers a repaint — no second Enter");
+        let welcome = " │  ▐█▛█▛█▌  Welcome to Kimi Code!  │\n   No session yet — one will be created on your first message.\n";
+        assert_eq!(startup_step(welcome, &c, true), StartupStep::Ready);
+        assert_eq!(startup_step(welcome, &c, false), StartupStep::Ready, "a remembered trust skips the dialog");
+        assert_eq!(startup_step("$ . /ws/.tmm/agents/k1/launch-k1.sh\n", &c, false), StartupStep::Wait);
+    }
 
     #[test]
     fn managed_agent_path_includes_user_cli_bins_even_with_a_service_path() {

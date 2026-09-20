@@ -694,6 +694,7 @@ pattern = "Bash(rm -rf*)"
         let c = r.confirmation.expect("the trust screen has a confirmer");
         assert_eq!(c.markers, KIMI_FOLDER_TRUST_MARKERS.to_vec());
         assert_eq!(c.accept_keys, vec!["Enter"]);
+        assert!(!c.ready_markers.is_empty(), "a Typed first prompt needs ready markers to wait for");
         assert_eq!(std::fs::read_to_string(kimi.join("AGENTS.md")).unwrap(), "You are k1.");
         let cfg: toml::Table = std::fs::read_to_string(kimi.join("config.toml")).unwrap().parse().unwrap();
         assert_eq!(cfg["default_model"].as_str(), Some("bedrock-kimi-k3"));

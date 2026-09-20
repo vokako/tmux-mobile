@@ -728,44 +728,11 @@ pub(super) fn stamp_now() -> String {
     chrono::Local::now().format("%Y-%m-%d %H:%M").to_string()
 }
 
-/// Type ONE stamped chat line into ONE named agent's pane — the targeted
-/// sibling of `deliver_mentions` (same gates: live window, managed, never a
-/// shell; same `record_delivery` bookkeeping). Quiet on every miss: a dead
-/// window or an unmanaged name simply has nobody to wake. Used by the
-/// done-summary feedback edge and the board's review handoff — both are
-/// DELIVERIES the server decides on, never mention scans, so the
-/// record-only invariant of hook-sourced posts stays intact.
-///
-/// Desktop-only, like every `crate::projects` reader: the module is cfg'd out
-/// on android/ios. The gate belongs on the FUNCTION, immediately above `fn` —
-/// a doc comment between an attribute and its item is legal, so an attribute
-/// left dangling above someone else's docs is silently adopted by whatever
-/// item comes next. That is how this file broke the Android build once
-/// (see the `projects_readers_are_desktop_gated` test below).
+/// Typing one stamped line into one managed agent's pane lives in
+/// `projects::managed` since board #224 (the spawn path types a kimi brief
+/// through the same door); this is the same function under its old name.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub(super) fn deliver_chat_line(session: &str, target_name: &str, line: &str) -> bool {
-    use crate::projects::agents;
-
-    let ws = crate::projects::project_for_session(session).ok().flatten().map(|p| p.path);
-    let Ok(panes) = crate::tmux::list_panes(session) else { return false };
-    for p in &panes {
-        if !p.active || p.window_name != target_name {
-            continue;
-        }
-        let is_agent = agents::detect_pane(ws.as_deref(), p).is_some();
-        if !is_agent || !crate::projects::is_managed_in(ws.as_deref(), &p.window_name) {
-            return false;
-        }
-        let target = format!("{}:{}.{}", session, p.window, p.pane);
-        if crate::tmux::send_command(&target, line).is_ok() {
-            crate::projects::telemetry::record_delivery(session, &p.window_name, line);
-            crate::projects::vitals::sniff_window_soon(session, &p.window_name);
-            return true;
-        }
-        return false;
-    }
-    false
-}
+pub(super) use crate::projects::deliver_chat_line;
 
 /// Pure half of the assignee notification (owner, 2026-08-30): given the
 /// PREVIOUS issue row and what this save carries, decide whether the assignee

@@ -166,8 +166,30 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
     // swallow bursts ≳2KB. Source a script instead.
     let script = shared::write_launch_script(&home, &window_name, &full)?;
     tmux::send_command(&pane, &format!(". {}", crate::shell::quote(&script.to_string_lossy())))?;
-    if let Some(confirmation) = m.confirmation {
-        shared::confirm_startup_prompt(pane.clone(), confirmation);
+    // A backend without a positional prompt (kimi, board #224) gets its brief
+    // TYPED once the composer is up — through `deliver_chat_line`, the same
+    // door every later message takes, so the delivery is recorded, the
+    // turn-start echo acks it and the reply edge names the briefer.
+    let backend = crate::backends::Backend::parse(&def.backend)
+        .ok_or_else(|| format!("unknown backend '{}'", def.backend))?;
+    let typed_brief = match backend.first_prompt() {
+        crate::backends::FirstPrompt::Typed => first_prompt(req.brief, req.by),
+        crate::backends::FirstPrompt::LaunchLine => None,
+    };
+    let on_ready: Option<Box<dyn FnOnce() + Send + 'static>> = typed_brief.map(|line| {
+        let (session, window) = (req.session.to_string(), window_name.clone());
+        Box::new(move || {
+            if !super::deliver_chat_line(&session, &window, &line) {
+                eprintln!("projects: the brief for {session}:{window} could not be typed into its pane");
+            }
+        }) as Box<dyn FnOnce() + Send + 'static>
+    });
+    match (m.confirmation, on_ready) {
+        (Some(confirmation), on_ready) => shared::confirm_startup_prompt(pane.clone(), confirmation, on_ready),
+        // A Typed backend always renders ready markers (its own test pins
+        // it); this arm is the closed enum's honesty, not a path in use.
+        (None, Some(f)) => f(),
+        (None, None) => {}
     }
 
     Ok(json!({ "window_name": window_name, "pane": pane, "backend": def.backend }))
@@ -548,15 +570,22 @@ fn first_prompt(brief: &str, by: &str) -> Option<String> {
     ))
 }
 
+/// The launch line: identity (+ resume) and, for a backend that takes it
+/// there, the first prompt as one quoted positional. A `Typed` backend
+/// (`Backend::first_prompt`) gets NO positional — kimi 2.0.2 read the brief
+/// as a subcommand and exited — its brief is typed by `spawn` once the pane
+/// is ready.
 fn launch_command(identity_cmd: &str, backend: &str, brief: &str, by: &str, resume: bool) -> String {
     let identity_cmd = if resume {
         resume_command(identity_cmd, backend, None)
     } else {
         identity_cmd.to_string()
     };
+    let positional = crate::backends::Backend::parse(backend)
+        .is_none_or(|b| b.first_prompt() == crate::backends::FirstPrompt::LaunchLine);
     match first_prompt(brief, by) {
-        Some(p) => format!("{} {}", identity_cmd, crate::shell::quote(&p)),
-        None => identity_cmd,
+        Some(p) if positional => format!("{} {}", identity_cmd, crate::shell::quote(&p)),
+        _ => identity_cmd,
     }
 }
 
@@ -576,6 +605,19 @@ mod relaunch_tests {
             launch_command("command codex -c a=b", "codex", "", "", true),
             "command codex resume --last -c a=b"
         );
+    }
+
+    /// A brief rides the launch line as one positional for the five CLIs that
+    /// take it there; kimi has no such form (`kimi <text>` → "unknown
+    /// command", measured live, board #224), so its line carries none and the
+    /// brief is typed into the ready pane instead.
+    #[test]
+    fn a_brief_is_positional_except_for_kimi() {
+        let line = launch_command("command claude --settings s.json", "claude", "fix it", "lead", false);
+        assert!(line.starts_with("command claude --settings s.json '[tmm chat "), "{line}");
+        assert!(line.ends_with("] lead: fix it'"), "{line}");
+        assert_eq!(launch_command("command kimi --auto", "kimi", "fix it", "lead", false), "command kimi --auto");
+        assert_eq!(launch_command("command kimi --auto", "kimi", "fix it", "lead", true), "command kimi --auto -c");
     }
 
     #[test]

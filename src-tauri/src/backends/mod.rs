@@ -33,6 +33,16 @@ pub enum Backend {
     Kimi,
 }
 
+/// Where a spawn's first prompt goes — see `Backend::first_prompt`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FirstPrompt {
+    /// Appended to the launch command as one quoted positional argument.
+    LaunchLine,
+    /// Typed into the pane by the startup waiter once the CLI's ready
+    /// markers are on screen; the launch line carries no prompt.
+    Typed,
+}
+
 impl Backend {
     /// Every backend, in the one canonical order (seeds, pickers, caps).
     pub const ALL: [Backend; 6] =
@@ -216,6 +226,20 @@ impl Backend {
         }
     }
 
+    /// How a spawn's first prompt (the stamped `--brief`) reaches the CLI.
+    /// Five CLIs take it as a trailing positional argument on the launch line;
+    /// Kimi Code 2.0.2 has no positional prompt (`kimi <text>` is "unknown
+    /// command …" and the pane falls back to the shell — measured live by
+    /// claude, board #224) and its `-p` is one-shot non-interactive, so the
+    /// brief is TYPED into the pane once the composer is up — the same
+    /// delivery primitive every later message uses (tenet 5).
+    pub fn first_prompt(self) -> FirstPrompt {
+        match self {
+            Backend::Kimi => FirstPrompt::Typed,
+            _ => FirstPrompt::LaunchLine,
+        }
+    }
+
     /// The backend's resume dialect on one persisted identity command.
     pub fn resume_command(self, cmd: &str, id: Option<&str>) -> String {
         match self {
@@ -283,7 +307,7 @@ impl Backend {
 
 #[cfg(test)]
 mod tests {
-    use super::Backend;
+    use super::{Backend, FirstPrompt};
 
     #[test]
     fn parse_and_name_roundtrip_and_names_mirror_all() {
@@ -292,6 +316,11 @@ mod tests {
             assert_eq!(Backend::NAMES[i], b.name(), "NAMES stays in ALL's order");
         }
         assert_eq!(Backend::parse(" kiro "), Some(Backend::Kiro), "boundary input is trimmed");
+        // kimi is the one CLI without a positional prompt (board #224).
+        for b in Backend::ALL {
+            let expected = if b == Backend::Kimi { FirstPrompt::Typed } else { FirstPrompt::LaunchLine };
+            assert_eq!(b.first_prompt(), expected, "{}", b.name());
+        }
         assert_eq!(Backend::parse("openclaw"), None, "detection-only, never spawnable");
         assert_eq!(Backend::DEFAULT.name(), "kiro");
     }
