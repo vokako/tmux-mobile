@@ -5,11 +5,11 @@
 
 use super::*;
 // The v18 step backfills the omp default from the registry's own seed text.
-use super::registry::{DEFAULT_OMP_MODEL, DEFAULT_OMP_SYSTEM};
+use super::registry::{DEFAULT_KIMI_SYSTEM, DEFAULT_OMP_MODEL, DEFAULT_OMP_SYSTEM};
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 21;
+const SCHEMA_VERSION: i64 = 22;
 
 impl Store {
     /// Ensure the durable half of Board editability exists, then
@@ -623,6 +623,25 @@ impl Store {
             // its own row, settled one at a time by its own echo.
             self.ensure_delivery_duplicates()?;
         }
+        if version < 22 {
+            // v22 (board #224): the `kimi` default joins EXISTING installs
+            // exactly once — the v18 mechanism (rows > 0 gates out fresh
+            // databases, NOT EXISTS respects a user's own `kimi` def, the
+            // stamp makes a later delete stick). Same skills as its siblings
+            // and the kiro-web-search shim (Bedrock K3 has no built-in
+            // search); model empty = the user's own default_model.
+            self.conn
+                .execute(
+                    "INSERT INTO reg_agents (name, backend, model, effort, system, skills, mcp, can_hire, created_at, updated_at)
+                     SELECT 'kimi', 'kimi', '', '', ?1, '[\"tmm-cli\",\"mem\",\"mcp-cli\"]',
+                            '[{\"name\":\"kiro-web-search\",\"command\":\"uvx\",\"args\":[\"kiro-web-search==0.1.3\"]}]', 1,
+                            CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER)
+                     WHERE (SELECT COUNT(*) FROM reg_agents) > 0
+                       AND NOT EXISTS (SELECT 1 FROM reg_agents WHERE name = 'kimi')",
+                    rusqlite::params![DEFAULT_KIMI_SYSTEM],
+                )
+                .map_err(|e| format!("migrate to 22: {e}"))?;
+        }
         Ok(())
     }
 
@@ -951,6 +970,56 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// v22 (board #224): the v18 mechanism again for `kimi` — backfilled once
+    /// into a seeded registry, a delete sticks, a custom def is respected.
+    #[test]
+    fn v22_backfills_kimi_into_an_already_seeded_registry() {
+        let dir = std::env::temp_dir().join(format!("tmm-migrate-kimi-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("state.db");
+        {
+            let store = Store::init(Connection::open(&path).unwrap()).unwrap();
+            store.reg_seed(1).unwrap();
+            store.conn.execute("DELETE FROM reg_agents WHERE name='kimi'", []).unwrap();
+            store.conn.pragma_update(None, "user_version", 21).unwrap();
+        }
+        {
+            let store = Store::init(Connection::open(&path).unwrap()).unwrap();
+            let kimi = store.reg_get("kimi").unwrap().expect("v22 backfills the kimi default");
+            assert_eq!(kimi.system, DEFAULT_KIMI_SYSTEM);
+            assert_eq!(kimi.model, "", "empty = the user's own default_model, carried into the home");
+            assert!(kimi.can_hire);
+            assert_eq!(kimi.skills, r#"["tmm-cli","mem","mcp-cli"]"#);
+            assert!(kimi.mcp.contains("kiro-web-search"), "Bedrock K3 has no built-in search");
+            assert_eq!(
+                store.reg_list().unwrap().iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
+                ["kiro", "codex", "claude", "grok", "omp", "kimi"]
+            );
+            assert!(store.reg_delete("kimi").unwrap());
+        }
+        {
+            let store = Store::init(Connection::open(&path).unwrap()).unwrap();
+            assert!(store.reg_get("kimi").unwrap().is_none(), "a deleted default never resurrects");
+            let custom = RegAgent {
+                name: "kimi".into(),
+                backend: "kimi".into(),
+                model: String::new(),
+                effort: String::new(),
+                system: "My own kimi persona.".into(),
+                skills: "[]".into(),
+                mcp: "[]".into(),
+                can_hire: false,
+            };
+            store.reg_save(&custom, 2).unwrap();
+            store.conn.pragma_update(None, "user_version", 21).unwrap();
+        }
+        {
+            let store = Store::init(Connection::open(&path).unwrap()).unwrap();
+            assert_eq!(store.reg_get("kimi").unwrap().unwrap().system, "My own kimi persona.");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn v4_to_v6_migration_adds_registry_and_assets() {
         // An existing v4 db (projects+slots only) must gain reg_agents.
@@ -972,10 +1041,10 @@ mod tests {
         let store = Store::init(conn).unwrap();
         store.reg_seed(1).unwrap();
         let seeded = store.reg_list().unwrap();
-        assert_eq!(seeded.len(), 5);
+        assert_eq!(seeded.len(), 6);
         assert_eq!(
             seeded.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
-            ["kiro", "codex", "claude", "grok", "omp"]
+            ["kiro", "codex", "claude", "grok", "omp", "kimi"]
         );
         let v: i64 = store.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
         assert_eq!(v, SCHEMA_VERSION);

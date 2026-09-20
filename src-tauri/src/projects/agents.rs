@@ -24,24 +24,17 @@ pub struct KnownAgent {
 
 use crate::tmux::TmuxPane;
 
-/// The detection/relaunch table, one row per recognisable CLI. The five
+/// The detection/relaunch table, one row per recognisable CLI. The six
 /// SPAWNABLE backends contribute their rows from their own files
 /// (`Backend::known`, board #129 — resume strings and the recipe resume
-/// dialect are one file per backend now, closing todo §D2); kimi and
-/// openclaw are DETECTION-ONLY — recognised in panes, never spawnable, no
-/// resume wired up because their flags are unverified here (they relaunch
-/// clean rather than guess).
+/// dialect are one file per backend now, closing todo §D2); openclaw is
+/// DETECTION-ONLY — recognised in panes, never spawnable, no resume wired up
+/// because its flags are unverified here (it relaunches clean rather than
+/// guess). kimi moved from this list to a backend of its own (board #224).
 fn known() -> &'static [KnownAgent] {
     static KNOWN: std::sync::OnceLock<Vec<KnownAgent>> = std::sync::OnceLock::new();
     KNOWN.get_or_init(|| {
         let mut rows = vec![
-            KnownAgent {
-                backend: "kimi",
-                needle: "kimi",
-                launch: "kimi",
-                resume_recent: None,
-                resume_id: None,
-            },
             KnownAgent {
                 backend: "openclaw",
                 needle: "openclaw",
@@ -59,8 +52,8 @@ fn known() -> &'static [KnownAgent] {
 /// `registry_save`, team validation and the CLI help read, so adding a
 /// backend cannot miss a validator again (omp did, 2026-09-07: the render
 /// arm existed while `registry_save` still said "must be kiro|claude|codex|
-/// grok"). Detection (`KNOWN`) is wider: kimi/openclaw are recognized in
-/// panes but not spawnable.
+/// grok"). Detection (`KNOWN`) is wider: openclaw is recognized in panes but
+/// not spawnable.
 pub const SPAWNABLE_BACKENDS: &[&str] = &crate::backends::Backend::NAMES;
 
 /// The longest agent name we accept — a tmux window name and a directory
@@ -391,8 +384,10 @@ mod tests {
         // no id means a clean start. Managed recipes use isolated CODEX_HOME
         // and may safely use cwd-filtered `resume --last` (spawn.rs).
         assert_eq!(launch_line("codex", None).as_deref(), Some("codex"));
-        assert_eq!(launch_line("kimi", None).as_deref(), Some("kimi"));
-        assert_eq!(launch_line("kimi", Some("x")).as_deref(), Some("kimi"), "no resume flags known");
+        // kimi's `-c` is cwd-scoped ("Continue the previous session for the
+        // working directory"), `-S <id>` exact (board #224).
+        assert_eq!(launch_line("kimi", None).as_deref(), Some("kimi -c"));
+        assert_eq!(launch_line("kimi", Some("session_x")).as_deref(), Some("kimi -S session_x"));
         // omp's --continue is cwd-scoped (sessions live per encoded cwd), so
         // the recent fallback is safe; an exact id wins when recorded.
         assert_eq!(launch_line("omp", None).as_deref(), Some("omp --continue"));

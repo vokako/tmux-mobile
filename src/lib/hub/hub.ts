@@ -140,7 +140,7 @@ export function gapWalkStep<T extends { ts?: number }>(
  * (design-language.md §Colour); this only names the token (review C, 2026-09-03). */
 export function backendColor(backend: string | null | undefined): string {
   // The served list names the token (board #130); the switch is the older-
-  // server fallback plus kimi, which is detected but never spawned.
+  // server fallback (kimi included since board #224 made it spawnable).
   const token = backendColorToken(backend);
   if (token) return `var(${token})`;
   switch (backend) {

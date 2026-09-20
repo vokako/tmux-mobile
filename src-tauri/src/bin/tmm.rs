@@ -75,7 +75,7 @@ USAGE (human or agent — self-management):
   tmm agent stop|restart <name>       stop it, or bring it back resuming its conversation
   tmm agent remove <name>             eject it: stop + forget its slot + delete its home
   tmm project list                    all projects
-  tmm project create <path> [--name n] [--session s] [--with-agent kiro|claude|codex|grok|omp]
+  tmm project create <path> [--name n] [--session s] [--with-agent {backends}]
   tmm project up <session>            bring a project's tmux session up
   tmm project rename <session> --name "New name"   rename the label (session unchanged)
   tmm project delete <session>        forget the project and delete its agents' homes
@@ -86,7 +86,7 @@ USAGE (human or agent — self-management):
   tmm teams save --name <n> --def '<members json>' [--description <text>]
                                       members: [{"name","base","role"[,"model","effort"]} | {"name","role","agent":{…}} | {"team":"<other team>"[,"role"]}]
   tmm teams delete <name>
-  tmm registry save --name <n> --backend <kiro|claude|codex|grok|omp> [--system <text>]
+  tmm registry save --name <n> --backend <{backends}> [--system <text>]
                     [--model m] [--effort low|medium|high|…] [--skills a,b] [--mcp <json>] [--can-hire]
   tmm registry delete <name>
   tmm prompt show|path                the app-wide agent instructions (<config>/AGENTS.md),
@@ -120,6 +120,17 @@ EXIT CODES: 0 ok · 1 local/tmux failure · 2 server unreachable · 3 auth
             4 not found · 5 usage
 "#;
 
+/// The usage text with the spawnable backends filled in from the ONE list
+/// (`SPAWNABLE_BACKENDS`, derived from the Backend enum): the CLI must not
+/// advertise five backends while six spawn (tenet 14; kimi, board #224).
+fn usage() -> String {
+    USAGE.replace("{backends}", &backends_help())
+}
+
+fn backends_help() -> String {
+    tmux_mobile::projects::agents::SPAWNABLE_BACKENDS.join("|")
+}
+
 struct Ctx {
     server: String,
     token: String,
@@ -145,7 +156,7 @@ async fn main() {
     };
     let (flags, mut pos, repeated) = split_flags(head);
     if pos.is_empty() || flags.contains_key("help") {
-        print!("{USAGE}");
+        print!("{}", usage());
         std::process::exit(if pos.is_empty() { EXIT_USAGE } else { EXIT_OK });
     }
 
@@ -528,7 +539,7 @@ async fn main() {
         // interface. can_hire stays a resource gate on spawn only.
         ("project", rest) if rest.first().map(String::as_str) == Some("create") => {
             let Some(path) = rest.get(1).cloned() else {
-                fail(EXIT_USAGE, "project create needs a path: tmm project create /path/to/dir [--name n] [--session s] [--with-agent kiro|claude|codex|grok|omp]");
+                fail(EXIT_USAGE, &format!("project create needs a path: tmm project create /path/to/dir [--name n] [--session s] [--with-agent {}]", backends_help()));
             };
             let mut params = json!({ "path": path });
             for (flag, key) in [("name", "name"), ("session", "session"), ("with-agent", "agent")] {

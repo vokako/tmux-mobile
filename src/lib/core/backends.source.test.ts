@@ -5,7 +5,7 @@
 // backend touches one file" is only true if that file is on the server.
 //
 // What is DELIBERATELY still client-side, and why this test does not touch it:
-//   - core/agents.ts AGENTS: pane DETECTION regexes (kimi/openclaw included).
+//   - core/agents.ts AGENTS: pane DETECTION regexes (openclaw included).
 //     An accepted mirror of agents.rs `find_word`; the comment there points at
 //     the Rust source of truth. Detection is wider than spawning.
 //   - hub.ts KIRO/GROK/CODEX command palettes: transcriptions of each TUI's
@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 
 const ROOT = new URL('../', import.meta.url);
-const NAMES = ['kiro', 'claude', 'codex', 'grok', 'omp'];
+const NAMES = ['kiro', 'claude', 'codex', 'grok', 'omp', 'kimi'];
 
 async function walk(dir: URL): Promise<URL[]> {
   const out: URL[] = [];

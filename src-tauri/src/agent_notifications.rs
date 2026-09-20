@@ -203,14 +203,14 @@ impl AgentNotificationHub {
             if tool_event_parts(&envelope).is_none() && !child_ask {
                 #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 if is_user_prompt_submit(&envelope) {
-                    if let Some(brief) = envelope.payload.get("prompt").and_then(Value::as_str) {
+                    if let Some(brief) = prompt_text(&envelope.payload) {
                         if !brief.trim().is_empty() {
                             let (session, window, _) = tmux::resolve_pane_id(&envelope.pane_id)?;
                             crate::projects::telemetry::record_tool(
                                 &session,
                                 &window,
                                 "Subagent",
-                                &truncate(brief, MAX_TOOL_DETAIL_CHARS),
+                                &truncate(&brief, MAX_TOOL_DETAIL_CHARS),
                             );
                         }
                     }
@@ -241,10 +241,10 @@ impl AgentNotificationHub {
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         if is_user_prompt_submit(&envelope) {
             let (session, window, _) = tmux::resolve_pane_id(&envelope.pane_id)?;
-            if let Some(prompt) = envelope.payload.get("prompt").and_then(Value::as_str) {
+            if let Some(prompt) = prompt_text(&envelope.payload) {
                 if !prompt.trim().is_empty() {
-                    self.start_turn(&session, &window, prompt);
-                    crate::projects::telemetry::record_prompt(&session, &window, prompt);
+                    self.start_turn(&session, &window, &prompt);
+                    crate::projects::telemetry::record_prompt(&session, &window, &prompt);
                 }
             }
             // A turn just opened: sniff while the pane is fresh.
@@ -264,8 +264,16 @@ impl AgentNotificationHub {
         if is_idle_nudge(&envelope) {
             return Ok(());
         }
-        let normalized = normalize(&envelope)?;
         let (session, window, pane) = tmux::resolve_pane_id(&envelope.pane_id)?;
+        // The agent's managed home, by NAME (pane → window → `managed_home`),
+        // for a backend whose reply lives in its own session store: never
+        // searched for by workspace, so two agents of one backend in one
+        // project cannot read each other's turn (board #224).
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        let home = crate::projects::managed_home(&session, &window);
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        let home: Option<PathBuf> = None;
+        let normalized = normalize_in(&envelope, home.as_deref())?;
         let timestamp = unix_seconds();
         // Resolve the reply edge BEFORE recording this stop. On a server
         // restart the in-memory edge is gone, so the durable activity log
@@ -417,12 +425,17 @@ impl AgentNotificationHub {
     fn write_helper(&self) -> Result<(), String> {
         std::fs::create_dir_all(self.root.join("inbox")).map_err(|e| e.to_string())?;
         let inbox = crate::shell::quote_always(&self.root.join("inbox").to_string_lossy());
+        // The helper accepts exactly the spawnable backends — derived from the
+        // enum, not spelled here: a hand list silently dropped every event of
+        // a new backend (kimi, 2026-09-20 — the literal guard cannot see a
+        // name inside a shell `case` pattern).
+        let backends = crate::backends::Backend::NAMES.join("|");
         let script = format!(
             r#"#!/bin/sh
 umask 077
 exec 2>/dev/null
 backend="${{1:-}}"
-case "$backend" in claude|codex|kiro|grok|omp) ;; *) exit 0 ;; esac
+case "$backend" in {backends}) ;; *) exit 0 ;; esac
 pane="${{TMUX_PANE:-}}"
 case "$pane" in %*[!0-9]*|%|"") exit 0 ;; esac
 inbox={inbox}
@@ -534,7 +547,14 @@ struct Normalized {
     full_reply: Option<String>,
 }
 
+/// `normalize_in` without a managed home — the shape every test and the
+/// mobile path use; a backend that needs its home gets no fallback reply.
+#[cfg(test)]
 fn normalize(envelope: &InboxEnvelope) -> Result<Normalized, String> {
+    normalize_in(envelope, None)
+}
+
+fn normalize_in(envelope: &InboxEnvelope, home: Option<&Path>) -> Result<Normalized, String> {
     let payload = envelope
         .payload
         .as_object()
@@ -559,7 +579,9 @@ fn normalize(envelope: &InboxEnvelope) -> Result<Normalized, String> {
         ],
     );
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    let raw_reply = if kind == "completed" && raw_reply.is_none() { backend.reply_fallback(payload) } else { raw_reply };
+    let raw_reply = if kind == "completed" && raw_reply.is_none() { backend.reply_fallback(payload, home) } else { raw_reply };
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let _ = home;
     // Preserve the untruncated text for the auto-post path only when this is
     // a stop/completion event — other events have no reply body worth posting.
     let full_reply = if kind == "completed" { raw_reply } else { None };
@@ -589,6 +611,34 @@ fn is_idle_nudge(envelope: &InboxEnvelope) -> bool {
 fn is_user_prompt_submit(envelope: &InboxEnvelope) -> bool {
     crate::backends::Backend::parse(&envelope.backend)
         .is_some_and(|b| b.is_user_prompt_submit(&envelope.payload))
+}
+
+/// The submitted prompt of a turn-start payload. Two shapes exist: a plain
+/// string (kiro, claude, codex, grok, omp) and an array of content parts
+/// (kimi 2.0.2: `[{type:"text",text}]`, the message shape its wire uses too).
+/// Both are the same fact, so one reader; a payload with neither is `None`.
+pub(crate) fn prompt_text(payload: &Value) -> Option<String> {
+    let prompt = payload.get("prompt")?;
+    match prompt {
+        Value::String(s) => Some(s.clone()),
+        Value::Array(_) => Some(content_text(prompt)).filter(|s| !s.is_empty()),
+        _ => None,
+    }
+}
+
+/// The text of a message `content`: a string as is, an array of parts as its
+/// `text` parts joined by newlines (think/image parts contribute nothing).
+pub(crate) fn content_text(content: &Value) -> String {
+    match content {
+        Value::String(s) => s.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter(|p| p.get("type").and_then(Value::as_str).is_none_or(|t| t == "text"))
+            .filter_map(|p| p.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
 }
 
 pub(crate) fn string_field(
@@ -1618,6 +1668,130 @@ mod tests {
             assert_eq!(agent, "dev", "posted as the agent, by window name");
             assert!(body.contains("Fixed the flaky test"), "the answer itself: {body:?}");
             assert_eq!(reply_to, &vec!["lead".to_string()]);
+        } else {
+            eprintln!("could not adopt a project — skipped the assertions");
+        }
+
+        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
+        let _ = std::fs::remove_dir_all(&ws);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// kimi end to end (board #224), the three edges claude's review asked
+    /// to see pinned rather than described: (1) a turn-start whose `prompt`
+    /// is an ARRAY of parts opens the same turn — the same reply targets — as
+    /// the string shape; (2) a bodiless `Stop` posts the reply read from THIS
+    /// agent's wire (`managed_home` by name — a sibling kimi home holding the
+    /// same session id is never read); (3) an `Interrupt` with no text in the
+    /// turn CLOSES the turn — the edge is consumed, telemetry records the end,
+    /// nothing is posted — instead of pinning the agent at `working`.
+    #[test]
+    fn kimi_array_prompt_bodiless_stop_and_interrupt_are_turn_edges() {
+        crate::projects::tests::use_test_store();
+        let session = format!("tmm-kimi-{}", std::process::id());
+        let ws = std::env::temp_dir().join(format!("tmm-kimi-ws-{}", uuid::Uuid::new_v4()));
+        let seed_home = |name: &str, reply: &str| {
+            let home = ws.join(".tmm/agents").join(name);
+            let kimi = home.join("kimi");
+            let sdir = kimi.join("sessions/wd_x_000000000000/session_abc");
+            std::fs::create_dir_all(sdir.join("agents/main")).unwrap();
+            std::fs::write(home.join("launch.json"), "{}").unwrap();
+            std::fs::write(
+                kimi.join("session_index.jsonl"),
+                format!("{}\n", json!({"sessionId":"session_abc","sessionDir":sdir.to_string_lossy(),"workDir":ws.to_string_lossy()})),
+            )
+            .unwrap();
+            std::fs::write(
+                sdir.join("agents/main/wire.jsonl"),
+                format!(
+                    "{}\n{}\n",
+                    r#"{"type":"turn.prompt","input":[{"type":"text","text":"fix it"}]}"#,
+                    json!({"message":{"message":{"role":"assistant","content":[{"type":"think","think":"…"},{"type":"text","text":reply}]}},"type":"agent.message.appended"})
+                ),
+            )
+            .unwrap();
+            sdir.join("agents/main/wire.jsonl")
+        };
+        let k1_wire = seed_home("k1", "Fixed it: the test assumed a fast disk.");
+        seed_home("k2", "DECOY — k2's answer must never be read for k1.");
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "-n", "k1", "-c", &ws.to_string_lossy(), "sleep 60"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        let adopted = crate::projects::adopt(&session, Some("kimi-test")).is_ok();
+        let pane_id = String::from_utf8(
+            std::process::Command::new("tmux")
+                .args(["display-message", "-p", "-t", &session, "#{pane_id}"])
+                .output().unwrap().stdout,
+        ).unwrap().trim().to_string();
+
+        struct Spy(std::sync::Mutex<Vec<(String, String, Vec<String>)>>);
+        impl RoomPoster for Spy {
+            fn post_final(&self, _session: &str, agent: &str, body: &str, reply_to: &[String]) {
+                self.0.lock().unwrap().push((agent.into(), body.into(), reply_to.to_vec()));
+            }
+        }
+        let spy = std::sync::Arc::new(Spy(std::sync::Mutex::new(Vec::new())));
+        let root = std::env::temp_dir().join(format!("tmm-kimi-hub-{}", uuid::Uuid::new_v4()));
+        let hub = AgentNotificationHub::load_at(root.clone());
+        hub.set_room_poster(spy.clone());
+        std::fs::create_dir_all(root.join("inbox")).unwrap();
+        let drop = |name: &str, payload: Value| {
+            std::fs::write(
+                root.join("inbox").join(name),
+                serde_json::to_vec(&json!({"backend": "kimi", "pane_id": pane_id, "payload": payload})).unwrap(),
+            )
+            .unwrap();
+        };
+        // The measured 2.0.2 shapes: the prompt as parts, the Stop without text.
+        let line = "[tmm chat 2026-09-20 14:00] lead: @k1 fix it";
+        drop("1-prompt.json", json!({"hook_event_name":"UserPromptSubmit","session_id":"session_abc","cwd":ws.to_string_lossy(),
+            "client_type":"kimi_code_cli","prompt":[{"type":"text","text":line}],"is_steer":false}));
+        drop("2-stop.json", json!({"hook_event_name":"Stop","session_id":"session_abc","cwd":ws.to_string_lossy(),
+            "client_type":"kimi_code_cli","stop_hook_active":false}));
+        hub.consume_inbox();
+
+        if adopted {
+            let (_, win, _) = crate::tmux::resolve_pane_id(&pane_id).expect("pane resolves");
+            assert_eq!(win, "k1");
+            {
+                let posts = spy.0.lock().unwrap();
+                assert_eq!(posts.len(), 1, "one final answer: {posts:?}");
+                let (agent, body, reply_to) = &posts[0];
+                assert_eq!(agent, "k1");
+                assert_eq!(body, "Fixed it: the test assumed a fast disk.", "read from k1's wire, not k2's");
+                assert_eq!(reply_to, &vec!["lead".to_string()], "the array prompt routed exactly like the string shape");
+            }
+            assert_eq!(reply_targets(line), vec!["lead"], "the string shape, for comparison");
+            let prompt = crate::projects::telemetry::recent_events(&session, 0)
+                .into_iter()
+                .find(|e| e.kind == "prompt")
+                .expect("the flattened prompt is the transcript's input half");
+            assert_eq!(prompt.text, line);
+
+            // A second turn, interrupted before any text: the wire gains only
+            // the prompt row; Escape fires `Interrupt` in place of `Stop`.
+            let mut wire = std::fs::OpenOptions::new().append(true).open(&k1_wire).unwrap();
+            use std::io::Write;
+            writeln!(wire, r#"{{"type":"turn.prompt","input":[{{"type":"text","text":"sleep 40"}}]}}"#).unwrap();
+            drop("3-prompt.json", json!({"hook_event_name":"UserPromptSubmit","session_id":"session_abc","cwd":ws.to_string_lossy(),
+                "prompt":[{"type":"text","text":"[tmm chat 2026-09-20 14:01] lead: @k1 run sleep 40"}]}));
+            drop("4-interrupt.json", json!({"hook_event_name":"Interrupt","session_id":"session_abc","cwd":ws.to_string_lossy(),
+                "turn_id":2,"reason":"cancelled"}));
+            hub.consume_inbox();
+            assert_eq!(spy.0.lock().unwrap().len(), 1, "an interrupted turn with no text posts nothing — and never an older answer");
+            assert!(hub.take_reply_targets(&session, "k1").is_empty(), "the edge was consumed: the turn is closed, not left running");
+            let last_notif = crate::projects::telemetry::recent_events(&session, 0)
+                .into_iter()
+                .rev()
+                .find(|e| e.kind == "notif")
+                .expect("the turn end is recorded");
+            assert_eq!(last_notif.text, "completed", "Interrupt closes the turn like Stop");
         } else {
             eprintln!("could not adopt a project — skipped the assertions");
         }

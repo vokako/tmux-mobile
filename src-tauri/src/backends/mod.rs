@@ -9,6 +9,7 @@
 pub(crate) mod claude;
 pub(crate) mod codex;
 pub(crate) mod grok;
+pub(crate) mod kimi;
 pub(crate) mod kiro;
 pub(crate) mod omp;
 pub(crate) mod shared;
@@ -29,17 +30,18 @@ pub enum Backend {
     Codex,
     Grok,
     Omp,
+    Kimi,
 }
 
 impl Backend {
     /// Every backend, in the one canonical order (seeds, pickers, caps).
-    pub const ALL: [Backend; 5] =
-        [Backend::Kiro, Backend::Claude, Backend::Codex, Backend::Grok, Backend::Omp];
+    pub const ALL: [Backend; 6] =
+        [Backend::Kiro, Backend::Claude, Backend::Codex, Backend::Grok, Backend::Omp, Backend::Kimi];
 
     /// `ALL` as the string names — kept literally beside it so a `const` can
     /// borrow it (`SPAWNABLE_BACKENDS`); the roundtrip test pins the two in
     /// sync.
-    pub const NAMES: [&'static str; 5] = ["kiro", "claude", "codex", "grok", "omp"];
+    pub const NAMES: [&'static str; 6] = ["kiro", "claude", "codex", "grok", "omp", "kimi"];
 
     /// The documented fallback where an absent backend means kiro (the
     /// registry dispatch's old inline `unwrap_or("kiro")`).
@@ -52,6 +54,7 @@ impl Backend {
             "codex" => Some(Backend::Codex),
             "grok" => Some(Backend::Grok),
             "omp" => Some(Backend::Omp),
+            "kimi" => Some(Backend::Kimi),
             _ => None,
         }
     }
@@ -63,6 +66,7 @@ impl Backend {
             Backend::Codex => "codex",
             Backend::Grok => "grok",
             Backend::Omp => "omp",
+            Backend::Kimi => "kimi",
         }
     }
 
@@ -100,6 +104,25 @@ impl Backend {
             Backend::Codex => codex::effort_values(),
             Backend::Grok => grok::effort_values(),
             Backend::Omp => omp::effort_values(),
+            Backend::Kimi => kimi::effort_values(),
+        }
+    }
+
+    /// Where a backend's Stop payload carries no reply text, the backend may
+    /// know another source: kiro --v3 reads the GLOBAL session store (board
+    /// #207); kimi reads the session wire inside `home`, the agent's managed
+    /// home resolved by name at the call site (board #224) — `None` for a
+    /// window this app did not spawn.
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    pub fn reply_fallback(
+        self,
+        payload: &serde_json::Map<String, serde_json::Value>,
+        home: Option<&std::path::Path>,
+    ) -> Option<String> {
+        match self {
+            Backend::Kiro => kiro::reply_fallback(payload),
+            Backend::Kimi => kimi::reply_fallback(payload, home?),
+            _ => None,
         }
     }
 
@@ -108,19 +131,6 @@ impl Backend {
     /// and screening rules — each arm lives on the backend's file (board
     /// #129). Compiled on every target: the mobile shell consumes the same
     /// inbox envelopes.
-    /// Where a backend's Stop payload carries no reply text, the backend may
-    /// know another source (kiro --v3: the global session file, board #207).
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    pub fn reply_fallback(
-        self,
-        payload: &serde_json::Map<String, serde_json::Value>,
-    ) -> Option<String> {
-        match self {
-            Backend::Kiro => kiro::reply_fallback(payload),
-            _ => None,
-        }
-    }
-
     pub fn normalize_kind(
         self,
         payload: &serde_json::Map<String, serde_json::Value>,
@@ -131,6 +141,7 @@ impl Backend {
             Backend::Codex => codex::normalize_kind(payload),
             Backend::Grok => grok::normalize_kind(payload),
             Backend::Omp => omp::normalize_kind(payload),
+            Backend::Kimi => kimi::normalize_kind(payload),
         }
     }
 
@@ -143,6 +154,7 @@ impl Backend {
             Backend::Codex => codex::is_user_prompt_submit(payload),
             Backend::Grok => grok::is_user_prompt_submit(payload),
             Backend::Omp => omp::is_user_prompt_submit(payload),
+            Backend::Kimi => kimi::is_user_prompt_submit(payload),
         }
     }
 
@@ -176,6 +188,7 @@ impl Backend {
             Backend::Codex => codex::known(),
             Backend::Grok => grok::known(),
             Backend::Omp => omp::known(),
+            Backend::Kimi => kimi::known(),
         }
     }
 
@@ -199,6 +212,7 @@ impl Backend {
             Backend::Codex => codex::render_codex(def, window_name, home, workspace, system_prompt, skills),
             Backend::Grok => grok::render_grok(def, window_name, home, system_prompt, skills),
             Backend::Omp => omp::render_omp(def, window_name, home, system_prompt, skills),
+            Backend::Kimi => kimi::render_kimi(def, window_name, home, workspace, system_prompt, skills),
         }
     }
 
@@ -210,6 +224,7 @@ impl Backend {
             Backend::Codex => codex::resume_command(cmd, id),
             Backend::Grok => grok::resume_command(cmd, id),
             Backend::Omp => omp::resume_command(cmd, id),
+            Backend::Kimi => kimi::resume_command(cmd, id),
         }
     }
 
@@ -230,6 +245,7 @@ impl Backend {
             Backend::Codex => codex::refresh(home, &notifications.helper_command("codex")),
             Backend::Grok => grok::refresh(home, &notifications.helper_command("grok")),
             Backend::Omp => omp::refresh(home, &notifications.helper_command("omp")),
+            Backend::Kimi => kimi::refresh(home, &notifications.helper_command("kimi")),
         }
     }
 
@@ -246,6 +262,7 @@ impl Backend {
             Backend::Codex => codex::sniff_codex(pane),
             Backend::Grok => grok::sniff_grok(pane),
             Backend::Omp => omp::sniff_omp(pane),
+            Backend::Kimi => kimi::sniff_kimi(pane),
         }
     }
 
@@ -259,6 +276,7 @@ impl Backend {
             Backend::Codex => codex::models_fetch(),
             Backend::Grok => grok::models_fetch(),
             Backend::Omp => omp::models_fetch(),
+            Backend::Kimi => kimi::models_fetch(),
         }
     }
 }
@@ -274,7 +292,7 @@ mod tests {
             assert_eq!(Backend::NAMES[i], b.name(), "NAMES stays in ALL's order");
         }
         assert_eq!(Backend::parse(" kiro "), Some(Backend::Kiro), "boundary input is trimmed");
-        assert_eq!(Backend::parse("kimi"), None);
+        assert_eq!(Backend::parse("openclaw"), None, "detection-only, never spawnable");
         assert_eq!(Backend::DEFAULT.name(), "kiro");
     }
 
@@ -384,5 +402,6 @@ mod tests {
         assert_eq!(list[0]["name"], Backend::DEFAULT.name());
         assert_eq!(list.as_array().unwrap().len(), Backend::ALL.len());
         assert_eq!(list[4]["efforts"].as_array().unwrap().len(), Backend::Omp.effort_values().len());
+        assert_eq!(list[5]["efforts"].as_array().unwrap().len(), Backend::Kimi.effort_values().len());
     }
 }

@@ -28,10 +28,11 @@ export type PaneLike = {
 } | null | undefined;
 
 export const AGENTS: Agent[] = [
-  // Kimi Code runs as `kimi-code`. It must match BEFORE the /kiro/ entry
-  // can fire: a kimi pane's child chain typically contains its
-  // "kiro-web-search" helper, and "kimi" in current_command always sits
-  // earlier in the pane text than any child-chain "kiro".
+  // Kimi Code runs as `kimi` (2.0.2; older builds `kimi-code`). It must
+  // match BEFORE the /kiro/ entry can fire: a kimi pane's child chain
+  // typically contains its "kiro-web-search" helper, and "kimi" in
+  // current_command always sits earlier in the pane text than any
+  // child-chain "kiro".
   //
   // Every needle is WORD-BOUNDED (\b): these are short brand names that ride
   // inside ordinary words — "omp" lives in "compose", "kiro" in a window
@@ -62,9 +63,10 @@ export const AGENTS: Agent[] = [
 // on every connect/reconnect success and hands it here).
 // `null` = not fetched yet, or an OLDER server without the method: every
 // reader below falls back to the client's last hand-kept list, frozen at the
-// shape that pre-#130 servers had. The detection-only CLIs (kimi, openclaw)
-// are never in the server list — they are recognised in panes, not spawned —
-// so their avatars stay in the fallback switch on purpose.
+// shape that pre-#130 servers had. The detection-only CLI (openclaw) is
+// never in the server list — recognised in panes, not spawned — so its
+// avatar stays in the fallback switch on purpose; kimi joined the served
+// list with board #224 and keeps its fallback row for older servers.
 export interface BackendInfo {
   name: string;
   /** Avatar path, `/assets/<name>.svg`. */

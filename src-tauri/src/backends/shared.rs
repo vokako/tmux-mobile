@@ -325,6 +325,9 @@ fn agent_launch_path_from(home: Option<&Path>, prepend: Option<&Path>, base: &st
         parts.push(home.join(".local/bin"));
         parts.push(home.join("bin"));
         parts.push(home.join(".cargo/bin"));
+        // Kimi Code's installer puts its one binary here (its install doc);
+        // a documented per-user bin like .cargo/bin, not a backend literal.
+        parts.push(home.join(".kimi-code/bin"));
     }
     parts.extend(std::env::split_paths(base));
     let mut seen = std::collections::HashSet::new();
