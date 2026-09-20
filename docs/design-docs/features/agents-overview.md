@@ -235,9 +235,11 @@ was touched.
   — the isolated home stays the single truth, v3 reads through the link;
   idempotent on every start; a file there that is NOT our link is never
   clobbered (spawn fails loud naming it; refresh logs); the link is removed
-  with the agent (`agent_remove`) and when the door closes; the directory goes
-  into `.git/info/exclude` (local, untracked, once) so an agent's `git add -A`
-  cannot commit it. Measured: v3 follows the link (found, session
+  with the agent (`agent_remove`) and when the door closes; OUR FILE's path
+  (`/.kiro/agents/<name>.json`, one line per agent under one mark) goes into
+  `.git/info/exclude` (local, untracked, idempotent) so an agent's `git add
+  -A` cannot commit it — never the whole directory, which would hide the
+  user's own agents from their `git status`. Measured: v3 follows the link (found, session
   `agentMode=probe207`); a 2.0 profile left BEHIND the link is upgraded by the
   CLI through it — and the CLI's write replaces the link with a regular file
   plus `.bak` under `ws/.kiro` — which is exactly why our profiles are 3.0

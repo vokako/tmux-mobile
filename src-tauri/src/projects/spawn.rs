@@ -900,6 +900,7 @@ mod tests {
         let triggers: Vec<&str> = hooks.iter().map(|h| h["trigger"].as_str().unwrap()).collect();
         assert_eq!(triggers, ["preToolUse", "postToolUse", "userPromptSubmit", "stop"]);
         assert!(hooks.iter().all(|h| h["action"]["type"] == "command" && h["name"].as_str().unwrap().starts_with("tmm-")));
+        assert!(hooks.iter().all(|h| h.get("matcher").is_none()), "no matcher key on any hook — \"*\" invalidates a 3.0 profile: {hooks:?}");
         assert_eq!(conf["permissions"]["rules"][0]["capability"], "all");
         let settings: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("settings/cli.json")).unwrap()).unwrap();

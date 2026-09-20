@@ -171,27 +171,26 @@ pub(crate) fn kiro_hooks(notify: &str) -> Value {
     // its featureFlags.v2Hooks. Writing this shape means the CLI's
     // "agent configs are still in the 2.0 format" upgrade never runs on our
     // homes — no startup modal, no `.bak`, no rewrite churn against refresh.
-    let hook = |name: &str, trigger: &str, matcher: Option<&str>| {
-        let mut h = json!({
+    // No `matcher` on any hook: in 3.0 the matcher is a regex and the 2.0
+    // glob "*" makes the whole profile invalid ("agent … not found, using
+    // default" — measured); a hook without a matcher fires for every tool.
+    let hook = |name: &str, trigger: &str| {
+        json!({
             "name": name,
             "trigger": trigger,
             "action": { "type": "command", "command": notify },
             "timeout": 10,
-        });
-        if let Some(m) = matcher {
-            h["matcher"] = json!(m);
-        }
-        h
+        })
     };
     json!([
         // The notify helper feeds notifications AND telemetry (tool events are
         // recognized by hook_event_name and routed to telemetry only).
-        hook("tmm-pre-tool", "preToolUse", Some("*")),
-        hook("tmm-post-tool", "postToolUse", Some("*")),
+        hook("tmm-pre-tool", "preToolUse"),
+        hook("tmm-post-tool", "postToolUse"),
         // Turn start — the ONLY reset of the same-turn dedup flag, and the
         // event that carries the submitted prompt.
-        hook("tmm-prompt", "userPromptSubmit", None),
-        hook("tmm-stop", "stop", None),
+        hook("tmm-prompt", "userPromptSubmit"),
+        hook("tmm-stop", "stop"),
     ])
 }
 
@@ -545,7 +544,7 @@ pub(crate) fn ensure_workspace_entry(workspace: &Path, home: &Path, name: &str) 
     }
     std::fs::create_dir_all(link.parent().unwrap()).map_err(|e| e.to_string())?;
     std::os::unix::fs::symlink(&target, &link).map_err(|e| format!("link {}: {e}", link.display()))?;
-    exclude_from_git(workspace);
+    exclude_from_git(workspace, name);
     Ok(true)
 }
 
@@ -560,22 +559,25 @@ pub(crate) fn remove_workspace_entry(workspace: &Path, name: &str) -> bool {
 }
 
 /// `.git/info/exclude` — local, untracked, idempotent: the workspace's own
-/// `.gitignore` is the project's, not ours to edit.
+/// `.gitignore` is the project's, not ours to edit. ONE line per agent, our
+/// file only: hiding the whole `.kiro/agents/` would hide the agents the user
+/// wrote there from their own `git status`.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn exclude_from_git(workspace: &Path) {
+fn exclude_from_git(workspace: &Path, name: &str) {
     let git = workspace.join(".git");
     if !git.is_dir() {
         return;
     }
     let path = git.join("info").join("exclude");
     let current = std::fs::read_to_string(&path).unwrap_or_default();
-    let line = format!("/{WS_AGENTS_DIR}/");
+    let line = format!("/{WS_AGENTS_DIR}/{name}.json");
     if current.lines().any(|l| l.trim() == line) {
         return;
     }
     let _ = std::fs::create_dir_all(path.parent().unwrap());
     let sep = if current.is_empty() || current.ends_with('\n') { "" } else { "\n" };
-    let _ = std::fs::write(&path, format!("{current}{sep}{GIT_EXCLUDE_MARK}\n{line}\n"));
+    let mark = if current.contains(GIT_EXCLUDE_MARK) { String::new() } else { format!("{GIT_EXCLUDE_MARK}\n") };
+    let _ = std::fs::write(&path, format!("{current}{sep}{mark}{line}\n"));
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -842,6 +844,19 @@ mod tests {
         assert_eq!(sniff_kiro(prose, "probe").model, None);
     }
 
+    /// Board #207: the exact 3.0 hooks we write — no `matcher` anywhere (the
+    /// 2.0 glob "*" invalidates a 3.0 profile, measured), four named hooks.
+    #[test]
+    fn hooks_shape_is_the_3_0_array_without_matchers() {
+        let hooks = kiro_hooks("/usr/bin/tmm-notify kiro");
+        let list = hooks.as_array().expect("an array");
+        assert_eq!(list.len(), 4);
+        assert!(list.iter().all(|h| h.get("matcher").is_none()), "no matcher: {hooks}");
+        assert!(list.iter().all(|h| h["action"]["type"] == "command" && h["action"]["command"] == "/usr/bin/tmm-notify kiro" && h["timeout"] == 10));
+        let names: Vec<&str> = list.iter().map(|h| h["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["tmm-pre-tool", "tmm-post-tool", "tmm-prompt", "tmm-stop"]);
+    }
+
     /// Board #207 option A: the v3 engine finds the agent through the
     /// WORKSPACE, so the door being open puts a symlink there and closing it
     /// takes the link away; a foreign file is never clobbered.
@@ -866,9 +881,19 @@ mod tests {
         assert_eq!(std::fs::read_link(&link).unwrap(), home.join("agents").join("dev.json"));
         assert!(!ensure_workspace_entry(&ws, &home, "dev").unwrap(), "second start: nothing to do");
         let exclude = std::fs::read_to_string(ws.join(".git/info/exclude")).unwrap();
-        assert!(exclude.lines().any(|l| l == "/.kiro/agents/"), "{exclude}");
+        assert!(exclude.lines().any(|l| l == "/.kiro/agents/dev.json"), "our file only, not the directory: {exclude}");
+        assert!(!exclude.contains("/.kiro/agents/\n"), "the user's own agents stay visible to their git status");
         ensure_workspace_entry(&ws, &home, "dev").unwrap();
         assert_eq!(std::fs::read_to_string(ws.join(".git/info/exclude")).unwrap(), exclude, "exclude is written once");
+        // A second agent adds its own line under the one mark.
+        let home2 = ws.join(".tmm").join("agents").join("ops2");
+        std::fs::create_dir_all(home2.join("agents")).unwrap();
+        std::fs::write(home2.join("agents").join("ops2.json"), "{}").unwrap();
+        ensure_workspace_entry(&ws, &home2, "ops2").unwrap();
+        let exclude2 = std::fs::read_to_string(ws.join(".git/info/exclude")).unwrap();
+        assert!(exclude2.lines().any(|l| l == "/.kiro/agents/ops2.json"));
+        assert_eq!(exclude2.matches(GIT_EXCLUDE_MARK).count(), 1, "one mark: {exclude2}");
+        remove_workspace_entry(&ws, "ops2");
         // Writing THROUGH the link lands in the home (what the CLI's upgrade does).
         std::fs::write(&link, "{\"name\":\"dev\"}").unwrap();
         assert_eq!(std::fs::read_to_string(home.join("agents/dev.json")).unwrap(), "{\"name\":\"dev\"}");
