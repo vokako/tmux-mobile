@@ -74,6 +74,16 @@ runtime worker it stalled every RPC sharing that thread for the duration.
   `end_turn`, `stop_failure` is failed) and OMP (our own telemetry extension
   emits claude-shaped `Stop`) are read the same way.
 
+**kiro payload shapes by engine (kiro-cli 2.22.1, board #207, measured):** v2
+`Stop` carries `assistant_response`/`last_assistant_message`; v3 `Stop` is
+`{session_id: "sess_<uuid>", hook_event_name: "Stop", cwd}` with no text (the
+reply is read from the session file, agents-overview.md); `UserPromptSubmit`
+carries `prompt` + `session_id` on both; v3 never delivers `preToolUse`/
+`postToolUse`. The managed profile's hooks are the 3.0 ARRAY shape
+(`{name, trigger, action:{type:"command", command}, timeout}`), accepted by
+both engines; the global `kiro_default.json` may be either shape and our
+entries follow it.
+
 **Where each dialect lives (board #129, 2026-09-09):** every backend's payload
 reading — `normalize_kind`, `is_user_prompt_submit`, claude's `is_idle_nudge`
 — is a function on that backend's file in `src-tauri/src/backends/`, next to

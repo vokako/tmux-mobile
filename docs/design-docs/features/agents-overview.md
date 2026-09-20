@@ -186,6 +186,103 @@ Two source tests make tenet 2 ("adding a backend touches one file") a failing bu
 
 Hooks are how we observe an agent at all, so a config on disk must never be older than the build reading its events — agents spawned before `userPromptSubmit` existed kept a three-hook config, so deliveries had no receipt and the reply edge could not find its requester. `spawn::refresh_hooks(project_path, window_name)` rewrites the `hooks` key in place (kiro `agents/<name>.json`, claude `settings.json`, codex `codex/hooks.json`, grok `hooks/tmux-mobile.json`) and nothing else — the prompt carries the brief given once at spawn and cannot be rebuilt; it is a no-op when current and runs on EVERY start (`hub_agent_restart`, `reconcile` on project up). Each backend's hook set lives in ONE function (`kiro_hooks`/`claude_hooks`/`codex_hooks`/`grok_hooks`), shared by render and refresh so the two cannot disagree. Settings drift is the same disease: `kiro_cli_settings` is the canonical `settings/cli.json` content (`chat.disableTrustAllConfirmation=true` — an agent has nobody at its keyboard; `chat.defaultInterruptBehavior="queue"` — owner 2026-08-20, a line typed at a busy agent arrives whole as the next prompt, the contract the delivery ack clock assumes; plus the toolSearch keys above), written fail-loud at spawn, backfilled fail-soft on every start, and a key the app does not own survives untouched. A CLI reads its config at LAUNCH, so patching a file never repairs a running agent — restart is the only path, which is what the roster's restart button is for.
 
+### The kiro backend on kiro-cli 2.22.1: one 3.0 profile for both engines, and the v3 door is the workspace (board #207, 2026-09-20)
+
+Owner: "kiro 后续升级了 kiro-cli --v3 版本，你来帮我看一下后端是否都能用，各种配置以及参数兼容性，
+以及一些状态嗅探等 … 保证我们顺利迁移". kiro-cli 2.22.1 ships two agent engines —
+`--agent-engine v2` (its default and ours) and `v3` (KAS 0.66.4, the "next
+generation Kiro agent") — and a 3.0 profile format. Everything below was
+measured on private `KIRO_HOME`s and private tmux sockets; no running agent
+was touched.
+
+- **The profile is the 3.0 shape, for both engines.** `kiro_hooks()` emits an
+  ARRAY of named hooks (`{name, trigger, action:{type:"command", command},
+  timeout}`; our tool hooks carry no `matcher` — a bare `"*"` made the 3.0
+  profile invalid, "agent not found", while no matcher means every tool) and
+  the profile carries `permissions.rules = [{capability:"all", effect:"allow"}]`.
+  The v2 engine accepts this shape and fires all four hooks (measured:
+  userPromptSubmit, preToolUse, postToolUse, stop). `patch_profile` replaces
+  the 2.0 object with the array and adds `permissions` only when absent;
+  idempotent on both shapes. Why it matters: with
+  `chat.enableAutoAgentUpgrade=true` (below) the CLI rewrites every 2.0 profile
+  it finds to 3.0 and leaves a `.bak` beside it — writing 3.0 ourselves means
+  the upgrade never runs on our homes. Measured: two `--agent-engine v3` starts
+  on our profile, no `.bak`, byte-identical file.
+- **Home settings** (`kiro_cli_settings`) gain `chat.enableAutoAgentUpgrade =
+  true` — without it v3 parks an unattended pane on "Your agent configs are
+  still in the 2.0 format. Upgrade?" — and `chat.defaultModel = <def.model>`:
+  **v3 IGNORES the profile's `model`** and reads this key (or `--model`). The
+  profile keeps `model` for v2; `ensure_kiro_settings(home, model)` mirrors the
+  profile's model at every refresh, OMITS the key when the model is empty and
+  DELETES a stale one when the model is cleared, so an old pin cannot outlive
+  the config. The model still lives in CONFIG, never on the launch line.
+- **The engine door is one app-wide key**: `kiro_engine = "v2" | "v3"` in
+  `config.toml` (`KIRO_ENGINE` overrides; default v2; anything else is v2 with
+  a note). `render_kiro` appends ` --agent-engine v3` to the launch line only
+  when the door is open — v2 is byte-for-byte what it was — and `refresh`
+  reconciles the recorded `launch.json` at every start (`reconcile_engine_in`:
+  add / replace / drop the segment), so an agent takes the new engine at its
+  NEXT restart and one scratch agent can be flipped by restarting it alone. No
+  per-agent field: that would be a schema and editor change nobody asked for.
+- **v3 finds the agent through the WORKSPACE, not `KIRO_HOME`** — the finding
+  that changed the plan. With a private home, the same profile was "agent
+  … not found, using default" under any other name and from any other cwd,
+  and found the moment it sat in `<cwd>/.kiro/agents/`; the earlier "works"
+  reading came from a copy that had been dropped there. `KIRO_HOME` still
+  supplies the settings (`chat.defaultModel` was honoured). So, only while the
+  door is open, `ensure_workspace_entry` puts ONE symlink per managed agent at
+  `<ws>/.kiro/agents/<name>.json` → `<ws>/.tmm/agents/<name>/agents/<name>.json`
+  — the isolated home stays the single truth, v3 reads through the link;
+  idempotent on every start; a file there that is NOT our link is never
+  clobbered (spawn fails loud naming it; refresh logs); the link is removed
+  with the agent (`agent_remove`) and when the door closes; the directory goes
+  into `.git/info/exclude` (local, untracked, once) so an agent's `git add -A`
+  cannot commit it. Measured: v3 follows the link (found, session
+  `agentMode=probe207`); a 2.0 profile left BEHIND the link is upgraded by the
+  CLI through it — and the CLI's write replaces the link with a regular file
+  plus `.bak` under `ws/.kiro` — which is exactly why our profiles are 3.0
+  before v3 ever sees them, and why a non-link file at that path is a loud
+  error at the next start rather than a silent fork.
+- **The v3 Stop payload carries no reply text** (`{session_id,
+  hook_event_name:"Stop", cwd}`). The reply is the last `assistant` entry of
+  the GLOBAL session file `~/.kiro/sessions/<cwd-hash>/sess_<id>/messages.jsonl`
+  — each line `{id, timestamp, payload:{type, content, …}}`, a turn
+  `turn_start … turn_end` with possibly several `assistant` entries (text
+  between tool calls, then the final text). `kiro_reply_from_session` takes the
+  last assistant after the last `turn_start`; `Backend::reply_fallback` wires it
+  into the notify helper when a kiro Stop has no text (agent-status.md).
+- **The v3 status line prints the model's DISPLAY name** (`probe · Claude
+  Sonnet 5 · high · ◔ 4% · Midway: 19h 19m   /ws · (branch)`; v2 prints the
+  slug). `sniff_kiro` accepts a display name (`looks_like_model_name`: words
+  of letters/digits/dots/dashes, ≤48 chars) ONLY right after the anchor —
+  the `Midway:` segment (a colon) and prose lines are not models (fixtures +
+  negative control in `backends/kiro.rs`).
+- **Not ours to fix, documented:** v3 never fires the tool hooks
+  (`preToolUse`/`postToolUse` are gated behind KAS `featureFlags.v2Hooks`), so
+  kiro's tool lane is empty on v3 while status from turn edges is unaffected;
+  in `--no-interactive` mode v3 fired no hooks at all (the TUI fires
+  prompt/stop); v3 loads every `~/.kiro/skills/*` and `~/.kiro/steering/*`
+  into each session regardless of `KIRO_HOME`; tmux 3.6a reports
+  `pane_dead_signal` as a number. Re-measure on the next kiro-cli release.
+- **The global `~/.kiro/agents/kiro_default.json`** is the CLI's file: 2.22.1
+  upgrades it to the array shape, older installs keep the object.
+  `install_kiro_default` / `remove_kiro_default_hook` add and remove our two
+  marked entries in WHICHEVER shape the file has, never converting it.
+
+**Rollout** (the owner's move, not the app's): 1) set `kiro_engine = "v3"` in
+`config.toml`, 2) `tmm agent restart <one scratch agent>` — its recipe gains
+` --agent-engine v3` at refresh, its workspace gains the link — 3) check
+`tmm agent list` vitals (model = display name, context, effort) and one reply
+edge (`tmm log --grep '[reply]'` after a turn), 4) then restart the real
+agents. Flip back by setting v2 and restarting: the segment and the link go.
+
+Guards: `backends/kiro.rs` tests (reconcile, session reply, display-name
+model, patch_profile idempotence, workspace entry incl. the foreign-file
+refusal and the git exclude), `spawn.rs` render/refresh tests (array shape,
+permissions, defaultModel, no engine segment by default),
+`agent_notifications.rs` (kiro_default both shapes), `config.rs`
+(`normalize_engine`).
+
 ### The grok backend (grok 1.0.5, added 2026-08-21; moved from tmm-cli.md, board #102)
 
 Aligned with kiro's shape, verified live (isolated home spawned from the hub answered on the owner's Bedrock custom model; hooks fired; state derived). **Isolation**: `GROK_HOME=<ws>/.tmm/agents/<name>/`. **Identity**: `agents/<name>.md` — YAML frontmatter (`name`, `description`, and the MODEL, honored from frontmatter; nothing on the launch line) with the system prompt as the body; launched `grok --always-approve --agent <name>`; skills ride the prompt as the compact index. **Telemetry**: `hooks/tmux-mobile.json` in the home (that home's "global" hook scope, always trusted); five events — UserPromptSubmit (payload wraps the text in `<user_query>` tags), Pre/PostToolUse (camelCase `toolName`/`toolInput`), Stop, StopFailure. **A grok `stop` is a completion ONLY with `reason: "end_turn"`** — a second observe-only stop fires at session teardown (`shutdown`/`channel_closed`) and reading it as a completion would double-post; the reply rides `lastAssistantMessage`. **Auth carries, prefs do not**: grok auth is HOME-scoped, so `grok_config_toml` copies the user's `[models]`/`[model.*]` catalog (+ `auth.json` when present) into the isolated home — without it the agent is a login screen; user hooks/UI/MCP deliberately do NOT carry. TRAP, paid for once: toml 1.x parses a DOCUMENT via `toml::Table` — `Value::from_str` fails on any real config ("expected nothing") and the catalog silently vanished. `[folder_trust] enabled=false` keeps the TUI off a trust prompt nobody can see. **Resume**: `--continue` is cwd-scoped, `--resume <id>` exact (id from the hooks' `sessionId`); managed homes always use one on restart. **Models**: `grok models` enumerates (bullet list, `*` marks the default), so grok ids validate like kiro's.
