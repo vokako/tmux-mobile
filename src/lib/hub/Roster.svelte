@@ -226,9 +226,12 @@
             <!-- The dot BECOMES the Stop: the danger icon command (a dense 28px
                  slot, compact-tools) centred where the dot was, taking no width —
                  the card never changes size (owner, 2026-09-20: "终止按钮应该是红色的
-                 吧，更符合语义"; board #205; replaces #195's resident quiet Stop). -->
+                 吧，更符合语义"; board #205; replaces #195's resident quiet Stop).
+                 bare: no wash — the card under it already carries the hover;
+                 the red glyph is the whole control (owner, 2026-09-20: "停止按钮就
+                 不用加背景了，就红色方块我直接点就行"; board #211). -->
             <span class="agent-stop compact-tools" class:pending use:overDot>
-              <CommandButton label={`${t('hubInterrupt')} ${a.name}`} icon="stop" variant="danger" iconOnly
+              <CommandButton label={`${t('hubInterrupt')} ${a.name}`} icon="stop" variant="danger" iconOnly bare
                 {pending} disabled={pending}
                 onclick={(e) => { e.stopPropagation(); interrupt(a.name); }} />
             </span>
@@ -279,6 +282,14 @@
     --roster-ring-stroke: 2px;
     --roster-paint-height: 30px;
     --roster-card-inset: 4px;
+    /* Room after the dot for the Stop that replaces it (#205): the 28px
+       compact-tools slot (its hit box, and the outer edge of its focus ring;
+       the paint is 20px inside it) centred on the 6px dot reaches 14px past
+       the dot's centre; 28/2 − 6/2 + the card's 1px inset border = 12px ends
+       the slot at the inner edge of the border. Constant, not hover-only, so
+       revealing the Stop never reflows the row (owner, 2026-09-20: "状态小点右侧
+       好像没有留边距…停止按钮都超出 agent 卡片框了"; board #211). */
+    --roster-dot-reserve: 12px;
     --roster-gap: 2px;
     --roster-control-gap: 2px;
     --roster-expanded-max: min(240px, calc(32dvh / var(--ui-zoom, 1)));
@@ -339,6 +350,8 @@
     -webkit-tap-highlight-color: transparent;
   }
   .agent-select:focus-visible { outline-color: var(--accent-ink); outline-offset: 0; }
+  /* Only a live card carries a dot, so only it reserves the Stop's room. */
+  .acard:not(.off) .agent-select { padding-inline-end: var(--roster-dot-reserve); }
   .a-name { font-family: var(--font-display); font-size: var(--fs-ui); font-weight: 600; white-space: nowrap; }
   .cards.expanded .a-name {
     min-width: 0; white-space: normal; overflow-wrap: anywhere;

@@ -709,6 +709,13 @@ press-scale/brightness details below do not override it.
 - Solid CTAs brighten (`filter: brightness(1.07)`); pressing scales 0.93–0.95.
   All at `--t-fast`. Hover is never the only affordance (phones exist): a
   hover-revealed control must have a tap/long-press route.
+- ONE exception, named: an icon command standing ON a surface that already
+  carries the hover takes `CommandButton`'s `bare` modifier — no rest, hover
+  or press paint, the glyph is the control; hit box, focus ring, pending and
+  disabled unchanged, and never on solid paint. A wash there would be a
+  second layer of the same hover. Today the roster card's Stop only (board
+  #211, owner 2026-09-20: "停止按钮就不用加背景了，就红色方块我直接点就行"); a
+  toolbar's icon commands stay in the wash family.
 
 ## 5 · Menus & popovers
 

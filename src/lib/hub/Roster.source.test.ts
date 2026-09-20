@@ -69,6 +69,19 @@ test('Stop is red, hidden until hover/focus or a pending interrupt, and never on
   assert.doesNotMatch(source, /renderedStops|pressStops|has-stop/u, 'the resident slot and its press-hold layout are gone');
 });
 
+test('the dot reserves the Stop\'s room, constant, and the Stop wears no wash (board #211)', () => {
+  // Owner 2026-09-20: "agent 卡片状态小点右侧好像没有留边距，包括我鼠标悬浮的时候，停止按钮都
+  // 超出 agent 卡片框了。而且停止按钮就不用加背景了，就红色方块我直接点就行".
+  // The 28px slot (hit box = focus-ring extent; 20px paint inside) centred on
+  // the 6px dot reaches 14px past its centre; 12px = 28/2 − 6/2 + the 1px
+  // inset border ends the slot at the border's inner edge.
+  assert.match(rule('.roster'), /--roster-dot-reserve: 12px/u);
+  assert.match(rule('.acard:not(.off) .agent-select'), /padding-inline-end: var\(--roster-dot-reserve\)/u,
+    'a live card reserves it at rest — revealing the Stop must not reflow the row');
+  assert.doesNotMatch(rule('.agent-select'), /padding-inline-end/u, 'a stopped card has no dot and keeps the plain inset');
+  assert.match(source, /icon="stop" variant="danger" iconOnly bare/u, 'no rest/hover/press paint: the red glyph is the control');
+});
+
 test('one controlled roster replaces the delayed tap menu whole (#168)', () => {
   assert.match(source, /import \{ ALL_TARGET \} from '\.\/hub-composer\.ts'/u);
   assert.match(source, /const ranked = \$derived\(sortAgentsForRoster\(managedAgents\)\)/u,

@@ -13,6 +13,12 @@
      * signal, so the button keeps its rest look instead of the engaged wash a
      * disclosure of content elsewhere wears (the roster's). */
     inside?: boolean;
+    /** No paint at all — rest, hover or press: the glyph IS the control. For
+     * an icon command that stands on a surface already carrying the hover
+     * (the roster card's Stop on its lit card, board #211): a wash there is a
+     * second layer of the same hover. Hit box, focus ring, pending and
+     * disabled are unchanged; meaningless with `primary`/solid paint. */
+    bare?: boolean;
     controls?: string;
     hasPopup?: 'menu' | 'dialog' | 'listbox';
     disabled?: boolean;
@@ -22,7 +28,7 @@
   } & ({ pending?: false; icon?: string } | { pending: boolean; icon: string });
   let {
     label, icon = '', variant = 'secondary', iconOnly = false,
-    pressed, expanded, inside = false, controls, hasPopup,
+    pressed, expanded, inside = false, bare = false, controls, hasPopup,
     disabled = false, pending = false, destructiveConfirm = false,
     onclick = () => {}, element = $bindable(null),
   }: Props = $props();
@@ -37,7 +43,7 @@
 
 <button type="button" class="command-button"
   class:primary={solid} class:secondary={variant === 'secondary'}
-  class:danger={variant === 'danger'} class:icon-only={compact} class:solid class:pending class:engaged
+  class:danger={variant === 'danger'} class:icon-only={compact} class:solid class:bare={bare && !solid} class:pending class:engaged
   disabled={disabled || pending} aria-label={label} aria-busy={pending || undefined}
   aria-pressed={pressed} aria-expanded={expanded} aria-controls={controls} aria-haspopup={hasPopup}
   bind:this={element}
@@ -85,6 +91,9 @@
     --command-overlay: color-mix(in srgb, var(--control-overlay-dark) 6%, transparent);
   }
   .command-button.solid.danger:active:not(:disabled) { --command-paint: var(--danger-fill); }
+  .command-button.bare,
+  .command-button.bare:hover:not(:disabled),
+  .command-button.bare:active:not(:disabled) { --command-paint: transparent; }
   .command-button.engaged,
   .command-button.engaged:hover:not(:disabled),
   .command-button.engaged:active:not(:disabled) {

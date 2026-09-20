@@ -366,6 +366,24 @@ resident while busy on both pointers, quiet `--text2` ink, with a press-hold
 of the row's layout (`renderedStops`/`pressStops`) so the slot could not
 shift under a finger — gone whole with the slot. Watch stays in the menu.
 
+**The dot reserves the Stop's room, and the Stop wears no wash (board #211,
+owner 2026-09-20: "agent 卡片状态小点右侧好像没有留边距，包括我鼠标悬浮的时候，停止按钮都超出
+agent 卡片框了。而且停止按钮就不用加背景了，就红色方块我直接点就行").** Measured before:
+the 28px slot centred on the dot reached 14px past the dot's centre while the
+card had 3px (half dot) + 4px (`--roster-card-inset`) there — the hovered
+Stop stood 7px outside the frame. Now a live card's `.agent-select` ends in
+`--roster-dot-reserve: 12px` (= 28/2 − 6/2 + the 1px inset border): the slot,
+which is also the focus ring's outer edge, ends at the border's inner edge.
+The reserve is constant, not hover-only, so revealing the Stop still never
+reflows the row; a stopped card has no dot and keeps its 4px. The Stop passes
+`bare` to `CommandButton`: no rest, hover or press paint — the card under it
+already carries the hover, and the red glyph is the whole control. Measured
+at 1440 and 720 (compact), and in the expanded grid: card width identical
+before/during/after hover (77.58px strip), slot right edge 379 vs card
+right 379.58, paint right edge 3.6px inside the border, `::before`
+background `rgba(0,0,0,0)` at rest and with the pointer on the button, ink
+`--danger-ink`, Stop gone on pointer leave.
+
 The state dot lives INSIDE the name's line with `vertical-align: middle` —
 by definition the dot's midpoint on the baseline plus half the x-height, so it
 is centred on the lowercase letters whatever the font's ascent/descent — 5px

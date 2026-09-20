@@ -44,6 +44,16 @@ test('command paint is inset inside the native target, with a visible keyboard r
   assert.match(style, /\.command-button:focus-visible::before \{ outline: 2px solid var\(--accent-ink\); outline-offset: 2px; \}/u);
 });
 
+test('bare is a modifier, not a variant: no paint in any state, never on solid, focus ring kept (board #211)', () => {
+  // Owner 2026-09-20: "停止按钮就不用加背景了，就红色方块我直接点就行". Every variant
+  // carries a hover wash, so "no paint at all" cannot be said with a variant;
+  // like `inside`, it modifies one. The paint layer stays for the focus ring.
+  assert.match(source, /bare\?: boolean;/u);
+  assert.match(source, /class:bare=\{bare && !solid\}/u, 'meaningless on primary/solid paint');
+  assert.match(style, /\.command-button\.bare,\s*\.command-button\.bare:hover:not\(:disabled\),\s*\.command-button\.bare:active:not\(:disabled\) \{ --command-paint: transparent; \}/u);
+  assert.doesNotMatch(source, /variant\?: [^;]*'bare'/u, 'not a fifth variant');
+});
+
 test('the warn variant is gone whole; icon commands keep the focus layer (#173 → #195)', () => {
   // #173 mixed amber into the roster's Stop ink to clear 3:1 on a selected card;
   // the owner found the result ugly ("颜色也不好看", 2026-09-13) and the Stop now
