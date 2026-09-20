@@ -193,6 +193,23 @@ doc already describes. Design decisions, in the order they bit:
   (`aria-busy`, title "Connecting…"). Before, the old row stayed lit while the
   socket was rebuilt and nothing said the tap had landed. A failed direct
   connect hands over to the reconnect machine, whose bar carries on from there.
+- **The failover set is editable: removable rows, drag priority** (board #222,
+  owner 2026-09-20: "可以手动删除某个链接，并且可以设定连接的优先级上下拖动
+  排序"). The list's stored order IS the priority — the reconnect round-robin
+  walks it and `findBestAddress`'s stable class sort keeps it within a class —
+  so a drag needs no new concept, only a write. A row's × removes one
+  alternate; the ACTIVE address is never removable (it is the live connection,
+  and deleting it would only hide the primary while it stays primary). The
+  drag speaks the rail's reorder idiom through the generic `moveBefore` /
+  `listDropAt` in nav-order.ts (one mechanism, not a second reorder dialect),
+  but the GRIP, not the row, is the handle: the row is already the switch
+  command, and on touch a whole-row vertical drag would fight the page's
+  scroll — the grip opts out with `touch-action: none`, and Arrow keys on the
+  focused grip are the keyboard form of the same move. Both edits hand the new
+  list to App's `onAddressesChange`, which persists through
+  `servers.ts` `saveMachineAddresses` — the map's ONE writer, sanitized at the
+  door — and bumps a version so the derived list re-reads (localStorage is not
+  reactive).
 - **The rail entry is a control, not a page**: it rides the RAIL_GAP branch
   (above the configure group — "右下角agent上边"), carries no rail slot, and
   its popover follows the app's one menu recipe (fixed layer, measured then
@@ -299,3 +316,7 @@ not claimed as a full-App or native-clipboard test.
 ### Servers are a named registry; the machine is the identity
 
 (board #55): `src/lib/app/servers.ts` keeps `tmux_servers` (+`tmux_server_current`) while the old `tmux_address`/`tmux_token`/`tmux_socket` stay the ACTIVE MIRROR every existing reader keeps reading. One machine = one entry however many LAN/Tailscale/WAN addresses it answers on — `recordServer` merges by `machineId` (learned at connect) without moving CURRENT, migration attributes `tmux_address_history` through `tmux_machines`, and the same-machine failover semantics are untouched. A different-machine successful connect goes through `activateConnected`: park the old live state/machine id before surfacing the target and reload; a same-machine alternate records in place. Switching (`applySwitch` + reload) parks/restores per-server `tmux_state`/`tmux_machine_id` under `::<id>` keys so restore targets never cross servers, and reuses the boot path so no in-memory cache (Hub rooms, terminals, Files cwds) can leak across; the caller cancels the reconnect machine and drops the socket first. The desktop rail's switcher rides the RAIL_GAP branch above the configure group — a control (no drag slot), popover in the one menu recipe; the Settings form is the add flow and activates only after authentication. Forgetting a non-current server captures its row identity and asks through the shared `ConfirmDialog` before removing config + parked state.
+
+### The failover set's order is the priority, edited through one writer
+
+(board #222): the Connection page's address list is the machine's `tmux_machines` failover set, and its stored order is what the reconnect round-robin walks — so reordering IS setting priority, no new concept. A row's × removes an alternate (never the ACTIVE address — the live connection), and the grip drags a row to its new place (Arrow keys on the focused grip are the keyboard form); the drag reuses the rail's idiom via the generic `moveBefore`/`listDropAt` in nav-order.ts, with the grip — not the row — as the handle because the row is already the switch command and a whole-row touch drag would fight the page's scroll. Both edits go to App's `onAddressesChange`, which persists through `saveMachineAddresses` (the map's ONE writer: sanitized, deduped, an empty set drops the key) and bumps a version counter so the derived list re-reads. The hooks-management row that used to sit under the list retired in the same task — managed agents carry hooks in their isolated homes, so the global install/remove surface and its `agent_hooks_*` RPCs were deleted whole (agent-notifications.md § Hook Management).

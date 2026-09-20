@@ -1,6 +1,6 @@
 use crate::{config, tmux};
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde::Deserialize;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -38,21 +38,6 @@ struct InboxEnvelope {
     payload: Value,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct HookBackendStatus {
-    pub supported: bool,
-    pub installed: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct HookStatus {
-    pub helper: bool,
-    pub claude: HookBackendStatus,
-    pub codex: HookBackendStatus,
-    pub kiro: HookBackendStatus,
-    pub grok: HookBackendStatus,
-}
-
 #[derive(Default)]
 struct State {
     /// window key → the agent's own conversation id, from the last hook that
@@ -78,13 +63,6 @@ pub struct AgentNotificationHub {
 impl AgentNotificationHub {
     pub fn load() -> Self {
         Self::load_at(config::config_dir().join("agent-notifications"))
-    }
-
-    /// Test-only constructor for OTHER modules' boundary tests (rpc.rs's
-    /// retired-RPC pin): same as `load_at`, kept off the public API.
-    #[cfg(test)]
-    pub(crate) fn load_at_for_tests(root: PathBuf) -> Self {
-        Self::load_at(root)
     }
 
     fn load_at(root: PathBuf) -> Self {
@@ -354,57 +332,6 @@ impl AgentNotificationHub {
         }
     }
 
-
-    pub fn hook_status(&self) -> HookStatus {
-        HookStatus {
-            helper: self.helper_path().is_file(),
-            claude: HookBackendStatus {
-                supported: true,
-                installed: json_file_contains(&claude_path(), OWNER_MARKER),
-            },
-            codex: HookBackendStatus {
-                supported: true,
-                installed: json_file_contains(&codex_path(), OWNER_MARKER),
-            },
-            kiro: HookBackendStatus {
-                supported: true,
-                installed: json_file_contains(&kiro_path(), OWNER_MARKER)
-                    || json_file_contains(&kiro_default_path(), OWNER_MARKER),
-            },
-            grok: HookBackendStatus {
-                supported: true,
-                installed: json_file_contains(&grok_path(), OWNER_MARKER),
-            },
-        }
-    }
-
-    pub fn install_hooks(&self) -> Result<HookStatus, String> {
-        self.write_helper()?;
-        let helper = format!(
-            "/bin/sh {}",
-            crate::shell::quote_always(&self.helper_path().to_string_lossy())
-        );
-        install_claude(&claude_path(), &helper)?;
-        install_codex(&codex_path(), &helper)?;
-        install_kiro(&kiro_path(), &helper)?;
-        install_kiro_default(&kiro_default_path(), &helper)?;
-        install_grok(&grok_path(), &helper)?;
-        Ok(self.hook_status())
-    }
-
-    pub fn remove_hooks(&self) -> Result<HookStatus, String> {
-        remove_owned_hooks(&claude_path())?;
-        remove_owned_hooks(&codex_path())?;
-        if kiro_path().is_file() && json_file_contains(&kiro_path(), OWNER_MARKER) {
-            std::fs::remove_file(kiro_path()).map_err(|e| e.to_string())?;
-        }
-        remove_kiro_default_hook(&kiro_default_path())?;
-        if grok_path().is_file() && json_file_contains(&grok_path(), OWNER_MARKER) {
-            std::fs::remove_file(grok_path()).map_err(|e| e.to_string())?;
-        }
-        Ok(self.hook_status())
-    }
-
     pub fn helper_command(&self, backend: &str) -> String {
         format!(
             "/bin/sh {} {} # {}",
@@ -592,15 +519,6 @@ fn normalize_in(envelope: &InboxEnvelope, home: Option<&Path>) -> Result<Normali
     })
 }
 
-/// Returns true when the envelope carries a `userPromptSubmit` event (kiro),
-/// which marks the beginning of a new user turn. Used to reset the
-/// `sent_this_turn` flag so the next stop can auto-post.
-/// The `Notification` types the global Claude install subscribes to. No
-/// `idle_prompt`: that is the idle nudge, not an ask (board #75).
-fn claude_hooks_matcher() -> &'static str {
-    "permission_prompt|agent_needs_input|agent_completed"
-}
-
 /// Claude Code's idle reminder (`Notification` / `idle_prompt`): fires ~60 s
 /// after a turn ended with nobody typing. Not an ask — see `consume_file`.
 fn is_idle_nudge(envelope: &InboxEnvelope) -> bool {
@@ -608,6 +526,9 @@ fn is_idle_nudge(envelope: &InboxEnvelope) -> bool {
         .is_some_and(|b| b.is_idle_nudge(&envelope.payload))
 }
 
+/// Returns true when the envelope carries a `userPromptSubmit` event (kiro),
+/// which marks the beginning of a new user turn. Used to reset the
+/// `sent_this_turn` flag so the next stop can auto-post.
 fn is_user_prompt_submit(envelope: &InboxEnvelope) -> bool {
     crate::backends::Backend::parse(&envelope.backend)
         .is_some_and(|b| b.is_user_prompt_submit(&envelope.payload))
@@ -698,313 +619,10 @@ fn unix_seconds() -> u64 {
         .as_secs()
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
-    std::fs::rename(tmp, path).map_err(|e| e.to_string())
-}
-
-fn home_dir() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-}
-fn claude_path() -> PathBuf {
-    home_dir().join(".claude/settings.json")
-}
-fn codex_path() -> PathBuf {
-    home_dir().join(".codex/hooks.json")
-}
-fn grok_path() -> PathBuf {
-    home_dir().join(".grok/hooks/tmux-mobile.json")
-}
-
-fn kiro_path() -> PathBuf {
-    home_dir().join(".kiro/hooks/tmux-mobile.json")
-}
-fn kiro_default_path() -> PathBuf {
-    home_dir().join(".kiro/agents/kiro_default.json")
-}
-
-fn read_json_object(path: &Path) -> Result<Value, String> {
-    if !path.exists() {
-        return Ok(json!({}));
-    }
-    let value: Value = serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?)
-        .map_err(|e| format!("{}: {e}", path.display()))?;
-    if value.is_object() {
-        Ok(value)
-    } else {
-        Err(format!("{} must contain a JSON object", path.display()))
-    }
-}
-
-fn write_json(path: &Path, value: &Value) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    atomic_write(
-        path,
-        &serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?,
-    )
-}
-
-fn command_hook(command: String) -> Value {
-    json!({ "type": "command", "command": command })
-}
-
-fn install_claude(path: &Path, helper: &str) -> Result<(), String> {
-    let mut root = read_json_object(path)?;
-    let hooks = root
-        .as_object_mut()
-        .unwrap()
-        .entry("hooks")
-        .or_insert_with(|| json!({}));
-    let hooks = hooks
-        .as_object_mut()
-        .ok_or("Claude hooks must be an object")?;
-    add_claude_event(
-        hooks,
-        "Notification",
-        Some(claude_hooks_matcher()),
-        format!("{helper} claude # {OWNER_MARKER}"),
-    )?;
-    add_claude_event(
-        hooks,
-        "Stop",
-        None,
-        format!("{helper} claude # {OWNER_MARKER}"),
-    )?;
-    add_claude_event(
-        hooks,
-        "StopFailure",
-        None,
-        format!("{helper} claude # {OWNER_MARKER}"),
-    )?;
-    write_json(path, &root)
-}
-
-fn add_claude_event(
-    hooks: &mut serde_json::Map<String, Value>,
-    event: &str,
-    matcher: Option<&str>,
-    command: String,
-) -> Result<(), String> {
-    let entries = hooks
-        .entry(event)
-        .or_insert_with(|| json!([]))
-        .as_array_mut()
-        .ok_or_else(|| format!("Claude {event} hooks must be an array"))?;
-    // Replace our own entry instead of merely detecting it. Older releases
-    // could persist a quoted `~` path that shells cannot expand.
-    entries.retain(|value| !value.to_string().contains(OWNER_MARKER));
-    let mut entry = json!({ "hooks": [command_hook(command)] });
-    if let Some(matcher) = matcher {
-        entry
-            .as_object_mut()
-            .unwrap()
-            .insert("matcher".into(), json!(matcher));
-    }
-    entries.push(entry);
-    Ok(())
-}
-
-fn install_codex(path: &Path, helper: &str) -> Result<(), String> {
-    let mut root = read_json_object(path)?;
-    let hooks = root
-        .as_object_mut()
-        .unwrap()
-        .entry("hooks")
-        .or_insert_with(|| json!({}));
-    let hooks = hooks
-        .as_object_mut()
-        .ok_or("Codex hooks must be an object")?;
-    add_codex_event(
-        hooks,
-        "PermissionRequest",
-        format!("{helper} codex # {OWNER_MARKER}"),
-    )?;
-    add_codex_event(hooks, "Stop", format!("{helper} codex # {OWNER_MARKER}"))?;
-    write_json(path, &root)
-}
-
-fn add_codex_event(
-    hooks: &mut serde_json::Map<String, Value>,
-    event: &str,
-    command: String,
-) -> Result<(), String> {
-    let entries = hooks
-        .entry(event)
-        .or_insert_with(|| json!([]))
-        .as_array_mut()
-        .ok_or_else(|| format!("Codex {event} hooks must be an array"))?;
-    entries.retain(|value| !value.to_string().contains(OWNER_MARKER));
-    entries.push(json!({ "hooks": [command_hook(command)] }));
-    Ok(())
-}
-
-/// Global grok hooks: `~/.grok/hooks/tmux-mobile.json`, a file we own whole
-/// (grok merges hook files, so ours never touches the user's). Stop is
-/// filtered to end_turn by the normalizer; UserPromptSubmit resets the
-/// same-turn dedup flag for direct grok windows the way kiro_default does.
-fn install_grok(path: &Path, helper: &str) -> Result<(), String> {
-    let cmd = format!("{helper} grok # {OWNER_MARKER}");
-    write_json(
-        path,
-        &json!({
-            "hooks": {
-                "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": cmd } ] } ],
-                "Stop": [ { "hooks": [ { "type": "command", "command": cmd } ] } ],
-                "StopFailure": [ { "hooks": [ { "type": "command", "command": cmd } ] } ]
-            }
-        }),
-    )
-}
-
-fn install_kiro(path: &Path, helper: &str) -> Result<(), String> {
-    write_json(
-        path,
-        &json!({
-            "version": "v1",
-            "hooks": [
-                {
-                    "name": OWNER_MARKER,
-                    "trigger": "Stop",
-                    "action": { "type": "command", "command": format!("{helper} kiro # {OWNER_MARKER}") },
-                    "enabled": true
-                },
-                {
-                    "name": format!("{OWNER_MARKER}-turn"),
-                    "trigger": "UserPromptSubmit",
-                    "action": { "type": "command", "command": format!("{helper} kiro # {OWNER_MARKER}") },
-                    "enabled": true
-                }
-            ]
-        }),
-    )
-}
-
-fn find_kiro_cli() -> Option<PathBuf> {
-    let home = home_dir();
-    [
-        home.join(".local/bin/kiro-cli"),
-        PathBuf::from("/opt/homebrew/bin/kiro-cli"),
-        PathBuf::from("/usr/local/bin/kiro-cli"),
-    ]
-    .into_iter()
-    .find(|path| path.is_file())
-    .or_else(|| {
-        std::env::var_os("PATH").and_then(|paths| {
-            std::env::split_paths(&paths)
-                .map(|path| path.join("kiro-cli"))
-                .find(|path| path.is_file())
-        })
-    })
-}
-
-fn install_kiro_default(path: &Path, helper: &str) -> Result<(), String> {
-    if !path.exists() {
-        let cli = find_kiro_cli().ok_or("kiro-cli is not installed")?;
-        let dir = path.parent().ok_or("invalid Kiro agent path")?;
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-        let output = std::process::Command::new(cli)
-            .args([
-                "agent",
-                "create",
-                "kiro_default",
-                "--from",
-                "kiro_default",
-                "--directory",
-            ])
-            .arg(dir)
-            .env("EDITOR", "true")
-            .output()
-            .map_err(|e| format!("failed to create kiro_default: {e}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "failed to create kiro_default: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
-        }
-    }
-    let mut root = read_json_object(path)?;
-    let command = format!("{helper} kiro # {OWNER_MARKER}");
-    // The global file is the CLI's: kiro-cli 2.22.1 upgrades it to the 3.0
-    // ARRAY shape (board #207) while older installs keep the 2.0 OBJECT. Add
-    // our two entries in whichever shape the file has — never convert it.
-    let hooks = root.as_object_mut().unwrap().entry("hooks").or_insert_with(|| json!({}));
-    if let Some(list) = hooks.as_array_mut() {
-        list.retain(|value| !value.to_string().contains(OWNER_MARKER));
-        list.push(json!({ "name": "tmm-stop", "trigger": "stop", "action": { "type": "command", "command": command }, "timeout": 10 }));
-        list.push(json!({ "name": "tmm-prompt", "trigger": "userPromptSubmit", "action": { "type": "command", "command": command }, "timeout": 10 }));
-        return write_json(path, &root);
-    }
-    let hooks = hooks
-        .as_object_mut()
-        .ok_or("kiro_default hooks must be an object or an array")?;
-    let stop = hooks
-        .entry("stop")
-        .or_insert_with(|| json!([]))
-        .as_array_mut()
-        .ok_or("kiro_default stop hooks must be an array")?;
-    stop.retain(|value| !value.to_string().contains(OWNER_MARKER));
-    stop.push(json!({ "command": command }));
-    // userPromptSubmit fires at the start of each user turn. We use it to
-    // reset the "sent this turn" flag so the next stop can auto-post.
-    let user_prompt = hooks
-        .entry("userPromptSubmit")
-        .or_insert_with(|| json!([]))
-        .as_array_mut()
-        .ok_or("kiro_default userPromptSubmit hooks must be an array")?;
-    user_prompt.retain(|value| !value.to_string().contains(OWNER_MARKER));
-    user_prompt.push(json!({ "command": command }));
-    write_json(path, &root)
-}
-
-fn remove_kiro_default_hook(path: &Path) -> Result<(), String> {
-    if !path.exists() || !json_file_contains(path, OWNER_MARKER) {
-        return Ok(());
-    }
-    let mut root = read_json_object(path)?;
-    match root.get_mut("hooks") {
-        // 3.0 array: drop our entries, keep the array (the CLI's shape).
-        Some(Value::Array(list)) => list.retain(|value| !value.to_string().contains(OWNER_MARKER)),
-        Some(Value::Object(hooks)) => {
-            for key in &["stop", "userPromptSubmit"] {
-                if let Some(arr) = hooks.get_mut(*key).and_then(Value::as_array_mut) {
-                    arr.retain(|value| !value.to_string().contains(OWNER_MARKER));
-                }
-            }
-            hooks.retain(|_, value| value.as_array().is_none_or(|items| !items.is_empty()));
-        }
-        _ => {}
-    }
-    write_json(path, &root)
-}
-
-fn remove_owned_hooks(path: &Path) -> Result<(), String> {
-    if !path.exists() {
-        return Ok(());
-    }
-    let mut root = read_json_object(path)?;
-    if let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut) {
-        for value in hooks.values_mut() {
-            if let Some(entries) = value.as_array_mut() {
-                entries.retain(|entry| !entry.to_string().contains(OWNER_MARKER));
-            }
-        }
-        hooks.retain(|_, value| value.as_array().is_none_or(|entries| !entries.is_empty()));
-    }
-    write_json(path, &root)
-}
-
-fn json_file_contains(path: &Path, needle: &str) -> bool {
-    std::fs::read_to_string(path).is_ok_and(|text| text.contains(needle))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     /// A legacy build's unread.json is REMOVED at load (the retired unread
     /// inbox must not leave stale reply summaries on disk for ever), and the
@@ -1080,7 +698,6 @@ mod tests {
         assert!(is_idle_nudge(&nudge));
         assert!(normalize(&nudge).is_err(), "no ask kind is ever derived from the idle nudge");
         assert!(!is_idle_nudge(&envelope("claude", json!({"hook_event_name":"Notification","notification_type":"permission_prompt"}))));
-        assert!(!claude_hooks_matcher().contains("idle_prompt"), "new configs do not subscribe to the nudge");
         assert_eq!(
             normalize(&envelope("codex", json!({"hook_event_name":"Stop"})))
                 .unwrap()
@@ -1183,46 +800,6 @@ mod tests {
         .unwrap();
         assert_eq!((tool.as_str(), detail.as_str()), ("bash", "npm test"));
         assert!(normalize(&envelope(json!({"hook_event_name":"SessionStart"}))).is_err());
-    }
-
-    #[test]
-    fn hook_merge_preserves_unrelated_entries() {
-        let root = std::env::temp_dir().join(format!("tmm-agent-hooks-{}", uuid::Uuid::new_v4()));
-        let path = root.join("settings.json");
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(&path, r#"{"theme":"dark","hooks":{"Stop":[{"hooks":[{"type":"command","command":"other"}]}]}}"#).unwrap();
-        install_claude(&path, "'/tmp/helper'").unwrap();
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("other"));
-        assert!(text.contains(OWNER_MARKER));
-        remove_owned_hooks(&path).unwrap();
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("other"));
-        assert!(!text.contains(OWNER_MARKER));
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn reinstall_replaces_stale_owned_hook_command() {
-        let root =
-            std::env::temp_dir().join(format!("tmm-agent-hook-migrate-{}", uuid::Uuid::new_v4()));
-        let path = root.join("hooks.json");
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(
-            &path,
-            format!(
-                r#"{{"hooks":{{"Stop":[{{"hooks":[{{"type":"command","command":"'~/.config/old-helper' codex # {OWNER_MARKER}"}}]}}]}}}}"#
-            ),
-        )
-        .unwrap();
-
-        install_codex(&path, "'/absolute/current-helper'").unwrap();
-
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(!text.contains("~/.config/old-helper"));
-        assert!(text.contains("/absolute/current-helper"));
-        assert_eq!(text.matches(OWNER_MARKER).count(), 2);
-        let _ = std::fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]
@@ -1827,55 +1404,6 @@ mod tests {
         let root = std::env::temp_dir().join(format!("tmm-reply-edge-{}", uuid::Uuid::new_v4()));
         let restarted = AgentNotificationHub::load_at(root.clone());
         assert_eq!(restarted.take_reply_targets(&session, "w2"), vec!["lead"]);
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn kiro_agent_merge_preserves_existing_hooks() {
-        let root = std::env::temp_dir().join(format!("tmm-kiro-hooks-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("dev.json");
-        std::fs::write(&path, r#"{"name":"dev","hooks":{"postToolUse":[{"command":"lint"}],"stop":[{"command":"other"}]}}"#).unwrap();
-        install_kiro_default(&path, "'/tmp/helper'").unwrap();
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("lint"));
-        assert!(text.contains("other"));
-        assert!(text.contains(OWNER_MARKER));
-        remove_kiro_default_hook(&path).unwrap();
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("lint"));
-        assert!(text.contains("other"));
-        assert!(!text.contains(OWNER_MARKER));
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    /// Board #207: kiro-cli 2.22.1 upgrades ~/.kiro/agents/kiro_default.json to
-    /// the 3.0 ARRAY shape; our two entries are added and removed in THAT
-    /// shape — the file is the CLI's, never converted.
-    #[test]
-    fn kiro_default_hooks_array_shape_gets_and_loses_our_entries_only() {
-        let root = std::env::temp_dir().join(format!("tmm-kiro-hooks3-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("kiro_default.json");
-        std::fs::write(&path, r#"{"name":"kiro_default","hooks":[{"name":"lint","trigger":"postToolUse","action":{"type":"command","command":"lint"},"timeout":10}],"permissions":{"rules":[{"capability":"all","effect":"allow"}]}}"#).unwrap();
-        install_kiro_default(&path, "'/tmp/helper'").unwrap();
-        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        let hooks = v["hooks"].as_array().expect("still an array");
-        assert_eq!(hooks.len(), 3);
-        assert_eq!(hooks[0]["name"], "lint");
-        let triggers: Vec<&str> = hooks[1..].iter().map(|h| h["trigger"].as_str().unwrap()).collect();
-        assert_eq!(triggers, ["stop", "userPromptSubmit"]);
-        assert!(hooks[1]["action"]["command"].as_str().unwrap().contains(OWNER_MARKER));
-        // Twice is once: our entries are replaced, not duplicated.
-        install_kiro_default(&path, "'/tmp/helper'").unwrap();
-        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(v["hooks"].as_array().unwrap().len(), 3);
-        remove_kiro_default_hook(&path).unwrap();
-        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        let hooks = v["hooks"].as_array().expect("still an array after removal");
-        assert_eq!(hooks.len(), 1);
-        assert_eq!(hooks[0]["name"], "lint");
-        assert_eq!(v["permissions"]["rules"][0]["capability"], "all", "the CLI's block is untouched");
         let _ = std::fs::remove_dir_all(root);
     }
 }

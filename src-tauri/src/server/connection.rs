@@ -20,7 +20,6 @@ use crate::tmux;
 
 use super::download::{handle_http_download, looks_like_dl_request};
 use super::rpc::{handle_request, handle_subscribe, handle_unsubscribe, Request, Response, Subscriptions, ERR_AUTH, ERR_INTERNAL, ERR_PARSE};
-use super::rpc::handle_notification_request;
 use super::wire::{bytes_to_hex, decode_wire_payload, derive_key, derive_session_keys, encode_wire_payload, hex_to_bytes, provided_token_matches, HalfCipher, E2E_VERSION};
 use super::{AuthTracker, NotificationHub, Outbound, ResizeTracker,
     AUTH_LOCKOUT_SECS, AUTH_TRACKER_GC_AFTER_SECS, CONN_ID_COUNTER, MAX_AUTH_FAILURES,
@@ -599,9 +598,6 @@ where
                             handle_unsubscribe(&req.params, &mut map)
                         }
                         m if m.starts_with("hub_") => tokio::task::spawn_blocking(move || super::hub_rpc::handle_hub_request(&req, Some(&notifications_c)))
-                            .await
-                            .unwrap_or_else(|e| Response::err(None, ERR_INTERNAL, format!("task panic: {}", e))),
-                        m if m.starts_with("agent_notifications_") || m.starts_with("agent_hooks_") => tokio::task::spawn_blocking(move || handle_notification_request(&req, &notifications_c))
                             .await
                             .unwrap_or_else(|e| Response::err(None, ERR_INTERNAL, format!("task panic: {}", e))),
                         "resize_pane" => {

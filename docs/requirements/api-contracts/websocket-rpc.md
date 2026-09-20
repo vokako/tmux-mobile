@@ -107,14 +107,12 @@ Shell metacharacters rejected in args.
 The `agent_notifications_list` / `agent_notifications_mark_read` unread-inbox
 RPCs and the `agent_notification` push retired 2026-09-01 with the old
 notification-dot UI: the project room's auto-post + read cursor and the derived
-status dots are the one notification language. The hooks themselves remain — they
-feed telemetry, status derivation and the auto-post.
-
-| Method | Params | Response |
-|--------|--------|----------|
-| `agent_hooks_status` | — | Per-agent install state `{claude?: {installed}, codex?: {installed}, kiro?: {installed}}` |
-| `agent_hooks_install` | — | Installs the notify hooks into agent configs; returns updated status |
-| `agent_hooks_remove` | — | Removes them; returns updated status |
+status dots are the one notification language. The `agent_hooks_status` /
+`agent_hooks_install` / `agent_hooks_remove` management RPCs retired
+2026-09-20 (board #222): managed agents carry their hooks in the isolated
+home's rendered config, so there was nothing left for a client to manage. The
+hooks themselves remain — they feed telemetry, status derivation and the
+auto-post. All of the retired methods answer METHOD_NOT_FOUND.
 
 ### Projects (desktop-only — method-not-found on servers without `state.db`)
 A project is a workspace declaration; the tmux session is its projection. The

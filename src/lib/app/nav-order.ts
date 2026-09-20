@@ -8,6 +8,12 @@
 // order — it is thumb geography, not a preference, and the reorder gesture it
 // would need (press-and-drag) is the one the terminal already spends on
 // scrolling.
+//
+// The module also hosts the GENERIC vertical-list drop geometry
+// (`moveBefore` / `listDropAt`, and `railDropIndex` / `railDropOffset` below
+// are already shape-generic): the rail's icon order and the Connection
+// page's failover-address order (board #222) are the same drag, so the drop
+// rules live here once rather than as a second reorder dialect.
 import type { Page } from './nav-state.ts';
 
 /** The gap between the rail's two groups, as a MEMBER of the order.
@@ -133,6 +139,21 @@ export function visibleRailSlots(
 }
 
 /**
+ * Move `item` so it lands directly before `before` (or last, when `before`
+ * is null), and return a NEW list. Generic over any vertical drag list.
+ * Refuses rather than guesses: an anchor that is not in the list (a stale
+ * rect from an aborted drag) leaves the list untouched.
+ */
+export function moveBefore<T>(list: readonly T[], item: T, before: T | null): T[] {
+  if (item === before || !list.includes(item)) return [...list];
+  const rest = list.filter((x) => x !== item);
+  if (before == null) return [...rest, item];
+  const at = rest.indexOf(before);
+  if (at < 0) return [...list];
+  return [...rest.slice(0, at), item, ...rest.slice(at)];
+}
+
+/**
  * Move `slot` so it lands directly before `before` (or last, when `before` is
  * null), and return a NEW order.
  *
@@ -147,12 +168,8 @@ export function moveRailItem(
   slot: RailSlot,
   before: RailSlot | null,
 ): RailSlot[] {
-  if (slot === RAIL_GAP || slot === before || !order.includes(slot)) return [...order];
-  const rest = order.filter((s) => s !== slot);
-  if (before == null) return [...rest, slot];
-  const at = rest.indexOf(before);
-  if (at < 0) return [...order];
-  return [...rest.slice(0, at), slot, ...rest.slice(at)];
+  if (slot === RAIL_GAP) return [...order];
+  return moveBefore(order, slot, before);
 }
 
 /**
@@ -193,22 +210,37 @@ export function railDropOffset(
 }
 
 /**
- * The order a release at insertion point `index` produces — the whole commit
- * path in one place, so what ships is what the tests exercise.
+ * The list a release at insertion point `index` produces — the whole commit
+ * path in one place, so what ships is what the tests exercise. Generic over
+ * any vertical drag list whose rows were snapshotted as `rects` at drag start.
  *
- * `rects` are the RENDERED slots (hidden pages have none), which is why the
- * anchor is resolved through them and the move is applied to the FULL order:
- * the user's drop is expressed in what they can see, and the pages they cannot
- * see keep their places. An index past the last rect means "last", which is the
- * one drop that has no anchor to sit before.
+ * An index past the last rect means "last", which is the one drop that has no
+ * anchor to sit before.
  *
- * The two insertion points touching the dragged icon — just above it and just
+ * The two insertion points touching the dragged row — just above it and just
  * below it — both mean UNCHANGED, and that has to be said explicitly rather
  * than falling out of the move. Resolved through the anchor, "just below me"
- * reads as "before the next VISIBLE slot", which steps over any hidden page in
- * between: the rail looked untouched while the stored order quietly swapped the
- * dragged icon with a page the bus was hiding, and the swap only surfaced when
- * that page came back.
+ * reads as "before the next VISIBLE row", which steps over any unrendered
+ * entry in between: the list looked untouched while the stored order quietly
+ * swapped the dragged row with an entry the drag could not see.
+ */
+export function listDropAt<T>(
+  order: readonly T[],
+  item: T,
+  rects: readonly { slot: T; top: number; bottom: number }[],
+  index: number,
+): T[] {
+  const own = rects.findIndex((r) => r.slot === item);
+  if (own >= 0 && (index === own || index === own + 1)) return [...order];
+  const anchor = index < rects.length ? rects[index]!.slot : null;
+  return moveBefore(order, item, anchor);
+}
+
+/**
+ * The rail's drop commit: `listDropAt` plus the rail-only rules — the gap is
+ * never a draggable, and `rects` are the RENDERED slots (hidden pages have
+ * none), so the anchor is resolved through what the user can see while the
+ * move is applied to the FULL order and hidden pages keep their places.
  */
 export function railDropAt(
   order: readonly RailSlot[],
@@ -216,8 +248,6 @@ export function railDropAt(
   rects: readonly { slot: string; top: number; bottom: number }[],
   index: number,
 ): RailSlot[] {
-  const own = rects.findIndex((r) => r.slot === slot);
-  if (own >= 0 && (index === own || index === own + 1)) return [...order];
-  const anchor = rects[index]?.slot;
-  return moveRailItem(order, slot, anchor == null ? null : (anchor as RailSlot));
+  if (slot === RAIL_GAP) return [...order];
+  return listDropAt(order, slot, rects as readonly { slot: RailSlot; top: number; bottom: number }[], index);
 }

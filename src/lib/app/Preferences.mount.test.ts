@@ -22,7 +22,6 @@ const compiled = (async () => {
     </script>
     <Preferences {...props} />`);
     return await compileMount(pathToFileURL(entry), [
-      new URL('../core/ws.ts', import.meta.url),
       new URL('../hub/AgentsPage.svelte', import.meta.url),
     ]);
   } finally { await rm(dir, { recursive: true, force: true }); }
@@ -46,7 +45,6 @@ type AgentProps = {
 async function mount(context: TestContext, options: {
   props?: Record<string, unknown>;
   tab?: string;
-  rpc?: Record<string, (...args: any[]) => unknown>;
   agent?: (props: AgentProps) => void;
   setup?: (window: any) => void;
 } = {}) {
@@ -57,7 +55,6 @@ async function mount(context: TestContext, options: {
       register: (fn: typeof update) => { update = fn; },
     },
     modules: [
-      { agentHooksStatus: () => ({}), ...options.rpc },
       // This stub supplies only the agreed child navigation contract; it does
       // not simulate Agent draft logic, which the parent tests independently.
       { default: (_anchor: unknown, props: AgentProps) => { options.agent?.(props); } },
@@ -86,47 +83,53 @@ async function mount(context: TestContext, options: {
   };
 }
 
-test('hook commands block same-tick repeats, preserve status on failure and allow retry', async context => {
-  const install = deferred<object>();
-  let calls = 0;
+test('a failover address is removed through the one write path; the active address has no delete (board #222)', async context => {
+  const writes: string[][] = [];
   const app = await mount(context, {
-    tab: 'connection', props: { connected: true, serverInfo: { hostname: 'A', machineId: 'a' } },
-    rpc: { agentHooksInstall: () => ++calls === 1 ? install.promise
-      : { claude: { installed: true }, codex: { installed: true }, kiro: { installed: true } } },
+    tab: 'connection',
+    props: {
+      connected: true, serverInfo: { hostname: 'A', machineId: 'a' },
+      activeAddress: 'ws://a:1', addresses: ['ws://a:1', 'ws://b:2'],
+      onAddressesChange: (next: string[]) => { writes.push(next); },
+    },
   });
   try {
-    await app.wait(() => !!app.document.querySelector('.hook-backends'));
-    const button = app.button('Install');
-    button.dispatchEvent(new app.window.MouseEvent('click', { bubbles: true }));
-    button.dispatchEvent(new app.window.MouseEvent('click', { bubbles: true }));
-    assert.equal(calls, 1, 'the handler guards before Svelte updates disabled');
+    const rows = [...app.document.querySelectorAll<HTMLElement>('[data-addr-row]')];
+    assert.deepEqual(rows.map((r) => r.dataset.addrRow), ['ws://a:1', 'ws://b:2']);
+    assert.equal(rows[0]!.querySelector('.addr-del'), null, 'the live connection is not removable');
+    const del = rows[1]!.querySelector<HTMLButtonElement>('.addr-del')!;
+    assert.equal(del.getAttribute('aria-label'), 'Delete ws://b:2');
+    del.click();
     await app.flush();
-    assert.equal(button.getAttribute('aria-busy'), 'true');
-    install.reject(new Error('permission denied'));
-    await app.wait(() => app.document.body.textContent!.includes('permission denied'));
-    assert.ok(app.document.querySelector('.hook-backends'), 'confirmed status survives');
-    assert.equal(app.button('Install').disabled, false);
-    await app.click('Install');
-    await app.wait(() => app.document.body.textContent!.includes('Remove'));
-    assert.equal(calls, 2, 'retry is a new request after failure, not a duplicate');
-  } finally { install.resolve({}); await app.close(); }
+    assert.deepEqual(writes, [['ws://a:1']], 'the new list goes up; App persists it');
+  } finally { await app.close(); }
 });
 
-test('late hook replies belong to the captured connection', async context => {
-  const old = deferred<object>();
-  let calls = 0;
+test('the grip reorders from the keyboard, one step per arrow (board #222)', async context => {
+  const writes: string[][] = [];
   const app = await mount(context, {
-    tab: 'connection', props: { connected: true, serverInfo: { hostname: 'A', machineId: 'a' } },
-    rpc: { agentHooksStatus: () => ++calls === 1 ? old.promise : { claude: { installed: true }, codex: { installed: true }, kiro: { installed: true } } },
+    tab: 'connection',
+    props: {
+      connected: true, serverInfo: { hostname: 'A', machineId: 'a' },
+      activeAddress: 'ws://a:1', addresses: ['ws://a:1', 'ws://b:2', 'ws://c:3'],
+      onAddressesChange: (next: string[]) => { writes.push(next); },
+    },
   });
   try {
-    await app.update({ serverInfo: { hostname: 'B', machineId: 'b' } });
-    await app.wait(() => calls === 2);
-    await app.wait(() => app.document.body.textContent!.includes('Remove'));
-    old.resolve({});
+    const grips = [...app.document.querySelectorAll<HTMLButtonElement>('.addr-grip')];
+    assert.equal(grips.length, 3, 'every row carries the drag handle');
+    assert.equal(grips[0]!.getAttribute('aria-label'), 'Drag to set priority');
+    grips[1]!.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }));
     await app.flush();
-    assert.ok(app.button('Remove'), 'the old status cannot replace B');
-  } finally { old.resolve({}); await app.close(); }
+    // The component allocates its arrays in the window's realm; copy before comparing.
+    assert.deepEqual(writes.map((w) => [...w]), [['ws://b:2', 'ws://a:1', 'ws://c:3']]);
+    grips[1]!.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    await app.flush();
+    assert.deepEqual([...writes.at(-1)!], ['ws://a:1', 'ws://c:3', 'ws://b:2'], 'each arrow commits one step');
+    grips[0]!.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }));
+    await app.flush();
+    assert.equal(writes.length, 2, 'the top row cannot move up — no write');
+  } finally { await app.close(); }
 });
 
 test('connection commands expose pending/error and reject duplicate activation', async context => {

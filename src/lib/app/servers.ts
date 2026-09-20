@@ -179,6 +179,30 @@ function machinesMap(storage: Store): Record<string, string[]> {
   return {};
 }
 
+/**
+ * The ONE writer for a machine's failover address set (board #222): the
+ * Connection page's remove and drag-reorder both reduce to saving the new
+ * list, whose order IS the failover priority the reconnect round-robin walks.
+ * Sanitized at the door (non-empty strings, deduped, order kept); an empty
+ * set drops the key — the map holds only machines with addresses worth
+ * failing over to. Returns the list as written.
+ */
+export function saveMachineAddresses(storage: Store, machineId: string, addresses: string[]): string[] {
+  if (!machineId) return [];
+  const seen = new Set<string>();
+  const clean: string[] = [];
+  for (const a of addresses) {
+    if (typeof a !== 'string' || !a || seen.has(a)) continue;
+    seen.add(a);
+    clean.push(a);
+  }
+  const machines = machinesMap(storage);
+  if (clean.length) machines[machineId] = clean;
+  else delete machines[machineId];
+  storage.setItem('tmux_machines', JSON.stringify(machines));
+  return clean;
+}
+
 function ownerOfAddr(machines: Record<string, string[]>, addr: string): string {
   for (const [mid, addrs] of Object.entries(machines)) {
     if (Array.isArray(addrs) && addrs.includes(addr)) return mid;

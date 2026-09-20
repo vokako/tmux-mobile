@@ -29,7 +29,7 @@
   import { agentsLivesInSettings, defaultPage, restoreNav, retarget } from './lib/app/nav-state.ts';
   import { RAIL_DRAG_THRESHOLD, RAIL_GAP, RAIL_ORDER_KEY, parseRailOrder, railDropAt, railDropIndex, railDropOffset, railOrderToStore, visibleRailSlots } from './lib/app/nav-order.ts';
   import { createReconnectMachine } from './lib/app/reconnect.ts';
-  import { activateConnected, applySwitch, currentServerId, hostLabel, loadServers, migrateServers, recordServer, removeServer, renameServer } from './lib/app/servers.ts';
+  import { activateConnected, applySwitch, currentServerId, hostLabel, loadServers, migrateServers, recordServer, removeServer, renameServer, saveMachineAddresses } from './lib/app/servers.ts';
   import { anchorOf, menuPlacement, popOrigin, viewBox } from './lib/ui/placement.ts';
   import HoverCard from './lib/ui/HoverCard.svelte';
   import ContextMenu from './lib/ui/ContextMenu.svelte';
@@ -290,7 +290,11 @@
   // old one stayed lit while the socket was rebuilt). Set before the direct
   // connect, cleared when it settles either way; the row wears the running cue.
   let pendingAddress = $state('');
+  // Bumped when the Connection page edits the failover set (board #222) —
+  // localStorage is not reactive, so the derived re-reads on the bump.
+  let addrSetVersion = $state(0);
   let prefAddresses = $derived.by(() => {
+    void addrSetVersion;
     if (!serverInfo.machineId) return [];
     try {
       const machines = JSON.parse(localStorage.getItem('tmux_machines') || '{}');
@@ -1857,6 +1861,10 @@
           .finally(() => { if (pendingAddress === address) pendingAddress = ''; });
       }}
       onDisconnect={() => { page = 'settings'; doDisconnect(); }}
+      onAddressesChange={(next) => {
+        saveMachineAddresses(localStorage, serverInfo.machineId, next);
+        addrSetVersion++;
+      }}
       onConnectionSetup={() => { page = 'settings'; }} />
     </div>
     {/if}

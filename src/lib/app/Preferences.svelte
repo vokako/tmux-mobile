@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte';
+  import { flip } from 'svelte/animate';
   import Icon from '../ui/Icon.svelte';
   import CommandButton from '../ui/CommandButton.svelte';
   import Switch from '../ui/Switch.svelte';
@@ -19,7 +20,8 @@
   import { notifyEnabled, setNotifyEnabled, ensurePermission, previewCue, notifyPermission, systemNotify, notifyLevel, setNotifyLevel, NOTIFY_LEVELS, type NotifyLevel } from '../hub/notifications.ts';
   import { shortcutFromEvent, shortcutLabel, type ShortcutAction } from './shortcuts.ts';
   import { shortcuts } from './shortcuts.svelte.ts';
-  import { agentHooksInstall, agentHooksRemove, agentHooksStatus } from '../core/ws.ts';
+  import { moveMs } from '../ui/motion.ts';
+  import { RAIL_DRAG_THRESHOLD, listDropAt, railDropIndex, railDropOffset } from './nav-order.ts';
   import AgentsPage from '../hub/AgentsPage.svelte';
 
   let {
@@ -49,6 +51,7 @@
     agentsEditRequest = null,
     openRequest = null,
     onAddress = () => {},
+    onAddressesChange = () => {},
     onDisconnect = () => {},
     onConnectionSetup = () => {},
     serverName = '',
@@ -91,6 +94,10 @@
      *  phone lands here. */
     openRequest?: { tab: string; n: number } | null;
     onAddress?: (address: string) => void | Promise<void>;
+    /** The failover set's ONE write path (board #222): a remove and a
+     *  drag-reorder both hand up the new list — its order IS the priority.
+     *  App persists it through servers.ts's saveMachineAddresses. */
+    onAddressesChange?: (addresses: string[]) => void;
     onDisconnect?: () => void | Promise<void>;
     onConnectionSetup?: () => void | Promise<void>;
     /** The current connected hostname (auth result; URL host before auth). */
@@ -236,14 +243,6 @@
   });
   let recordingShortcut = $state<ShortcutAction | ''>('');
   let shortcutError = $state('');
-  type HookAgentStatus = { installed?: boolean };
-  type HookStatus = { claude?: HookAgentStatus; codex?: HookAgentStatus; kiro?: HookAgentStatus };
-  let hookStatus = $state<HookStatus | null>(null);
-  let hookBusy = $state(false);
-  let hookError = $state('');
-  let hookLoaded = false;
-  let hookOwner: string | null = null;
-  let hookGeneration = 0;
   const commandState = () => ({ pending: false, error: '' });
   const connectionCommands = () => ({
     optimize: commandState(), share: commandState(), address: commandState(),
@@ -260,6 +259,94 @@
     catch (error) { if (alive) state.error = errorText(error); }
     finally { if (alive) state.pending = false; }
   }
+
+  // ── Failover-set management (board #222) ────────────────────────────────
+  // The address list's order IS the failover priority the reconnect
+  // round-robin walks. A row's × removes one alternate (the ACTIVE address is
+  // not removable — it is the live connection); the grip drags a row to its
+  // new priority. The drag speaks the rail's reorder idiom (nav-order.ts):
+  // a threshold so a press stays a press, geometry snapshotted at drag start
+  // (the carried row moves by transform and reflows nothing), an accent
+  // insertion line, and the commit computed from the SAME index on release.
+  // Unlike the rail the grip, not the row, is the handle: the row is already
+  // a switch command, and on touch a whole-row vertical drag would fight the
+  // page's scroll — the grip opts out of scrolling with `touch-action: none`.
+  let addrDrag = $state<{ address: string; dy: number; idx: number; listTop: number; rects: { slot: string; top: number; bottom: number }[] } | null>(null);
+  let addrPress: { address: string; y: number; el: HTMLElement } | null = null; // pre-threshold bookkeeping; deliberately not reactive
+
+  function removeAddress(address: string) {
+    if (pendingAddress || commands.address.pending) return;
+    onAddressesChange(addresses.filter((a) => a !== address));
+  }
+
+  function addrPointerDown(e: PointerEvent, address: string) {
+    if (e.button !== 0 || pendingAddress || commands.address.pending) return;
+    addrPress = { address, y: e.clientY, el: e.currentTarget as HTMLElement };
+    // Captured at once so a fast drag off the small grip keeps reporting here
+    // instead of to whatever it passes over.
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+  function addrPointerMove(e: PointerEvent) {
+    if (!addrPress) return;
+    const dy = e.clientY - addrPress.y;
+    if (!addrDrag) {
+      if (Math.abs(dy) < RAIL_DRAG_THRESHOLD) return;
+      const list = addrPress.el.closest('.address-list');
+      if (!list) return;
+      addrDrag = {
+        address: addrPress.address, dy, idx: 0,
+        listTop: list.getBoundingClientRect().top,
+        rects: [...list.querySelectorAll('[data-addr-row]')].map((el) => {
+          const r = el.getBoundingClientRect();
+          return { slot: (el as HTMLElement).dataset.addrRow!, top: r.top, bottom: r.bottom };
+        }),
+      };
+    }
+    addrDrag.dy = dy;
+    addrDrag.idx = railDropIndex(addrDrag.rects, e.clientY);
+  }
+  function addrPointerUp() {
+    if (addrDrag) {
+      // Committed with the SAME index the insertion line was drawn from, so
+      // the row can only land where the line said it would.
+      onAddressesChange(listDropAt(addresses, addrDrag.address, addrDrag.rects, addrDrag.idx));
+    }
+    addrPress = null;
+    addrDrag = null;
+  }
+  function addrCancelDrag() {
+    addrPress = null;
+    addrDrag = null;
+  }
+  /** The keyboard form of the same reorder: one step per arrow, committed at
+   *  once — there is no drag in flight to cancel. */
+  function addrGripKey(e: KeyboardEvent, address: string) {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    const i = addresses.indexOf(address);
+    const j = e.key === 'ArrowUp' ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= addresses.length) return;
+    const next = [...addresses];
+    [next[i], next[j]] = [next[j]!, next[i]!];
+    onAddressesChange(next);
+  }
+  // Escape abandons a drag and a resize invalidates its snapshotted rects —
+  // the same dismissal contract every transient layer here follows. The
+  // window-level pointerup is a safety net: if the captured grip stops
+  // existing mid-drag, the list never sees the release and a carried row
+  // would be stranded on screen.
+  $effect(() => {
+    if (!addrDrag) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); addrCancelDrag(); } };
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('resize', addrCancelDrag);
+    window.addEventListener('pointerup', addrPointerUp, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('resize', addrCancelDrag);
+      window.removeEventListener('pointerup', addrPointerUp, true);
+    };
+  });
   /** The embedded AgentsPage's own back chain, and whether it is showing an
    *  editor (which brings its own page head). */
   let agentsBack: (() => boolean) | null = null;
@@ -278,20 +365,14 @@
       untrack(() => selectTab('appearance', undefined, undefined, false));
     }
   });
+  let commandsOwner: string | null = null;
   $effect(() => {
     const owner = connected ? serverInfo.machineId || activeAddress : null;
-    const online = connected, category = tab;
     untrack(() => {
-      if (owner !== hookOwner) {
-        hookOwner = owner;
-        hookGeneration++;
-        hookLoaded = false;
-        hookStatus = null;
-        hookBusy = false;
-        hookError = '';
+      if (owner !== commandsOwner) {
+        commandsOwner = owner;
         commands = connectionCommands();
       }
-      if (online && category === 'connection' && !hookLoaded) loadHookStatus();
     });
   });
 
@@ -307,33 +388,6 @@
       acceptedAgentRequest = req.tab === 'agents' ? edit : null;
     }, () => openRequest?.n === req.n && openRequest.tab === req.tab));
   });
-
-  async function loadHookStatus() {
-    if (!connected || hookBusy) return;
-    hookLoaded = true;
-    hookBusy = true;
-    hookError = '';
-    const generation = hookGeneration;
-    try {
-      const result = await agentHooksStatus();
-      if (alive && generation === hookGeneration) hookStatus = result;
-    } catch (error) {
-      if (alive && generation === hookGeneration) hookError = errorText(error);
-    } finally { if (alive && generation === hookGeneration) hookBusy = false; }
-  }
-
-  async function updateHooks(install: boolean) {
-    if (!connected || hookBusy) return;
-    hookBusy = true;
-    hookError = '';
-    const generation = hookGeneration;
-    try {
-      const result = install ? await agentHooksInstall() : await agentHooksRemove();
-      if (alive && generation === hookGeneration) hookStatus = result;
-    } catch (error) {
-      if (alive && generation === hookGeneration) hookError = errorText(error);
-    } finally { if (alive && generation === hookGeneration) hookBusy = false; }
-  }
 
   async function saveFont(role: keyof typeof fontState) {
     const state = fontState[role];
@@ -686,47 +740,53 @@
             {/each}
             <!-- One status-dot language (design-language.md §Colour): at rest
                  achromatic, the current address accent, the one still dialing
-                 accent + `.live-dot` — the same cue an agent in motion wears. -->
-            <div class="address-list">
-              {#each (addresses.length ? addresses : [activeAddress]) as address}
+                 accent + `.live-dot` — the same cue an agent in motion wears.
+                 The wrapper row exists so the list can `animate:flip` (Svelte
+                 wants the animated element to be the each block's only child);
+                 it also CARRIES the dragged row: the inline transform follows
+                 the pointer with no transition, and on release the flip
+                 measures from that translated rect, so the row settles from
+                 under the finger into its new slot instead of jumping back. -->
+            <div class="address-list" class:reordering={!!addrDrag} role="group" aria-label={t('addresses')}
+              onpointermove={addrPointerMove} onpointerup={addrPointerUp} onpointercancel={addrCancelDrag}>
+              {#each (addresses.length ? addresses : [activeAddress]) as address (address)}
                 {@const pending = address === pendingAddress}
-                <button type="button" class="config-input address-choice" class:active={address === activeAddress} class:pending aria-busy={pending || undefined}
-                  disabled={!!pendingAddress || commands.address.pending}
-                  use:hoverInfo={() => ({ title: address, lines: [pending
-                    ? { label: t('status'), value: t('connecting'), tone: 'warn' }
-                    : address === activeAddress ? { label: t('status'), value: t('serverCurrent'), tone: 'accent' }
-                    : { label: t('status'), value: t('addressAlternate') }] })}
-                  onclick={() => { if (address !== activeAddress && !pendingAddress) void runCommand(commands.address, () => onAddress(address)); }}>
-                  <span class="addr-dot" class:live-dot={pending}></span><span class="addr-text">{address}</span>
-                </button>
+                {@const active = address === activeAddress}
+                <div class="address-row" class:lifted={addrDrag?.address === address}
+                  style:transform={addrDrag?.address === address ? `translateY(${addrDrag.dy}px)` : null}
+                  data-addr-row={address} animate:flip={{ duration: moveMs() }}>
+                  {#if addresses.length > 1}
+                    <button type="button" class="addr-grip" aria-label={t('addressDrag')}
+                      disabled={!!pendingAddress || commands.address.pending}
+                      onpointerdown={(e) => addrPointerDown(e, address)}
+                      onkeydown={(e) => addrGripKey(e, address)}>
+                      <Icon name="grip" size={13} />
+                    </button>
+                  {/if}
+                  <button type="button" class="config-input address-choice" class:active class:pending aria-busy={pending || undefined}
+                    disabled={!!pendingAddress || commands.address.pending}
+                    use:hoverInfo={() => ({ title: address, lines: [pending
+                      ? { label: t('status'), value: t('connecting'), tone: 'warn' }
+                      : active ? { label: t('status'), value: t('serverCurrent'), tone: 'accent' }
+                      : { label: t('status'), value: t('addressAlternate') }] })}
+                    onclick={() => { if (!active && !pendingAddress) void runCommand(commands.address, () => onAddress(address)); }}>
+                    <span class="addr-dot" class:live-dot={pending}></span><span class="addr-text">{address}</span>
+                  </button>
+                  {#if addresses.length && !active}
+                    <button type="button" class="addr-del" aria-label={`${t('delete')} ${address}`}
+                      disabled={!!pendingAddress || commands.address.pending}
+                      onclick={() => removeAddress(address)}>
+                      <Icon name="x" size={11} />
+                    </button>
+                  {/if}
+                </div>
               {/each}
+              {#if addrDrag}
+                <div class="addr-drop appear" aria-hidden="true"
+                  style:top="{(railDropOffset(addrDrag.rects, addrDrag.idx) ?? addrDrag.listTop) - addrDrag.listTop}px"></div>
+              {/if}
             </div>
             {#if commands.address.error}<div class="config-error appear" role="alert">{commands.address.error}</div>{/if}
-            <div class="preference-row">
-              <div class="pref-label"><strong class="config-field-label">{t('agentNotifications')}</strong></div>
-              <div class="pref-control">
-                <div class="hook-control">
-                {#if hookStatus}
-                  <span class="hook-backends">
-                    {#each [['claude', 'Claude'], ['codex', 'Codex'], ['kiro', 'Kiro']] as [id, name]}
-                      {@const installed = hookStatus[id as keyof HookStatus]?.installed}
-                      <span class:on={installed} aria-label={`${name}: ${t(installed ? 'on' : 'off')}`}>
-                        <Icon name={installed ? 'check' : 'minus'} size={14} />{name}
-                      </span>
-                    {/each}
-                  </span>
-                  {#if hookStatus.claude?.installed && hookStatus.codex?.installed && hookStatus.kiro?.installed}
-                    <CommandButton label={t('agentHooksRemove')} icon="minus" pending={hookBusy} onclick={() => updateHooks(false)} />
-                  {:else}
-                    <CommandButton label={t('agentHooksInstall')} icon="plus" pending={hookBusy} onclick={() => updateHooks(true)} />
-                  {/if}
-                {:else}
-                  <CommandButton label={t('agentHooksCheck')} icon="refresh" pending={hookBusy} onclick={loadHookStatus} />
-                {/if}
-                </div>
-                {#if hookError}<div class="config-error appear" role="alert">{hookError}</div>{/if}
-              </div>
-            </div>
           {:else}
             <div class="empty-connection">
               <span class="config-note">{t('notConnected')}</span>
@@ -803,14 +863,46 @@
   .connection-title > div:first-child { display: flex; flex-direction: column; gap: var(--config-label-gap); min-width: 0; }
   .connection-id { font-family: var(--font-mono); user-select: text; }
   .conn-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-  .address-list { display: flex; flex-direction: column; gap: 8px; }
-  .address-choice { display: flex; align-items: center; gap: 8px; text-align: left; cursor: pointer; }
+  .address-list { display: flex; flex-direction: column; gap: 8px; position: relative; }
+  .address-row { display: flex; align-items: center; gap: 6px; }
+  /* Lifted = carrying the dragged row: it paints over its neighbours. */
+  .address-row.lifted { position: relative; z-index: 2; }
+  .address-choice { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; text-align: left; cursor: pointer; }
   .address-choice.active { border-color: var(--accent-line); background: var(--accent-bg); color: var(--accent-ink); }
   .addr-text { min-width: 0; overflow-x: auto; white-space: nowrap; font-family: var(--font-mono); }
   .addr-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--status-sleep);transition:background var(--t-fast)}
   .address-list button.active .addr-dot,.address-list button.pending .addr-dot{background:var(--accent)}
-  .hook-control, .hook-backends { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-  .hook-backends span { display: inline-flex; align-items: center; gap: 4px; color: var(--text2); font-size: var(--fs-sub); }
-  .hook-backends span.on { color: var(--accent-ink); }
+  /* The drag handle: quiet at rest, `touch-action: none` so a touch drag
+     reorders instead of scrolling the page (the row itself stays a switch
+     command, so the gesture needs its own target). */
+  .addr-grip {
+    flex: none; width: 28px; height: 28px; padding: 0; display: grid; place-items: center;
+    border: none; border-radius: var(--ui-radius-control); background: none;
+    color: var(--text3); cursor: grab; touch-action: none;
+    -webkit-tap-highlight-color: transparent; transition: color var(--t-fast), background var(--t-fast);
+  }
+  .addr-grip:hover:not(:disabled) { color: var(--text2); background: var(--bg3); }
+  .addr-grip:disabled { opacity: 0.4; cursor: default; }
+  .addr-del {
+    flex: none; padding: 8px 10px; border: none; background: none;
+    color: var(--text3); cursor: pointer; -webkit-tap-highlight-color: transparent;
+    transition: color var(--t-fast);
+  }
+  .addr-del:hover:not(:disabled) { color: var(--danger); }
+  .addr-del:disabled { opacity: 0.4; cursor: default; }
+  /* Mid-drag the pointer's row wears the accent selection it already uses for
+     "active"; the insertion point is an accent LINE on the edge the row would
+     push down — the rail's drag grammar, unchanged. */
+  .address-list.reordering { cursor: grabbing; user-select: none; }
+  .address-list.reordering .addr-grip { cursor: grabbing; }
+  .address-row.lifted .address-choice {
+    border-color: var(--accent-line); background: var(--accent-bg); color: var(--accent-ink);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  }
+  .addr-drop {
+    position: absolute; left: 0; right: 0; height: 2px;
+    background: var(--accent); border-radius: 1px;
+    z-index: 1; pointer-events: none;
+  }
   .empty-connection { display: flex; flex-direction: column; align-items: flex-start; gap: var(--config-field-gap); }
 </style>

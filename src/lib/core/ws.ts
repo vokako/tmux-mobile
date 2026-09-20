@@ -766,10 +766,6 @@ export const fsUpload = (path: string, data: string) => call('fs_upload', { path
 export const fsConvert = (path: string, format = 'html') => call('fs_convert', { path, format });
 export const gitCmd = (subcmd: string, args: string[] = [], cwd?: string) => call<{ code: number; stdout: string; stderr: string }>('git', { subcmd, args, cwd });
 
-export const agentHooksStatus = () => call('agent_hooks_status');
-export const agentHooksInstall = () => call('agent_hooks_install');
-export const agentHooksRemove = () => call('agent_hooks_remove');
-
 // Declarative projects (desktop server only — state.db is not built for
 // mobile). Like team_*, these reject with method-not-found on a server without
 // support and the Projects section hides itself.

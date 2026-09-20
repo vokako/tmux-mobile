@@ -52,14 +52,17 @@ Rust-based WebSocket server providing JSON-RPC interface to tmux and filesystem 
 - Git operations whitelisted to safe subset, shell metacharacters rejected in args
 - iframe sandbox: `allow-same-origin` only (no scripts)
 
-## Agent hooks RPC
+## Agent hooks
 
-- `agent_hooks_status`, `agent_hooks_install`, and `agent_hooks_remove` manage only tmux-mobile-owned Claude Code, Codex, and Kiro hooks.
+- There is no client-facing hooks RPC. Managed agents carry their hooks in the
+  isolated home's rendered config (spawn / `refresh_hooks`), so the
+  `agent_hooks_status` / `agent_hooks_install` / `agent_hooks_remove`
+  management surface retired 2026-09-20 (board #222) together with the
+  user-space installers; an old client's call gets METHOD_NOT_FOUND.
 - The hooks feed telemetry (status derivation, tool/prompt rows), the managed
   stop-hook auto-post into the project room, and the per-window conversation-id
   memory that project restore resumes with.
 - The unread-inbox surface retired 2026-09-01: `agent_notifications_list`,
   `agent_notifications_mark_read` and the `agent_notification` push are no
-  longer served — an old client's call gets METHOD_NOT_FOUND (soft error, same
-  dispatcher still answers `agent_hooks_*`; a boundary test pins both). The
+  longer served — an old client's call gets METHOD_NOT_FOUND. The
   room's auto-post + read cursor and the derived status dots carry the signal.

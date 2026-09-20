@@ -111,9 +111,37 @@ test('category and address rows explain themselves with the one hover card (moti
   }
   // An address row: the address and its state (current / dialing / alternate);
   // the dialing cue used to be a native title — the card replaces it.
-  const addr = source.match(/<button type="button" class="config-input address-choice" class:active=\{address === activeAddress\} class:pending[\s\S]*?onclick=/u)?.[0] ?? '';
+  assert.match(source, /\{@const active = address === activeAddress\}/u);
+  const addr = source.match(/<button type="button" class="config-input address-choice" class:active class:pending[\s\S]*?onclick=/u)?.[0] ?? '';
   assert.match(addr, /use:hoverInfo=\{\(\) => \(\{ title: address, lines: \[pending/u);
   assert.doesNotMatch(addr, /title=/u);
+});
+
+test('failover addresses are removable and drag-reorderable through ONE write path (board #222)', () => {
+  // The list's order IS the failover priority the reconnect round-robin walks.
+  // Remove and reorder never touch storage themselves: both hand the new list
+  // to App's onAddressesChange, which persists through servers.ts's
+  // saveMachineAddresses — the map's one writer.
+  assert.match(source, /onAddressesChange\?: \(addresses: string\[\]\) => void/u);
+  assert.match(source, /onAddressesChange\(addresses\.filter\(\(a\) => a !== address\)\)/u, 'remove hands up the filtered list');
+  assert.match(source, /onAddressesChange\(listDropAt\(addresses, addrDrag\.address, addrDrag\.rects, addrDrag\.idx\)\)/u,
+    'the drop commits from the SAME index the insertion line was drawn from');
+  // The drag is the rail's idiom, not a second dialect: the shared threshold
+  // and drop geometry come from nav-order.ts, the carried row moves by
+  // transform, and the commit animates with the shared flip tempo.
+  assert.match(source, /import \{ RAIL_DRAG_THRESHOLD, listDropAt, railDropIndex, railDropOffset \} from '\.\/nav-order\.ts'/u);
+  assert.match(source, /as address \(address\)/u, 'a keyed each — flip needs stable identity');
+  assert.match(source, /animate:flip=\{\{ duration: moveMs\(\) \}\}/u);
+  // The grip, not the row, is the handle: the row is already a switch command,
+  // and on touch a whole-row vertical drag would fight the page's scroll.
+  assert.match(source, /class="addr-grip" aria-label=\{t\('addressDrag'\)\}/u);
+  assert.match(source, /onkeydown=\{\(e\) => addrGripKey\(e, address\)\}/u, 'the keyboard form of the same reorder');
+  assert.match(style, /\.addr-grip \{[^}]*touch-action: none/u, 'the grip opts out of scrolling');
+  // The ACTIVE address is the live connection — it is never removable.
+  assert.match(source, /\{#if addresses\.length && !active\}[\s\S]{0,200}?class="addr-del"/u);
+  // The legacy agent-hooks management surface is gone whole (board #222): the
+  // UI, its RPC wrappers and its state left together.
+  assert.doesNotMatch(source, /agentHooks|hook-backends|hook-control|hookStatus/u);
 });
 
 test('the category list and a switched category unfold instead of flashing (motion.md §1.15, board #86)', () => {
@@ -147,7 +175,6 @@ test('settings controls use labels and values, not a subtitle under every row (b
     'uiFontBodyHint', 'uiFontDisplayHint', 'uiZoomHint', 'hubNotifyHint',
     'hubNotifyLevelHint', 'hubNotifyTestHint', 'fontFamilyHint', 'fontSizeHint',
     'lineHeightHint', 'shortcutGlobalScope', 'shortcutTerminalScope', 'debugHint',
-    'agentNotificationsHint',
   ]) {
     assert.doesNotMatch(source, new RegExp(`<small>\\{t\\('${key}'\\)\\}<\\/small>`, 'u'),
       `${key} must not become persistent tutorial copy`);

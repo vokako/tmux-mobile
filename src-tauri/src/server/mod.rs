@@ -343,10 +343,6 @@ mod golden_errors {
         check("fs_convert ext", rpc("fs_convert", serde_json::json!({"path": "x.docx"})), ERR_INVALID_PARAMS, "unsupported file type: .docx");
         check("resize_pane", rpc("resize_pane", serde_json::json!({})), ERR_INTERNAL, "resize_pane handled elsewhere");
         check("unknown method", rpc("nope", serde_json::json!({})), ERR_METHOD_NOT_FOUND, "unknown method: nope");
-        let root = std::env::temp_dir().join(format!("tmm-golden-{}", uuid::Uuid::new_v4()));
-        let nhub = crate::agent_notifications::AgentNotificationHub::load_at_for_tests(root);
-        check("unknown notification method", handle_notification_request(&req("agent_nope", serde_json::json!({})), &nhub),
-            ERR_METHOD_NOT_FOUND, "unknown agent notification method: agent_nope");
 
         // `restart failed: {e}` needs a live tmux session with a managed agent
         // whose relaunch fails — not reachable here, so the literal is pinned

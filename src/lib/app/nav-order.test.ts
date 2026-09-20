@@ -6,6 +6,8 @@ import {
   RAIL_GAP,
   RAIL_PAGES,
   isDefaultRailOrder,
+  listDropAt,
+  moveBefore,
   moveRailItem,
   normalizeRailOrder,
   parseRailOrder,
@@ -236,4 +238,30 @@ test('a whole gesture: the icon lands where the line was drawn', () => {
   for (const bad of [rects.length + 5, 99]) {
     assert.deepEqual([...railDropAt(order, 'files', rects, bad)].sort(), [...order].sort());
   }
+});
+
+test('the generic list drop is the same drag the rail speaks (board #222)', () => {
+  // The Connection page's failover addresses reorder through moveBefore /
+  // listDropAt — the rail's commit rules with no rail vocabulary: no gap, no
+  // hidden slots, every rendered row has a rect.
+  const list = ['ws://lan:1', 'ws://tail:2', 'wss://wan:3'];
+  assert.deepEqual(moveBefore(list, 'wss://wan:3', 'ws://lan:1'), ['wss://wan:3', 'ws://lan:1', 'ws://tail:2']);
+  assert.deepEqual(moveBefore(list, 'ws://lan:1', null), ['ws://tail:2', 'wss://wan:3', 'ws://lan:1'],
+    'a null anchor lands last');
+  assert.deepEqual(moveBefore(list, 'ws://lan:1', 'ws://lan:1'), list, 'dropping on itself is a no-op');
+  assert.deepEqual(moveBefore(list, 'ws://ghost:9', 'ws://lan:1'), list, 'an item the list never had moves nothing');
+  assert.deepEqual(moveBefore(list, 'ws://lan:1', 'ws://ghost:9'), list, 'a stale anchor refuses rather than guesses');
+
+  const rects = [
+    { slot: 'ws://lan:1', top: 10, bottom: 46 },
+    { slot: 'ws://tail:2', top: 54, bottom: 90 },
+    { slot: 'wss://wan:3', top: 98, bottom: 134 },
+  ];
+  assert.deepEqual(listDropAt(list, 'wss://wan:3', rects, 0), ['wss://wan:3', 'ws://lan:1', 'ws://tail:2']);
+  assert.deepEqual(listDropAt(list, 'ws://lan:1', rects, 3), ['ws://tail:2', 'wss://wan:3', 'ws://lan:1'],
+    'an index past the last rect is the one drop with no anchor');
+  // The insertion points touching the dragged row — just above and just below
+  // it — both mean UNCHANGED, said explicitly rather than falling out of the move.
+  assert.deepEqual(listDropAt(list, 'ws://tail:2', rects, 1), list);
+  assert.deepEqual(listDropAt(list, 'ws://tail:2', rects, 2), list);
 });

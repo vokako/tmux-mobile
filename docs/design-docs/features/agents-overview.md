@@ -296,9 +296,11 @@ was touched.
   into each session regardless of `KIRO_HOME`; tmux 3.6a reports
   `pane_dead_signal` as a number. Re-measure on the next kiro-cli release.
 - **The global `~/.kiro/agents/kiro_default.json`** is the CLI's file: 2.22.1
-  upgrades it to the array shape, older installs keep the object.
-  `install_kiro_default` / `remove_kiro_default_hook` add and remove our two
-  marked entries in WHICHEVER shape the file has, never converting it.
+  upgrades it to the array shape, older installs keep the object. The
+  user-space installers that once merged our marked entries into it retired
+  with the Settings hooks surface (board #222) — managed agents carry hooks
+  in their isolated home, and the global path was never reliable for
+  observation anyway (it is shadowed by the built-in `kiro_default`).
 
 **Rollout** (the owner's move, not the app's): 1) set `kiro_engine = "v3"` in
 `config.toml` (the running server reads it at the next spawn/refresh; the

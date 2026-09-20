@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   CURRENT_KEY, MACHINE_PREFIX, MAX_SERVERS, SERVERS_KEY, STATE_PREFIX,
   activateConnected, applySwitch, currentServerId, hostLabel, loadServers,
-  migrateServers, recordServer, removeServer, renameServer,
+  migrateServers, recordServer, removeServer, renameServer, saveMachineAddresses,
 } from './servers.ts';
 
 function mem(init: Record<string, string> = {}) {
@@ -322,4 +322,42 @@ test('removeServer with a vanished id is a harmless no-op (stale confirm, board 
   const before = loadServers(s);
   assert.equal(removeServer(s, 'gone-id').length, before.length, 'nothing filtered');
   assert.deepEqual(loadServers(s), before, 'registry byte-identical');
+});
+
+test('saveMachineAddresses: a drag-reorder persists the new priority order (board #222)', () => {
+  const s = mem({
+    tmux_machines: JSON.stringify({ 'm-a': ['ws://a-lan:1', 'wss://a-wan:443'], 'm-b': ['ws://b:2'] }),
+  });
+  const written = saveMachineAddresses(s, 'm-a', ['wss://a-wan:443', 'ws://a-lan:1']);
+  assert.deepEqual(written, ['wss://a-wan:443', 'ws://a-lan:1']);
+  const map = JSON.parse(s.getItem('tmux_machines')!);
+  assert.deepEqual(map['m-a'], ['wss://a-wan:443', 'ws://a-lan:1'], 'order IS the failover priority');
+  assert.deepEqual(map['m-b'], ['ws://b:2'], 'other machines untouched');
+});
+
+test('saveMachineAddresses: removing an address shrinks the set; the last one drops the key', () => {
+  const s = mem({
+    tmux_machines: JSON.stringify({ 'm-a': ['ws://a-lan:1', 'wss://a-wan:443'] }),
+  });
+  saveMachineAddresses(s, 'm-a', ['ws://a-lan:1']);
+  assert.deepEqual(JSON.parse(s.getItem('tmux_machines')!)['m-a'], ['ws://a-lan:1']);
+  const written = saveMachineAddresses(s, 'm-a', []);
+  assert.deepEqual(written, []);
+  assert.deepEqual(JSON.parse(s.getItem('tmux_machines')!), {}, 'an empty set leaves no key behind');
+});
+
+test('saveMachineAddresses sanitizes at the door: dedupe, drop blanks, keep first-seen order', () => {
+  const s = mem();
+  const written = saveMachineAddresses(s, 'm-a', ['ws://a:1', '', 'ws://a:1', 'ws://b:2']);
+  assert.deepEqual(written, ['ws://a:1', 'ws://b:2']);
+  assert.deepEqual(JSON.parse(s.getItem('tmux_machines')!)['m-a'], ['ws://a:1', 'ws://b:2']);
+});
+
+test('saveMachineAddresses refuses a missing machine id and an unreadable map', () => {
+  const s = mem({ tmux_machines: '{broken' });
+  assert.deepEqual(saveMachineAddresses(s, '', ['ws://a:1']), [], 'no machine id, no write');
+  assert.equal(s.getItem('tmux_machines'), '{broken', 'no machine id — the map is untouched');
+  const written = saveMachineAddresses(s, 'm-a', ['ws://a:1']);
+  assert.deepEqual(written, ['ws://a:1'], 'an unreadable map is replaced, not crashed on');
+  assert.deepEqual(JSON.parse(s.getItem('tmux_machines')!), { 'm-a': ['ws://a:1'] });
 });

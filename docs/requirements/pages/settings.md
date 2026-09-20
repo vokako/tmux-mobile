@@ -42,7 +42,10 @@ where Agents is a page of its own, reads as one plain list):
   one-time, idempotent, and never loses the current user.
 - Server info: hostname, machine ID, address; the address list marks the
   current address and shows a connecting cue on a tapped address until the
-  switch settles
+  switch settles. An alternate address is removable (the active one is not —
+  it is the live connection), and a row's grip drag (or Arrow keys on it)
+  reorders the list; the order IS the failover priority the reconnect
+  round-robin walks (board #222)
 - Language selector: EN / 中文 (`ui/Segmented`, the travelling pill)
 - Theme selector: Auto / Light / Dark (`ui/Segmented`)
 - Message notifications (own category): `ui/Switch`, persisted immediately to localStorage `tmux_notify`; turning it on is the user gesture that previews the cue and requests system-notification permission (Android's runtime prompt inside the app). The caption says when only sound can play. The separate test command plays the cue and attempts a notification; it cannot race an outstanding permission request. Moved here from the Hub header (board #72).
@@ -52,7 +55,6 @@ where Agents is a page of its own, reads as one plain list):
 - Terminal line spacing (0.40–1.60, persisted to localStorage `tmux_line_height`; applies live to every normal, split, and Team terminal)
 - Line spacing uses `ui/Slider`, with its native range semantics, visible numeric value and named reset command
 - Debug uses the same `ui/Switch` in Connection; the floating log panel retains its existing drag and position behavior
-- Connection includes the Agent hooks status row (telemetry hooks — labelled "Agent hooks", not notifications) with additive install/remove actions for Claude Code, Codex, and Kiro `kiro_default`; Codex may require one-time trust from `/hooks`
 - Desktop shortcuts default to Cmd+U / Cmd+I for previous/next page, Option+U / Option+I for previous/next Terminal window, Cmd+T for Terminal, and Cmd+F for Files
 - Shortcut bindings can be recorded, cleared with Delete/Backspace, reset to defaults, or disabled; duplicate bindings are rejected
 - Disconnect button
@@ -67,7 +69,7 @@ where Agents is a page of its own, reads as one plain list):
 - Adjust interface scale → updates the complete Tauri desktop WebView; terminal grid refits after the native zoom settles
 - Adjust terminal font size → updates Terminal view without changing the surrounding UI
 - Choose or enter a font → validate it against the device font registry, then apply and remember it; the row is pending during validation, and failure restores the confirmed family with a visible error
-- Install Agent hooks → preserve unrelated agent settings/hooks and add the tmux-mobile lifecycle helper
+- Tap an alternate address' × → it leaves the machine's failover set; drag a row's grip (or focus it and press Arrow keys) → the set's order changes; both persist to localStorage `tmux_machines` through the one writer (`servers.ts` `saveMachineAddresses`)
 - Tap disconnect → `doDisconnect()`
 
 ## API Calls

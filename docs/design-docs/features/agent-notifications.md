@@ -65,11 +65,7 @@ runtime worker it stalled every RPC sharing that thread for the duration.
   is the agent's own work (board #169): its `UserPromptSubmit` is a `Subagent`
   tool row, its `SubagentStop` is not a turn end — see agent-status.md.
 - Kiro CLI: `stop` maps to completed. Current Kiro hooks do not expose a
-  permission-wait event with the same precision as Claude or Codex. For Kiro
-  2.x, installation asks Kiro itself to materialize an editable `kiro_default`
-  config from the built-in agent, then merges only the owned Stop hook. The
-  installer also writes the v3 workspace/global hook format for forward
-  compatibility; it never edits unrelated custom agents.
+  permission-wait event with the same precision as Claude or Codex.
 - Grok 1.0.5 (camelCase `hookEventName`; `stop` counts only with reason
   `end_turn`, `stop_failure` is failed) and OMP (our own telemetry extension
   emits claude-shaped `Stop`) are read the same way.
@@ -81,8 +77,7 @@ reply is read from the session file, agents-overview.md); `UserPromptSubmit`
 carries `prompt` + `session_id` on both; v3 never delivers `preToolUse`/
 `postToolUse`. The managed profile's hooks are the 3.0 ARRAY shape
 (`{name, trigger, action:{type:"command", command}, timeout}`), accepted by
-both engines; the global `kiro_default.json` may be either shape and our
-entries follow it.
+both engines.
 
 **Where each dialect lives (board #129, 2026-09-09):** every backend's payload
 reading — `normalize_kind`, `is_user_prompt_submit`, claude's `is_idle_nudge`
@@ -123,16 +118,16 @@ are the one notification language.
 
 ## Hook Management
 
-Settings exposes install/status/remove actions in the Connection tab.
-Installation is additive: tmux-mobile identifies only hook entries that invoke
-its generated helper and preserves all unrelated user configuration. Reinstall
-replaces owned entries with the current absolute helper command, which repairs
-older quoted-tilde commands that shells cannot expand. Codex may require the
-user to approve the new hook once from `/hooks`.
-
-Team-managed agents receive the same hooks in their generated private backend
-configuration automatically. They do not depend on the user's global hook
-installation.
+Managed agents receive the hooks in their generated private backend
+configuration automatically (spawn and `refresh_hooks` render them into the
+isolated home; `helper_command` names the one generated helper). They never
+depended on the user's global hook installation — and the global install
+surface itself retired 2026-09-20 (board #222, owner: "这个页面里的agenthooks
+是不是多余了，是历史冗余 我们都删掉吧"): the Settings → Connection install/
+status/remove row, the `agent_hooks_*` RPCs and the user-space installers are
+deleted whole. Hooks a user installed globally before the retirement keep
+firing — the helper and the inbox consumer remain — they are simply no longer
+managed from the app.
 
 The generated helper and inbox are private to the local user's config directory.
 Payloads are bounded and notification summaries are truncated before
