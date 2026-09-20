@@ -128,7 +128,9 @@ danger semantics.
   a command's PAINT — the inset layer inside its hit box — takes
   `--control-paint-radius 7`, icon squares, text commands and the segmented
   track alike (on a 24px paint square `--ui-radius-control 10` or
-  `--control-radius 12` IS a circle, which is what the owner stopped). The
+  `--control-radius 12` IS a circle, which is what the owner stopped); a
+  dense `.compact-tools` group paints 20px squares and scales the corner to
+  5px with them (#219 — 7 on 20 read as circles in the Files toolbar). The
   circle/capsule exceptions, by reason: agent avatars, the composer's Send
   (`CommandButton round`, its only wearer), the switch knob/track, tags and
   chips (day/filter pills, count badges, `.pick`/AgentChip membership), input

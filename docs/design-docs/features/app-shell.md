@@ -214,7 +214,14 @@ scroller's padding so its text centre is the page head's, `padding-left: 8px +
 `padding-left: 44px` on `--t-move`, so the title slides with the track. The
 Terminal page with an open terminal already has a `.page-head` row above the
 grid (the window title), so the square never covers terminal cells and the
-grid's geometry is untouched. The rail is brand + tabs again; #215's head
+grid's geometry is untouched. **Only the three pages that have the sidebar
+show it** (board #219, owner 2026-09-20: "files页面里，多显示了折叠左侧边栏的按钮，还有
+设置这些页面也都没兼容好"): `pageHasSidebar` (hub/terminal/board) gates the node
+and puts `.side-page` on `<main>`, and the page-head room rule is keyed on
+it — Files, Settings and Agents have no sidebar, so no toggle and no indent;
+the collapsed STATE stays app-wide (#200) so hidden Terminal/Board tracks
+keep their rest position. The node is `.shell-side-toggle` (the Board owns a
+phone-only `.side-toggle` of its own). The rail is brand + tabs again; #215's head
 group and rule went with the toggle (a rule with no reason is not kept).
 Measured at 1440 on Chat, Terminal and Board, open → collapsed → open: the
 square at x=54/y=7 (28×28) in every state; head text centre 21 = square

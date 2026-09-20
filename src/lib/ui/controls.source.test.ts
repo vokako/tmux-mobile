@@ -181,7 +181,8 @@ test('a dense tool group on the phone keeps its paint but sits on a 32px pitch (
   // at 44 (More needed at 390); the APK's TEN (Git, Downloads) 390 px at 36 —
   // still 8 + More on a 360–384 phone; 338 px at 32, all ten fit at 360.
   // The paint (28 px) and the icon (17 px) are unchanged — only the pitch.
-  assert.match(css, /\.compact-tools \{ --control-paint-inset: 4px; \}/u, 'pointer: 20 px paint inside 28');
+  assert.match(css, /\.compact-tools \{ --control-paint-inset: 4px; --control-paint-radius: 5px; \}/u,
+    'pointer: 20 px paint inside 28, with the corner scaled to that paint (#219: 7px on 20px read as a circle)');
   assert.match(css, /@media \(any-pointer: coarse\)[\s\S]*?\.compact-tools \{ --control-height: 32px; --control-paint-inset: 2px; \}/u,
     'touch: 28 px paint inside 32 — the one deliberate exception to the 44 px icon hit box');
   const files = await readFile(new URL('../files/Files.svelte', import.meta.url), 'utf8');

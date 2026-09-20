@@ -1448,6 +1448,13 @@
   // page's and the Board's sidebars and the system-status bar follow it, and a
   // rail reselect on any of the three pages opens it again (#199).
   const shellSideCollapsed = $derived(connected && !layout.isTouchDevice && hubPrefs.sidebarCollapsed);
+  // Only three pages HAVE the primary sidebar; the toggle and the page-head
+  // room it takes exist there alone (board #219, owner 2026-09-20: "files页面里，
+  // 多显示了折叠左侧边栏的按钮，还有设置这些页面也都没兼容好"). The collapsed state
+  // itself stays app-wide (#200) so the hidden Terminal/Board tracks keep
+  // their rest position while another page is on screen.
+  const SIDEBAR_PAGES = new Set(['hub', 'terminal', 'board']);
+  const pageHasSidebar = $derived(SIDEBAR_PAGES.has(page));
   // A reselect TOGGLES (owner, 2026-09-14: "选中点击也能展开，也能折叠"; board #201).
   pageReselect.terminal = pageReselect.board = () => hubPrefs.setSidebarCollapsed(!hubPrefs.sidebarCollapsed);
   // The Terminal page moves its track the way the Hub does (reveal.ts): the
@@ -1610,7 +1617,7 @@
   });
 </script>
 
-<main class:with-rail={connected && !layout.isTouchDevice} class:touch-layout={connected && layout.isTouchDevice} class:side-collapsed={shellSideCollapsed}>
+<main class:with-rail={connected && !layout.isTouchDevice} class:touch-layout={connected && layout.isTouchDevice} class:side-collapsed={shellSideCollapsed} class:side-page={pageHasSidebar}>
   <!-- Shell chrome. Every nav item is in the Tab order (no tabindex="-1" —
        review, 2026-09-03: the whole nav was unreachable by keyboard) and wears
        the global button:focus-visible ring; the current page is aria-current.
@@ -1718,11 +1725,13 @@
          reselect delegate (#199/#201): the Hub keeps its reading anchor,
          Terminal/Board their reveal effects (#200). The heads make room for
          it through `.side-toggle-row` / `.page-head` (app.css). -->
-    <div class="side-toggle">
-      <CommandButton variant="secondary" iconOnly icon="panel-left" expanded={!hubPrefs.sidebarCollapsed} inside
-        label={hubPrefs.sidebarCollapsed ? t('hubSidebarExpand') : t('hubSidebarCollapse')}
-        onclick={toggleShellSidebar} />
-    </div>
+    {#if pageHasSidebar}
+      <div class="shell-side-toggle">
+        <CommandButton variant="secondary" iconOnly icon="panel-left" expanded={!hubPrefs.sidebarCollapsed} inside
+          label={hubPrefs.sidebarCollapsed ? t('hubSidebarExpand') : t('hubSidebarCollapse')}
+          onclick={toggleShellSidebar} />
+      </div>
+    {/if}
   {/if}
 
   <!-- Server system vitals (board #85): ONE shell-level instance. Desktop
@@ -2106,7 +2115,7 @@
      inset, centred on the page-head row. Fixed, so neither the collapsing
      track nor a page's own scrolling moves it; above page content, below
      popovers (rail 12, menus 24). The heads' reservations live in app.css. */
-  .side-toggle {
+  .shell-side-toggle {
     position: fixed; z-index: 11;
     left: calc(46px + var(--side-toggle-x));
     top: calc((var(--page-head-h) - var(--control-height)) / 2);

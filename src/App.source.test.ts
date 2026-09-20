@@ -610,7 +610,7 @@ test('one shell-wide sidebar state: the Terminal page and the system status foll
   // Owner 2026-09-14: "左侧边栏收起的时候，底下的系统状态显示也要收起，而且这个折叠收起在不同的
   // 页面是同步的，不然我点击chat terminal board，展开状态不一致".
   assert.match(source, /const shellSideCollapsed = \$derived\(connected && !layout\.isTouchDevice && hubPrefs\.sidebarCollapsed\);/u);
-  assert.match(source, /<main class:with-rail=\{[^}]+\} class:touch-layout=\{[^}]+\} class:side-collapsed=\{shellSideCollapsed\}>/u);
+  assert.match(source, /<main class:with-rail=\{[^}]+\} class:touch-layout=\{[^}]+\} class:side-collapsed=\{shellSideCollapsed\} class:side-page=\{pageHasSidebar\}>/u);
   assert.match(source, /pageReselect\.terminal = pageReselect\.board = \(\) => hubPrefs\.setSidebarCollapsed\(!hubPrefs\.sidebarCollapsed\);/u, '#199 on every page, a toggle since #201');
   assert.match(source, /<Board session=\{filesSession\} visible=\{page === 'board'\} sideCollapsed=\{shellSideCollapsed\}/u);
   // The Terminal page's track is the Hub's technique: factor, gate, pin, hidden at rest.
@@ -639,13 +639,18 @@ test('THE sidebar toggle is one fixed shell node at the content area\'s top-left
   const rail = source.match(/<nav\s+class="rail"[\s\S]*?<\/nav>/u)?.[0] ?? '';
   assert.doesNotMatch(rail, /CommandButton|panel-left|rail-head/u, 'the rail is brand + tabs again; no toggle, no head group, no rule');
   assert.match(source, /<img class="rail-brand"[^>]*\/>\s*\n\s*\{#each railSlots as slot \(slot\)\}/u, 'the brand is followed by the tabs');
-  assert.match(source, /<\/nav>\s*\n(?:\s*<!--[\s\S]*?-->\s*\n)?\s*<div class="side-toggle">\s*<CommandButton variant="secondary" iconOnly icon="panel-left" expanded=\{!hubPrefs\.sidebarCollapsed\} inside\s+label=\{hubPrefs\.sidebarCollapsed \? t\('hubSidebarExpand'\) : t\('hubSidebarCollapse'\)\}\s+onclick=\{toggleShellSidebar\} \/>\s*<\/div>\s*\{\/if\}/u,
-    'rendered once, beside the rail, under the same desktop-connected guard; a quiet surface so it reads over a terminal');
+  assert.match(source, /<\/nav>\s*\n(?:\s*<!--[\s\S]*?-->\s*\n)?\s*\{#if pageHasSidebar\}\s*<div class="shell-side-toggle">\s*<CommandButton variant="secondary" iconOnly icon="panel-left" expanded=\{!hubPrefs\.sidebarCollapsed\} inside\s+label=\{hubPrefs\.sidebarCollapsed \? t\('hubSidebarExpand'\) : t\('hubSidebarCollapse'\)\}\s+onclick=\{toggleShellSidebar\} \/>\s*<\/div>\s*\{\/if\}\s*\{\/if\}/u,
+    'rendered once, beside the rail, under the desktop-connected guard AND only on a page that has the sidebar (#219); a quiet surface so it reads over a terminal');
+  // #219 (owner: "files页面里，多显示了折叠左侧边栏的按钮，还有设置这些页面也都没兼容好"):
+  // Files, Settings and Agents have no primary sidebar — no toggle, no head room.
+  assert.match(source, /const SIDEBAR_PAGES = new Set\(\['hub', 'terminal', 'board'\]\);\s*\n\s*const pageHasSidebar = \$derived\(SIDEBAR_PAGES\.has\(page\)\);/u);
+  assert.match(source, /class:side-collapsed=\{shellSideCollapsed\} class:side-page=\{pageHasSidebar\}/u,
+    'the collapsed state stays app-wide (#200); which page is on screen is a second class');
   assert.equal([...source.matchAll(/icon="panel-left"/gu)].length, 1, 'ONE node — never one per state or per page');
   assert.match(source, /function toggleShellSidebar\(\) \{\s*\n\s*\(pageReselect\[page\] \?\? \(\(\) => hubPrefs\.setSidebarCollapsed\(!hubPrefs\.sidebarCollapsed\)\)\)\(\);/u,
     'the same act as a reselect: the page\'s delegate, else the shared state');
   const style = source.match(/<style>[\s\S]*<\/style>/u)?.[0] ?? '';
-  const seat = style.match(/\.side-toggle \{([^}]*)\}/u)?.[1] ?? '';
+  const seat = style.match(/\.shell-side-toggle \{([^}]*)\}/u)?.[1] ?? '';
   assert.match(seat, /position: fixed/u, 'fixed: neither the track nor a page scroll moves it');
   assert.match(seat, /left: calc\(46px \+ var\(--side-toggle-x\)\)/u, 'the rail\'s width in, one inset');
   assert.match(seat, /top: calc\(\(var\(--page-head-h\) - var\(--control-height\)\) \/ 2\)/u, 'centred on the page-head row');
@@ -660,8 +665,10 @@ test('THE sidebar toggle is one fixed shell node at the content area\'s top-left
   assert.match(row, /min-height: var\(--page-head-h\)/u, 'the sidebar\'s first head is the page-head row');
   assert.match(row, /margin-top: calc\(-1 \* var\(--side-toggle-x\)\)/u, 'absorbing the scroller\'s 8px so the text centre is the page head\'s');
   assert.match(row, /padding-left: calc\(var\(--side-toggle-x\) \+ var\(--control-height\)\)/u, 'text starts 8px after the square, like the collapsed title');
-  assert.match(css, /\.with-rail\.side-collapsed \.page-head \{ padding-left: calc\(var\(--side-toggle-x\) \* 2 \+ var\(--control-height\)\); \}/u);
-  assert.match(css, /\.with-rail \.page-head \{ transition: padding-left var\(--t-move\) ease-out; \}/u, 'the title slides with the track, never jumps');
+  assert.match(css, /\.with-rail\.side-page\.side-collapsed \.page-head \{ padding-left: calc\(var\(--side-toggle-x\) \* 2 \+ var\(--control-height\)\); \}/u,
+    'the page head makes room only on a sidebar page (#219)');
+  assert.doesNotMatch(css, /\.with-rail\.side-collapsed \.page-head \{/u);
+  assert.match(css, /\.with-rail\.side-page \.page-head \{ transition: padding-left var\(--t-move\) ease-out; \}/u, 'the title slides with the track, never jumps');
   // Every desktop sidebar's first head wears the class.
   for (const [file, pattern] of [
     ['./lib/hub/Sidebar.svelte', /class="side-h side-head side-toggle-row"/u],

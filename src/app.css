@@ -119,7 +119,11 @@ html {
   --tool-inset-inline: 6px;
 }
 
-.compact-tools { --control-paint-inset: 4px; }
+/* A dense group's paint is a 20px square (28 − 2×4); the 7px command corner
+   that reads as a rounded rectangle on 24px reads as a circle there, so the
+   group scales the corner with its paint (board #219, owner 2026-09-20:
+   "files 页面里，上方的小按钮应该都是圆角矩形的形式，不要全是小圆圈的按钮"). */
+.compact-tools { --control-paint-inset: 4px; --control-paint-radius: 5px; }
 @media (any-pointer: coarse) {
   :root { --menu-row-height: 44px; --menu-font-size: var(--fs-body); }
   :root { --files-row-height: 44px; }
@@ -555,9 +559,11 @@ button:disabled {
   padding-top: 0; padding-bottom: 0; padding-left: calc(var(--side-toggle-x) + var(--control-height));
   display: flex; align-items: center;
 }
-.with-rail .page-head { transition: padding-left var(--t-move) ease-out; }
-.with-rail.side-collapsed .page-head { padding-left: calc(var(--side-toggle-x) * 2 + var(--control-height)); }
-@media (prefers-reduced-motion: reduce) { .with-rail .page-head { transition: none; } }
+.with-rail.side-page .page-head { transition: padding-left var(--t-move) ease-out; }
+/* Only while a page WITH the sidebar is on screen (#219): Files, Settings and
+   Agents have no sidebar, no toggle, and no room to make. */
+.with-rail.side-page.side-collapsed .page-head { padding-left: calc(var(--side-toggle-x) * 2 + var(--control-height)); }
+@media (prefers-reduced-motion: reduce) { .with-rail.side-page .page-head { transition: none; } }
 /* The title NEVER becomes a squeezed vertical strip: it keeps one line and
    ellipsizes (a 4-character name wrapped to four 36px-wide lines between
    five action buttons — owner report, skill editor on a phone). */
