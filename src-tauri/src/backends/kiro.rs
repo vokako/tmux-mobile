@@ -377,7 +377,11 @@ pub(crate) fn kiro_reply_from_session(jsonl: &str) -> Option<String> {
             Some("assistant") => {
                 if let Some(text) = payload.get("content").and_then(Value::as_str) {
                     let text = text.trim();
-                    if !text.is_empty() {
+                    // KAS closes a turn with a placeholder assistant row
+                    // (`"..."`, measured 2.22.1 through a managed spawn) after
+                    // the real text; a row without one letter or digit is
+                    // not the reply (board #213: it posted "..." to the room).
+                    if text.chars().any(char::is_alphanumeric) {
                         reply = Some(text.to_string());
                     }
                 }
@@ -716,13 +720,50 @@ pub(crate) fn refresh(home: &Path, window_name: &str, workspace: &Path, notify: 
     changed
 }
 
-/// kiro resume dialect: `--resume-id <id>` exact, `--resume` recent (the
-/// isolated KIRO_HOME scopes it to this one agent).
+/// kiro resume dialect, per engine (the engine is read off the launch line —
+/// `reconcile_recipe_engine` has already brought it in line with the door).
+///
+/// v2: `--resume-id <id>` exact, `--resume` recent (the isolated KIRO_HOME
+/// scopes the store to this one agent, so "recent" is safe).
+///
+/// v3 (board #213): the store is the GLOBAL `~/.kiro/sessions/<cwd-hash>/`,
+/// keyed by cwd — every managed agent of a project shares it — and its ids
+/// are `sess_<uuid>`. Only an exact v3 id resumes (measured, kiro-cli
+/// 2.22.1: same session appended, agentMode and model kept, earlier context
+/// recalled). A v2 id handed to v3 loaded a rootless "Default · Auto" session
+/// whose reply never reached the room (claude, #213), and `--resume` under v3
+/// would take the newest session of the DIRECTORY — possibly a teammate's or
+/// the human's. So anything else starts fresh; losing the v2 thread once at
+/// the switch is the owner's accepted trade ("没关系，我可以重新再开").
+///
+/// The rule is symmetric: an id is handed only to the engine that minted it.
+/// v2 given a v3 id (the rollback case — the hook recorded `sess_…` while
+/// the door was open) also came up `agent "kiro" not found, using "default"`
+/// (measured), so under v2 a v3 id falls back to `--resume`, which is the
+/// pre-switch v2 thread of this home.
 pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
-    match id {
-        Some(id) => format!("{cmd} --resume-id {}", crate::shell::quote(id)),
-        None => format!("{cmd} --resume"),
+    let v3_id = id.is_some_and(|i| i.starts_with(V3_SESSION_PREFIX));
+    if launch_engine_is_v3(cmd) {
+        return match id {
+            Some(id) if v3_id => format!("{cmd} --resume-id {}", crate::shell::quote(id)),
+            _ => cmd.to_string(),
+        };
     }
+    match id {
+        Some(id) if !v3_id => format!("{cmd} --resume-id {}", crate::shell::quote(id)),
+        _ => format!("{cmd} --resume"),
+    }
+}
+
+/// v3 session ids as the hook and the global store spell them.
+const V3_SESSION_PREFIX: &str = "sess_";
+
+/// Whether a recorded launch line runs the v3 engine (`--agent-engine v3` or
+/// the CLI's `--v3` alias).
+pub(crate) fn launch_engine_is_v3(cmd: &str) -> bool {
+    let tokens: Vec<&str> = cmd.split_whitespace().collect();
+    tokens.iter().any(|t| *t == "--v3")
+        || tokens.windows(2).any(|w| w[0] == "--agent-engine" && w[1] == "v3")
 }
 
 /// This backend's detection/relaunch row (board #129). Resume flags from
@@ -842,6 +883,48 @@ mod tests {
         // Negative control: the same words on an UNANCHORED line are prose.
         let prose = "I switched to Claude Sonnet 5 · high · ◔ 4%\n";
         assert_eq!(sniff_kiro(prose, "probe").model, None);
+    }
+
+    /// Board #213, measured on a managed v3 spawn: the turn's last assistant
+    /// row is a `"..."` placeholder AFTER the real text; a second turn after a
+    /// `session_start` row must not fall back to the first turn's text.
+    #[test]
+    fn session_reply_skips_the_placeholder_row_and_stays_in_the_last_turn() {
+        let rows = [
+            r#"{"id":1,"timestamp":1,"payload":{"type":"user","content":"[tmm chat] human: say hi"}}"#,
+            r#"{"id":2,"timestamp":2,"payload":{"type":"turn_start"}}"#,
+            r#"{"id":3,"timestamp":3,"payload":{"type":"assistant","content":"v3 ready."}}"#,
+            r#"{"id":4,"timestamp":4,"payload":{"type":"assistant","content":"..."}}"#,
+            r#"{"id":5,"timestamp":5,"payload":{"type":"turn_end"}}"#,
+        ];
+        assert_eq!(kiro_reply_from_session(&rows.join("\n")).as_deref(), Some("v3 ready."));
+        let second = [
+            r#"{"id":6,"timestamp":6,"payload":{"type":"session_start","content":"prompt"}}"#,
+            r#"{"id":7,"timestamp":7,"payload":{"type":"turn_start"}}"#,
+            r#"{"id":8,"timestamp":8,"payload":{"type":"assistant","content":"…"}}"#,
+            r#"{"id":9,"timestamp":9,"payload":{"type":"turn_end"}}"#,
+        ];
+        let all = format!("{}\n{}", rows.join("\n"), second.join("\n"));
+        assert_eq!(kiro_reply_from_session(&all), None, "a turn with only placeholders has no reply");
+    }
+
+    /// Board #213: resume follows the engine on the launch line.
+    #[test]
+    fn resume_dialect_follows_the_engine_on_the_launch_line() {
+        let v2 = "command kiro-cli chat --agent dev --trust-all-tools";
+        assert_eq!(resume_command(v2, Some("0d1b8e2a-1111")), format!("{v2} --resume-id 0d1b8e2a-1111"));
+        assert_eq!(resume_command(v2, Some("sess_abc")), format!("{v2} --resume"), "a v3 id never reaches the v2 engine: its own recent thread");
+        assert_eq!(resume_command(v2, None), format!("{v2} --resume"));
+
+        let v3 = format!("{v2} --agent-engine v3");
+        assert_eq!(resume_command(&v3, Some("sess_abc")), format!("{v3} --resume-id sess_abc"), "an exact v3 id resumes");
+        assert_eq!(resume_command(&v3, Some("0d1b8e2a-1111")), v3, "a v2 id never reaches the v3 engine: fresh");
+        assert_eq!(resume_command(&v3, None), v3, "no --resume under v3: the store is per directory, not per agent");
+        assert!(launch_engine_is_v3("kiro-cli chat --v3"));
+        assert!(!launch_engine_is_v3("kiro-cli chat --agent-engine v2"));
+        // Flipping the door back (reconcile drops the segment) restores the v2 dialect untouched.
+        let back = reconcile_engine_in(&v3, "").unwrap();
+        assert_eq!(resume_command(&back, Some("0d1b8e2a-1111")), format!("{v2} --resume-id 0d1b8e2a-1111"));
     }
 
     /// Board #207: the exact 3.0 hooks we write — no `matcher` anywhere (the

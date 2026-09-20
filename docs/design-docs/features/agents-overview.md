@@ -250,9 +250,36 @@ was touched.
   the GLOBAL session file `~/.kiro/sessions/<cwd-hash>/sess_<id>/messages.jsonl`
   — each line `{id, timestamp, payload:{type, content, …}}`, a turn
   `turn_start … turn_end` with possibly several `assistant` entries (text
-  between tool calls, then the final text). `kiro_reply_from_session` takes the
-  last assistant after the last `turn_start`; `Backend::reply_fallback` wires it
-  into the notify helper when a kiro Stop has no text (agent-status.md).
+  between tool calls, then the final text, then — measured on a managed TUI
+  spawn, board #213 — a placeholder row whose content is `"..."`).
+  `kiro_reply_from_session` takes the last assistant after the last
+  `turn_start` that carries a letter or digit (the placeholder posted `...`
+  to the room once); `Backend::reply_fallback` wires it into the notify
+  helper when a kiro Stop has no text (agent-status.md).
+- **Resume follows the engine, and an id is handed only to the engine that
+  minted it** (board #213). The recipe's `cmd` never carries a resume
+  segment; `relaunch_line` appends the backend's dialect at restart, so
+  `kiro::resume_command` reads the engine off the (already reconciled)
+  launch line. v2 ids live in the isolated home's own store; v3 ids are
+  `sess_<uuid>` in the GLOBAL `~/.kiro/sessions/<cwd-hash>/`, which every
+  managed agent of a project SHARES. Measured on kiro-cli 2.22.1: v3 given a
+  v2 id came up `Default · Auto` with no session file, so the reply never
+  reached the room (claude's rollout attempt); v2 given a v3 id came up
+  `agent "kiro" not found, using "default"`; v3 `--resume-id sess_…` resumes
+  the same session with agentMode, model and context intact; v3 `--resume`
+  would take the newest session of the DIRECTORY, possibly a teammate's or
+  the human's. Rule: v3 + `sess_` id → `--resume-id`; v3 + anything else →
+  fresh (no `--resume`); v2 + non-`sess_` id → `--resume-id`; v2 + `sess_`
+  id or none → `--resume` (this home's own newest thread — after a rollback
+  that is the pre-switch conversation). Losing the v2 thread once at the
+  first switch is the owner's accepted trade ("没关系，我可以重新再开",
+  2026-09-20). Proven end to end on a scratch project with a private server
+  and private tmux socket: spawn on v3 → reply posts; restart on v3 →
+  `--resume-id sess_…`, status `kiro · …`, recalls the previous turn, reply
+  posts; door closed → `--resume`, `kiro · auto`, reply posts; door opened
+  again with a v2 id recorded → no resume segment, `kiro · …`, reply posts;
+  the slot's `agent_session_id` follows the engine (the hook records
+  whichever id the CLI reports).
 - **The v3 status line prints the model's DISPLAY name** (`probe · Claude
   Sonnet 5 · high · ◔ 4% · Midway: 19h 19m   /ws · (branch)`; v2 prints the
   slug). `sniff_kiro` accepts a display name (`looks_like_model_name`: words
@@ -272,11 +299,15 @@ was touched.
   marked entries in WHICHEVER shape the file has, never converting it.
 
 **Rollout** (the owner's move, not the app's): 1) set `kiro_engine = "v3"` in
-`config.toml`, 2) `tmm agent restart <one scratch agent>` — its recipe gains
-` --agent-engine v3` at refresh, its workspace gains the link — 3) check
-`tmm agent list` vitals (model = display name, context, effort) and one reply
-edge (`tmm log --grep '[reply]'` after a turn), 4) then restart the real
-agents. Flip back by setting v2 and restarting: the segment and the link go.
+`config.toml` (the running server reads it at the next spawn/refresh; the
+server binary must carry #207 + #213), 2) `tmm agent restart <one scratch
+agent>` — its recipe gains ` --agent-engine v3` at refresh, its workspace
+gains the link, and its FIRST v3 start is a fresh conversation (the v2 thread
+stays in the home's store) — 3) check `tmm agent list` vitals (model =
+display name, context, effort) and one reply edge (`tmm log --grep
+'[reply]'` after a turn), 4) then restart the real agents. Flip back by
+setting v2 and restarting: the segment and the link go, and `--resume`
+returns the agent to its pre-switch v2 thread.
 
 Guards: `backends/kiro.rs` tests (reconcile, session reply, display-name
 model, patch_profile idempotence, workspace entry incl. the foreign-file
