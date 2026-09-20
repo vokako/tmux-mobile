@@ -108,6 +108,19 @@ impl Backend {
     /// and screening rules — each arm lives on the backend's file (board
     /// #129). Compiled on every target: the mobile shell consumes the same
     /// inbox envelopes.
+    /// Where a backend's Stop payload carries no reply text, the backend may
+    /// know another source (kiro --v3: the global session file, board #207).
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    pub fn reply_fallback(
+        self,
+        payload: &serde_json::Map<String, serde_json::Value>,
+    ) -> Option<String> {
+        match self {
+            Backend::Kiro => kiro::reply_fallback(payload),
+            _ => None,
+        }
+    }
+
     pub fn normalize_kind(
         self,
         payload: &serde_json::Map<String, serde_json::Value>,
@@ -181,7 +194,7 @@ impl Backend {
         skills: &[crate::projects::skills::ResolvedSkill],
     ) -> Result<crate::projects::spawn::Rendered, String> {
         match self {
-            Backend::Kiro => kiro::render_kiro(def, window_name, home, system_prompt, skills),
+            Backend::Kiro => kiro::render_kiro(def, window_name, home, workspace, system_prompt, skills),
             Backend::Claude => claude::render_claude(def, window_name, home, workspace, system_prompt, skills),
             Backend::Codex => codex::render_codex(def, window_name, home, workspace, system_prompt, skills),
             Backend::Grok => grok::render_grok(def, window_name, home, system_prompt, skills),
@@ -212,7 +225,7 @@ impl Backend {
         notifications: &crate::agent_notifications::AgentNotificationHub,
     ) -> bool {
         match self {
-            Backend::Kiro => kiro::refresh(home, window_name, &notifications.helper_command("kiro")),
+            Backend::Kiro => kiro::refresh(home, window_name, workspace, &notifications.helper_command("kiro")),
             Backend::Claude => claude::refresh(home, workspace, &notifications.helper_command("claude")),
             Backend::Codex => codex::refresh(home, &notifications.helper_command("codex")),
             Backend::Grok => grok::refresh(home, &notifications.helper_command("grok")),

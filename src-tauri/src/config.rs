@@ -16,6 +16,11 @@ struct FileConfig {
     // immediately (legacy behavior). Default 600 (10 min) so short
     // reconnects (backgrounded app, network blip) skip the reflow cycle.
     disconnect_grace_secs: Option<u64>,
+    // The kiro-cli agent engine managed kiro agents launch with: "v2" (the
+    // CLI's default, ours too) or "v3" (kiro-cli 2.22.1's KAS engine). Read
+    // at spawn and at every refresh; an agent takes it at its next restart
+    // (board #207).
+    kiro_engine: Option<String>,
 }
 
 pub struct Config {
@@ -28,6 +33,36 @@ pub struct Config {
     pub tls_key: Option<String>,
     pub scrollback: usize,
     pub disconnect_grace_secs: u64,
+    pub kiro_engine: String,
+}
+
+/// The kiro engine door, side-effect free (no token/machine-id seeding — the
+/// backend reads it at spawn/refresh time): `KIRO_ENGINE` env, else
+/// `kiro_engine` in config.toml, else "v2". Anything but v2/v3 is v2 with a
+/// note on stderr.
+pub fn kiro_engine() -> String {
+    let raw = std::env::var("KIRO_ENGINE")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| {
+            std::fs::read_to_string(config_path())
+                .ok()
+                .and_then(|t| toml::from_str::<FileConfig>(&t).ok())
+                .and_then(|c| c.kiro_engine)
+        })
+        .unwrap_or_default();
+    normalize_engine(&raw)
+}
+
+pub fn normalize_engine(raw: &str) -> String {
+    match raw.trim() {
+        "" | "v2" => "v2".into(),
+        "v3" => "v3".into(),
+        other => {
+            eprintln!("config: kiro_engine {other:?} is not v2|v3 — using v2");
+            "v2".into()
+        }
+    }
 }
 
 fn config_path() -> PathBuf {
@@ -100,6 +135,9 @@ impl Config {
                 .and_then(|s| s.parse().ok())
                 .or(file_cfg.disconnect_grace_secs)
                 .unwrap_or(600),
+            kiro_engine: normalize_engine(
+                &std::env::var("KIRO_ENGINE").ok().or(file_cfg.kiro_engine).unwrap_or_default(),
+            ),
         }
     }
 }
@@ -309,3 +347,17 @@ pub fn touch_session(name: &str) -> Result<(), String> {
     std::fs::write(session_usage_path(), json).map_err(|e| e.to_string())
 }
 
+
+#[cfg(test)]
+mod engine_tests {
+    use super::normalize_engine;
+    /// Board #207: the kiro engine door has two positions; anything else is the default.
+    #[test]
+    fn engine_door_is_v2_or_v3() {
+        assert_eq!(normalize_engine(""), "v2");
+        assert_eq!(normalize_engine("v2"), "v2");
+        assert_eq!(normalize_engine(" v3 "), "v3");
+        assert_eq!(normalize_engine("v1"), "v2", "v1 is not offered: v2");
+        assert_eq!(normalize_engine("kas"), "v2");
+    }
+}

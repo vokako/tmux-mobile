@@ -542,11 +542,12 @@ fn normalize(envelope: &InboxEnvelope) -> Result<Normalized, String> {
     // The kind decision is the backend's own dialect — each arm lives on the
     // backend's file (board #129); an unknown backend is rejected at the door
     // exactly as the old inline match did.
-    let kind = crate::backends::Backend::parse(&envelope.backend)
-        .ok_or_else(|| String::from("unsupported backend"))?
-        .normalize_kind(payload)?;
+    let backend = crate::backends::Backend::parse(&envelope.backend)
+        .ok_or_else(|| String::from("unsupported backend"))?;
+    let kind = backend.normalize_kind(payload)?;
     // The raw reply text for the auto-post path (truncated to MAX_REPLY_CHARS
-    // at the call site).
+    // at the call site). A completion without text asks the backend for its
+    // other source (kiro --v3 reads the session file, board #207).
     let raw_reply = string_field(
         payload,
         &[
@@ -557,6 +558,8 @@ fn normalize(envelope: &InboxEnvelope) -> Result<Normalized, String> {
             "task_subject",
         ],
     );
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let raw_reply = if kind == "completed" && raw_reply.is_none() { backend.reply_fallback(payload) } else { raw_reply };
     // Preserve the untruncated text for the auto-post path only when this is
     // a stop/completion event — other events have no reply body worth posting.
     let full_reply = if kind == "completed" { raw_reply } else { None };
@@ -875,21 +878,27 @@ fn install_kiro_default(path: &Path, helper: &str) -> Result<(), String> {
         }
     }
     let mut root = read_json_object(path)?;
-    let hooks = root
-        .as_object_mut()
-        .unwrap()
-        .entry("hooks")
-        .or_insert_with(|| json!({}));
+    let command = format!("{helper} kiro # {OWNER_MARKER}");
+    // The global file is the CLI's: kiro-cli 2.22.1 upgrades it to the 3.0
+    // ARRAY shape (board #207) while older installs keep the 2.0 OBJECT. Add
+    // our two entries in whichever shape the file has — never convert it.
+    let hooks = root.as_object_mut().unwrap().entry("hooks").or_insert_with(|| json!({}));
+    if let Some(list) = hooks.as_array_mut() {
+        list.retain(|value| !value.to_string().contains(OWNER_MARKER));
+        list.push(json!({ "name": "tmm-stop", "trigger": "stop", "action": { "type": "command", "command": command }, "timeout": 10 }));
+        list.push(json!({ "name": "tmm-prompt", "trigger": "userPromptSubmit", "action": { "type": "command", "command": command }, "timeout": 10 }));
+        return write_json(path, &root);
+    }
     let hooks = hooks
         .as_object_mut()
-        .ok_or("kiro_default hooks must be an object")?;
+        .ok_or("kiro_default hooks must be an object or an array")?;
     let stop = hooks
         .entry("stop")
         .or_insert_with(|| json!([]))
         .as_array_mut()
         .ok_or("kiro_default stop hooks must be an array")?;
     stop.retain(|value| !value.to_string().contains(OWNER_MARKER));
-    stop.push(json!({ "command": format!("{helper} kiro # {OWNER_MARKER}") }));
+    stop.push(json!({ "command": command }));
     // userPromptSubmit fires at the start of each user turn. We use it to
     // reset the "sent this turn" flag so the next stop can auto-post.
     let user_prompt = hooks
@@ -898,7 +907,7 @@ fn install_kiro_default(path: &Path, helper: &str) -> Result<(), String> {
         .as_array_mut()
         .ok_or("kiro_default userPromptSubmit hooks must be an array")?;
     user_prompt.retain(|value| !value.to_string().contains(OWNER_MARKER));
-    user_prompt.push(json!({ "command": format!("{helper} kiro # {OWNER_MARKER}") }));
+    user_prompt.push(json!({ "command": command }));
     write_json(path, &root)
 }
 
@@ -907,13 +916,18 @@ fn remove_kiro_default_hook(path: &Path) -> Result<(), String> {
         return Ok(());
     }
     let mut root = read_json_object(path)?;
-    if let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut) {
-        for key in &["stop", "userPromptSubmit"] {
-            if let Some(arr) = hooks.get_mut(*key).and_then(Value::as_array_mut) {
-                arr.retain(|value| !value.to_string().contains(OWNER_MARKER));
+    match root.get_mut("hooks") {
+        // 3.0 array: drop our entries, keep the array (the CLI's shape).
+        Some(Value::Array(list)) => list.retain(|value| !value.to_string().contains(OWNER_MARKER)),
+        Some(Value::Object(hooks)) => {
+            for key in &["stop", "userPromptSubmit"] {
+                if let Some(arr) = hooks.get_mut(*key).and_then(Value::as_array_mut) {
+                    arr.retain(|value| !value.to_string().contains(OWNER_MARKER));
+                }
             }
+            hooks.retain(|_, value| value.as_array().is_none_or(|items| !items.is_empty()));
         }
-        hooks.retain(|_, value| value.as_array().is_none_or(|items| !items.is_empty()));
+        _ => {}
     }
     write_json(path, &root)
 }
@@ -1658,6 +1672,36 @@ mod tests {
         assert!(text.contains("lint"));
         assert!(text.contains("other"));
         assert!(!text.contains(OWNER_MARKER));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Board #207: kiro-cli 2.22.1 upgrades ~/.kiro/agents/kiro_default.json to
+    /// the 3.0 ARRAY shape; our two entries are added and removed in THAT
+    /// shape — the file is the CLI's, never converted.
+    #[test]
+    fn kiro_default_hooks_array_shape_gets_and_loses_our_entries_only() {
+        let root = std::env::temp_dir().join(format!("tmm-kiro-hooks3-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("kiro_default.json");
+        std::fs::write(&path, r#"{"name":"kiro_default","hooks":[{"name":"lint","trigger":"postToolUse","action":{"type":"command","command":"lint"},"timeout":10}],"permissions":{"rules":[{"capability":"all","effect":"allow"}]}}"#).unwrap();
+        install_kiro_default(&path, "'/tmp/helper'").unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let hooks = v["hooks"].as_array().expect("still an array");
+        assert_eq!(hooks.len(), 3);
+        assert_eq!(hooks[0]["name"], "lint");
+        let triggers: Vec<&str> = hooks[1..].iter().map(|h| h["trigger"].as_str().unwrap()).collect();
+        assert_eq!(triggers, ["stop", "userPromptSubmit"]);
+        assert!(hooks[1]["action"]["command"].as_str().unwrap().contains(OWNER_MARKER));
+        // Twice is once: our entries are replaced, not duplicated.
+        install_kiro_default(&path, "'/tmp/helper'").unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v["hooks"].as_array().unwrap().len(), 3);
+        remove_kiro_default_hook(&path).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let hooks = v["hooks"].as_array().expect("still an array after removal");
+        assert_eq!(hooks.len(), 1);
+        assert_eq!(hooks[0]["name"], "lint");
+        assert_eq!(v["permissions"]["rules"][0]["capability"], "all", "the CLI's block is untouched");
         let _ = std::fs::remove_dir_all(root);
     }
 }

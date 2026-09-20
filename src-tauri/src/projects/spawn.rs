@@ -879,7 +879,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tmm-spawn-kiro-{}", uuid::Uuid::new_v4()));
         let mut d = def("kiro");
         d.model = "claude-haiku-4.5".into();
-        let r = render_kiro(&d, "tester", &dir, &build_prompt(&d, "tester", "proj", "fix the bug", "lead", ""), &[]).unwrap();
+        let r = render_kiro(&d, "tester", &dir, &dir, &build_prompt(&d, "tester", "proj", "fix the bug", "lead", ""), &[]).unwrap();
         assert!(r.env.iter().any(|(k, v)| k == "KIRO_HOME" && v.contains("tmm-spawn-kiro")), "home must be the isolated dir");
         // Board #183: a managed pane is unattended — kiro-cli's launch-time
         // "Refresh it now with mwinit? [y/N]" would park the agent until a
@@ -892,6 +892,21 @@ mod tests {
         // flag made a wrong id invisible (owner report, 2026-08-19).
         assert_eq!(conf.get("model").and_then(|m| m.as_str()), Some("claude-haiku-4.5"));
         assert!(!r.cmd.contains("--model"), "no model on the launch line: {}", r.cmd);
+        // Board #207 (kiro-cli 2.22.1): the 3.0 profile shape for both engines —
+        // hooks as a named ARRAY, permissions.rules allowing all — so the CLI's
+        // "still in the 2.0 format" upgrade (and its .bak) never runs on our
+        // homes; the v3 engine reads the model from the home settings.
+        let hooks = conf.get("hooks").and_then(|h| h.as_array()).expect("3.0 hooks are an array");
+        let triggers: Vec<&str> = hooks.iter().map(|h| h["trigger"].as_str().unwrap()).collect();
+        assert_eq!(triggers, ["preToolUse", "postToolUse", "userPromptSubmit", "stop"]);
+        assert!(hooks.iter().all(|h| h["action"]["type"] == "command" && h["name"].as_str().unwrap().starts_with("tmm-")));
+        assert_eq!(conf["permissions"]["rules"][0]["capability"], "all");
+        let settings: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("settings/cli.json")).unwrap()).unwrap();
+        assert_eq!(settings.get("chat.defaultModel").and_then(|m| m.as_str()), Some("claude-haiku-4.5"), "v3 reads the model here");
+        assert_eq!(settings.get("chat.enableAutoAgentUpgrade").and_then(|m| m.as_bool()), Some(true));
+        // The engine door is closed by default: the launch line is what it was.
+        assert!(!r.cmd.contains("--agent-engine"), "v2 default leaves no trace: {}", r.cmd);
         let prompt = conf.get("prompt").and_then(|p| p.as_str()).unwrap();
         assert!(prompt.contains("tmm send"), "the tmm paragraph IS the integration");
         assert!(!prompt.contains("fix the bug"), "brief is delivered as the first user message");
@@ -911,8 +926,8 @@ mod tests {
         assert!(p.contains("] lead: "), "the reply edge names the briefer: {p}");
         assert!(p.ends_with("fix the flaky test"), "the brief is the message: {p}");
         assert!(conf.get("mcpServers").and_then(|m| m.get("files")).is_some(), "registry MCP def must materialize");
-        // Tool hooks feed telemetry.
-        assert!(conf.get("hooks").and_then(|h| h.get("preToolUse")).is_some());
+        // Tool hooks feed telemetry (3.0 array since #207: find by trigger).
+        assert!(conf["hooks"].as_array().unwrap().iter().any(|h| h["trigger"] == "preToolUse"));
         // The CLI settings ship with the home: queue mode is the DEFAULT for
         // every managed kiro agent (owner, 2026-08-20 — a line typed at a busy
         // agent waits for the turn to end instead of steering it mid-flight),
@@ -945,10 +960,10 @@ mod tests {
         let _ = line; // shape of the ws path differs in this fixture; covered below
         // Turn start resets the same-turn dedup flag. Without it a managed
         // agent that calls `tmm send` once never auto-posts again.
-        let turn = conf.get("hooks").and_then(|h| h.get("userPromptSubmit")).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let turn: Vec<&serde_json::Value> = conf["hooks"].as_array().unwrap().iter().filter(|h| h["trigger"] == "userPromptSubmit").collect();
         assert_eq!(turn.len(), 1, "managed kiro must carry the turn-start hook");
         assert!(
-            turn[0].get("command").and_then(|c| c.as_str()).is_some_and(|c| c.contains("tmux-mobile")),
+            turn[0]["action"]["command"].as_str().is_some_and(|c| c.contains("tmux-mobile")),
             "turn-start hook must run the notify helper, got {turn:?}"
         );
         assert!(!r.cmd.contains("@team"), "no team plumbing in registry agents");
@@ -976,10 +991,12 @@ mod tests {
 
         assert!(refresh_hooks(&ws.to_string_lossy(), "dev"), "a stale config is rewritten");
         let after: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
-        let hooks = after.get("hooks").and_then(|h| h.as_object()).unwrap();
-        let mut keys: Vec<&str> = hooks.keys().map(String::as_str).collect();
+        // The 2.0 object gives way to the 3.0 array (board #207), permissions are added.
+        let hooks = after.get("hooks").and_then(|h| h.as_array()).unwrap();
+        let mut keys: Vec<&str> = hooks.iter().map(|h| h["trigger"].as_str().unwrap()).collect();
         keys.sort();
         assert_eq!(keys, ["postToolUse", "preToolUse", "stop", "userPromptSubmit"]);
+        assert_eq!(after["permissions"]["rules"][0]["effect"], "allow");
         assert_eq!(
             after.get("prompt").and_then(|p| p.as_str()),
             Some("You are dev. Brief: fix the flaky test."),
@@ -1021,14 +1038,25 @@ mod tests {
             "chat.disableTrustAllConfirmation": true,
             "chat.editMode": "vi"
         })).unwrap()).unwrap();
-        assert!(ensure_kiro_settings(&home), "missing key is backfilled");
+        assert!(ensure_kiro_settings(&home, ""), "missing key is backfilled");
         let after = read();
         assert_eq!(after.get("chat.defaultInterruptBehavior").and_then(|v| v.as_str()), Some("queue"));
         assert_eq!(after.get("chat.editMode").and_then(|v| v.as_str()), Some("vi"), "foreign keys are not ours to drop");
+        assert_eq!(after.get("chat.enableAutoAgentUpgrade").and_then(|v| v.as_bool()), Some(true), "#207: the v3 startup modal is answered in the settings");
+        assert!(after.get("chat.defaultModel").is_none(), "#207: no model pinned → no key");
 
         // Case 3: already canonical — no write, so starting a project does not
         // churn mtimes.
-        assert!(!ensure_kiro_settings(&home), "no needless writes");
+        assert!(!ensure_kiro_settings(&home, ""), "no needless writes");
+
+        // Case 4 (#207): the v3 model mirror follows the profile's model —
+        // written when pinned, DELETED when cleared (a stale pin must not
+        // outlive the config), idempotent in between.
+        assert!(ensure_kiro_settings(&home, "claude-sonnet-5"));
+        assert_eq!(read().get("chat.defaultModel").and_then(|v| v.as_str()), Some("claude-sonnet-5"));
+        assert!(!ensure_kiro_settings(&home, "claude-sonnet-5"), "same model, no write");
+        assert!(ensure_kiro_settings(&home, ""), "cleared → the stale key goes");
+        assert!(read().get("chat.defaultModel").is_none());
         let _ = std::fs::remove_dir_all(&ws);
     }
 
@@ -1185,7 +1213,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         let dir = std::env::temp_dir().join(format!("tmm-spawn-nomodel-{}", uuid::Uuid::new_v4()));
         let mut d = def("kiro");
         d.model = "   ".into();
-        let r = render_kiro(&d, "tester", &dir, "p", &[]).unwrap();
+        let r = render_kiro(&d, "tester", &dir, &dir, "p", &[]).unwrap();
         let conf: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("agents/tester.json")).unwrap()).unwrap();
         assert!(conf.get("model").is_none(), "no key at all, not \"\" (kiro rejects that): {conf}");
@@ -1429,7 +1457,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         let mut d = def("kiro");
         d.effort = "high".into();
         let prompt = build_prompt(&d, "t", "p", "", "", "");
-        assert!(render_kiro(&d, "t", &dir, &prompt, &[]).unwrap().cmd.ends_with("--effort high"));
+        assert!(render_kiro(&d, "t", &dir, &dir, &prompt, &[]).unwrap().cmd.ends_with("--effort high"));
         d.backend = "claude".into();
         assert!(render_claude(&d, "t", &dir, &dir, &prompt, &[]).unwrap().cmd.contains(" --effort high "));
         d.backend = "grok".into();
@@ -1440,7 +1468,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         // Empty effort leaves every line clean.
         d.effort = String::new();
         d.backend = "kiro".into();
-        assert!(!render_kiro(&d, "t", &dir, &prompt, &[]).unwrap().cmd.contains("--effort"));
+        assert!(!render_kiro(&d, "t", &dir, &dir, &prompt, &[]).unwrap().cmd.contains("--effort"));
         // Validation is a fixed enum per backend; empty always passes.
         assert!(super::super::models::validate_effort("kiro", "xhigh").is_ok());
         assert!(super::super::models::validate_effort("codex", "minimal").is_ok());
@@ -1459,12 +1487,15 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
     /// codex-cli 0.148.0; claude's documented schema is the same family.
     #[test]
     fn every_backend_hook_set_registers_the_turn_start_hook() {
-        assert!(kiro_hooks("n")["userPromptSubmit"].is_array(), "kiro");
+        // kiro writes the 3.0 ARRAY shape (board #207): trigger names carry the events.
+        let kiro_triggers: Vec<String> = kiro_hooks("n").as_array().unwrap().iter()
+            .map(|h| h["trigger"].as_str().unwrap().to_string()).collect();
+        assert!(kiro_triggers.iter().any(|t| t == "userPromptSubmit"), "kiro");
         assert!(claude_hooks("n")["UserPromptSubmit"].is_array(), "claude");
         assert!(codex_hooks("n")["UserPromptSubmit"].is_array(), "codex");
         assert!(grok_hooks("n")["UserPromptSubmit"].is_array(), "grok");
         // And every set still ends turns: a stop hook.
-        assert!(kiro_hooks("n")["stop"].is_array());
+        assert!(kiro_triggers.iter().any(|t| t == "stop"));
         for f in [claude_hooks, codex_hooks, grok_hooks] {
             assert!(f("n")["Stop"].is_array());
         }

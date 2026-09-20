@@ -54,6 +54,8 @@ pub fn agent_remove(session: &str, agent: &str) -> Result<Value, String> {
         return Err(format!("'{agent}' is not an agent of project '{}'", project.name));
     }
     let slot_removed = with_store(|store| store.delete_slot(&project.id, agent))?;
+    // The v3 workspace entry (a symlink into the home, board #207) goes with it.
+    crate::backends::kiro::remove_workspace_entry(std::path::Path::new(&project.path), agent);
     let home_removed = home.is_some_and(|h| std::fs::remove_dir_all(h).is_ok());
     Ok(json!({
         "session": session,
