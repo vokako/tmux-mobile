@@ -20,6 +20,22 @@ mod tests {
 
     const TEST_SESSION: &str = "_tmux_mobile_test";
 
+    /// Poll the pane until `needle` is painted (or the deadline passes) and
+    /// return the last capture. Tests share the host's tmux server, so a
+    /// fixed sleep makes host load decide the verdict (board #208:
+    /// t07 waited 1 s for 100 echo lines and failed under a parallel cargo
+    /// build). Same idea as `wait_dead` in the tasks tests.
+    fn pane_shows(needle: &str, lines: usize) -> String {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let out = tmux::capture_pane(TEST_SESSION, Some(lines)).unwrap_or_default();
+            if out.contains(needle) || std::time::Instant::now() >= deadline {
+                return out;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
     fn cleanup() {
         let _ = tmux::kill_session(TEST_SESSION);
     }
@@ -87,9 +103,8 @@ mod tests {
 
         let marker = "TMUX_MOBILE_TEST_12345";
         tmux::send_command(TEST_SESSION, &format!("echo {}", marker)).unwrap();
-        thread::sleep(Duration::from_millis(500));
 
-        let output = tmux::capture_pane(TEST_SESSION, Some(50)).expect("Failed to capture pane");
+        let output = pane_shows(marker, 50);
         println!("✅ Captured pane output ({} chars)", output.len());
         assert!(output.contains(marker), "Marker not found in output");
         println!("✅ Command output verified!");
@@ -109,9 +124,8 @@ mod tests {
 
         let marker = "AFTER_CTRL_C_OK";
         tmux::send_command(TEST_SESSION, &format!("echo {}", marker)).unwrap();
-        thread::sleep(Duration::from_millis(500));
 
-        let output = tmux::capture_pane(TEST_SESSION, Some(20)).unwrap();
+        let output = pane_shows(marker, 20);
         assert!(output.contains(marker), "Pane should work after Ctrl-C");
         println!("✅ Special keys (C-c) work correctly");
         cleanup();
@@ -128,9 +142,8 @@ mod tests {
             "for i in $(seq 1 100); do echo \"line_$i\"; done",
         )
         .unwrap();
-        thread::sleep(Duration::from_millis(1000));
 
-        let output = tmux::capture_pane(TEST_SESSION, Some(50)).unwrap();
+        let output = pane_shows("line_100", 50);
         assert!(output.contains("line_100"), "Should capture line_100");
         println!("✅ Scrollback capture works");
         cleanup();

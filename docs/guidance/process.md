@@ -102,6 +102,7 @@
   permanently omitted a table until `Store::heal`.
 - 2026-08-05: shared tmux state made `adopt_then_down_then_up` flaky;
   use an isolated `-S` socket.
+- 2026-09-20 (board #208): `t07_capture_scrollback` waited a FIXED 1 s for 100 echo lines on the shared tmux and failed under a parallel cargo build (load ~6), passing alone. A test that waits for the terminal must poll for the expected paint with a deadline (`pane_shows` in `main.rs`), never sleep a guessed number; verified 5× green under a concurrent build at load ~15.
 - Board lessons: #19 took three rounds to find the cause; #97 had three
   kiro lang/stack changes before claude found font features; #56 treated
   click-through ("点击
