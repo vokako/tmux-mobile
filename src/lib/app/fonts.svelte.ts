@@ -24,6 +24,8 @@ import { localFontSource, normalizeFontFamily } from './font-validation.ts';
 const COMMON_MONO = [
   'Maple Mono NF CN',
   'Maple Mono',
+  'LXGW WenKai Mono',
+  'Sarasa Mono SC',
   'SF Mono',
   'Menlo',
   'Monaco',
@@ -39,9 +41,21 @@ const COMMON_MONO = [
   'Consolas',
 ];
 
+// The suggestion pool, not the offer: `FontPref.available()` filters this to
+// the families the DEVICE resolves, so the picker never offers a font that
+// would fail validation (owner, 2026-09-21, board #233: "很多字体都用不了，
+// 用不了前端应该提前过滤一下"). Adding a name here costs nothing on devices
+// without it — which is why the pool may carry tasteful Han faces (LXGW 霞鹜,
+// Sarasa 更纱, MiSans, HarmonyOS Sans) that only some machines have.
 const COMMON_SANS = [
   'Inter',
   'Space Grotesk',
+  'LXGW WenKai',
+  'LXGW WenKai GB',
+  'LXGW Neo XiHei',
+  'MiSans',
+  'HarmonyOS Sans SC',
+  'Sarasa UI SC',
   'SF Pro Text',
   'Helvetica Neue',
   'Segoe UI',
@@ -140,6 +154,18 @@ export interface FontPref {
   set(name: string): Promise<boolean>;
   /** Rewrite the role's CSS var inline on <html> so every consumer follows. */
   apply(): void;
+}
+
+/** The suggestion pool filtered to families THIS device resolves — what the
+ * pickers offer, so nothing offered can fail validation (board #233:
+ * "很多字体都用不了，用不了前端应该提前过滤一下"). Uncached: the caller
+ * (Settings) mounts rarely, and a probe is one registry lookup. */
+export async function availableFamilies(pref: FontPref): Promise<string[]> {
+  const hits = await Promise.all(pref.common.map(async (name) => (await isAvailable(name)) ? name : ''));
+  const names = hits.filter(Boolean);
+  // The custom family joined through `set`, which validated it — offer it
+  // even when it is not in the pool.
+  return pref.custom && !names.includes(pref.custom) ? [pref.custom, ...names] : names;
 }
 
 function makeFontPref(key: string, defaultStack: string, cssVar: string, common: string[]): FontPref {

@@ -29,7 +29,12 @@ function category(app: App, name: string) {
 test('real Settings and Agent share one confirmation when changing an edited category (#156)', async context => {
   const app = await (await compiled).mount(context, {
     props: { showAgents: true }, modules: [rpc],
-    setup(window) { window.localStorage.setItem('tmux_settings_tab', 'agents'); },
+    setup(window) {
+      window.localStorage.setItem('tmux_settings_tab', 'agents');
+      // The font-availability sweep (#233) runs at mount; jsdom's canvas
+      // fallback reports "not implemented" through the virtual console.
+      window.HTMLCanvasElement.prototype.getContext = () => null;
+    },
   });
   try {
     await edit(app);
@@ -49,7 +54,10 @@ test('real Settings defers its category exit until the Agent Save completes (#15
   const app = await (await compiled).mount(context, {
     props: { showAgents: true },
     modules: [{ ...rpc, registrySave: () => new Promise<void>(yes => finish = yes) }],
-    setup(window) { window.localStorage.setItem('tmux_settings_tab', 'agents'); },
+    setup(window) {
+      window.localStorage.setItem('tmux_settings_tab', 'agents');
+      window.HTMLCanvasElement.prototype.getContext = () => null; // see above
+    },
   });
   try {
     await edit(app);

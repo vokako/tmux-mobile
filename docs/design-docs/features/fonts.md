@@ -282,9 +282,25 @@ every system family).
 
 ## Personal preference: the custom font setting
 
-Settings → "Font name" (`fonts.svelte.ts`, localStorage `tmux_font`).
-The editable control suggests common families and also accepts another family
-typed by the user. Before a new value is applied, a temporary `FontFace` with
+Settings → Appearance (`fonts.svelte.ts`, localStorage `tmux_font`). All
+three font roles stand together there — content, display, terminal family —
+one "which fonts" cluster; the Terminal page keeps size and line spacing,
+which are terminal geometry, not typography (owner, 2026-09-21, board #233:
+"终端的显示字体和其他字体设置应该在一起，现在有点乱").
+
+The editable control offers ONLY families the device resolves: the
+suggestion pool (`COMMON_MONO`/`COMMON_SANS`) is probed through
+`availableFamilies` — the same `FontFace`+`local()` registry check the
+validator uses — when Settings mounts, so nothing offered can fail on pick
+(owner, same board: "很多字体都用不了，用不了前端应该提前过滤一下"; before
+this the pool was shown raw and most rows were decoration). Because the
+offer is filtered per device, the pool may carry tasteful Han faces that
+only some machines have — LXGW 霞鹜 (WenKai/WenKai GB/Neo XiHei, WenKai
+Mono), Sarasa 更纱 (UI SC, Mono SC), MiSans, HarmonyOS Sans SC ("帮我能不能
+加上 LXGW，或者你找一些有质感的字体") — install one on a device and its
+picker offers it; bundling them stays traded away (see History above).
+A family typed by hand still works and still validates. Before a new value
+is applied, a temporary `FontFace` with
 `local("<family>")` asks the platform font registry to resolve it. Canvas width
 comparison remains only as a compatibility fallback: it falsely rejects an
 installed monospace family such as Maple Mono NF CN when its advances equal the

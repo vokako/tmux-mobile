@@ -13,7 +13,7 @@
   import { hoverInfo } from '../ui/hover.ts';
   import { t, i18n, setLocale } from '../core/i18n.svelte.ts';
   import { layout } from './layout.svelte.ts';
-  import { fonts, uiFont, displayFont } from './fonts.svelte.ts';
+  import { fonts, uiFont, displayFont, availableFamilies } from './fonts.svelte.ts';
   import { UI_ZOOM_MIN, UI_ZOOM_MAX, UI_ZOOM_STEP } from './ui-zoom.ts';
   import { terminalPrefs, LINE_HEIGHT_MIN, LINE_HEIGHT_MAX } from './terminal-prefs.svelte.ts';
   import { hubPrefs } from '../hub/hub-prefs.svelte.ts';
@@ -236,6 +236,19 @@
   // validate-then-commit contract as the terminal font.
   let uiFontInput = $state(uiFont.custom);
   let displayFontInput = $state(displayFont.custom);
+  // What the pickers OFFER: the suggestion pool filtered to families this
+  // device resolves (FontPref.available, board #233) — a listed font that
+  // fails validation on pick taught the owner the list was decoration
+  // ("很多字体都用不了，用不了前端应该提前过滤一下"). Probed once, at the
+  // page; an empty list while probing just means the combo starts blank.
+  let fontOptions = $state<{ mono: string[]; ui: string[]; display: string[] }>({ mono: [], ui: [], display: [] });
+  $effect(() => {
+    let live = true;
+    void Promise.all([availableFamilies(fonts), availableFamilies(uiFont), availableFamilies(displayFont)]).then(([mono, ui, display]) => {
+      if (live) fontOptions = { mono, ui, display };
+    });
+    return () => { live = false; };
+  });
   const fontState = $state({
     mono: { pending: false, invalid: false },
     ui: { pending: false, invalid: false },
@@ -615,7 +628,7 @@
           <div class="preference-row">
             <div class="pref-label" use:hoverInfo={() => ({ title: t('uiFontBody'), text: t('uiFontBodyHint') })}><strong class="config-field-label">{t('uiFontBody')}</strong></div>
             <fieldset class="pref-control config-fields" aria-busy={fontState.ui.pending}>
-              <Select bind:value={uiFontInput} editable fontPreview options={uiFont.common}
+              <Select bind:value={uiFontInput} editable fontPreview options={fontOptions.ui}
                 placeholder={t('fontFamilySystem')} ariaLabel={`${t('uiFontBody')} — ${t('uiFontBodyHint')}`}
                 disabled={fontState.ui.pending} onchange={() => saveFont('ui')} />
               {#if fontState.ui.invalid}<small class="config-error font-error appear" role="alert">{t('fontFamilyInvalid')}</small>{/if}
@@ -624,10 +637,23 @@
           <div class="preference-row">
             <div class="pref-label" use:hoverInfo={() => ({ title: t('uiFontDisplay'), text: t('uiFontDisplayHint') })}><strong class="config-field-label">{t('uiFontDisplay')}</strong></div>
             <fieldset class="pref-control config-fields" aria-busy={fontState.display.pending}>
-              <Select bind:value={displayFontInput} editable fontPreview options={displayFont.common}
+              <Select bind:value={displayFontInput} editable fontPreview options={fontOptions.display}
                 placeholder={t('fontFamilySystem')} ariaLabel={`${t('uiFontDisplay')} — ${t('uiFontDisplayHint')}`}
                 disabled={fontState.display.pending} onchange={() => saveFont('display')} />
               {#if fontState.display.invalid}<small class="config-error font-error appear" role="alert">{t('fontFamilyInvalid')}</small>{/if}
+            </fieldset>
+          </div>
+          <!-- The terminal's FAMILY stands with the other two font roles — one
+               "which fonts" cluster (owner, 2026-09-21, board #233: "终端的显
+               示字体和其他字体设置应该在一起"). Size and line spacing stay on
+               the Terminal page: they are terminal geometry, not typography. -->
+          <div class="preference-row">
+            <div class="pref-label" use:hoverInfo={() => ({ title: t('fontFamily'), text: t('fontFamilyHint') })}><strong class="config-field-label">{t('fontFamily')}</strong></div>
+            <fieldset class="pref-control config-fields" aria-busy={fontState.mono.pending}>
+              <Select bind:value={fontInput} editable fontPreview options={fontOptions.mono}
+                placeholder={t('fontFamilySystem')} ariaLabel={`${t('fontFamily')} — ${t('fontFamilyHint')}`}
+                disabled={fontState.mono.pending} onchange={() => saveFont('mono')} />
+              {#if fontState.mono.invalid}<small class="config-error font-error appear" role="alert">{t('fontFamilyInvalid')}</small>{/if}
             </fieldset>
           </div>
           {#if showUiZoom}
@@ -670,15 +696,6 @@
         </div>
       {:else if tab === 'terminal'}
         <div class="config-section">
-          <div class="preference-row">
-            <div class="pref-label" use:hoverInfo={() => ({ title: t('fontFamily'), text: t('fontFamilyHint') })}><strong class="config-field-label">{t('fontFamily')}</strong></div>
-            <fieldset class="pref-control config-fields" aria-busy={fontState.mono.pending}>
-              <Select bind:value={fontInput} editable fontPreview options={fonts.common}
-                placeholder={t('fontFamilySystem')} ariaLabel={`${t('fontFamily')} — ${t('fontFamilyHint')}`}
-                disabled={fontState.mono.pending} onchange={() => saveFont('mono')} />
-              {#if fontState.mono.invalid}<small class="config-error font-error appear" role="alert">{t('fontFamilyInvalid')}</small>{/if}
-            </fieldset>
-          </div>
           <div class="preference-row">
             <div class="pref-label"><strong class="config-field-label">{t('font')}</strong></div>
             <div class="pref-control">

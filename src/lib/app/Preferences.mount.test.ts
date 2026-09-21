@@ -191,6 +191,34 @@ test('notification switch remains immediate while permission/test requests are s
   } finally { permission.resolve('granted'); await app.close(); }
 });
 
+// #233: the picker offers only families the device resolves — a listed font
+// that fails on pick is decoration. The probe is the same FontFace door the
+// validator uses; here it resolves only for two families, and the combo's
+// dropdown must show exactly those.
+test('font suggestions are filtered to families the device actually has (#233)', async context => {
+  const app = await mount(context, {
+    setup(window) {
+      window.FontFace = class {
+        src: string;
+        constructor(_name: string, src: string) { this.src = src; }
+        load() {
+          return /LXGW WenKai|Inter/.test(this.src) ? Promise.resolve(this) : Promise.reject(new Error('no such family'));
+        }
+      };
+    },
+  });
+  try {
+    await app.wait(() => {
+      const input = app.document.querySelector<HTMLInputElement>('.sel-combo input')!;
+      input.click();
+      const options = [...app.document.querySelectorAll('.sel-opt')].map(el => el.textContent?.trim());
+      // 'LXGW WenKai GB' also matches the probe regex — pool order survives.
+      return options.length === 3
+        && options[0] === 'Inter' && options[1] === 'LXGW WenKai' && options[2] === 'LXGW WenKai GB';
+    });
+  } finally { await app.close(); }
+});
+
 test('font validation locks its row and restores the confirmed family on failure', async context => {
   const probe = deferred<void>();
   let calls = 0;
@@ -202,11 +230,14 @@ test('font validation locks its row and restores the confirmed family on failure
   });
   try {
     const input = app.document.querySelector<HTMLInputElement>('.sel-combo input')!;
+    // The availability sweep (#233) probes the suggestion pool at mount with
+    // the same FontFace door; the row's own probe is the one AFTER typing.
+    const swept = calls;
     input.value = 'Unavailable Face';
     input.dispatchEvent(new app.window.Event('input', { bubbles: true }));
     input.dispatchEvent(new app.window.FocusEvent('blur'));
     await app.flush();
-    assert.equal(calls, 1);
+    assert.equal(calls, swept + 1);
     assert.equal(input.disabled, true);
     assert.equal(app.window.localStorage.getItem('tmux_font_ui'), 'Inter');
     probe.reject(new Error('not installed'));
