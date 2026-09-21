@@ -452,7 +452,6 @@
   .projects.dense .proj:focus-within .acts { opacity: 1; }
   .projects.dense .side-h-inline {
     display: inline-flex; align-items: baseline; gap: 6px;
-    font-family: var(--font-mono);
   }
   /* Windows stay — they are what the project is made of, and picking one is
      why this sidebar exists. Their LOOK is the shared `.side-win` dialect in
@@ -481,7 +480,11 @@
     transition: background var(--t-fast), box-shadow var(--t-fast);
   }
   .dot.on { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
-  .body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  /* flex: 1 so `.line` spans the row and the age's `margin-left: auto` can
+     right-align it — without it the age hugged the name while Chat's
+     `.side-age` sat on the row's right edge (owner, 2026-09-21, board #232:
+     "terminal 页面的的左侧边栏好像像是还是不一样"). */
+  .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .line { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
   /* Identity layer: the project's NAME takes the display face; the window
      chips beside it stay mono — they are data. */

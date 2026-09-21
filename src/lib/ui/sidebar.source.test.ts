@@ -32,17 +32,20 @@ test('a sidebar header takes its box from .side-h, not from a local override', a
     // recurrence of this drift was an UNQUALIFIED `.group-label` rule (the
     // first two were `.projects.dense`-scoped), so the test now inverts:
     // only a rule pinned to PAGE mode (`:not(.dense)` / `:not(.sidebar-mode)`)
-    // may declare the header's box or type.
+    // may declare the header's box or type. The fourth recurrence (#232) was
+    // a `font-family` on the header's INNER span (`.side-h-inline`), which
+    // painted the Terminal sidebar's "PROJECTS" in mono next to Chat's
+    // display face — inner spans and the face are guarded too.
     const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
       .map(([, sel, body]) => [sel!.trim(), body!] as const)
-      .filter(([sel]) => /\.group-label/.test(sel) && !/:not\(\.(?:dense|sidebar-mode)\)/.test(sel));
+      .filter(([sel]) => /\.group-label|\.side-h-inline/.test(sel) && !/:not\(\.(?:dense|sidebar-mode)\)/.test(sel));
     for (const [sel, body] of rules) {
       assert.ok(
         !/(^|;|\s)padding[^:]*:/.test(body),
         `${file}: \`${sel}\` re-declares the header's padding, which .side-h owns in sidebar mode — qualify it to page mode (:not(.dense) / :not(.sidebar-mode))`,
       );
       assert.ok(
-        !/font-size\s*:|letter-spacing\s*:|text-transform\s*:/.test(body),
+        !/font-size\s*:|font-family\s*:|letter-spacing\s*:|text-transform\s*:/.test(body),
         `${file}: \`${sel}\` re-declares the header's type, which .side-h owns in sidebar mode — qualify it to page mode (:not(.dense) / :not(.sidebar-mode))`,
       );
     }
