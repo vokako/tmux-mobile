@@ -1528,6 +1528,10 @@ test('modelLabel drops vendor and region prefixes, keeps the model id', () => {
   assert.equal(modelLabel('Fable 5.1 (Bedrock, 1M)'), 'Fable 5.1');
   assert.equal(modelLabel('Opus 4.8 (US)'), 'Opus 4.8');
   assert.equal(modelLabel('GPT 5.6 Sol (Bedrock, 1M)'), 'GPT 5.6 Sol');
+  // The unparenthesised route tail is the same fact — kimi's display name
+  // (owner, 2026-09-21, board #230: "现在应该是 Kimi K3").
+  assert.equal(modelLabel('Kimi K3 on Bedrock'), 'Kimi K3');
+  assert.equal(modelLabel('K3 on holiday'), 'K3 on holiday', 'only known route words drop');
   assert.equal(modelLabel('(experimental)'), '(experimental)', 'a name that is only a parenthetical stays whole');
   assert.equal(modelLabel('claude (new) opus'), 'claude (new) opus', 'only a TRAILING group is furniture');
 });

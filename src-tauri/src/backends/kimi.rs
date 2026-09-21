@@ -97,12 +97,15 @@ use crate::projects::vitals::Vitals;
 /// Line 1 is the `tui.toml [status_line].items` row — mode, model, cwd, git —
 /// joined by TWO spaces; the model item is the alias's `display_name` with a
 /// ` thinking` tail while thinking is on (the effort level is not painted).
-/// At 44 columns the cwd truncates to `/…` and the git item drops; the model
+/// On a narrow pane the cwd truncates and the git item drops; the model
 /// survives. Line 2 is `context: N% (used/total)`, right-aligned; the literal
 /// `context:` word is its anchor. The mode label heads line 1 and is the
 /// anchor for the model reading: only the three permission modes
 /// (`Never Ask`, `Ask When Needed`, `Always Ask`) start a footer, and the
-/// model is the item before the cwd item (the one starting `/` or `~`).
+/// model is the item before the cwd item — the one starting `/`, `~` or `…`
+/// (measured live at ~52 columns: kimi paints the truncated cwd with a
+/// LEADING ellipsis, `…/work/pr…`; anchoring on `/` alone read no model on
+/// any phone-width pane, board #230).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn sniff_kimi(pane: &str) -> Vitals {
     let mut v = Vitals::default();
@@ -141,7 +144,8 @@ pub(crate) fn kimi_context_item(line: &str) -> Option<u8> {
 
 /// The model out of the items row: the item before the cwd item, minus the
 /// ` thinking` tail; `None` unless the row starts with a permission-mode
-/// label and has a cwd item to anchor against.
+/// label and has a cwd item to anchor against. A truncated cwd keeps its
+/// LEADING ellipsis (`…/work/pr…`), so `…` anchors like `/` and `~`.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn kimi_footer_model(line: &str) -> Option<String> {
     const MODES: [&str; 3] = ["Never Ask", "Ask When Needed", "Always Ask"];
@@ -149,7 +153,7 @@ pub(crate) fn kimi_footer_model(line: &str) -> Option<String> {
     if items.len() < 3 || !MODES.contains(&items[0]) {
         return None;
     }
-    let cwd = items.iter().position(|i| i.starts_with('/') || i.starts_with('~'))?;
+    let cwd = items.iter().position(|i| i.starts_with('/') || i.starts_with('~') || i.starts_with('…'))?;
     if cwd < 2 {
         return None;
     }
@@ -587,6 +591,12 @@ mod tests {
         let v = sniff_kimi(narrow);
         assert_eq!(v.model.as_deref(), Some("Kimi K3 on Bedrock"));
         assert_eq!(v.context_pct, Some(0));
+        // Measured live at ~52 columns (board #230): the truncated cwd keeps a
+        // LEADING ellipsis, not a leading slash — the anchor must read it.
+        let phone = " Never Ask  Kimi K3 on Bedrock thinking  …/work/pr…\n                             context: 21% (212k/1M)\n";
+        let v = sniff_kimi(phone);
+        assert_eq!(v.model.as_deref(), Some("Kimi K3 on Bedrock"));
+        assert_eq!(v.context_pct, Some(21));
         let busy = " Never Ask  Kimi K3 on Bedrock thinking  /tmp/kimi-probe/ws  master [±]              ctrl+c: cancel\n";
         assert_eq!(sniff_kimi(busy).model.as_deref(), Some("Kimi K3 on Bedrock"));
         let no_thinking = " Ask When Needed  Kimi K3 on Bedrock  ~/work  main\n";

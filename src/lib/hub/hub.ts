@@ -1736,8 +1736,13 @@ export function perLineOf(contentPx: number, glyphPx: number): number {
  * parenthetical is the same kind of fact — omp's display names carry the
  * route and the window there (`Fable 5.1 (Bedrock, 1M)`, `Opus 4.8 (US)`) —
  * and is dropped too (owner, 2026-09-07: "(Bedrock, 1M) 这个可以省略吧");
- * a name that is ONLY a parenthetical stays whole rather than emptying. */
+ * a name that is ONLY a parenthetical stays whole rather than emptying.
+ * A trailing ` on <route>` clause is the unparenthesised spelling of the same
+ * fact — kimi's alias display name is `Kimi K3 on Bedrock` (owner, 2026-09-21,
+ * board #230: "现在应该是 Kimi K3") — and only the known route words drop, so a
+ * model whose identity happens to contain " on " passes unchanged. */
 const MODEL_PREFIXES = new Set(['openai', 'anthropic', 'xai', 'amazon', 'meta', 'us', 'eu', 'apac', 'global']);
+const MODEL_ROUTES = new Set(['bedrock', 'vertex', 'azure']);
 export function modelLabel(model: string): string {
   let s = model.trim();
   for (;;) {
@@ -1745,6 +1750,8 @@ export function modelLabel(model: string): string {
     if (dot <= 0 || !MODEL_PREFIXES.has(s.slice(0, dot)) || dot === s.length - 1) break;
     s = s.slice(dot + 1);
   }
-  const bare = s.replace(/\s*\([^()]*\)$/u, '');
+  let bare = s.replace(/\s*\([^()]*\)$/u, '');
+  const route = bare.match(/^(.*\S)\s+on\s+(\S+)$/u);
+  if (route?.[1] && route[2] && MODEL_ROUTES.has(route[2].toLowerCase())) bare = route[1];
   return bare === '' ? s : bare;
 }
