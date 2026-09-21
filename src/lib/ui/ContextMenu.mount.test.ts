@@ -26,6 +26,31 @@ test('rect menus ignore sibling output scroll but close when their trigger moves
   }
 });
 
+// #223: a touch-opened agent menu carries the hover card's facts, because a
+// finger has no hover. The body is the SAME InfoRows the HoverCard renders;
+// a menu opened without info (every pointer menu) shows no facts block.
+test('a menu with info shows the facts under its heading; without, none (#223)', async context => {
+  const items = [{ label: 'Talk to', onselect: () => {} }];
+  const info = { lines: [{ label: 'State', value: 'working', tone: 'accent' }, { label: 'Model', value: 'kiro · gpt-6' }], note: 'Sending to @kiro' };
+  const app = await (await compiled).mount(context, {
+    props: { at: { x: 10, y: 10 }, who: 'kiro', items, info }, modules: [],
+  });
+  try {
+    const block = app.document.querySelector('.ctx .ctx-info');
+    assert.ok(block, 'the facts block renders inside the menu');
+    const rows = [...block!.querySelectorAll('.ir-rows dt')].map(dt => dt.textContent);
+    assert.deepEqual(rows, ['State', 'Model']);
+    assert.ok(block!.querySelector('.ir-rows dd.accent'), 'tones carry through');
+    assert.equal(block!.querySelector('.ir-note')?.textContent, 'Sending to @kiro');
+  } finally { await app.close(); }
+  const bare = await (await compiled).mount(context, {
+    props: { at: { x: 10, y: 10 }, who: 'kiro', items }, modules: [],
+  });
+  try {
+    assert.equal(bare.document.querySelector('.ctx .ctx-info'), null, 'no info, no block');
+  } finally { await bare.close(); }
+});
+
 test('controlled menu states are announced and disabled items cannot activate (#164)', async context => {
   let calls = 0;
   const app = await (await compiled).mount(context, {

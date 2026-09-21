@@ -160,7 +160,7 @@ test('Hub owns one strip above Composer; ContextMenu replaces the delayed menu (
   const roster = source.slice(start, source.indexOf('/>', start));
   assert.match(roster, /\{composerText\} \{managedNames\} \{busyNames\} \{interrupting\}/u);
   assert.match(roster, /onselect=\{setRecipient\} oninterrupt=\{interrupt\}/u);
-  assert.match(roster, /oncontext=\{\(at, name\) => openCtx\(at, name, agentItems\(name\)\)\}/u);
+  assert.match(roster, /oncontext=\{\(at, name, info\) => openCtx\(at, name, agentItems\(name\), info\)\}/u);
   assert.equal([...source.matchAll(/<Roster /g)].length, 1);
   assert.ok(source.indexOf('<Feed ') < start && start < source.indexOf('<Composer '));
   assert.doesNotMatch(source, /menuFor|cardsEl|agentMenu|function cardClick|function toggleAgentMenu|class="a-menu/u,

@@ -100,12 +100,20 @@
   /* A menu opened FROM a card sits at the card — left-aligned, the card kept
      visible — like the All button's (#168) and a stopped card's. */
   const cardAnchor = (trigger) => ({ anchor: anchorOf(trigger), align: 'left', trigger, keepTriggerClear: true });
+  /* Touch has no hover, so a touch-opened menu CARRIES the hover card's facts
+     (board #223: "手机上因为没有悬停窗口 所以选项卡里给我展示一下agent信息").
+     A pointer menu stays verbs-only — the hover card already answered. */
+  const touchInfo = (get) => (coarsePointer() ? get() : null);
   function clickAgent(event, name) {
     if (!coarsePointer() && event.detail > 1) return;
     // The recipient's own card: a second click opens its menu (Record only
     // leads), it does not deselect (owner, 2026-09-13: "agent选中卡片时，再次点击
     // 不是取消选中，而且展开选项卡"; board #196). Under All, a click narrows to the card.
-    if (recipient === name) { oncontext(cardAnchor(event.currentTarget), name); return; }
+    if (recipient === name) {
+      const a = managedAgents.find((x) => x.name === name);
+      oncontext(cardAnchor(event.currentTarget), name, touchInfo(() => (a ? cardInfo(a) : offCardInfo(name))));
+      return;
+    }
     selectTarget(name);
   }
   function focusAgent(event, name, stopped = false) {
@@ -116,7 +124,7 @@
   }
   function stoppedMenu(event, name) {
     if (!coarsePointer() && event.detail > 1) return;
-    oncontext(cardAnchor(event.currentTarget), name);
+    oncontext(cardAnchor(event.currentTarget), name, touchInfo(() => offCardInfo(name)));
   }
 
   function destinationNote(name) {
@@ -210,8 +218,8 @@
             aria-label={[`${a.name} · ${stateLabel(a.state)}`, a.team, a.detail, vitalsLine(a.vitals), unread.has(a.name) ? t('hubUnread') : '', mentioned ? t('hubToAlsoHint').replace('{names}', `@${a.name}`) : '', filterAgent === a.name ? t('hubFilterItem') : ''].filter(Boolean).join(' · ')}
             use:hoverInfo={() => cardInfo(a)}
             onclick={(e) => clickAgent(e, a.name)} ondblclick={(e) => focusAgent(e, a.name)}
-            oncontextmenu={(e) => { e.preventDefault(); oncontext(pointOf(e), a.name); }}
-            use:longpress={{ onlongpress: (at) => oncontext(at, a.name) }}>
+            oncontextmenu={(e) => { e.preventDefault(); oncontext(pointOf(e), a.name, touchInfo(() => cardInfo(a))); }}
+            use:longpress={{ onlongpress: (at) => oncontext(at, a.name, touchInfo(() => cardInfo(a))) }}>
             <span class="avatar-slot">
               {#if backendIcon(a.agent)}<img class="ava" src={backendIcon(a.agent)} alt={a.agent} />{:else}<span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>{/if}
             </span>
@@ -254,8 +262,8 @@
             aria-label={[name, t('hubStopped'), filterAgent === name ? t('hubFilterItem') : ''].filter(Boolean).join(' · ')} aria-haspopup="menu"
             use:hoverInfo={() => offCardInfo(name)}
             onclick={(e) => stoppedMenu(e, name)} ondblclick={(e) => focusAgent(e, name, true)}
-            oncontextmenu={(e) => { e.preventDefault(); oncontext(pointOf(e), name); }}
-            use:longpress={{ onlongpress: (at) => oncontext(at, name) }}>
+            oncontextmenu={(e) => { e.preventDefault(); oncontext(pointOf(e), name, touchInfo(() => offCardInfo(name))); }}
+            use:longpress={{ onlongpress: (at) => oncontext(at, name, touchInfo(() => offCardInfo(name))) }}>
             <span class="avatar-slot">
               {#if backendIcon(backend)}<img class="ava dim" src={backendIcon(backend)} alt={backend} />{:else}<span class="ava dim">{name.slice(0, 1).toUpperCase()}</span>{/if}
             </span>

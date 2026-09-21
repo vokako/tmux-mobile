@@ -126,8 +126,12 @@ test('native selection owns hover and context; stopped slots never select or res
   assert.match(source, /class:sel=\{isAddressed\(a\.name\)\}/u, '#186: paint and accessibility read the same aggregate selection');
   assert.match(source, /use:hoverInfo=\{\(\) => cardInfo\(a\)\}/u);
   assert.match(source, /use:hoverInfo=\{\(\) => offCardInfo\(name\)\}/u);
-  assert.match(source, /oncontextmenu=\{\(e\) => \{ e\.preventDefault\(\); oncontext\(pointOf\(e\), a\.name\); \}\}/u);
-  assert.match(source, /use:longpress=\{\{ onlongpress: \(at\) => oncontext\(at, a\.name\) \}\}/u);
+  // #223: a touch open carries the hover card's facts (a finger has no
+  // hover); touchInfo returns null on a fine pointer, keeping those menus
+  // verbs-only.
+  assert.match(source, /const touchInfo = \(get\) => \(coarsePointer\(\) \? get\(\) : null\);/u);
+  assert.match(source, /oncontextmenu=\{\(e\) => \{ e\.preventDefault\(\); oncontext\(pointOf\(e\), a\.name, touchInfo\(\(\) => cardInfo\(a\)\)\); \}\}/u);
+  assert.match(source, /use:longpress=\{\{ onlongpress: \(at\) => oncontext\(at, a\.name, touchInfo\(\(\) => cardInfo\(a\)\)\) \}\}/u);
   const off = source.slice(source.indexOf('class="acard off"'), source.indexOf('{/each}', source.indexOf('class="acard off"')));
   assert.match(off, /onclick=\{\(e\) => stoppedMenu\(e, name\)\}/u);
   assert.match(off, /disabled=\{acting\}/u);
@@ -220,10 +224,10 @@ test('the stop is a quiet dense action and the dot sits clear of the name, on th
 
 test("a second click on the recipient's card opens its menu at the card, never deselects (board #196)", () => {
   // Owner 2026-09-13: "agent选中卡片时，再次点击不是取消选中，而且展开选项卡".
-  assert.match(source, /if \(recipient === name\) \{ oncontext\(cardAnchor\(event\.currentTarget\), name\); return; \}/u);
+  assert.match(source, /if \(recipient === name\) \{\n\s*const a = managedAgents\.find\(\(x\) => x\.name === name\);\n\s*oncontext\(cardAnchor\(event\.currentTarget\), name, touchInfo\(\(\) => \(a \? cardInfo\(a\) : offCardInfo\(name\)\)\)\);\n\s*return;\n\s*\}/u);
   assert.match(source, /const cardAnchor = \(trigger\) => \(\{ anchor: anchorOf\(trigger\), align: 'left', trigger, keepTriggerClear: true \}\);/u);
   assert.doesNotMatch(source, /recipient === name \? '' : name/u, 'the click toggle is gone');
-  assert.match(source, /use:longpress=\{\{ onlongpress: \(at\) => oncontext\(at, a\.name\) \}\}/u, 'a hold forwards the element anchor longpress hands it');
+  assert.match(source, /use:longpress=\{\{ onlongpress: \(at\) => oncontext\(at, a\.name, touchInfo\(\(\) => cardInfo\(a\)\)\) \}\}/u, 'a hold forwards the element anchor longpress hands it');
 });
 
 test('Everyone stands at the head of the EXPANDED strip, avatar-sized (board #204)', () => {

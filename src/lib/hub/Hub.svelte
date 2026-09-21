@@ -1282,15 +1282,19 @@
   let ctxAt = $state(null);        // { x, y } in client px, or null
   let ctxItems = $state([]);
   let ctxWho = $state('');
+  // Facts under the heading for TOUCH-opened agent menus (board #223): the
+  // opener passes the hover card's info, because a finger has no hover.
+  let ctxInfo = $state(null);
 
-  function openCtx(at, who, items) {
+  function openCtx(at, who, items, info = null) {
     const usable = items.filter(Boolean);
     if (!usable.length) return;
     ctxWho = who;
     ctxItems = usable;
+    ctxInfo = info;
     ctxAt = at;
   }
-  const closeCtx = () => { ctxAt = null; ctxItems = []; };
+  const closeCtx = () => { ctxAt = null; ctxItems = []; ctxInfo = null; };
 
   function activateAll(event) {
     const session = selected;
@@ -1739,7 +1743,7 @@
         {stateLabel} {stateTone} onselect={setRecipient} oninterrupt={interrupt}
         onfilter={(name) => { closeCtx(); toggleFilter(name); }}
         onadd={() => openPicker('add')}
-        oncontext={(at, name) => openCtx(at, name, agentItems(name))} />
+        oncontext={(at, name, info) => openCtx(at, name, agentItems(name), info)} />
 
       <Composer bind:this={composer} bind:composerText {selected} {compact} {recipient}
         {roomReady}
@@ -1782,7 +1786,7 @@
 
   <!-- One context menu for every subject above: right-click on the desktop, long
        press on a phone. -->
-  <ContextMenu at={ctxAt} items={visibleCtxItems} who={ctxWho} oncancel={closeCtx} />
+  <ContextMenu at={ctxAt} items={visibleCtxItems} who={ctxWho} info={ctxInfo} oncancel={closeCtx} />
 
   <!-- Forgetting a PROJECT for good — only reachable from the recycle bin,
        the two-step rule: hide first, destroy there. -->

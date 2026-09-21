@@ -8,6 +8,7 @@
   // second menu language would read as a second kind of menu. The only difference
   // is what it is anchored to: a pointer instead of a trigger's rect.
   import Icon from './Icon.svelte';
+  import InfoRows from './InfoRows.svelte';
   import { menuHeightLimit, menuPlacement, pointAnchor, popOrigin, viewBox, scrollMovesTrigger } from './placement.ts';
   import { activeModal } from './modal.ts';
   import { nextMenuIndex } from './menu-navigation.ts';
@@ -39,6 +40,11 @@
     /** @type {MenuItem[]} */ items = [],
     /** Optional heading — usually the name of what was clicked. */
     who = '',
+    /** Optional read-only facts under the heading — the HoverCard's body
+     * (InfoRows), passed by touch openers because a finger has no hover
+     * (board #223). Pointer menus leave it null: the hover card already
+     * answered, and repeating it would double every right-click menu. */
+    info = null,
     id = menuId,
     oncancel = () => {},
   } = $props();
@@ -154,6 +160,7 @@
     style:--pop-origin={at ? popOrigin(at.anchor ?? pointAnchor(at.x, at.y), pos, align) : undefined}
     bind:offsetWidth={w} bind:offsetHeight={h}>
     {#if who}<div class="ctx-who menu-heading data" title={who}>{who}</div>{/if}
+    {#if info}<div class="ctx-info"><InfoRows {info} /></div>{/if}
     {#each items as it, i (it.label)}
       <button class="menu-item" type="button" tabindex="-1" role={it.checked === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-checked={it.checked}
         id={`${id}-${i}`}
@@ -178,5 +185,13 @@
     max-height: calc(100vh / var(--ui-zoom, 1) - 16px); overflow-y: auto;
     /* Invisible until measured, then grows from its anchor corner: the shared
        .pop-layer atom (app.css) owns opacity/pointer-events/transform. */
+  }
+  /* The facts block sits with the heading, visually apart from the actions:
+     the heading's inset, a hairline before the first verb. */
+  .ctx-info {
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 0 var(--menu-item-padding-x) var(--menu-item-padding-y); margin-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+    font-size: var(--fs-ui); color: var(--text2);
   }
 </style>

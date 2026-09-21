@@ -6,6 +6,7 @@
   // opened it, and an ancestor scroll or a key closes it.
   import { hoverCard } from './hover.svelte.ts';
   import { menuPlacement, popOrigin, viewBox } from './placement.ts';
+  import InfoRows from './InfoRows.svelte';
 
   let w = $state(0);
   let h = $state(0);
@@ -32,15 +33,7 @@
     style:left="{pos.x}px" style:top="{pos.y}px" style:--pop-origin={origin}
     bind:offsetWidth={w} bind:offsetHeight={h}>
     {#if cur.info.title}<div class="hc-title">{cur.info.title}</div>{/if}
-    {#if cur.info.text}<div class="hc-text">{cur.info.text}</div>{/if}
-    {#if cur.info.lines?.length}
-      <dl class="hc-rows">
-        {#each cur.info.lines as l (l.label)}
-          <dt>{l.label}</dt><dd class:ok={l.tone === 'ok'} class:warn={l.tone === 'warn'} class:danger={l.tone === 'danger'} class:accent={l.tone === 'accent'}>{l.value}</dd>
-        {/each}
-      </dl>
-    {/if}
-    {#if cur.info.note}<div class="hc-note">{cur.info.note}</div>{/if}
+    <InfoRows info={cur.info} />
   </div>
 {/if}
 
@@ -56,13 +49,4 @@
   /* Read-only: it must never take the pointer from the thing under it. */
   .hover-card.ready { pointer-events: none; }
   .hc-title { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .hc-text { color: var(--text2); line-height: 1.35; }
-  .hc-rows { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; }
-  .hc-rows dt { color: var(--text3); font-size: var(--fs-meta); white-space: nowrap; }
-  .hc-rows dd { margin: 0; color: var(--text2); font-size: var(--fs-meta); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .hc-rows dd.ok { color: var(--status-ok); }
-  .hc-rows dd.warn { color: var(--status-warn); }
-  .hc-rows dd.danger { color: var(--danger); }
-  .hc-rows dd.accent { color: var(--accent); }
-  .hc-note { color: var(--text3); font-size: var(--fs-meta); }
 </style>
