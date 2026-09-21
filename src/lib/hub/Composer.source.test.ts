@@ -164,7 +164,10 @@ test('measured signature actions reuse shared commands without hardcoded avoidan
   assert.match(source, /<div class="composer-actions" class:compact-tools=\{compact\} bind:this=\{actionsEl\}>/u,
     '#228: on the phone the two controls are a dense 32px group');
   assert.match(rule('.composer-actions'), /display: flex/u);
-  assert.match(rule('.composer-actions'), /position: absolute; right: 0; bottom: 0/u);
+  // #229: centred on the line's captured height, not glued to the bottom.
+  assert.match(rule('.composer-actions'), /position: absolute; right: 0; bottom: calc\(\(var\(--composer-line-h\) - var\(--control-height\)\) \/ 2\)/u);
+  assert.match(rule('.compose-line'), /--composer-line-h: var\(--control-height\)/u, 'captured before the dense group redefines the token');
+  assert.match(source, /const lift = parseFloat\(actionsStyle\.bottom\) \|\| 0;/u, 'the layout math reads the same offset back');
   // #203: an input's radius and the row content inset — 16px on a 32px desktop
   // shell was a semicircle (owner: "在电脑上这个输入框左边是一个半圆").
   assert.match(rule('.compose-shell'), /border-radius: var\(--ui-radius-control\)/u);

@@ -79,7 +79,18 @@ first line reserved a 28px band; now `reserved` is 0 there, still 28 when the
 last line runs under the commands (right 1101 > 1068). A 44px touch command's
 paint (inset 6) does reach the preceding line's ink, so the phone keeps its
 band — the #186 rule that a tall touch target can hit a long preceding line
-even when the last line is short still holds, measured against paint. At the scroll ceiling the commands keep their own bottom band outside
+even when the last line is short still holds, measured against paint. **The
+commands stand centred on the field's single-line height, not glued to its
+bottom** (board #229, owner 2026-09-21: "消息发送按钮在详细框里行没有上下居中对齐"):
+after #228 the phone's group is 32px inside a 44px line, and at `bottom: 0` it
+sat 6px low. `.compose-line` captures `--composer-line-h: var(--control-height)`
+before the dense group redefines the token, `.composer-actions` takes
+`bottom: calc((line − control) / 2)` (6px on the phone, 0 on the desktop's
+28-in-28), and `growComposer` reads that `bottom` back as `lift` so
+`signatureLayout` moves the collision box AND the reserved band up by the same
+amount (`reserved = controlsHeight + lift`, 38 on the phone). Measured at
+390: controls 746–778 in a 740–784 field (centre delta 0); a short last line
+shares the row; a last line under the commands reserves 38px. At the scroll ceiling the commands keep their own bottom band outside
 the scrolling text; no typed line loses a permanent right column. Only an
 empty placeholder gives width to the controls, and the empty field stays
 one native control high.

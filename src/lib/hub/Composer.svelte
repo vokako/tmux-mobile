@@ -99,13 +99,14 @@
       const actionsStyle = getComputedStyle(actionsEl);
       const gap = parseFloat(actionsStyle.columnGap) || 0;
       const paintInset = parseFloat(actionsStyle.getPropertyValue('--control-paint-inset')) || 0;
+      const lift = parseFloat(actionsStyle.bottom) || 0;
       const inkInset = Math.max(0, ((parseFloat(style.lineHeight) || 0) - (parseFloat(style.fontSize) || 0)) / 2);
       const empty = !el.value;
       if (empty && measureValue) measureValue.data = '';
       const layout = signatureLayout({
         width: parseFloat(style.width) || el.clientWidth, naturalHeight: el.scrollHeight,
         maxHeight: parseFloat(style.maxHeight) || Infinity,
-        controlsWidth, controlsHeight, gap, empty, paintInset, inkInset,
+        controlsWidth, controlsHeight, gap, empty, paintInset, inkInset, lift,
         textRects: empty ? [] : textBoxes(el, style),
       });
       if (empty) el.style.paddingRight = `${controlsWidth + gap}px`;
@@ -379,7 +380,9 @@
   .compose-shell:focus-within { border-color: var(--accent-line); }
   .compose-shell.cmd { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 6%, var(--bubble-in)); }
   .compose-shell.cmd .c-input { font-family: var(--font-mono); }
-  .compose-line { position: relative; min-width: 0; box-sizing: border-box; }
+  /* The line's own height is captured HERE, before a dense group inside
+     redefines --control-height (board #229): the controls centre on it. */
+  .compose-line { position: relative; min-width: 0; box-sizing: border-box; --composer-line-h: var(--control-height); }
   .c-input {
     display: block; min-width: 0; width: 100%; box-sizing: border-box; min-height: var(--control-height);
     max-height: calc(30vh / var(--ui-zoom, 1)); padding: max(2px, calc((var(--control-height) - 1.5em) / 2)) 0;
@@ -387,7 +390,15 @@
     font: var(--fs-body)/1.5 var(--font-ui); resize: none; overflow-y: hidden; overflow-x: hidden;
   }
   .c-input::placeholder { color: var(--text3); }
-  .composer-actions { position: absolute; right: 0; bottom: 0; display: flex; align-items: center; gap: var(--tool-gap); }
+  /* The controls stand centred on the field's single-line height: on the
+     phone the group is 32px inside a 44px line (#228), and glued to the
+     bottom it sat 6px low (owner 2026-09-21: "消息发送按钮在详细框里行没有上下居中
+     对齐", board #229). Desktop: 28 in 28 → 0, unchanged. growComposer reads
+     this `bottom` back as `lift`, so the collision band moves with it. */
+  .composer-actions {
+    position: absolute; right: 0; bottom: calc((var(--composer-line-h) - var(--control-height)) / 2);
+    display: flex; align-items: center; gap: var(--tool-gap);
+  }
   .compose-line :global(.composer-measure) {
     position: absolute; top: 0; left: 0; width: 100%; height: 0;
     overflow: hidden; visibility: hidden; pointer-events: none;

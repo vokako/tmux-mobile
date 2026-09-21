@@ -21,6 +21,24 @@ test('signature controls share clear text space, not a permanent right column (#
   assert.equal(signatureLayout({ ...box, textRects: [{ left: 0, right: 182.1, top: 75, bottom: 91 }] }).reserved, 44);
 });
 
+test('lifted controls move their box and their band up with them (board #229)', () => {
+  // The phone group is 32px centred in a 44px line → bottom: 6px. A second
+  // line ending under the controls' PAINT collides; one ending 6px lower than
+  // the controls' box (in the lift) does not; the reserved band grows by the
+  // lift so the controls clear the text.
+  const phone = { width: 320, naturalHeight: 88, maxHeight: 240, controlsWidth: 66, controlsHeight: 32, gap: 2, paintInset: 2, lift: 6 };
+  const under = signatureLayout({ ...phone, textRects: [{ left: 0, right: 300, top: 0, bottom: 44 }, { left: 0, right: 300, top: 44, bottom: 88 }] });
+  assert.deepEqual(under, { inputHeight: 88, reserved: 38, overflow: false, collision: true });
+  const clear = signatureLayout({ ...phone, textRects: [{ left: 0, right: 300, top: 0, bottom: 44 }, { left: 0, right: 240, top: 44, bottom: 88 }] });
+  assert.equal(clear.collision, false);
+  // A rect that ends inside the lift band (below the controls) does not collide.
+  const belowBox = signatureLayout({ ...phone, textRects: [{ left: 0, right: 300, top: 84, bottom: 88 }] });
+  assert.equal(belowBox.collision, false);
+  // Unlifted (desktop) is exactly the old math.
+  const desk = signatureLayout({ ...phone, lift: 0, textRects: [{ left: 0, right: 300, top: 84, bottom: 88 }] });
+  assert.equal(desk.collision, true);
+});
+
 test('a tall touch target checks the previous line too (#186)', () => {
   assert.deepEqual(signatureLayout({
     width: 320, naturalHeight: 84, maxHeight: 240, controlsWidth: 136, controlsHeight: 44, gap: 2,
