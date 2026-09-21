@@ -179,18 +179,13 @@ pub(crate) fn codex_mcp_overrides(m: &McpDef) -> Vec<String> {
     args
 }
 
-fn system_codex_home() -> PathBuf {
-    std::env::var_os("CODEX_HOME")
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))
-        .unwrap_or_else(|| PathBuf::from(".codex"))
-}
-
 /// Keep the managed home's runtime state isolated while sharing the system
 /// Codex provider and login. Links follow config/token refreshes without
-/// copying credentials.
+/// copying credentials. The system home is `codex::codex_user_home` — under
+/// test a per-process temp dir, so a render test never links the developer's
+/// real `~/.codex` (board #216, #231).
 pub(crate) fn inherit_codex_system_files(home: &Path) -> Result<(), String> {
-    inherit_codex_system_files_from(home, &system_codex_home())
+    inherit_codex_system_files_from(home, &super::codex::codex_user_home())
 }
 
 fn link_codex_system_file(

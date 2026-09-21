@@ -7,9 +7,65 @@ pub(crate) fn effort_values() -> &'static [&'static str] {
     &["minimal", "low", "medium", "high", "xhigh"]
 }
 
-/// codex takes aliases with no authoritative list — no validation.
+/// codex models are the slugs of the catalog the user's own config points at
+/// (`model_catalog_json`): the bedrock-runtime endpoint rejects any other
+/// spelling with `validation_error: The provided model identifier is invalid`
+/// (measured on codex-cli 0.154.0, board #231 — `gpt-5.6-sol` fails where
+/// `global.openai.gpt-5.6-sol` answers), so the catalog is authoritative and
+/// a bare slug is rejected at save time. `None` when the config names no
+/// catalog — stock codex takes aliases nobody can enumerate, and validation
+/// degrades to accept-all (models.rs module doc).
 pub(crate) fn models_fetch() -> Option<Vec<String>> {
-    None
+    let config = std::fs::read_to_string(codex_user_home().join("config.toml")).ok()?;
+    let catalog = std::fs::read_to_string(catalog_path(&config)?).ok()?;
+    let slugs = catalog_slugs(&catalog);
+    (!slugs.is_empty()).then_some(slugs)
+}
+
+/// The `model_catalog_json` path out of a codex `config.toml`, if any.
+fn catalog_path(config: &str) -> Option<std::path::PathBuf> {
+    let table = config.parse::<toml::Table>().ok()?;
+    table.get("model_catalog_json").and_then(toml::Value::as_str).map(std::path::PathBuf::from)
+}
+
+/// The `models[].slug` values of a codex model catalog, in file order.
+pub(crate) fn catalog_slugs(json: &str) -> Vec<String> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return Vec::new() };
+    v.get("models")
+        .and_then(serde_json::Value::as_array)
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|m| m.get("slug").and_then(serde_json::Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Where the user's own codex lives — `CODEX_HOME` when the user set it,
+/// else `~/.codex`. Only read, never written.
+#[cfg(not(test))]
+pub(crate) fn codex_user_home() -> std::path::PathBuf {
+    if let Some(h) = std::env::var_os("CODEX_HOME").filter(|h| !h.is_empty()) {
+        return std::path::PathBuf::from(h);
+    }
+    std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default().join(".codex")
+}
+
+/// Under test the user's home is a per-process temp dir (kimi's pattern,
+/// board #216): a test that validates a model must never read — or depend
+/// on — the developer's real `~/.codex`.
+#[cfg(test)]
+pub(crate) fn codex_user_home() -> std::path::PathBuf {
+    static DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let dir = std::env::temp_dir().join(format!("tmm-codex-user-home-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create the test codex home");
+        dir
+    })
+    .clone()
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -383,6 +439,46 @@ pub(crate) fn is_user_prompt_submit(payload: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The catalog the user's config points at is the authoritative model
+    /// list (board #231): its slugs are the list, any other spelling — the
+    /// exact class the runtime endpoint rejects — fails at save time, and a
+    /// home with no catalog degrades to accept-all. The home is the
+    /// per-process test dir, never the developer's real `~/.codex`. Asserted
+    /// on `models_fetch` directly: `models::list` caches per backend (600 s),
+    /// and warming that cache here would couple test order.
+    #[test]
+    fn models_are_the_catalog_slugs_of_the_users_config() {
+        let home = codex_user_home();
+        assert!(models_fetch().is_none(), "no config yet — no authoritative list");
+
+        // A config with no catalog is stock codex — aliases, accept-all.
+        std::fs::write(home.join("config.toml"), "model = \"gpt-5.6-sol\"\n").unwrap();
+        assert!(models_fetch().is_none());
+
+        let catalog = home.join("models.json");
+        std::fs::write(
+            &catalog,
+            r#"{"models":[{"slug":"global.openai.gpt-6-astra"},{"slug":"global.openai.gpt-5.6-sol"}]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            home.join("config.toml"),
+            format!("model = \"global.openai.gpt-6-astra\"\nmodel_catalog_json = {:?}\n", catalog),
+        )
+        .unwrap();
+        assert_eq!(
+            models_fetch(),
+            Some(vec!["global.openai.gpt-6-astra".into(), "global.openai.gpt-5.6-sol".into()])
+        );
+
+        assert_eq!(catalog_slugs("not json"), Vec::<String>::new());
+        assert_eq!(catalog_slugs(r#"{"models":"nope"}"#), Vec::<String>::new());
+
+        // Leave the home catalog-less: sibling tests share the per-process
+        // dir and must keep seeing "no authoritative list".
+        std::fs::remove_file(home.join("config.toml")).unwrap();
+    }
 
     /// The measured 0.153.4 sub-agent shapes (board #169): a child's event is
     /// told apart by `agent_id`; the parent's identical-looking prompt has no
