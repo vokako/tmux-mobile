@@ -707,3 +707,18 @@ test("re-selecting the Hub's rail tab toggles the sidebar (boards #199, #201)", 
   assert.match(source, /onReselect\?\.\(\(\) => \{ if \(!compact\) void setSidebar\(!sideCollapsed\); \}\);/u,
     'desktop only — the phone has no rail; a sheet has its own opener');
 });
+
+test('the phone Chat head is ONE dense tool group and the name may run up to it (board #228)', () => {
+  // Owner 2026-09-21: "chat在手机上的按钮间的间距小一些，更紧凑一些，右上角的按钮 发送区的按钮，
+  // 还有chat的标题要能够放下更宽的标题 下箭头右边不用留这么大间距". The 32px pitch is the
+  // .compact-tools exception (#192/#193) the Files head already takes on touch;
+  // the whole head wears it on compact so the menu, the caret and the three
+  // toggles shrink together and the name gets the width their padding spent.
+  assert.match(source, /<div class="page-head chat-head" class:compact-tools=\{compact\}>/u);
+  const tools = source.slice(source.indexOf('<div class="head-tools">'), source.indexOf('{#if headerCopyFeedback && headerCopyAnchor}'));
+  assert.ok(tools.includes('icon="layout"') && tools.includes('icon="files"') && tools.includes('icon="terminal"'), 'the three toggles are the group');
+  assert.match(source, /\.head-tools \{ display: flex; align-items: center; gap: var\(--tool-gap\); flex: none; \}/u);
+  // The 60% cap exists for the desktop PATH; the phone renders none.
+  assert.match(source, /\.hub-root\.compact \.title-group \{ max-width: none; \}/u);
+  assert.match(source, /\{#if !compact\}<span class="path"/u, 'the path is desktop-only, so the cap has nothing to protect on compact');
+});

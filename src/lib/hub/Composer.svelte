@@ -310,7 +310,10 @@
     onpaste={onComposerPaste}
     onfocus={onfocus}
   ></textarea>
-  <div class="composer-actions" bind:this={actionsEl}>
+  <!-- On the phone the two controls are a dense group (.compact-tools, the
+       Files-head pitch): 32px each instead of 44, so the field keeps 24px more
+       for text (board #228, owner: "发送区的按钮" tighter). -->
+  <div class="composer-actions" class:compact-tools={compact} bind:this={actionsEl}>
     <CommandButton variant="icon" icon="plus" label={t('hubAttach')} disabled={!selected || attaching}
       pending={attaching} onclick={() => fileEl?.click()} />
     <CommandButton variant="primary" iconOnly round icon="send-up" label={t('hubSend')}

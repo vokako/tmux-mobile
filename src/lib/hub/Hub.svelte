@@ -1570,7 +1570,13 @@
 
     <!-- ── Main: the conversation ─────────── -->
     <main class="mid">
-      <div class="page-head chat-head">
+      <!-- On the phone the whole head is ONE dense tool group (.compact-tools:
+           the 32px pitch the Files head keeps on touch, #192/#193) — menu,
+           caret and the three partition toggles — so the name gets the width
+           three 44px boxes were spending on padding (board #228, owner
+           2026-09-21: "手机上的按钮间的间距小一些，更紧凑一些，右上角的按钮…标题要能够
+           放下更宽的标题"). -->
+      <div class="page-head chat-head" class:compact-tools={compact}>
         <!-- The phone reaches the project list here, as a drawer. No chip strip:
              separate conversations are chosen deliberately, not flicked past. -->
         {#if compact}
@@ -1634,6 +1640,9 @@
              2026-08-29: "board单独作为一个独立的功能的页面"); on desktop it is
              the drawer's THIRD partition ("或者右侧边栏有这个任务侧边栏", same
              day) — exactly the files toggle's split. -->
+        <!-- The partition toggles sit at the tool gap, not the row gap: three
+             icons read as one group (board #228). -->
+        <div class="head-tools">
         <CommandButton variant="icon" icon="layout" label={t('board')}
           expanded={mobile || compact ? undefined : termOpen && drawerView === 'board'}
           controls={mobile || compact || !drawerShown ? undefined : drawerId}
@@ -1660,6 +1669,7 @@
           expanded={mobile || compact ? undefined : termOpen && drawerView === 'term'}
           controls={mobile || compact || !drawerShown ? undefined : drawerId}
           onclick={() => termOpen && drawerView === 'term' && !compact ? closeDrawer() : (drawerView = 'term', openDrawer())} />
+        </div>
         {#if headerCopyFeedback && headerCopyAnchor}
           <div class="header-copy-feedback pop-layer" use:feedbackPosition={{ trigger: headerCopyAnchor, bounds: headerCopyAnchor.closest('main'), keepClear: headerCopyAnchor.closest('.chat-head') }}>
             <OperationFeedback value={headerCopyFeedback} ondismiss={headerCopyFeedback.kind === 'error' ? headerCopyLifetime.clear : undefined} />
@@ -1915,6 +1925,12 @@
      effectively all of it and the name only starts to ellipsize once the
      path is gone. The buttons are `flex: none` and always keep their box. */
   .title-group { display: flex; align-items: center; gap: 1px; flex: 0 1 auto; min-width: 0; max-width: 60%; }
+  /* The 60% cap keeps room for the PATH — which the phone does not show, so
+     there the name may run right up to the tool group and its caret stays
+     glued to the name's end instead of parking mid-row (board #228, owner:
+     "chat的标题要能够放下更宽的标题 下箭头右边不用留这么大间距"). */
+  .hub-root.compact .title-group { max-width: none; }
+  .head-tools { display: flex; align-items: center; gap: var(--tool-gap); flex: none; }
   /* The title yields width before any native command target does. */
   h1 { display: flex; align-items: center; min-width: 0; }
   .h1-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

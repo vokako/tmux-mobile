@@ -161,7 +161,8 @@ test('the composer scrollbar follows measured overflow and the placeholder names
 
 test('measured signature actions reuse shared commands without hardcoded avoidance (#186)', async () => {
   assert.match(source, /import CommandButton from '\.\.\/ui\/CommandButton\.svelte';/u);
-  assert.match(source, /<div class="composer-actions" bind:this=\{actionsEl\}>/u);
+  assert.match(source, /<div class="composer-actions" class:compact-tools=\{compact\} bind:this=\{actionsEl\}>/u,
+    '#228: on the phone the two controls are a dense 32px group');
   assert.match(rule('.composer-actions'), /display: flex/u);
   assert.match(rule('.composer-actions'), /position: absolute; right: 0; bottom: 0/u);
   // #203: an input's radius and the row content inset — 16px on a 32px desktop

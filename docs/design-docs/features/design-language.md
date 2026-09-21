@@ -309,7 +309,20 @@ the ten take 338px and fit at 360 (348 available). Three inline row tools
 136 → 96px; toolbar 48 → 36, path row 52 → 40, the list starts at 76 instead
 of 100. The file row itself keeps its 44px `--files-row-height`.
 `controls.source.test.ts` pins the metric and which Files groups carry the
-class.
+class. **The Chat head and the composer's two controls wear it on the phone
+too** (board #228, owner 2026-09-21: "chat在手机上的按钮间的间距小一些，更紧凑一些，
+右上角的按钮 发送区的按钮，还有chat的标题要能够放下更宽的标题 下箭头右边不用留这么大间距"):
+`Hub`'s `.chat-head` takes `class:compact-tools={compact}` — menu, name caret
+and the three partition toggles all on the 32px pitch, the toggles grouped
+in `.head-tools` at the tool gap — and `Composer`'s `.composer-actions`
+likewise. Measured on a 390px phone (coarse tokens): the three toggles
+280/314/348 instead of 240/288/336 (100px, was 140), the caret's box
+32 wide so its glyph sits 7px off the name's end instead of 13, attach+send
+66px instead of 90 (the field keeps the difference), and a long name gets
+193px before it ellipsizes (was ~178). The `.title-group`'s 60% cap is for
+the PATH beside it, which the phone does not render, so
+`.hub-root.compact .title-group { max-width: none }` lets the name run up to
+the tool group.
 Single-line controls are border-box sized with an 18px line box. Layout,
 hover, pending icons and disabled states cannot resize them. Command
 labels use display/ui-step 500; values/options use the content face;
