@@ -269,15 +269,16 @@
              chat 里不太一样"). No count either: Chat's header is the word
              alone, and "PROJECTS 24" next to Chat's "PROJECTS" was one of
              the mismatches the owner named (board #235: "projects 后面写的
-             project 数量等等，这些都给我对齐一下"). Page mode keeps its
-             count — there the header is a section summary, not a sidebar
-             label. -->
+             project 数量等等，这些都给我对齐一下"). -->
         <span>{t('projects')}</span>
       {:else}
+        <!-- The word alone here too (#235 follow-up): with every sidebar
+             count gone, the page header's badge was the last of its species
+             — the Sessions page shows none, and the list below already
+             answers "how many". -->
         <button class="group-toggle" onclick={() => collapsed = !collapsed} aria-expanded={!collapsed}>
           <span class="chev" class:open={!collapsed}><Icon name="chevron-right" size={12} /></span>
           {t('projects')}
-          <span class="group-count">{sorted.length}</span>
         </button>
       {/if}
     </div>
@@ -408,10 +409,6 @@
     display: flex; align-items: center; gap: 6px;
     background: none; border: 0; padding: 2px 0; cursor: pointer;
     font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit;
-  }
-  .group-count {
-    background: var(--surface2); color: var(--text2);
-    border-radius: 8px; padding: 0 5px; font-size: var(--fs-meta); letter-spacing: 0;
   }
 
   /* ── Sidebar (dense) mode ───────────────────────────────────────────────
