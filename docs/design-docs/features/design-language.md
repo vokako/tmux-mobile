@@ -716,10 +716,15 @@ by the contract above, not extended by new page-local overrides.
   going DARKER beneath (per-theme opaque, dark `#06060a`, light `#e2e2e8`),
   never from a brighter tab ("会不会有点过亮了？…把其他地方变得更暗的方式来解
   决"). The lit tab overlaps the band's top edge by 1px with the same fill, so
-  the outline breaks exactly at the junction — no seam, no stub. MULTI-SELECT
-  IS ONE ENCLOSURE: under All (and while All previews) the STRIP itself is the
-  lit tab — one fill, one edge, zero lines between siblings ("就用一个大的包
-  边…不要有很多线拐来拐去") — and per-card paint switches off. An inactive
+  the outline breaks exactly at the junction. The band draws NO top edge: a
+  full-width line there is a horizontal rule across the tray ("中间分隔的横线
+  不要有"), and beside the lit tab the frame simply steps into the band's
+  colour. MULTI-SELECT IS ONE ENCLOSURE: under All (and while All previews)
+  the DESTINATIONS GROUP (`.tabs` — the All tab plus the live agents, sized to
+  its content) is the lit tab — one fill, one edge, zero lines between
+  siblings ("就用一个大的包边…不要有很多线拐来拐去") — and per-card paint
+  switches off. The `+`, a stopped identity and the space behind them stay
+  OUTSIDE it: they are not destinations ("不要把加号后面的这些区域也都框出来"). An inactive
   tab's LABEL dims to `--text2`, two signals for one state; avatars, status
   dots and context rings keep their colours because they are live facts. Top
   corners `--ui-radius-control`, fill down to the strip's floor in the

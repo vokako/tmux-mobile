@@ -40,7 +40,7 @@ test('Roster renders the controlled destination strip (#168)', { timeout: RENDER
     // #236: Everyone is the PINNED tab at the strip's head — always in view,
     // collapsed included (owner, 2026-09-22: "不用隐藏"; supersedes #204's
     // expanded-only rule).
-    const all = (r: DocumentFragment) => r.querySelector<HTMLButtonElement>('.cards > .all-choice:first-child button')!;
+    const all = (r: DocumentFragment) => r.querySelector<HTMLButtonElement>('.cards > .tabs > .all-choice:first-child button')!;
     assert.equal(all(root).getAttribute('aria-label'), 'everyone', 'present while collapsed');
     assert.equal(all(view()).getAttribute('aria-pressed'), 'false');
     assert.equal(all(view({ recipient: 'all' })).getAttribute('aria-pressed'), 'true');

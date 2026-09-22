@@ -375,12 +375,13 @@
        (--bubble-in) with the bubble's faint edge, and the contrast comes from
        the darker frame above — "和 Agent 返回给我的消息框的亮度色彩差不多就可
        以…整体加一个稍微淡白色的边". No top edge: the strip's lit tab owns that
-       side of the enclosure: the band's top edge runs the full width and the
-       lit tab's own fill covers the segment under it (same colour, 1px
-       overlap), so the outline breaks exactly where the tab joins — one
-       enclosure, no line between them. The input stays its own field. */
+       side of the enclosure. The band draws NO top edge (owner, 2026-09-22:
+       "Agent card 和下面这个区域中间分隔的横线不要有"): a full-width top
+       border is a horizontal line across the tray, and the lit tab above
+       already closes the enclosure on that side — beside the tab, the frame
+       simply steps into the band's colour. The input stays its own field. */
     background: var(--bubble-in);
-    border: 1px solid var(--bubble-line);
+    border: 1px solid var(--bubble-line); border-top: 0;
     border-radius: 0 0 var(--ui-radius-control) var(--ui-radius-control);
   }
   /* An input's radius (--ui-radius-control), not 16px: on a 32px desktop

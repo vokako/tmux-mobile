@@ -246,7 +246,7 @@ test('Everyone is the PINNED tab: always at the head, previewing on hover (board
   // exactly as clicking would (round 5); touch never previews.
   assert.match(source, /let allPreview = \$state\(false\);/u);
   assert.match(source, /const allLit = \$derived\(recipient === ALL_TARGET \|\| allPreview\);/u);
-  assert.match(source, /<div class="cards edge-fade" class:all-lit=\{allLit\}/u);
+  assert.match(source, /<div class="tabs" class:all-lit=\{allLit\}>/u);
   assert.match(source, /onpointerenter=\{\(e\) => \{ if \(e\.pointerType !== 'touch'\) allPreview = true; \}\}/u);
   assert.doesNotMatch(source, /class:preview=/u, 'round 5: no per-card preview paint — the strip is the one enclosure');
 });
@@ -265,10 +265,15 @@ test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosur
   assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel::before \{[\s\S]{0,240}?inset: var\(--control-paint-inset\) 0 -1px; border-bottom: 0;/u);
   // Multi-select: the STRIP is the lit tab — one fill, one edge, no lines
   // between siblings, and the per-card paint switches off by construction.
-  assert.match(rule('.cards.all-lit'), /background: var\(--bubble-in\)/u);
-  assert.match(rule('.cards.all-lit'), /border: 1px solid var\(--bubble-line\); border-bottom: 0/u);
-  assert.match(rule('.cards.all-lit'), /margin-bottom: -1px; padding-bottom: 1px; position: relative; z-index: 1/u);
-  assert.match(source, /\.cards\.all-lit \.acard::before \{ background: transparent; border-color: transparent; \}/u);
+  assert.match(rule('.tabs.all-lit'), /background: var\(--bubble-in\)/u);
+  assert.match(rule('.tabs.all-lit'), /border: 1px solid var\(--bubble-line\); border-bottom: 0/u);
+  assert.match(rule('.tabs.all-lit'), /margin-bottom: -1px; padding-bottom: 1px; position: relative; z-index: 1/u);
+  assert.match(source, /\.tabs\.all-lit \.acard::before \{ background: transparent; border-color: transparent; \}/u);
+  // Round 6: the enclosure belongs to the DESTINATIONS group, sized to its
+  // content — the +, a stopped identity and the space behind them are not
+  // destinations (owner: "不要把加号后面的这些区域也都框出来").
+  assert.match(rule('.tabs'), /display: flex; align-items: center; gap: var\(--roster-gap\); min-width: 0/u);
+  assert.doesNotMatch(source, /\.cards\.all-lit/u, 'the row-wide enclosure is gone');
   assert.match(rule('.acard::before'), /transition: background var\(--t-move\) ease, border-color var\(--t-move\) ease,\n\s*border-radius var\(--t-move\) ease, inset var\(--t-move\) ease/u,
     'switching tabs is movement: the swap crossfades and reshapes, never snaps');
   assert.doesNotMatch(source, /\.roster::after/u, 'the hairline model stays dead');

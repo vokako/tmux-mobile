@@ -174,7 +174,10 @@ test('measured signature actions reuse shared commands without hardcoded avoidan
   // corners) inside the composer BAND — the owner's Chrome screenshot: the
   // toolbar and the active tab share one fill, the omnibox stands in it.
   assert.match(rule('.compose-shell'), /border: 1px solid var\(--border\); border-radius: var\(--ui-radius-control\)/u);
-  assert.match(rule('.composer'), /background: var\(--bubble-in\);\n\s*border: 1px solid var\(--bubble-line\);\n\s*border-radius: 0 0 var\(--ui-radius-control\) var\(--ui-radius-control\)/u,
+  // Round 6: NO top edge — a full-width top border is a horizontal line
+  // across the tray (owner: "中间分隔的横线不要有"); the lit tab above closes
+  // that side of the enclosure, and beside it the frame steps into the band.
+  assert.match(rule('.composer'), /background: var\(--bubble-in\);\n\s*border: 1px solid var\(--bubble-line\); border-top: 0;\n\s*border-radius: 0 0 var\(--ui-radius-control\) var\(--ui-radius-control\)/u,
     'the band wears the agent bubble and closes the enclosure the lit tab opens');
   assert.match(rule('.compose-shell'), /padding: var\(--tool-inset-block\) var\(--menu-item-padding-x\)/u);
   assert.match(source, /const paintInset = parseFloat\(actionsStyle\.getPropertyValue\('--control-paint-inset'\)\) \|\| 0;/u);

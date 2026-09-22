@@ -185,7 +185,7 @@
 
 {#if selected}
   <div class="roster" class:compact>
-    <div class="cards edge-fade" class:all-lit={allLit} class:expanded class:reveal={justLoaded} id={cardsId} bind:this={cardsEl} use:scrollEdges={!expanded}
+    <div class="cards edge-fade" class:expanded class:reveal={justLoaded} id={cardsId} bind:this={cardsEl} use:scrollEdges={!expanded}
       role="group" aria-label={t('agentsTitle')}
       onpointerenter={(e) => { hovering = e.pointerType !== 'touch'; }}
       onpointerleave={() => { hovering = false; clearPress(); }}
@@ -199,6 +199,12 @@
         </div>
       {/if}
 
+      <!-- The DESTINATIONS: the All tab and the live agents, the group the
+           multi-select enclosure belongs to. It is a group, not the row: the
+           +, a stopped identity and the empty space after them are not
+           destinations, and framing them was what made the All enclosure "有点
+           过分大了" (owner, 2026-09-22). -->
+      <div class="tabs" class:all-lit={allLit}>
       <!-- Everyone: the PINNED tab at the strip's head (board #236, owner,
            2026-09-22: "不用隐藏，我不展开就看不到吧…都显示全了"). Chrome pins a
            tab as an icon-only tab at the far left; this is that — always in
@@ -267,6 +273,7 @@
           {/if}
         </div>
       {/each}
+      </div>
       {#each stopped as name (name)}
         {@const backend = slotBackend(name)}
         <!-- A stopped identity offers context actions, never a card-wide restart.
@@ -338,21 +345,26 @@
     display: flex; align-items: center; gap: var(--roster-gap); overflow-x: auto; scrollbar-width: none;
     min-width: 0; min-height: 0; padding: 2px 2px 0;
   }
+  /* The destinations group: sized to its content, so the multi-select
+     enclosure ends after the last tab instead of framing the + and the empty
+     space behind it (owner, 2026-09-22: "不要把加号后面的这些区域也都框出来"). */
+  .tabs { display: flex; align-items: center; gap: var(--roster-gap); min-width: 0; }
+  .cards.expanded .tabs { flex-wrap: wrap; align-content: start; }
   /* MULTI-SELECT IS ONE ENCLOSURE (owner, 2026-09-22: "如果是选择多个 Agent，
      就用一个大的包边。注意 Agent 和 Agent 之间的卡片不要有很多线拐来拐去，就是
-     一个大的包边"): under All — and while the All tab previews it — the STRIP
-     itself is the lit tab, one fill and one edge around the whole row, and the
-     per-card paint switches off (below). Every internal line is gone by
+     一个大的包边"): under All — and while the All tab previews it — the
+     DESTINATIONS GROUP is the lit tab, one fill and one edge around it, and
+     the per-card paint switches off (below). Every internal line is gone by
      construction, not by patching borders between siblings. */
-  .cards.all-lit {
+  .tabs.all-lit {
     background: var(--bubble-in);
     border: 1px solid var(--bubble-line); border-bottom: 0;
     border-radius: var(--ui-radius-control) var(--ui-radius-control) 0 0;
-    /* 1px down over the band's top edge: the same fill covers it, so the
-       enclosure reads as continuous into the composer. */
+    /* 1px into the band: the same fill, so no sub-pixel gap can open at the
+       junction on a fractional zoom. */
     margin-bottom: -1px; padding-bottom: 1px; position: relative; z-index: 1;
   }
-  .cards.all-lit .acard::before { background: transparent; border-color: transparent; }
+  .tabs.all-lit .acard::before { background: transparent; border-color: transparent; }
   .cards:not(.expanded)::-webkit-scrollbar { display: none; }
   .cards.expanded {
     flex-wrap: wrap; align-content: start;
@@ -392,7 +404,7 @@
      one state, which is what makes the lit tab read at a glance (owner,
      2026-09-22: "选中和没有选中的…差异更明显一点"). The avatar, status dot and
      context ring keep their colours: they are live facts, not chrome. */
-  .cards:not(.all-lit) .acard:not(.sel):not(.off) { color: var(--text2); }
+  .tabs:not(.all-lit) .acard:not(.sel):not(.off) { color: var(--text2); }
   .acard { transition: color var(--t-move) ease; }
   /* Attached only in the single-row strip: the fill reaches the floor
      (inset-bottom 0), top corners the control radius — Chrome's active-tab

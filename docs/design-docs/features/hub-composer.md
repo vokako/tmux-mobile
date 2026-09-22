@@ -199,12 +199,23 @@ tab joins.
 
 **Multi-select is ONE enclosure** ("如果是选择多个 Agent，就用一个大的包边。
 注意 Agent 和 Agent 之间的卡片不要有很多线拐来拐去"): under All — and while
-the All tab PREVIEWS it — `.cards.all-lit` makes the STRIP the lit tab (one
-fill, one edge, `margin-bottom: -1px` over the band) and switches every
-card's own paint off. No border logic between siblings exists to zigzag, and
-the per-card `preview` class is gone with it: hovering All now shows exactly
-the shape clicking produces. Measured in both themes, desktop 1280 and phone
-390: single selection and All.
+the All tab PREVIEWS it — `.tabs.all-lit` makes the DESTINATIONS GROUP the
+lit tab (one fill, one edge, `margin-bottom: -1px` into the band) and
+switches every card's own paint off. No border logic between siblings exists
+to zigzag, and the per-card `preview` class is gone with it: hovering All
+shows exactly the shape clicking produces.
+
+Round 6 fixed what the first enclosure got wrong (owner, same evening). The
+group is `.tabs` — the All tab plus the live agents — and it is sized to its
+CONTENT, so the enclosure ends after the last agent instead of framing the
+`+`, the stopped identities and the empty row behind them ("上面框的这个区域
+有点过分大了…不要把加号后面的这些区域也都框出来"); naming that group is also
+honest, since those siblings are not destinations. And the band's `border-top`
+is gone: a full-width top edge drew a horizontal rule between the strip and
+the input area ("Agent card 和下面这个区域中间分隔的横线不要有"), while the lit
+tab above already closes that side of the enclosure and beside it the frame
+steps straight into the band's colour. Measured in both themes, desktop 1280
+and phone 390: single selection and All.
 
 ### All selects the addressed cards (#186, 2026-09-12)
 
