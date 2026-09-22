@@ -210,7 +210,17 @@ group is `.tabs` — the All tab plus the live agents — and it is sized to its
 CONTENT, so the enclosure ends after the last agent instead of framing the
 `+`, the stopped identities and the empty row behind them ("上面框的这个区域
 有点过分大了…不要把加号后面的这些区域也都框出来"); naming that group is also
-honest, since those siblings are not destinations. And the band's `border-top`
+honest, since those siblings are not destinations. **`.tabs` carries
+`flex: none` in the single-row strip**, and that is load-bearing: as a
+shrinkable item of the scrolling `.cards` it absorbed every bit of negative
+space once the tabs overflowed while its own `flex: none` cards did not, so
+the cards spilled out of the group and the stopped cards and the `+` drew ON
+TOP of them (review caught it before merge; Chromium at 300px with four 90px
+tabs: group right 198 vs. last tab right 368, stopped card left 200). The
+wrapped list is the opposite case and keeps `flex: 0 1 auto; min-width: 0`,
+where the group shrinks to the container and wraps inside itself. Measured on
+the phone at 390px with five destinations: group right 469 = last tab right
+469, the `+` at 471, the strip scrolling as before. And the band's `border-top`
 is gone: a full-width top edge drew a horizontal rule between the strip and
 the input area ("Agent card 和下面这个区域中间分隔的横线不要有"), while the lit
 tab above already closes that side of the enclosure and beside it the frame

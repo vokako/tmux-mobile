@@ -272,7 +272,10 @@ test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosur
   // Round 6: the enclosure belongs to the DESTINATIONS group, sized to its
   // content — the +, a stopped identity and the space behind them are not
   // destinations (owner: "不要把加号后面的这些区域也都框出来").
-  assert.match(rule('.tabs'), /display: flex; align-items: center; gap: var\(--roster-gap\); min-width: 0/u);
+  assert.match(rule('.tabs'), /display: flex; align-items: center; gap: var\(--roster-gap\); flex: none/u,
+    'the group must NOT shrink in the scrolling strip: its flex:none cards would spill out of it and the + would draw on top (review 2026-09-22)');
+  assert.match(rule('.cards.expanded .tabs'), /flex: 0 1 auto; min-width: 0; flex-wrap: wrap/u,
+    'only the wrapped list shrinks the group — there it wraps inside itself');
   assert.doesNotMatch(source, /\.cards\.all-lit/u, 'the row-wide enclosure is gone');
   assert.match(rule('.acard::before'), /transition: background var\(--t-move\) ease, border-color var\(--t-move\) ease,\n\s*border-radius var\(--t-move\) ease, inset var\(--t-move\) ease/u,
     'switching tabs is movement: the swap crossfades and reshapes, never snaps');

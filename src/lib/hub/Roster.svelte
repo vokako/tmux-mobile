@@ -347,9 +347,17 @@
   }
   /* The destinations group: sized to its content, so the multi-select
      enclosure ends after the last tab instead of framing the + and the empty
-     space behind it (owner, 2026-09-22: "不要把加号后面的这些区域也都框出来"). */
-  .tabs { display: flex; align-items: center; gap: var(--roster-gap); min-width: 0; }
-  .cards.expanded .tabs { flex-wrap: wrap; align-content: start; }
+     space behind it (owner, 2026-09-22: "不要把加号后面的这些区域也都框出来").
+     `flex: none` is load-bearing in the single-row strip: as a shrinkable item
+     of the scrolling `.cards`, the group absorbed all the negative space once
+     the tabs overflowed while its own `flex: none` cards did not — the cards
+     spilled out of the group and the stopped cards and the + drew ON TOP of
+     them (review, 2026-09-22, measured in Chromium at 300px with four 90px
+     tabs: group right 198 vs. last tab right 368, stopped card left 200).
+     The wrapped list is the opposite case: there the group SHOULD shrink to
+     the container and wrap inside itself. */
+  .tabs { display: flex; align-items: center; gap: var(--roster-gap); flex: none; }
+  .cards.expanded .tabs { flex: 0 1 auto; min-width: 0; flex-wrap: wrap; align-content: start; }
   /* MULTI-SELECT IS ONE ENCLOSURE (owner, 2026-09-22: "如果是选择多个 Agent，
      就用一个大的包边。注意 Agent 和 Agent 之间的卡片不要有很多线拐来拐去，就是
      一个大的包边"): under All — and while the All tab previews it — the
