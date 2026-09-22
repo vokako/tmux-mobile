@@ -1869,6 +1869,10 @@
        action atoms (board #46) — one definition, every wearer. */
     --bubble-out: color-mix(in srgb, var(--bg) 84%, var(--accent) 16%);
     --bubble-line: color-mix(in srgb, var(--border) 72%, var(--text3) 28%);
+    /* ONE inline inset for the tab strip (Roster) and the composer shell
+       under it (board #236): the lit tab must land exactly on the shell's
+       edge, and two literals is how they would drift apart. */
+    --composer-inset: 12px;
   
     /* Design tokens (--fs-*, --meta-ink, --t-*) come from :root in app.css —
        promoted app-wide 2026-08-18. Contract: tmm-cli.md "Design tokens". */
@@ -1889,6 +1893,7 @@
   .cols { flex: 1; display: grid; min-height: 0; --side-open: 1; --drawer-open: 0; }
   .hub-root:not(.compact) .cols { grid-template-columns: minmax(0, calc(var(--sidebar-w) * var(--side-open))) minmax(280px, 1fr) minmax(0, calc(var(--hub-drawer-w, 520px) * var(--drawer-open))); overflow: hidden; }
   .hub-root.compact .cols { grid-template-columns: minmax(0, 1fr); }
+  .hub-root.compact { --composer-inset: 9px; }
   /* :global — these classes are raised by reveal.ts, not by the markup. */
   .cols:global(.moving) { transition: --side-open var(--t-move) ease-out, --drawer-open var(--t-move) ease-out; }
   /* A track is a single-cell grid so its partition stretches to it at rest;

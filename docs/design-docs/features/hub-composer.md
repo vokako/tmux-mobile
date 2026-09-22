@@ -99,7 +99,14 @@ The shell wears an input's radius (`--ui-radius-control`) and the row content
 inset (`--menu-item-padding-x`) since #203: its 16px radius on a 32px desktop
 shell was a full semicircle and the first glyph, 6px from the border, read as
 squeezed into it (owner: "尤其是文字在靠近边缘的位置 感觉被挤到了半圆里面一样"); the
-50px phone shell had read as a rounded rectangle all along.
+50px phone shell had read as a rounded rectangle all along. Since board #236
+the radius is the BOTTOM corners only and the shell has no top border: it is
+the toolbar under a Chrome-style tab strip — the Roster draws the shared top
+hairline (`.roster::after`, at `--composer-inset`, the ONE inline inset both
+components consume from `.hub-root` so the lit tab lands exactly on the
+shell's edge) and the selected agent's tab paints over it, one surface from
+tab to input. The hairline answers the shell's focus/command colours through
+`:has`, so the tray's whole outline agrees.
 
 This explicitly reverses the #168/#180 no-mirror/side-column layout rule:
 the mirror was unnecessary for a separate row, but is necessary for the
@@ -140,6 +147,22 @@ when the list expands upward, keeping collapse at the same reachable position.
 Chromium 152.0.7977.64 measured the old disclosure 3px below the card centre
 on desktop and 1px below on 390px coarse input, in both themes. Both offsets
 are now zero; restoring the old wrapper CSS reproduces the mismatch.
+
+### The destination strip is a tab strip (board #236, 2026-09-22)
+
+Owner: "Agent 卡片标题：能不能做成类似 Chrome tab 栏的样式？选中哪一个，哪一个
+就是亮的，其他在旁边" — and on the pre-#236 look: "现在太多都是通过颜色块加选
+择线框的形式了". The cards' wash + accent ring said "selected" with a colour
+block and an outline; the tab says it with SHAPE and continuity: the lit
+tab and the composer shell are one surface (the normative idiom lives in
+design-language.md § paint species — rest bare, hover `--surface2`,
+selected `--bubble-in` + `--border`, bottom open onto the shell in the
+single-row strip; the wrapped expanded list keeps a closed rounded box,
+a list is not a tab bar). The strip's bottom scrollport inset went to the
+tab (it must reach the floor), so the disclosure wrapper height carries
+`+ 2px`, not `+ 4px`. Status dots, context rings, unread marks, @ marks,
+the dashed filter ring and the Stop-on-dot all survive unchanged — they
+are function, not the retired chrome.
 
 ### All selects the addressed cards (#186, 2026-09-12)
 
@@ -183,19 +206,26 @@ and clamps its scrollTop during a width resize; restoring the textarea
 then leaves a 61px tail gap. The row hold is removed in `finally` before
 the shell-height notification. It is not a mirror, timer or Feed correction.
 
-All is the single circular icon CommandButton — in the composer's signature
-from #168 to #203, and since board #204 at the HEAD of the roster strip, only
-while the list is expanded, its glyph an avatar's size (owner, 2026-09-15:
-"这个按钮就小一点，和其他agent的icon一样大就行，固定在最左边"; 2026-09-17: "藏到展开
-Agent 卡片的列表里 就像你的那个加号一样…展开之后再显示"): it is a destination like
-the cards, so it stands with them, first, and the composer's signature keeps
-only Attach and Send. Same command, same 28/44px native target (`.all-choice`
-sets `--control-icon-size: var(--roster-avatar-size)` — 20px like the
-avatars; the hit box stays the row's), same props (`pressed`, `hasPopup`,
-`expanded` for the All menu), now wired into `Roster` (`allMenuOpen`,
-`onall`). #180's "never a card" holds: no `data-agent="all"`. Selected All wears the shared pressed
-control-surface/accent-ink treatment; Send is the only solid CTA. The old
-roster All card, its private styling and resident All Stop are removed whole.
+All is the PINNED TAB at the strip's head (board #236, owner, 2026-09-22:
+"不用隐藏，我不展开就看不到吧…都显示全了" — supersedes #204's expanded-only
+gate, whose reason was the 2026-09-17 "藏到展开列表里"): Chrome pins a tab as
+an icon-only tab at the far left, and this is that — always in view,
+collapsed strip included, the `everyone` group-of-people glyph (`collab`'s
+orbiting dots read as nothing to a newcomer — owner: "别人看了都不知道什么意
+思"), avatar-sized (`.all-choice` sets `--control-icon-size:
+var(--roster-avatar-size)`), the same 28/44px native target and props
+(`pressed`, `hasPopup`, `expanded` for the All menu), wired into `Roster`
+(`allMenuOpen`, `onall`). The span is `.acard` so selected All is a LIT TAB
+like any card's; the CommandButton inside is `bare` and its `engaged` wash
+is switched off locally — the tab is the paint, a wash inside it would be a
+colour block again; the accent ink remains as the pressed signal. Hovering
+or focusing the tab PREVIEWS the choice (owner: "鼠标悬停…看到的就是所有的
+Agent 被选中或者激活"): `allPreview` lights every live, not-yet-addressed
+card with exactly the selected tab paint (`.acard.preview` shares the
+`.acard.sel` rule); touch never previews — a finger has no hover. #180's
+"never a card" holds: no `data-agent="all"`, no Stop, no meter. Selected
+All still opens the All menu on a second activation; Send is the only
+solid CTA.
 First activation selects `ALL_TARGET`; another activation opens the existing
 Hub ContextMenu. Constructive Record only comes first and clears All
 directly; the amber interrupt command appears only while members are busy,

@@ -37,16 +37,17 @@ test('Roster renders the controlled destination strip (#168)', { timeout: RENDER
     assert.equal(select(root, 'runner').getAttribute('aria-pressed'), 'true');
     assert.equal(select(root, 'waiting').getAttribute('aria-pressed'), 'false');
     assert.equal(root.querySelector('[data-agent="all"]'), null, '#180: All is never a CARD');
-    // #204: Everyone stands at the strip's HEAD, only while expanded — the same shared command it was in the composer.
-    assert.equal(root.querySelector('.all-choice'), null, 'collapsed: hidden like the owner reads the +');
-    const open = (props: Record<string, unknown> = {}) => view({ expanded: true, ...props });
+    // #236: Everyone is the PINNED tab at the strip's head — always in view,
+    // collapsed included (owner, 2026-09-22: "不用隐藏"; supersedes #204's
+    // expanded-only rule).
     const all = (r: DocumentFragment) => r.querySelector<HTMLButtonElement>('.cards > .all-choice:first-child button')!;
-    assert.equal(all(open()).getAttribute('aria-label'), 'everyone');
-    assert.equal(all(open()).getAttribute('aria-pressed'), 'false');
-    assert.equal(all(open({ recipient: 'all' })).getAttribute('aria-pressed'), 'true');
-    assert.equal(all(open({ recipient: 'all' })).getAttribute('aria-haspopup'), 'menu');
-    assert.equal(all(open({ recipient: 'all', allMenuOpen: true })).getAttribute('aria-expanded'), 'true');
-    assert.equal(open({ roomReady: false }).querySelector<HTMLButtonElement>('.all-choice button')!.disabled, true, 'not before the room is ready');
+    assert.equal(all(root).getAttribute('aria-label'), 'everyone', 'present while collapsed');
+    assert.equal(all(view()).getAttribute('aria-pressed'), 'false');
+    assert.equal(all(view({ recipient: 'all' })).getAttribute('aria-pressed'), 'true');
+    assert.equal(all(view({ recipient: 'all' })).getAttribute('aria-haspopup'), 'menu');
+    assert.equal(all(view({ recipient: 'all', allMenuOpen: true })).getAttribute('aria-expanded'), 'true');
+    assert.ok(view({ recipient: 'all' }).querySelector('.all-choice')!.classList.contains('sel'), 'selected All is the lit tab');
+    assert.equal(view({ roomReady: false }).querySelector<HTMLButtonElement>('.all-choice button')!.disabled, true, 'not before the room is ready');
     assert.equal(root.querySelector('.roster-add')!.lastElementChild!.getAttribute('aria-label'), 'agent');
     assert.match(select(root, 'runner').getAttribute('aria-label')!, /unread/iu);
     assert.ok(card(root, 'runner').querySelector('.st.live-dot'));
@@ -102,8 +103,8 @@ test('Roster renders the controlled destination strip (#168)', { timeout: RENDER
     assert.equal(select(extra, 'waiting').getAttribute('aria-pressed'), 'false');
     assert.deepEqual(marked(view({ composerText: '@all' })), ['waiting', 'runner', 'solo']);
     assert.deepEqual(marked(view({ recipient: 'all', composerText: '@waiting' })), []);
-    assert.equal(view({ recipient: 'all' }).querySelectorAll('.acard:not(.off) [aria-pressed="true"]').length, agents.length,
-      '#186: the All command addresses every managed card');
+    assert.equal(view({ recipient: 'all' }).querySelectorAll('.acard[data-agent]:not(.off) [aria-pressed="true"]').length, agents.length,
+      '#186: the All command addresses every managed card (the pinned All tab presses separately)');
     assert.equal(view({ recipient: 'all' }).querySelector('.acard.off.sel'), null);
     const none = view({ recipient: '', composerText: '@waiting' });
     assert.equal(none.querySelector('[aria-pressed="true"]'), null);

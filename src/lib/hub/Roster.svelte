@@ -42,6 +42,9 @@
   let armed = $state('');
   function arm(name, pointerType = 'mouse') { if (!coarse && pointerType !== 'touch') armed = name; }
   function disarm(name) { if (armed === name) armed = ''; }
+  /** Pointer or focus on the Everyone tab: every live card previews the
+   * selected paint (board #236). Touch never previews — a finger has no hover. */
+  let allPreview = $state(false);
   const showStop = (name) => !coarse && busyNames.includes(name) && (armed === name || interrupting.includes(name));
   /** Places the Stop's centre on the dot's centre — offsets are the card's own
    * coordinate space (the select button is positioned; the card is too). */
@@ -192,24 +195,31 @@
         </div>
       {/if}
 
-      <!-- Everyone: a destination, so it stands with the destinations — at the
-           strip's head, only while the list is expanded, its glyph the size of
-           an agent's avatar (owner, 2026-09-15: "这个按钮就小一点，和其他agent的icon一样
-           大就行，固定在最左边"; 2026-09-17: "藏到展开 Agent 卡片的列表里 就像你的那个加号一样
-           …展开之后再显示"; board #204). Same shared command it was in the composer. -->
-      {#if expanded}
-        <span class="all-choice">
-          <CommandButton variant="icon" icon="collab" label={t('hubEveryone')} pressed={recipient === ALL_TARGET}
-            hasPopup={recipient === ALL_TARGET ? 'menu' : undefined}
-            expanded={recipient === ALL_TARGET ? allMenuOpen : undefined}
-            disabled={!selected || !roomReady} onclick={onall} />
-        </span>
-      {/if}
+      <!-- Everyone: the PINNED tab at the strip's head (board #236, owner,
+           2026-09-22: "不用隐藏，我不展开就看不到吧…都显示全了"). Chrome pins a
+           tab as an icon-only tab at the far left; this is that — always in
+           view, avatar-sized glyph, and a destination like the cards so it
+           wears the same tab paint (lit when All IS the recipient). Hovering
+           or focusing it PREVIEWS the choice: every live card lights as it
+           would after the click (owner: "鼠标悬停…看到的就是所有的 Agent 被选中或
+           者激活"). The `everyone` glyph replaced `collab` here — three orbiting
+           dots read as nothing (owner: "别人看了都不知道什么意思"); a group of
+           people is the glyph Slack/Discord/Teams use for "everyone". `bare`:
+           the tab is the paint, the command adds none (#180: never a card —
+           no data-agent, no Stop, no meter). -->
+      <span class="all-choice acard" class:sel={recipient === ALL_TARGET} role="presentation"
+        onpointerenter={(e) => { if (e.pointerType !== 'touch') allPreview = true; }} onpointerleave={() => { allPreview = false; }}
+        onfocusin={() => { allPreview = true; }} onfocusout={() => { allPreview = false; }}>
+        <CommandButton variant="icon" icon="everyone" label={t('hubEveryone')} pressed={recipient === ALL_TARGET} bare
+          hasPopup={recipient === ALL_TARGET ? 'menu' : undefined}
+          expanded={recipient === ALL_TARGET ? allMenuOpen : undefined}
+          disabled={!selected || !roomReady} onclick={onall} />
+      </span>
       {#each orderedAgents as a (a.name)}
         {@const mentioned = extras.includes(a.name) || extras.includes(ALL_TARGET)}
         {@const pending = interrupting.includes(a.name)}
         <!-- Selection and interruption are sibling native targets, never nested buttons. -->
-        <div class="acard" role="group" data-agent={a.name} class:sel={isAddressed(a.name)} class:filtered={filterAgent === a.name} class:stop-shown={showStop(a.name)}
+        <div class="acard" role="group" data-agent={a.name} class:sel={isAddressed(a.name)} class:preview={allPreview && !isAddressed(a.name)} class:filtered={filterAgent === a.name} class:stop-shown={showStop(a.name)}
           class:appear-pop={!!rosterBase && !rosterBase.has(a.name)} animate:flip={{ duration: moveMs() }}
           onpointerenter={(e) => arm(a.name, e.pointerType)} onpointerleave={() => disarm(a.name)}
           onfocusin={() => arm(a.name)} onfocusout={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) disarm(a.name); }}>
@@ -301,14 +311,27 @@
     --roster-gap: 2px;
     --roster-control-gap: 2px;
     --roster-expanded-max: min(240px, calc(32dvh / var(--ui-zoom, 1)));
+    position: relative;
     display: grid; grid-template-columns: minmax(0, 1fr) var(--control-height);
-    gap: 0; flex: 0 1 auto; min-width: 0; min-height: 0; padding: 0 14px;
+    gap: 0; flex: 0 1 auto; min-width: 0; min-height: 0; padding: 0 var(--composer-inset);
     container: roster / inline-size;
   }
-  .roster.compact { padding-inline: 10px; }
+  /* The tab strip's floor IS the composer shell's top edge (board #236, the
+     Chrome tab model: the lit tab and the toolbar are one surface, the
+     inactive tabs are text on the frame). The shell below dropped its top
+     border; this hairline, at the shell's inline inset, is that edge, and
+     the lit tab's paint runs down over it — no seam under the tab, a line
+     everywhere else. The composer's focus/command colours reach it through
+     :has, so the tray's top edge answers with the rest of the shell. */
+  .roster::after {
+    content: ''; position: absolute; left: var(--composer-inset); right: var(--composer-inset); bottom: 0; height: 1px;
+    background: var(--border); transition: background var(--t-fast);
+  }
+  .roster:has(+ :global(.composer .compose-shell:focus-within))::after { background: var(--accent-line); }
+  .roster:has(+ :global(.composer .compose-shell.cmd))::after { background: color-mix(in srgb, var(--accent) 45%, transparent); }
   .cards {
     display: flex; align-items: center; gap: var(--roster-gap); overflow-x: auto; scrollbar-width: none;
-    min-width: 0; min-height: 0; padding: 2px;
+    min-width: 0; min-height: 0; padding: 2px 2px 0;
   }
   .cards:not(.expanded)::-webkit-scrollbar { display: none; }
   .cards.expanded {
@@ -320,8 +343,15 @@
     width: calc(3 * var(--control-height)); height: var(--roster-paint-height);
     margin-block: var(--control-paint-inset); border-radius: var(--ui-radius-row);
   }
+  /* A card is a TAB (board #236, owner: "做成类似 Chrome tab 栏的样式？选中哪一个，
+     哪一个就是亮的，其他在旁边"). At rest: no paint, no line — a name beside
+     the others. Hover: the one quiet wash. Selected: the composer shell's own
+     surface, three bordered sides, top corners rounded, and the paint runs
+     to the strip's floor so tab and shell are one object — "which agent am
+     I typing to" is said by SHAPE and continuity, not by a colour block and
+     an outline (the pre-#236 wash + accent ring were exactly that). */
   .acard {
-    --card-paint: var(--surface); --card-line: var(--border);
+    --card-paint: transparent; --card-line: transparent;
     position: relative;
     display: flex;
     align-items: center; flex: none; width: max-content; min-width: 0;
@@ -330,12 +360,21 @@
   }
   .acard::before {
     content: ''; position: absolute; inset: var(--control-paint-inset) 0;
-    border-radius: inherit; pointer-events: none;
-    background: var(--card-paint); box-shadow: inset 0 0 0 1px var(--card-line);
-    transition: background var(--t-fast), box-shadow var(--t-fast);
+    border-radius: inherit; pointer-events: none; box-sizing: border-box;
+    background: var(--card-paint); border: 1px solid var(--card-line);
+    transition: background var(--t-fast), border-color var(--t-fast), inset var(--t-fast);
   }
-  .acard:hover { --card-line: var(--input-border); }
-  .acard.sel { --card-paint: var(--accent-bg); --card-line: var(--accent-line); }
+  .acard:hover { --card-paint: var(--surface2); }
+  .acard.sel, .acard.preview { --card-paint: var(--bubble-in); --card-line: var(--border); }
+  /* Attached only in the single-row strip: the lit tab's paint reaches the
+     floor (inset-bottom 0 → the card's bottom = the strip's floor, over the
+     hairline), its bottom edge open, top corners the shell's radius. The
+     wrapped (expanded) list is a list, so there a lit card stays a closed
+     rounded box. */
+  .cards:not(.expanded) .acard.sel::before, .cards:not(.expanded) .acard.preview::before {
+    inset: var(--control-paint-inset) 0 0; border-bottom: 0;
+    border-radius: var(--ui-radius-control) var(--ui-radius-control) 0 0;
+  }
   .acard.filtered::after {
     content: ''; position: absolute; inset: var(--control-paint-inset) 0; border: 1px dashed var(--text2);
     border-radius: inherit; pointer-events: none;
@@ -390,6 +429,12 @@
   .ava.dim { background: var(--surface2); color: var(--text3); }
   img.ava.dim { background: none !important; filter: grayscale(1); opacity: 0.55; }
   .roster-add { display: flex; align-items: center; flex: none; min-height: var(--control-height); }
-  .all-choice { display: flex; flex: none; --control-icon-size: var(--roster-avatar-size); }
-  .roster-toggle { display: flex; align-self: end; align-items: center; height: calc(var(--roster-paint-height) + 2 * var(--control-paint-inset) + 4px); }
+  .all-choice { --control-icon-size: var(--roster-avatar-size); }
+  /* The TAB carries the selected paint; the command inside stays washless
+     (engaged would put a colour block back inside the tab) — its accent ink
+     is the pressed signal that remains. */
+  .all-choice :global(.command-button.engaged) { --command-paint: transparent; }
+  /* The strip lost its bottom scrollport inset (the tab must reach the
+     floor), so the disclosure matches card height plus the one inset left. */
+  .roster-toggle { display: flex; align-self: end; align-items: center; height: calc(var(--roster-paint-height) + 2 * var(--control-paint-inset) + 2px); }
 </style>

@@ -170,7 +170,11 @@ test('measured signature actions reuse shared commands without hardcoded avoidan
   assert.match(source, /const lift = parseFloat\(actionsStyle\.bottom\) \|\| 0;/u, 'the layout math reads the same offset back');
   // #203: an input's radius and the row content inset — 16px on a 32px desktop
   // shell was a semicircle (owner: "在电脑上这个输入框左边是一个半圆").
-  assert.match(rule('.compose-shell'), /border-radius: var\(--ui-radius-control\)/u);
+  // #236: the shell is the toolbar under a tab strip — its top edge belongs
+  // to the Roster's hairline and the lit tab, so the top corners square off
+  // and only the bottom keeps the control radius.
+  assert.match(rule('.compose-shell'), /border: 1px solid var\(--border\); border-top: 0/u);
+  assert.match(rule('.compose-shell'), /border-radius: 0 0 var\(--ui-radius-control\) var\(--ui-radius-control\)/u);
   assert.match(rule('.compose-shell'), /padding: var\(--tool-inset-block\) var\(--menu-item-padding-x\)/u);
   assert.match(source, /const paintInset = parseFloat\(actionsStyle\.getPropertyValue\('--control-paint-inset'\)\) \|\| 0;/u);
   assert.match(source, /const inkInset = Math\.max\(0, \(\(parseFloat\(style\.lineHeight\) \|\| 0\) - \(parseFloat\(style\.fontSize\) \|\| 0\)\) \/ 2\);/u);

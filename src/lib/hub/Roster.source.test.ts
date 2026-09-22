@@ -10,8 +10,8 @@ test('cards, Add and disclosure share the strip centre without moving the expand
   assert.match(rule('.cards'), /align-items: center/u);
   const toggle = rule('.roster-toggle');
   assert.match(toggle, /align-items: center/u);
-  assert.match(toggle, /height: calc\(var\(--roster-paint-height\) \+ 2 \* var\(--control-paint-inset\) \+ 4px\)/u,
-    'the disclosure wrapper matches card height plus the scrollport insets');
+  assert.match(toggle, /height: calc\(var\(--roster-paint-height\) \+ 2 \* var\(--control-paint-inset\) \+ 2px\)/u,
+    'the disclosure wrapper matches card height plus the one scrollport inset left (#236: the tab reaches the floor)');
   assert.match(toggle, /align-self: end/u, 'expanding upward keeps the collapse control reachable in place');
   assert.doesNotMatch(toggle, /padding-block-end/u);
 });
@@ -41,7 +41,9 @@ test('everyone leaves the roster whole for the sole Composer command (#180)', as
 test('card paint keeps its inset and the single measured scrolling edge (#180)', () => {
   assert.match(rule('.acard::before'), /inset: var\(--control-paint-inset\) 0/u);
   assert.match(rule('.acard::before'), /pointer-events: none/u);
-  assert.match(rule('.roster'), /padding: 0 14px/u);
+  // #236: the strip and the composer shell share ONE inline inset token, so
+  // the lit tab lands exactly on the shell's edge.
+  assert.match(rule('.roster'), /padding: 0 var\(--composer-inset\)/u);
   assert.match(rule('.roster'), /gap: 0/u);
   assert.match(source, /class="cards edge-fade"[^>]*use:scrollEdges=\{!expanded\}/u);
 });
@@ -230,8 +232,30 @@ test("a second click on the recipient's card opens its menu at the card, never d
   assert.match(source, /use:longpress=\{\{ onlongpress: \(at\) => oncontext\(at, a\.name, touchInfo\(\(\) => cardInfo\(a\)\)\) \}\}/u, 'a hold forwards the element anchor longpress hands it');
 });
 
-test('Everyone stands at the head of the EXPANDED strip, avatar-sized (board #204)', () => {
-  assert.match(source, /\{#if expanded\}\s*\n\s*<span class="all-choice">\s*\n\s*<CommandButton variant="icon" icon="collab" label=\{t\('hubEveryone'\)\} pressed=\{recipient === ALL_TARGET\}/u);
+test('Everyone is the PINNED tab: always at the head, previewing on hover (board #236, supersedes #204)', () => {
+  // Owner, 2026-09-22: "不用隐藏，我不展开就看不到吧"; "重新给我设计一个好看的
+  // 图案" (collab's orbiting dots read as nothing — the group-of-people glyph
+  // is the everyone Slack/Teams use); "鼠标悬停…所有的 Agent 被选中或者激活".
+  assert.match(source, /<span class="all-choice acard" class:sel=\{recipient === ALL_TARGET\} role="presentation"/u);
+  assert.match(source, /<CommandButton variant="icon" icon="everyone" label=\{t\('hubEveryone'\)\} pressed=\{recipient === ALL_TARGET\} bare/u);
+  assert.doesNotMatch(source, /\{#if expanded\}\s*\n\s*<span class="all-choice"/u, 'the expanded-only gate is gone');
   assert.match(rule('.all-choice'), /--control-icon-size: var\(--roster-avatar-size\)/u, 'the glyph is an avatar\'s size; the hit box stays the row\'s');
   assert.doesNotMatch(source, /data-agent="all"/u, '#180: never a card');
+  // Hover/focus previews the choice on every live card; touch never previews.
+  assert.match(source, /let allPreview = \$state\(false\);/u);
+  assert.match(source, /class:preview=\{allPreview && !isAddressed\(a\.name\)\}/u);
+  assert.match(source, /onpointerenter=\{\(e\) => \{ if \(e\.pointerType !== 'touch'\) allPreview = true; \}\}/u);
+  assert.match(source, /\.acard\.sel, \.acard\.preview \{/u, 'the preview paints exactly the selected tab');
+});
+
+test('a card is a TAB: no rest chrome, and the lit tab joins the composer shell (board #236)', () => {
+  // Owner: "做成类似 Chrome tab 栏的样式？选中哪一个，哪一个就是亮的，其他在旁边".
+  assert.match(rule('.acard'), /--card-paint: transparent; --card-line: transparent/u, 'at rest a card is a name, not a block');
+  assert.match(source, /\.acard:hover \{ --card-paint: var\(--surface2\); \}/u, 'hover is the one quiet wash');
+  assert.match(source, /\.acard\.sel, \.acard\.preview \{ --card-paint: var\(--bubble-in\); --card-line: var\(--border\); \}/u,
+    'the lit tab wears the composer shell\'s own surface, not an accent block');
+  assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel::before, \.cards:not\(\.expanded\) \.acard\.preview::before \{\n\s*inset: var\(--control-paint-inset\) 0 0; border-bottom: 0;\n\s*border-radius: var\(--ui-radius-control\) var\(--ui-radius-control\) 0 0;/u,
+    'single-row strip: the tab opens its bottom edge onto the shell');
+  assert.match(rule('.roster::after'), /left: var\(--composer-inset\); right: var\(--composer-inset\); bottom: 0; height: 1px/u,
+    'the strip floor is the shell\'s top hairline, at the shell\'s inset');
 });

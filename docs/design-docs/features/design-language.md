@@ -706,6 +706,15 @@ by the contract above, not extended by new page-local overrides.
   reads flat on the near-black canvas (owner, 2026-09-05: "第一次启动的
   时候，选项的卡片后面没有阴影"). A drop shadow may ride along for the
   light theme, where it does show.
+- The Hub roster's agent TAB (board #236) — the one Chrome-tab selection
+  idiom, reserved for the destination strip above the composer: at rest a
+  card is a bare name (no paint, no line), hover is the `--surface2` wash,
+  and the SELECTED card wears the composer shell's own surface
+  (`--bubble-in` + `--border`), top corners `--ui-radius-control`, bottom
+  edge open onto the shell in the single-row strip — "who am I typing to"
+  said by shape and continuity, not a colour block + outline. The strip's
+  floor is one hairline at `--composer-inset`; the shell below has no top
+  border. A second wearer of this idiom needs a recorded reason.
 - `.pick` / `.agent-pick` / `.pchip` — stadium toggle chips for MEMBERSHIP
   (skills, roster picks); selected = `--accent-line` border + `--accent-bg`.
 - Inputs — the dense field dialect: `--input-bg`, 1px `--input-border`,
