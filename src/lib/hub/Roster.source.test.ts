@@ -249,18 +249,20 @@ test('Everyone is the PINNED tab: always at the head, previewing on hover (board
   assert.match(source, /\.acard\.sel, \.acard\.preview \{/u, 'the preview paints exactly the selected tab');
 });
 
-test('a card is a TAB: no rest chrome, and the lit tab joins the composer shell (board #236)', () => {
-  // Owner: "做成类似 Chrome tab 栏的样式？选中哪一个，哪一个就是亮的，其他在旁边".
-  assert.match(rule('.acard'), /--card-paint: transparent; --card-line: transparent/u, 'at rest a card is a name, not a block');
+test('a card is a TAB, joined to the composer BAND by colour alone (board #236, round 3)', () => {
+  // Owner: "做成类似 Chrome tab 栏的样式？选中哪一个，哪一个就是亮的，其他在旁边";
+  // round 3, with the owner's Chrome screenshot: "我只要从颜色上把它们变成一体的
+  // 就好" — the round-2 hairline + tab outline left gaps under every lit tab
+  // ("一堆缺口，看起来好奇怪"). No borders, no hairline: ONE FILL shared by the
+  // lit tab and the composer band, the input its own field inside the band.
+  assert.match(rule('.acard'), /--card-paint: transparent/u, 'at rest a card is a name, not a block');
+  assert.doesNotMatch(source, /--card-line/u, 'no tab outline — colour is the whole mechanism');
   assert.match(source, /\.acard:hover \{ --card-paint: var\(--surface2\); \}/u, 'hover is the one quiet wash');
-  assert.match(source, /\.acard\.sel, \.acard\.preview \{ --card-paint: var\(--bubble-in\); --card-line: var\(--border\); \}/u,
-    'the lit tab wears the composer shell\'s own surface, not an accent block');
-  assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel::before, \.cards:not\(\.expanded\) \.acard\.preview::before \{\n\s*inset: var\(--control-paint-inset\) 0 0; border-bottom: 0;\n\s*border-radius: var\(--ui-radius-control\) var\(--ui-radius-control\) 0 0;/u,
-    'single-row strip: the tab opens its bottom edge onto the shell');
-  assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel, \.cards:not\(\.expanded\) \.acard\.preview \{ z-index: 1; \}/u,
-    'the lit tab stands above the roster hairline — the ::after painted over its bottom as a 1px seam');
-  assert.match(rule('.acard::before'), /transition: background var\(--t-move\) ease, border-color var\(--t-move\) ease,\n\s*border-radius var\(--t-move\) ease, inset var\(--t-move\) ease/u,
+  assert.match(source, /\.acard\.sel, \.acard\.preview \{ --card-paint: var\(--surface\); \}/u,
+    'the lit tab wears the BAND fill');
+  assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel::before, \.cards:not\(\.expanded\) \.acard\.preview::before \{\n\s*inset: var\(--control-paint-inset\) 0 0;\n\s*border-radius: var\(--ui-radius-control\) var\(--ui-radius-control\) 0 0;/u,
+    'single-row strip: the fill reaches the floor where the band begins');
+  assert.match(rule('.acard::before'), /transition: background var\(--t-move\) ease,\n\s*border-radius var\(--t-move\) ease, inset var\(--t-move\) ease/u,
     'switching tabs is movement: the swap crossfades and reshapes, never snaps');
-  assert.match(rule('.roster::after'), /left: var\(--composer-inset\); right: var\(--composer-inset\); bottom: 0; height: 1px/u,
-    'the strip floor is the shell\'s top hairline, at the shell\'s inset');
+  assert.doesNotMatch(source, /\.roster::after|\.acard\.sel[^:{]*\{ z-index/u, 'the hairline and its seam workaround died with the outline model');
 });

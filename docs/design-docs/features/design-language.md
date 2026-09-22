@@ -709,12 +709,15 @@ by the contract above, not extended by new page-local overrides.
 - The Hub roster's agent TAB (board #236) — the one Chrome-tab selection
   idiom, reserved for the destination strip above the composer: at rest a
   card is a bare name (no paint, no line), hover is the `--surface2` wash,
-  and the SELECTED card wears the composer shell's own surface
-  (`--bubble-in` + `--border`), top corners `--ui-radius-control`, bottom
-  edge open onto the shell in the single-row strip — "who am I typing to"
-  said by shape and continuity, not a colour block + outline. The strip's
-  floor is one hairline at `--composer-inset`; the shell below has no top
-  border. A second wearer of this idiom needs a recorded reason.
+  and the SELECTED card and the composer BAND below share ONE FILL
+  (`--surface` on both; the composer paints it full-width, the input is its
+  own bordered field inside) — round 3, from the owner's Chrome screenshot:
+  "我只要从颜色上把它们变成一体的就好". No borders, no hairline: the earlier
+  outline+hairline attempt left gaps under every lit tab. Top corners
+  `--ui-radius-control`, fill down to the strip's floor in the single-row
+  strip; the wrapped expanded list keeps closed rounded boxes. The swap
+  animates on `--t-move`. A second wearer of this idiom needs a recorded
+  reason.
 - `.pick` / `.agent-pick` / `.pchip` — stadium toggle chips for MEMBERSHIP
   (skills, roster picks); selected = `--accent-line` border + `--accent-bg`.
 - Inputs — the dense field dialect: `--input-bg`, 1px `--input-border`,

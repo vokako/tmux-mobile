@@ -100,13 +100,12 @@ inset (`--menu-item-padding-x`) since #203: its 16px radius on a 32px desktop
 shell was a full semicircle and the first glyph, 6px from the border, read as
 squeezed into it (owner: "尤其是文字在靠近边缘的位置 感觉被挤到了半圆里面一样"); the
 50px phone shell had read as a rounded rectangle all along. Since board #236
-the radius is the BOTTOM corners only and the shell has no top border: it is
-the toolbar under a Chrome-style tab strip — the Roster draws the shared top
-hairline (`.roster::after`, at `--composer-inset`, the ONE inline inset both
-components consume from `.hub-root` so the lit tab lands exactly on the
-shell's edge) and the selected agent's tab paints over it, one surface from
-tab to input. The hairline answers the shell's focus/command colours through
-`:has`, so the tray's whole outline agrees.
+(round 3) the composer paints the BAND: full-width `--surface` under the tab
+strip, the same fill the lit tab wears — the owner's Chrome screenshot: the
+active tab and the toolbar are one colour, the omnibox its own field inside
+("底下的框是一个单独的一个输入框 但上面整体上你有这种tab 的这种样"). The shell
+itself stays a complete bordered field. `--composer-inset` remains the ONE
+inline inset both components consume from `.hub-root`.
 
 This explicitly reverses the #168/#180 no-mirror/side-column layout rule:
 the mirror was unnecessary for a separate row, but is necessary for the
@@ -164,14 +163,16 @@ tab (it must reach the floor), so the disclosure wrapper height carries
 the dashed filter ring and the Stop-on-dot all survive unchanged — they
 are function, not the retired chrome.
 
-Two review fixes, same day (owner: "整体看起来比较生硬"): the lit tab sat
-UNDER the roster's hairline — `.roster::after` is a later positioned box, so
-it painted a 1px grey seam across the tab's open bottom ("Tab 和下面的框中间
-还有一道分界线"); the single-row lit tab now carries `z-index: 1`, the one
-thing above the strip's floor. And the swap between tabs snapped: the tab
-paint now transitions background/border/radius/inset on `--t-move` ease —
-switching destination is the selection MOVING, so it crossfades and reshapes
-on the movement tempo (reduced-motion still disables it).
+Three review rounds, same day (owner: "整体看起来比较生硬" → the Chrome
+screenshot). Round 2 fixed the snap (the tab paint transitions on `--t-move`
+ease — switching destination is the selection MOVING, so it crossfades and
+reshapes; reduced-motion still disables it) and patched the 1px seam with a
+z-index. Round 3 replaced the mechanism: the outline + hairline model left
+"一堆缺口" — a gap in the line under every lit tab, worst under All where
+every tab is lit — because it said "attached" with LINES. The owner's
+screenshot says Chrome does it with COLOUR: the lit tab and the composer
+band share one `--surface` fill, no borders, no hairline, and the input
+stays its own complete field inside the band.
 
 ### All selects the addressed cards (#186, 2026-09-12)
 

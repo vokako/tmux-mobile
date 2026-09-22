@@ -366,21 +366,19 @@
 <style>
   .composer {
     position: relative; z-index: 15; flex: none; min-width: 0;
-    padding: 0 var(--composer-inset) 10px;
+    padding: 6px var(--composer-inset) 10px;
+    /* The BAND (board #236 round 3, the owner's Chrome screenshot): the
+       toolbar under the tab strip, one fill with the lit tab above it —
+       colour is what joins them. The input below stays its own field. */
+    background: var(--surface);
   }
   /* An input's radius (--ui-radius-control), not 16px: on a 32px desktop
      shell 16px was a full semicircle and text near the edge read as squeezed
      into it (owner, 2026-09-17: "在电脑上这个输入框左边是一个半圆…感觉被挤到了半圆里面
      一样"; board #203). The inline inset is the row content inset so the first
-     glyph stands clear of the corner.
-     No top edge of its own (board #236): the shell is the TOOLBAR under a
-     Chrome-style tab strip — the Roster draws the shared top hairline at the
-     same --composer-inset and the lit tab paints over it, so the tab and the
-     shell read as one surface. Top corners square where the strip meets the
-     sides; the bottom keeps the control radius. */
+     glyph stands clear of the corner. */
   .compose-shell {
-    position: relative; border: 1px solid var(--border); border-top: 0;
-    border-radius: 0 0 var(--ui-radius-control) var(--ui-radius-control);
+    position: relative; border: 1px solid var(--border); border-radius: var(--ui-radius-control);
     background: var(--bubble-in); padding: var(--tool-inset-block) var(--menu-item-padding-x);
   }
   .compose-shell:focus-within { border-color: var(--accent-line); }
@@ -440,6 +438,6 @@
   .cmd-name { flex: none; font-weight: 600; color: var(--accent); }
   .cmd-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @media (any-pointer: coarse) { .cmd-opt { min-height: 44px; } }
-  :global(.hub-root.compact) .composer { padding: 0 var(--composer-inset) 8px; }
+  :global(.hub-root.compact) .composer { padding: 6px var(--composer-inset) 8px; }
   :global(.hub-root.compact) .c-input { max-height: calc(28vh / var(--ui-zoom, 1)); }
 </style>

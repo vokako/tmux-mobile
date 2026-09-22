@@ -317,19 +317,12 @@
     gap: 0; flex: 0 1 auto; min-width: 0; min-height: 0; padding: 0 var(--composer-inset);
     container: roster / inline-size;
   }
-  /* The tab strip's floor IS the composer shell's top edge (board #236, the
-     Chrome tab model: the lit tab and the toolbar are one surface, the
-     inactive tabs are text on the frame). The shell below dropped its top
-     border; this hairline, at the shell's inline inset, is that edge, and
-     the lit tab's paint runs down over it — no seam under the tab, a line
-     everywhere else. The composer's focus/command colours reach it through
-     :has, so the tray's top edge answers with the rest of the shell. */
-  .roster::after {
-    content: ''; position: absolute; left: var(--composer-inset); right: var(--composer-inset); bottom: 0; height: 1px;
-    background: var(--border); transition: background var(--t-fast);
-  }
-  .roster:has(+ :global(.composer .compose-shell:focus-within))::after { background: var(--accent-line); }
-  .roster:has(+ :global(.composer .compose-shell.cmd))::after { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+  /* The tab strip sits on the page frame; the composer below is the BAND
+     (owner's Chrome screenshot, 2026-09-22: the active tab and the toolbar
+     are ONE FILL, the omnibox its own field inside — "从颜色上把它们变成一体…
+     底下的框是一个单独的一个输入框"). No hairline, no tab outline: the first
+     round said "attached" with lines and left gaps under every lit tab
+     ("一堆缺口，看起来好奇怪"); colour is the whole mechanism now. */
   .cards {
     display: flex; align-items: center; gap: var(--roster-gap); overflow-x: auto; scrollbar-width: none;
     min-width: 0; min-height: 0; padding: 2px 2px 0;
@@ -345,14 +338,14 @@
     margin-block: var(--control-paint-inset); border-radius: var(--ui-radius-row);
   }
   /* A card is a TAB (board #236, owner: "做成类似 Chrome tab 栏的样式？选中哪一个，
-     哪一个就是亮的，其他在旁边"). At rest: no paint, no line — a name beside
-     the others. Hover: the one quiet wash. Selected: the composer shell's own
-     surface, three bordered sides, top corners rounded, and the paint runs
-     to the strip's floor so tab and shell are one object — "which agent am
-     I typing to" is said by SHAPE and continuity, not by a colour block and
-     an outline (the pre-#236 wash + accent ring were exactly that). */
+     哪一个就是亮的，其他在旁边"; round 3, with the owner's Chrome screenshot:
+     colour only). At rest: nothing — a name on the frame. Hover: the quiet
+     wash. Selected: the BAND's fill (--surface, the composer band below),
+     rounded top corners, and in the single-row strip the fill runs to the
+     strip's floor where the band begins — one colour from tab into band, no
+     border anywhere ("我只要从颜色上把它们变成一体的就好"). */
   .acard {
-    --card-paint: transparent; --card-line: transparent;
+    --card-paint: transparent;
     position: relative;
     display: flex;
     align-items: center; flex: none; width: max-content; min-width: 0;
@@ -361,27 +354,22 @@
   }
   .acard::before {
     content: ''; position: absolute; inset: var(--control-paint-inset) 0;
-    border-radius: inherit; pointer-events: none; box-sizing: border-box;
-    background: var(--card-paint); border: 1px solid var(--card-line);
+    border-radius: inherit; pointer-events: none;
+    background: var(--card-paint);
     /* --t-move, not --t-fast: switching tabs is the selection MOVING, and the
        instant swap read as 生硬 (owner, 2026-09-22) — the outgoing and
        incoming tabs crossfade and reshape over the one movement tempo. */
-    transition: background var(--t-move) ease, border-color var(--t-move) ease,
+    transition: background var(--t-move) ease,
       border-radius var(--t-move) ease, inset var(--t-move) ease;
   }
   .acard:hover { --card-paint: var(--surface2); }
-  .acard.sel, .acard.preview { --card-paint: var(--bubble-in); --card-line: var(--border); }
-  /* Attached only in the single-row strip: the lit tab's paint reaches the
-     floor (inset-bottom 0 → the card's bottom = the strip's floor, over the
-     hairline), its bottom edge open, top corners the shell's radius. The
-     wrapped (expanded) list is a list, so there a lit card stays a closed
-     rounded box. z-index 1: the hairline is the roster's LATER ::after and
-     painted over the tab's bottom — the 1px seam the owner saw between tab
-     and shell ("Tab 和下面的框中间还有一道分界线"); the lit tab must be the
-     one thing above the strip's floor line. */
-  .cards:not(.expanded) .acard.sel, .cards:not(.expanded) .acard.preview { z-index: 1; }
+  .acard.sel, .acard.preview { --card-paint: var(--surface); }
+  /* Attached only in the single-row strip: the fill reaches the floor
+     (inset-bottom 0), top corners the control radius — Chrome's active-tab
+     silhouette. The wrapped (expanded) list is a list, so there a lit card
+     stays a closed rounded box. */
   .cards:not(.expanded) .acard.sel::before, .cards:not(.expanded) .acard.preview::before {
-    inset: var(--control-paint-inset) 0 0; border-bottom: 0;
+    inset: var(--control-paint-inset) 0 0;
     border-radius: var(--ui-radius-control) var(--ui-radius-control) 0 0;
   }
   .acard.filtered::after {
