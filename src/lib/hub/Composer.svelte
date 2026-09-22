@@ -371,8 +371,17 @@
        toolbar under the tab strip, one fill with the lit tab above it —
        colour is what joins them, and its step above the frame is what makes
        the lit tab obvious (round 4: --surface on both was too close to the
-       frame — "颜色差异特别小"). The input below stays its own field. */
-    background: var(--hub-tab-band);
+       frame — "颜色差异特别小"). Round 5: the fill is the AGENT BUBBLE's own
+       (--bubble-in) with the bubble's faint edge, and the contrast comes from
+       the darker frame above — "和 Agent 返回给我的消息框的亮度色彩差不多就可
+       以…整体加一个稍微淡白色的边". No top edge: the strip's lit tab owns that
+       side of the enclosure: the band's top edge runs the full width and the
+       lit tab's own fill covers the segment under it (same colour, 1px
+       overlap), so the outline breaks exactly where the tab joins — one
+       enclosure, no line between them. The input stays its own field. */
+    background: var(--bubble-in);
+    border: 1px solid var(--bubble-line);
+    border-radius: 0 0 var(--ui-radius-control) var(--ui-radius-control);
   }
   /* An input's radius (--ui-radius-control), not 16px: on a 32px desktop
      shell 16px was a full semicircle and text near the edge read as squeezed

@@ -178,14 +178,33 @@ stays its own complete field inside the band.
 Round 4 gave that colour enough contrast to READ (owner: "选中和没有选中的
 这些 agent card 的显示差异更明显一点…深色和浅色模式下都要考虑好"): a 3%
 `--surface` wash on both the strip and the band left barely any step, so the
-two fills became per-theme OPAQUE tokens in app.css — Chrome's own
-frame/toolbar pair (dark `--hub-tab-frame: #0f0f18` / `--hub-tab-band:
-#2b2b33`, light `#e6e6ea` / `#ffffff`). Opaque on purpose: the lit tab and
-the band must be the SAME colour over different backdrops, which a
-translucent wash cannot promise. The inactive tab's LABEL dims to `--text2`
-as well — two signals for one state, as Chrome does — while avatar, status
-dot and context ring keep their colours: those are live facts, not chrome.
-Measured in both themes at 1280, single-selection and All.
+two fills became per-theme OPAQUE tokens in app.css. Opaque on purpose: the
+lit tab and the band must be the SAME colour over different backdrops, which
+a translucent wash cannot promise. The inactive tab's LABEL dims to
+`--text2` as well — two signals for one state, as Chrome does — while avatar,
+status dot and context ring keep their colours: those are live facts, not
+chrome.
+
+Round 5 put the step on the other side and joined the whole tray to the
+conversation's own palette (owner, same evening): the lit tab and band wear
+the AGENT BUBBLE's paint — `--bubble-in` fill, `--bubble-line` edge ("和
+Agent 返回给我的消息框的亮度色彩差不多就可以…整体加一个稍微淡白色的边") — and
+the contrast is the FRAME going darker beneath (`--hub-tab-frame`: dark
+`#06060a`, light `#e2e2e8`), not a brighter tab ("会不会有点过亮了？…把其他
+地方变得更暗的方式来解决呢"). `--hub-tab-band` is deleted: there is one
+bubble paint, and a second token for the same colour would drift from it.
+The enclosure closes without a seam because the lit tab's fill overlaps the
+band's top edge by 1px — same colour, so the outline simply breaks where the
+tab joins.
+
+**Multi-select is ONE enclosure** ("如果是选择多个 Agent，就用一个大的包边。
+注意 Agent 和 Agent 之间的卡片不要有很多线拐来拐去"): under All — and while
+the All tab PREVIEWS it — `.cards.all-lit` makes the STRIP the lit tab (one
+fill, one edge, `margin-bottom: -1px` over the band) and switches every
+card's own paint off. No border logic between siblings exists to zigzag, and
+the per-card `preview` class is gone with it: hovering All now shows exactly
+the shape clicking produces. Measured in both themes, desktop 1280 and phone
+390: single selection and All.
 
 ### All selects the addressed cards (#186, 2026-09-12)
 

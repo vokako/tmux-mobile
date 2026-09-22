@@ -242,30 +242,35 @@ test('Everyone is the PINNED tab: always at the head, previewing on hover (board
   assert.match(rule('.all-choice'), /--control-icon-size: 16px/u, 'smaller than an avatar; the hit box stays the row\'s');
   assert.doesNotMatch(source, /\{#if expanded\}\s*\n\s*<span class="all-choice"/u, 'the expanded-only gate is gone');
   assert.doesNotMatch(source, /data-agent="all"/u, '#180: never a card');
-  // Hover/focus previews the choice on every live card; touch never previews.
+  // Hover/focus previews the choice — the STRIP lights as one enclosure,
+  // exactly as clicking would (round 5); touch never previews.
   assert.match(source, /let allPreview = \$state\(false\);/u);
-  assert.match(source, /class:preview=\{allPreview && !isAddressed\(a\.name\)\}/u);
+  assert.match(source, /const allLit = \$derived\(recipient === ALL_TARGET \|\| allPreview\);/u);
+  assert.match(source, /<div class="cards edge-fade" class:all-lit=\{allLit\}/u);
   assert.match(source, /onpointerenter=\{\(e\) => \{ if \(e\.pointerType !== 'touch'\) allPreview = true; \}\}/u);
-  assert.match(source, /\.acard\.sel, \.acard\.preview \{/u, 'the preview paints exactly the selected tab');
+  assert.doesNotMatch(source, /class:preview=/u, 'round 5: no per-card preview paint — the strip is the one enclosure');
 });
 
-test('a card is a TAB, joined to the composer BAND by colour alone (board #236, round 3)', () => {
-  // Owner: "做成类似 Chrome tab 栏的样式？选中哪一个，哪一个就是亮的，其他在旁边";
-  // round 3, with the owner's Chrome screenshot: "我只要从颜色上把它们变成一体的
-  // 就好" — the round-2 hairline + tab outline left gaps under every lit tab
-  // ("一堆缺口，看起来好奇怪"). No borders, no hairline: ONE FILL shared by the
-  // lit tab and the composer band, the input its own field inside the band.
-  assert.match(rule('.acard'), /--card-paint: transparent/u, 'at rest a card is a name, not a block');
-  assert.doesNotMatch(source, /--card-line/u, 'no tab outline — colour is the whole mechanism');
+test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosure (board #236, round 5)', () => {
+  // Owner: "做成类似 Chrome tab 栏的样式"; round 5 — "会不会有点过亮了？…把其他
+  // 地方变得更暗", "和 Agent 返回给我的消息框的亮度色彩差不多就可以", "整体加一个
+  // 稍微淡白色的边", "如果是选择多个 Agent，就用一个大的包边…不要有很多线拐来拐去".
+  assert.match(rule('.acard'), /--card-paint: transparent; --card-line: transparent/u, 'at rest a card is a name, not a block');
   assert.match(source, /\.acard:hover \{ --card-paint: var\(--surface2\); \}/u, 'hover is the one quiet wash');
-  assert.match(source, /\.acard\.sel, \.acard\.preview \{ --card-paint: var\(--hub-tab-band\); \}/u,
-    'the lit tab wears the BAND fill');
-  // Round 4: the FRAME is a step below the band, which is what makes the lit
-  // tab obvious with no line (owner: "选中和没有选中的…颜色差异特别小").
-  assert.match(rule('.roster'), /background: var\(--hub-tab-frame\)/u);
-  assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel::before, \.cards:not\(\.expanded\) \.acard\.preview::before \{\n\s*inset: var\(--control-paint-inset\) 0 0;\n\s*border-radius: var\(--ui-radius-control\) var\(--ui-radius-control\) 0 0;/u,
-    'single-row strip: the fill reaches the floor where the band begins');
-  assert.match(rule('.acard::before'), /transition: background var\(--t-move\) ease,\n\s*border-radius var\(--t-move\) ease, inset var\(--t-move\) ease/u,
+  assert.match(source, /\.acard\.sel \{ --card-paint: var\(--bubble-in\); --card-line: var\(--bubble-line\); \}/u,
+    'the lit tab wears the agent bubble: its brightness and its faint edge');
+  // The lit tab overlaps the band's top edge by 1px with the SAME fill, so the
+  // outline breaks exactly at the junction — no seam, no stub of line.
+  assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel \{ z-index: 1; \}/u);
+  assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel::before \{[\s\S]{0,240}?inset: var\(--control-paint-inset\) 0 -1px; border-bottom: 0;/u);
+  // Multi-select: the STRIP is the lit tab — one fill, one edge, no lines
+  // between siblings, and the per-card paint switches off by construction.
+  assert.match(rule('.cards.all-lit'), /background: var\(--bubble-in\)/u);
+  assert.match(rule('.cards.all-lit'), /border: 1px solid var\(--bubble-line\); border-bottom: 0/u);
+  assert.match(rule('.cards.all-lit'), /margin-bottom: -1px; padding-bottom: 1px; position: relative; z-index: 1/u);
+  assert.match(source, /\.cards\.all-lit \.acard::before \{ background: transparent; border-color: transparent; \}/u);
+  assert.match(rule('.acard::before'), /transition: background var\(--t-move\) ease, border-color var\(--t-move\) ease,\n\s*border-radius var\(--t-move\) ease, inset var\(--t-move\) ease/u,
     'switching tabs is movement: the swap crossfades and reshapes, never snaps');
-  assert.doesNotMatch(source, /\.roster::after|\.acard\.sel[^:{]*\{ z-index/u, 'the hairline and its seam workaround died with the outline model');
+  assert.doesNotMatch(source, /\.roster::after/u, 'the hairline model stays dead');
+  assert.match(rule('.roster'), /background: var\(--hub-tab-frame\)/u, 'the contrast comes from the frame going darker');
 });

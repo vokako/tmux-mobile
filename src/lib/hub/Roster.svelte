@@ -42,9 +42,13 @@
   let armed = $state('');
   function arm(name, pointerType = 'mouse') { if (!coarse && pointerType !== 'touch') armed = name; }
   function disarm(name) { if (armed === name) armed = ''; }
-  /** Pointer or focus on the Everyone tab: every live card previews the
-   * selected paint (board #236). Touch never previews — a finger has no hover. */
+  /** Pointer or focus on the Everyone tab previews the All choice: the STRIP
+   * lights as one enclosure, exactly as clicking would (board #236). Touch
+   * never previews — a finger has no hover. */
   let allPreview = $state(false);
+  /** All is the destination, actually or in preview: then the strip is the
+   * lit tab and no card paints its own (one enclosure, no internal lines). */
+  const allLit = $derived(recipient === ALL_TARGET || allPreview);
   const showStop = (name) => !coarse && busyNames.includes(name) && (armed === name || interrupting.includes(name));
   /** Places the Stop's centre on the dot's centre — offsets are the card's own
    * coordinate space (the select button is positioned; the card is too). */
@@ -181,7 +185,7 @@
 
 {#if selected}
   <div class="roster" class:compact>
-    <div class="cards edge-fade" class:expanded class:reveal={justLoaded} id={cardsId} bind:this={cardsEl} use:scrollEdges={!expanded}
+    <div class="cards edge-fade" class:all-lit={allLit} class:expanded class:reveal={justLoaded} id={cardsId} bind:this={cardsEl} use:scrollEdges={!expanded}
       role="group" aria-label={t('agentsTitle')}
       onpointerenter={(e) => { hovering = e.pointerType !== 'touch'; }}
       onpointerleave={() => { hovering = false; clearPress(); }}
@@ -220,7 +224,7 @@
         {@const mentioned = extras.includes(a.name) || extras.includes(ALL_TARGET)}
         {@const pending = interrupting.includes(a.name)}
         <!-- Selection and interruption are sibling native targets, never nested buttons. -->
-        <div class="acard" role="group" data-agent={a.name} class:sel={isAddressed(a.name)} class:preview={allPreview && !isAddressed(a.name)} class:filtered={filterAgent === a.name} class:stop-shown={showStop(a.name)}
+        <div class="acard" role="group" data-agent={a.name} class:sel={isAddressed(a.name)} class:filtered={filterAgent === a.name} class:stop-shown={showStop(a.name)}
           class:appear-pop={!!rosterBase && !rosterBase.has(a.name)} animate:flip={{ duration: moveMs() }}
           onpointerenter={(e) => arm(a.name, e.pointerType)} onpointerleave={() => disarm(a.name)}
           onfocusin={() => arm(a.name)} onfocusout={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) disarm(a.name); }}>
@@ -321,16 +325,34 @@
   /* The tab strip sits on the tab FRAME; the composer below is the BAND
      (owner's Chrome screenshot, 2026-09-22: the active tab and the toolbar
      are ONE FILL, the omnibox its own field inside — "从颜色上把它们变成一体…
-     底下的框是一个单独的一个输入框"). No hairline, no tab outline: the first
-     round said "attached" with lines and left gaps under every lit tab
-     ("一堆缺口，看起来好奇怪"); colour is the whole mechanism now. The frame
-     is a step DOWN from the band (--hub-tab-frame vs --hub-tab-band, app.css
-     per theme) — that step is what makes the lit tab obvious with no line at
-     all, and a 3% wash was not enough ("颜色差异特别小"). */
+     底下的框是一个单独的一个输入框"). The join is colour, never a hairline —
+     the first round said "attached" with lines and left a gap under every lit
+     tab ("一堆缺口，看起来好奇怪").
+     Round 5 sets the two ends of the step: the band/tab fill is the AGENT
+     BUBBLE's own brightness (--bubble-in) with the bubble's own faint edge
+     (--bubble-line) — "和 Agent 返回给我的消息框的亮度色彩差不多就可以…整体加
+     一个稍微淡白色的边" — and the contrast comes from the FRAME going darker
+     beneath, not the tab going brighter ("会不会有点过亮了？…把其他地方变得更
+     暗"). */
   .cards {
     display: flex; align-items: center; gap: var(--roster-gap); overflow-x: auto; scrollbar-width: none;
     min-width: 0; min-height: 0; padding: 2px 2px 0;
   }
+  /* MULTI-SELECT IS ONE ENCLOSURE (owner, 2026-09-22: "如果是选择多个 Agent，
+     就用一个大的包边。注意 Agent 和 Agent 之间的卡片不要有很多线拐来拐去，就是
+     一个大的包边"): under All — and while the All tab previews it — the STRIP
+     itself is the lit tab, one fill and one edge around the whole row, and the
+     per-card paint switches off (below). Every internal line is gone by
+     construction, not by patching borders between siblings. */
+  .cards.all-lit {
+    background: var(--bubble-in);
+    border: 1px solid var(--bubble-line); border-bottom: 0;
+    border-radius: var(--ui-radius-control) var(--ui-radius-control) 0 0;
+    /* 1px down over the band's top edge: the same fill covers it, so the
+       enclosure reads as continuous into the composer. */
+    margin-bottom: -1px; padding-bottom: 1px; position: relative; z-index: 1;
+  }
+  .cards.all-lit .acard::before { background: transparent; border-color: transparent; }
   .cards:not(.expanded)::-webkit-scrollbar { display: none; }
   .cards.expanded {
     flex-wrap: wrap; align-content: start;
@@ -342,14 +364,12 @@
     margin-block: var(--control-paint-inset); border-radius: var(--ui-radius-row);
   }
   /* A card is a TAB (board #236, owner: "做成类似 Chrome tab 栏的样式？选中哪一个，
-     哪一个就是亮的，其他在旁边"; round 3, with the owner's Chrome screenshot:
-     colour only). At rest: nothing — a name on the frame. Hover: the quiet
-     wash. Selected: the BAND's fill (--surface, the composer band below),
-     rounded top corners, and in the single-row strip the fill runs to the
-     strip's floor where the band begins — one colour from tab into band, no
-     border anywhere ("我只要从颜色上把它们变成一体的就好"). */
+     哪一个就是亮的，其他在旁边"). At rest: nothing — a name on the frame.
+     Hover: the quiet wash. Selected: the bubble fill and the bubble edge,
+     top corners rounded, reaching the strip's floor where the band begins —
+     one enclosure from tab into band. */
   .acard {
-    --card-paint: transparent;
+    --card-paint: transparent; --card-line: transparent;
     position: relative;
     display: flex;
     align-items: center; flex: none; width: max-content; min-width: 0;
@@ -358,28 +378,31 @@
   }
   .acard::before {
     content: ''; position: absolute; inset: var(--control-paint-inset) 0;
-    border-radius: inherit; pointer-events: none;
-    background: var(--card-paint);
+    border-radius: inherit; pointer-events: none; box-sizing: border-box;
+    background: var(--card-paint); border: 1px solid var(--card-line);
     /* --t-move, not --t-fast: switching tabs is the selection MOVING, and the
        instant swap read as 生硬 (owner, 2026-09-22) — the outgoing and
        incoming tabs crossfade and reshape over the one movement tempo. */
-    transition: background var(--t-move) ease,
+    transition: background var(--t-move) ease, border-color var(--t-move) ease,
       border-radius var(--t-move) ease, inset var(--t-move) ease;
   }
   .acard:hover { --card-paint: var(--surface2); }
-  .acard.sel, .acard.preview { --card-paint: var(--hub-tab-band); }
+  .acard.sel { --card-paint: var(--bubble-in); --card-line: var(--bubble-line); }
   /* Chrome dims an inactive tab's LABEL as well as its fill — two signals for
      one state, which is what makes the lit tab read at a glance (owner,
      2026-09-22: "选中和没有选中的…差异更明显一点"). The avatar, status dot and
      context ring keep their colours: they are live facts, not chrome. */
-  .cards .acard:not(.sel):not(.preview):not(.off) { color: var(--text2); }
+  .cards:not(.all-lit) .acard:not(.sel):not(.off) { color: var(--text2); }
   .acard { transition: color var(--t-move) ease; }
   /* Attached only in the single-row strip: the fill reaches the floor
      (inset-bottom 0), top corners the control radius — Chrome's active-tab
      silhouette. The wrapped (expanded) list is a list, so there a lit card
      stays a closed rounded box. */
-  .cards:not(.expanded) .acard.sel::before, .cards:not(.expanded) .acard.preview::before {
-    inset: var(--control-paint-inset) 0 0;
+  .cards:not(.expanded) .acard.sel { z-index: 1; }
+  .cards:not(.expanded) .acard.sel::before {
+    /* -1px: the tab's own fill covers the band's top edge under it, so the
+       enclosure is continuous and no stub of line shows at the junction. */
+    inset: var(--control-paint-inset) 0 -1px; border-bottom: 0;
     border-radius: var(--ui-radius-control) var(--ui-radius-control) 0 0;
   }
   .acard.filtered::after {

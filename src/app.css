@@ -165,12 +165,14 @@ html[data-theme="dark"] {
   /* Chat destination strip (board #236): Chrome separates the tab FRAME from
      the TOOLBAR by a real step, which is what makes an active tab obvious
      without a single line — a 3% wash could not (owner, 2026-09-22: "选中和没
-     有选中的这些 tab 颜色差异特别小"). Dark: frame near the canvas, band a
-     visible lift (Chrome dark is #202124 frame / #35363a toolbar). Opaque, not
-     a wash: the lit tab and the band must be the SAME colour over different
-     backdrops (strip frame vs. the shell), and translucency would make them
-     differ. */
-  --hub-tab-frame: #0f0f18; --hub-tab-band: #2b2b33;
+     有选中的这些 tab 颜色差异特别小"). Round 5 puts the step where the owner
+     asked for it — "会不会有点过亮了？能不能尝试把其他地方变得更暗的方式来解决呢":
+     the BAND takes the agent bubble's own brightness (--bubble-in, "和 Agent
+     返回给我的消息框的亮度色彩差不多就可以") and the FRAME goes DARKER beneath
+     it, rather than the tab going brighter. Opaque, not a wash: the lit tab
+     and the band must be the SAME colour over different backdrops (strip
+     frame vs. the shell), and translucency would make them differ. */
+  --hub-tab-frame: #06060a;
   --accent: #00d4ff; --accent-bg: rgba(0,212,255,0.12); --accent-glow: rgba(0,212,255,0.1);
   /* #155: tone solid commands for readable white ink in both themes.
      The brand accent stays unchanged; selected text has its own ink role.
@@ -226,10 +228,10 @@ html[data-theme="light"] {
      The BRAND accent stays #0088cc (owner, 2026-08-21: an iOS-blue swap
      was reverted — "就用原来品牌色为主"). */
   --surface: rgba(255,255,255,0.72); --surface2: rgba(0,0,0,0.04);
-  /* Light follows the same Chrome step, upward: a grey frame, a WHITE band
-     (Chrome light is #dee1e6 frame / #ffffff toolbar) — elevation goes up in
-     this theme, per the TRIM note above. */
-  --hub-tab-frame: #e6e6ea; --hub-tab-band: #ffffff;
+  /* Light follows the same Chrome step, with the same round-5 direction: the
+     band is the bubble's brightness and the FRAME is the darker one (Chrome
+     light is #dee1e6 frame / #ffffff toolbar). */
+  --hub-tab-frame: #e2e2e8;
   --accent: #0088cc; --accent-bg: rgba(0,136,204,0.08); --accent-glow: rgba(0,136,204,0.06);
   --accent-fill: #0074ad;
   --accent-fill-ink: #ffffff;

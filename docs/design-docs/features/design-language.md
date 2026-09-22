@@ -709,21 +709,22 @@ by the contract above, not extended by new page-local overrides.
 - The Hub roster's agent TAB (board #236) — the one Chrome-tab selection
   idiom, reserved for the destination strip above the composer: at rest a
   card is a bare name (no paint, no line), hover is the `--surface2` wash,
-  and the SELECTED card and the composer BAND below share ONE FILL
-  (`--hub-tab-band`; the composer paints it full-width, the input is its own
-  bordered field inside) standing a real step above the strip's own
-  `--hub-tab-frame` — round 4: `--surface` on both frame and band was a 3%
-  wash the owner could barely see ("选中和没有选中的…颜色差异特别小"), so the
-  two fills are per-theme opaque values in app.css, Chrome's frame/toolbar
-  step (dark `#0f0f18`/`#2b2b33`, light `#e6e6ea`/`#ffffff`). An inactive
-  tab's LABEL also dims to `--text2` — two signals for one state, as Chrome
-  does; avatars, status dots and context rings keep their colours because
-  they are live facts. Round 3, from the owner's Chrome screenshot:
-  "我只要从颜色上把它们变成一体的就好". No borders, no hairline: the earlier
-  outline+hairline attempt left gaps under every lit tab. Top corners
-  `--ui-radius-control`, fill down to the strip's floor in the single-row
-  strip; the wrapped expanded list keeps closed rounded boxes. The swap
-  animates on `--t-move`. A second wearer of this idiom needs a recorded
+  and the SELECTED card and the composer BAND below are ONE ENCLOSURE wearing
+  the AGENT BUBBLE's own paint — `--bubble-in` fill, `--bubble-line` edge
+  (owner, 2026-09-22: "和 Agent 返回给我的消息框的亮度色彩差不多就可以…整体加
+  一个稍微淡白色的边"). The contrast comes from the strip's `--hub-tab-frame`
+  going DARKER beneath (per-theme opaque, dark `#06060a`, light `#e2e2e8`),
+  never from a brighter tab ("会不会有点过亮了？…把其他地方变得更暗的方式来解
+  决"). The lit tab overlaps the band's top edge by 1px with the same fill, so
+  the outline breaks exactly at the junction — no seam, no stub. MULTI-SELECT
+  IS ONE ENCLOSURE: under All (and while All previews) the STRIP itself is the
+  lit tab — one fill, one edge, zero lines between siblings ("就用一个大的包
+  边…不要有很多线拐来拐去") — and per-card paint switches off. An inactive
+  tab's LABEL dims to `--text2`, two signals for one state; avatars, status
+  dots and context rings keep their colours because they are live facts. Top
+  corners `--ui-radius-control`, fill down to the strip's floor in the
+  single-row strip; the wrapped expanded list keeps closed rounded boxes. The
+  swap animates on `--t-move`. A second wearer of this idiom needs a recorded
   reason.
 - `.pick` / `.agent-pick` / `.pchip` — stadium toggle chips for MEMBERSHIP
   (skills, roster picks); selected = `--accent-line` border + `--accent-bg`.
