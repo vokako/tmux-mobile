@@ -477,8 +477,12 @@ test('the ⋯ is grouped WITH the name, so the row gap cannot separate them (own
   // first, and scrolls), the buttons are flex: none.
   assert.match(source, /\.title-group \{[^}]*flex: 0 1 auto; min-width: 0;[^}]*\}/u, 'the name group CAN shrink — buttons come first');
   assert.ok(!/\.title-group \{[^}]*flex: none/u.test(source), 'flex: none is what hid the buttons');
-  assert.match(source, /\.path \{[\s\S]{0,800}?min-width: 0; flex: 0 1000 auto;/u,
-    'the path gives way first — a 1000× shrink weight, below content, scrolls');
+  // #234: no width cap on the name — the old 60% cap ellipsized the title
+  // while the path still held width, inverting the stated priority. The
+  // path's floor is what keeps it visible AND scrollable when compressed.
+  assert.ok(!/\.title-group \{[^}]*max-width/u.test(source), 'a cap on the name inverts the name-over-path priority');
+  assert.match(source, /\.path \{[\s\S]{0,900}?min-width: 8ch; flex: 0 1000 auto;/u,
+    'the path gives way first — a 1000× shrink weight down to a scrollable floor');
   // The heading must not clip the command's native target or focus ring.
   const h1 = source.slice(source.indexOf('<h1>', source.indexOf('<div class="title-group">')), source.indexOf('</h1>'));
   assert.ok(!h1.includes('icon="chevron-down"'), 'the caret sits beside the h1, never inside it');
@@ -718,7 +722,9 @@ test('the phone Chat head is ONE dense tool group and the name may run up to it 
   const tools = source.slice(source.indexOf('<div class="head-tools">'), source.indexOf('{#if headerCopyFeedback && headerCopyAnchor}'));
   assert.ok(tools.includes('icon="layout"') && tools.includes('icon="files"') && tools.includes('icon="terminal"'), 'the three toggles are the group');
   assert.match(source, /\.head-tools \{ display: flex; align-items: center; gap: var\(--tool-gap\); flex: none; \}/u);
-  // The 60% cap exists for the desktop PATH; the phone renders none.
-  assert.match(source, /\.hub-root\.compact \.title-group \{ max-width: none; \}/u);
-  assert.match(source, /\{#if !compact\}<span class="path"/u, 'the path is desktop-only, so the cap has nothing to protect on compact');
+  // #228's compact max-width:none override died with the cap itself (#234):
+  // the name now runs to the tools on EVERY layout, and on the desktop the
+  // path compresses to its scrollable floor first.
+  assert.ok(!source.includes('.hub-root.compact .title-group'), 'no compact override left — there is no cap to lift');
+  assert.match(source, /\{#if !compact\}<span class="path"/u, 'the path is desktop-only');
 });

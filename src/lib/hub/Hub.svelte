@@ -1927,13 +1927,13 @@
      .h1-text ellipsis engage), but at flex-shrink 1 against the path's 1000:
      negative space is distributed by shrink × basis, so the path absorbs
      effectively all of it and the name only starts to ellipsize once the
-     path is gone. The buttons are `flex: none` and always keep their box. */
-  .title-group { display: flex; align-items: center; gap: 1px; flex: 0 1 auto; min-width: 0; max-width: 60%; }
-  /* The 60% cap keeps room for the PATH — which the phone does not show, so
-     there the name may run right up to the tool group and its caret stays
-     glued to the name's end instead of parking mid-row (board #228, owner:
-     "chat的标题要能够放下更宽的标题 下箭头右边不用留这么大间距"). */
-  .hub-root.compact .title-group { max-width: none; }
+     path is down to its floor. No width cap: the old 60% cap ellipsized the
+     name while the path still held width — the exact inversion of the
+     priority (owner, 2026-09-21, board #234: "优先保证标题完整显示，可以压
+     缩路径宽度，反正路径可以滚动"). The path's own min-width floor is what
+     keeps it reachable. The buttons are `flex: none` and always keep their
+     box. */
+  .title-group { display: flex; align-items: center; gap: 1px; flex: 0 1 auto; min-width: 0; }
   .head-tools { display: flex; align-items: center; gap: var(--tool-gap); flex: none; }
   /* The title yields width before any native command target does. */
   h1 { display: flex; align-items: center; min-width: 0; }
@@ -1954,12 +1954,14 @@
   .path {
     font-family: var(--font-mono); font-size: var(--fs-sub); color: var(--text3);
     white-space: nowrap; overflow-x: auto; overflow-y: hidden;
-    /* THE dynamic region: shrinks below its content first (min-width: 0 +
-       scroll) while the buttons stay whole; the shrink weight of 1000 against
-       the title group's 1 is what makes it yield FIRST and the name only
-       after it (see .title-group); the spacer still owns the leftover,
-       keeping the toggles right-aligned. */
-    min-width: 0; flex: 0 1000 auto;
+    /* THE dynamic region: shrinks below its content first (min-width + scroll)
+       while the buttons stay whole; the shrink weight of 1000 against the
+       title group's 1 is what makes it yield FIRST and the name only after it
+       (see .title-group); the spacer still owns the leftover, keeping the
+       toggles right-aligned. The 8ch floor (board #234) keeps a compressed
+       path visible and scrollable — a path squeezed to zero is not
+       "可以滚动", it is gone. */
+    min-width: 8ch; flex: 0 1000 auto;
     scrollbar-width: none; -webkit-overflow-scrolling: touch;
     user-select: text; -webkit-user-select: text; cursor: text;
   }
