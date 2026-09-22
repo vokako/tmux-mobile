@@ -315,14 +315,18 @@
     position: relative;
     display: grid; grid-template-columns: minmax(0, 1fr) var(--control-height);
     gap: 0; flex: 0 1 auto; min-width: 0; min-height: 0; padding: 0 var(--composer-inset);
+    background: var(--hub-tab-frame);
     container: roster / inline-size;
   }
-  /* The tab strip sits on the page frame; the composer below is the BAND
+  /* The tab strip sits on the tab FRAME; the composer below is the BAND
      (owner's Chrome screenshot, 2026-09-22: the active tab and the toolbar
      are ONE FILL, the omnibox its own field inside — "从颜色上把它们变成一体…
      底下的框是一个单独的一个输入框"). No hairline, no tab outline: the first
      round said "attached" with lines and left gaps under every lit tab
-     ("一堆缺口，看起来好奇怪"); colour is the whole mechanism now. */
+     ("一堆缺口，看起来好奇怪"); colour is the whole mechanism now. The frame
+     is a step DOWN from the band (--hub-tab-frame vs --hub-tab-band, app.css
+     per theme) — that step is what makes the lit tab obvious with no line at
+     all, and a 3% wash was not enough ("颜色差异特别小"). */
   .cards {
     display: flex; align-items: center; gap: var(--roster-gap); overflow-x: auto; scrollbar-width: none;
     min-width: 0; min-height: 0; padding: 2px 2px 0;
@@ -363,7 +367,13 @@
       border-radius var(--t-move) ease, inset var(--t-move) ease;
   }
   .acard:hover { --card-paint: var(--surface2); }
-  .acard.sel, .acard.preview { --card-paint: var(--surface); }
+  .acard.sel, .acard.preview { --card-paint: var(--hub-tab-band); }
+  /* Chrome dims an inactive tab's LABEL as well as its fill — two signals for
+     one state, which is what makes the lit tab read at a glance (owner,
+     2026-09-22: "选中和没有选中的…差异更明显一点"). The avatar, status dot and
+     context ring keep their colours: they are live facts, not chrome. */
+  .cards .acard:not(.sel):not(.preview):not(.off) { color: var(--text2); }
+  .acard { transition: color var(--t-move) ease; }
   /* Attached only in the single-row strip: the fill reaches the floor
      (inset-bottom 0), top corners the control radius — Chrome's active-tab
      silhouette. The wrapped (expanded) list is a list, so there a lit card

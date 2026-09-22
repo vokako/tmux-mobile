@@ -369,8 +369,10 @@
     padding: 6px var(--composer-inset) 10px;
     /* The BAND (board #236 round 3, the owner's Chrome screenshot): the
        toolbar under the tab strip, one fill with the lit tab above it —
-       colour is what joins them. The input below stays its own field. */
-    background: var(--surface);
+       colour is what joins them, and its step above the frame is what makes
+       the lit tab obvious (round 4: --surface on both was too close to the
+       frame — "颜色差异特别小"). The input below stays its own field. */
+    background: var(--hub-tab-band);
   }
   /* An input's radius (--ui-radius-control), not 16px: on a 32px desktop
      shell 16px was a full semicircle and text near the edge read as squeezed

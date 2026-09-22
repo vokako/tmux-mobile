@@ -164,15 +164,28 @@ the dashed filter ring and the Stop-on-dot all survive unchanged — they
 are function, not the retired chrome.
 
 Three review rounds, same day (owner: "整体看起来比较生硬" → the Chrome
-screenshot). Round 2 fixed the snap (the tab paint transitions on `--t-move`
-ease — switching destination is the selection MOVING, so it crossfades and
-reshapes; reduced-motion still disables it) and patched the 1px seam with a
-z-index. Round 3 replaced the mechanism: the outline + hairline model left
+screenshot) and a fourth for contrast. Round 2 fixed the snap (the tab paint
+transitions on `--t-move` ease — switching destination is the selection
+MOVING, so it crossfades and reshapes; reduced-motion still disables it) and
+patched the 1px seam with a z-index. Round 3 replaced the mechanism: the
+outline + hairline model left
 "一堆缺口" — a gap in the line under every lit tab, worst under All where
 every tab is lit — because it said "attached" with LINES. The owner's
 screenshot says Chrome does it with COLOUR: the lit tab and the composer
-band share one `--surface` fill, no borders, no hairline, and the input
+band share one fill, no borders, no hairline, and the input
 stays its own complete field inside the band.
+
+Round 4 gave that colour enough contrast to READ (owner: "选中和没有选中的
+这些 agent card 的显示差异更明显一点…深色和浅色模式下都要考虑好"): a 3%
+`--surface` wash on both the strip and the band left barely any step, so the
+two fills became per-theme OPAQUE tokens in app.css — Chrome's own
+frame/toolbar pair (dark `--hub-tab-frame: #0f0f18` / `--hub-tab-band:
+#2b2b33`, light `#e6e6ea` / `#ffffff`). Opaque on purpose: the lit tab and
+the band must be the SAME colour over different backdrops, which a
+translucent wash cannot promise. The inactive tab's LABEL dims to `--text2`
+as well — two signals for one state, as Chrome does — while avatar, status
+dot and context ring keep their colours: those are live facts, not chrome.
+Measured in both themes at 1280, single-selection and All.
 
 ### All selects the addressed cards (#186, 2026-09-12)
 

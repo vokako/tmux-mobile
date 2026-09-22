@@ -710,8 +710,15 @@ by the contract above, not extended by new page-local overrides.
   idiom, reserved for the destination strip above the composer: at rest a
   card is a bare name (no paint, no line), hover is the `--surface2` wash,
   and the SELECTED card and the composer BAND below share ONE FILL
-  (`--surface` on both; the composer paints it full-width, the input is its
-  own bordered field inside) — round 3, from the owner's Chrome screenshot:
+  (`--hub-tab-band`; the composer paints it full-width, the input is its own
+  bordered field inside) standing a real step above the strip's own
+  `--hub-tab-frame` — round 4: `--surface` on both frame and band was a 3%
+  wash the owner could barely see ("选中和没有选中的…颜色差异特别小"), so the
+  two fills are per-theme opaque values in app.css, Chrome's frame/toolbar
+  step (dark `#0f0f18`/`#2b2b33`, light `#e6e6ea`/`#ffffff`). An inactive
+  tab's LABEL also dims to `--text2` — two signals for one state, as Chrome
+  does; avatars, status dots and context rings keep their colours because
+  they are live facts. Round 3, from the owner's Chrome screenshot:
   "我只要从颜色上把它们变成一体的就好". No borders, no hairline: the earlier
   outline+hairline attempt left gaps under every lit tab. Top corners
   `--ui-radius-control`, fill down to the strip's floor in the single-row

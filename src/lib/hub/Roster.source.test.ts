@@ -258,8 +258,11 @@ test('a card is a TAB, joined to the composer BAND by colour alone (board #236, 
   assert.match(rule('.acard'), /--card-paint: transparent/u, 'at rest a card is a name, not a block');
   assert.doesNotMatch(source, /--card-line/u, 'no tab outline — colour is the whole mechanism');
   assert.match(source, /\.acard:hover \{ --card-paint: var\(--surface2\); \}/u, 'hover is the one quiet wash');
-  assert.match(source, /\.acard\.sel, \.acard\.preview \{ --card-paint: var\(--surface\); \}/u,
+  assert.match(source, /\.acard\.sel, \.acard\.preview \{ --card-paint: var\(--hub-tab-band\); \}/u,
     'the lit tab wears the BAND fill');
+  // Round 4: the FRAME is a step below the band, which is what makes the lit
+  // tab obvious with no line (owner: "选中和没有选中的…颜色差异特别小").
+  assert.match(rule('.roster'), /background: var\(--hub-tab-frame\)/u);
   assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel::before, \.cards:not\(\.expanded\) \.acard\.preview::before \{\n\s*inset: var\(--control-paint-inset\) 0 0;\n\s*border-radius: var\(--ui-radius-control\) var\(--ui-radius-control\) 0 0;/u,
     'single-row strip: the fill reaches the floor where the band begins');
   assert.match(rule('.acard::before'), /transition: background var\(--t-move\) ease,\n\s*border-radius var\(--t-move\) ease, inset var\(--t-move\) ease/u,
