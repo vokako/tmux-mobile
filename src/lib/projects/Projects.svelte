@@ -266,8 +266,13 @@
         <!-- A sidebar section header is a LABEL, not a control: the Chat
              sidebar has no chevron to collapse its projects, and a list this
              short never needed one (owner: "projects 上边还是折叠的，这个和
-             chat 里不太一样"). -->
-        <span class="side-h-inline">{t('projects')}<span class="group-count">{sorted.length}</span></span>
+             chat 里不太一样"). No count either: Chat's header is the word
+             alone, and "PROJECTS 24" next to Chat's "PROJECTS" was one of
+             the mismatches the owner named (board #235: "projects 后面写的
+             project 数量等等，这些都给我对齐一下"). Page mode keeps its
+             count — there the header is a section summary, not a sidebar
+             label. -->
+        <span>{t('projects')}</span>
       {:else}
         <button class="group-toggle" onclick={() => collapsed = !collapsed} aria-expanded={!collapsed}>
           <span class="chev" class:open={!collapsed}><Icon name="chevron-right" size={12} /></span>
@@ -423,11 +428,14 @@
      tracking next to Chat's 1.4px (measured 2026-08-19). Only the sidebar's
      tighter gutter stays local. */
   /* Padding comes from `.side-h` too — see the note in Sessions.svelte. */
-  .projects.dense .group-count { background: none; color: var(--text3); padding: 0; }
+  /* ONE box rhythm with Chat's `.side-row.proj-row` (board #235, owner:
+     "上下宽度等格式感觉不一样…都给我对齐一下"; measured 2026-09-22 — Chat:
+     row pad 8/10, name→chips 2px, chips flush to the 8px bottom pad, an 8px
+     gap before the ⋯ column; this row had 2+6 pads, an 8px name→chips gap
+     and a 3px chips inset, three near-misses that read as a second dialect).
+     The row owns the 8px 10px pad like Chat's; .proj-main carries none. */
   .projects.dense .proj {
-    /* 6 + `.proj-main`'s 4 = the 10px inset the whole sidebar shares, so the
-       name lines up with the header above it and with the session rows below. */
-    background: none; border: none; border-radius: var(--ui-radius-row); padding: 2px 6px; gap: 2px;
+    background: none; border: none; border-radius: var(--ui-radius-row); padding: 8px 10px; gap: 2px;
   }
   .projects.dense .proj:hover { background: var(--surface2); }
   /* The project whose pane the terminal is SHOWING — the same selected wash
@@ -435,9 +443,15 @@
      identically in both sidebars. */
   .projects.dense .proj.open { background: var(--accent-bg); }
   .projects.dense .proj.live { border: none; }
-  /* 2 + 6 = the 8px vertical rhythm of `.side-row`; rows are one line here,
-     so the dot centers instead of hanging off the first text line. */
-  .projects.dense .proj-main { padding: 6px 4px; align-items: center; }
+  .projects.dense .proj-main { padding: 0; align-items: center; }
+  /* Chat's first line, verbatim: an 8px gap before the ⋯ column, and the ⋯
+     CENTRED on the whole row rather than inflating the first line (in Chat
+     the menu is the row's sibling column; here it leaves the flow, the line
+     reserves its 24+8 width, and the name→chips rhythm stops depending on a
+     button's height). */
+  .projects.dense .proj { position: relative; }
+  .projects.dense .proj-top { gap: 8px; align-items: flex-start; padding-right: 32px; }
+  .projects.dense .row-menu { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); }
   /* Chat's dot language, verbatim: 6px, --status-ok when live, --text3 when
      down, no glow (the 7px accent-glow dot is the card dialect). The name
      takes `.p-name`'s 550, not the card's 600. */
@@ -450,15 +464,14 @@
   .projects.dense .acts { opacity: 0; transition: opacity var(--t-fast) ease; }
   .projects.dense .proj:hover .acts,
   .projects.dense .proj:focus-within .acts { opacity: 1; }
-  .projects.dense .side-h-inline {
-    display: inline-flex; align-items: baseline; gap: 6px;
-  }
   /* Windows stay — they are what the project is made of, and picking one is
      why this sidebar exists. Their LOOK is the shared `.side-win` dialect in
      app.css now (the Chat sidebar's agent chips wear the same class — "这两个
      可以共用", owner 2026-08-24); only the indent that tucks them under the
-     name is structural and stays here. */
-  .projects.dense .wins-indent { padding: 0 4px 3px 18px; }
+     name is structural and stays here: dot 6 + gap 8 = 14, the name's own x,
+     exactly where Chat's chips start (#235). The bottom inset is the row's
+     8px pad, as in Chat — no extra chip padding. */
+  .projects.dense .wins-indent { padding: 0 0 0 14px; }
 
   .proj {
     display: flex; flex-direction: column; gap: 6px;

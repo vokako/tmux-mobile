@@ -620,7 +620,6 @@
       <div class="group-label" class:side-h={!chips}>
         <Icon name="terminal" size={12} />
         {t('groupSessions')}
-        <span class="group-count">{filtered.length}</span>
       </div>
     {/if}
     <!-- A row that changes rank (an activation re-sorts by recency) MOVES
@@ -736,10 +735,8 @@
      as its type, and a scoped rule outranks it (0,2,0 vs 0,1,0). Overriding just
      the padding put this header 4px left of the rows it labels — and 4px left of
      Chat's identical header (owner, 2026-08-20: "chat 页面和 terminal 页面这里的
-     projects 文字的位置不一样，样式好像不统一"). */
-  .sessions.sidebar-mode .group-count {
-    background: none; color: var(--text3); padding: 0; font-weight: 600;
-  }
+     projects 文字的位置不一样，样式好像不统一"). No count either: sidebar
+     headers are the WORD alone, like Chat's (board #235). */
   /* The footer is two utilities, not a call to action: right-aligned so the
      create ROW above stays the only full-width affordance. */
   .sessions.sidebar-mode .bottom-bar { justify-content: flex-end; padding: 6px 2px 0; }
@@ -899,16 +896,6 @@
      only: in the sidebar `.side-h` owns the box (same 0,2,0-vs-0,1,0 trap as
      above). */
   .sessions:not(.sidebar-mode) .group-label:first-child { padding-top: 2px; }
-  .group-count {
-    font-weight: 600;
-    color: var(--accent);
-    background: var(--accent-bg);
-    border-radius: 999px;
-    padding: 0 6px;
-    font-size: var(--fs-meta);
-    letter-spacing: 0;
-    font-variant-numeric: tabular-nums;
-  }
 
 
   .session-row {
