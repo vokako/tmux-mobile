@@ -202,15 +202,16 @@
            wears the same tab paint (lit when All IS the recipient). Hovering
            or focusing it PREVIEWS the choice: every live card lights as it
            would after the click (owner: "鼠标悬停…看到的就是所有的 Agent 被选中或
-           者激活"). The `everyone` glyph replaced `collab` here — three orbiting
-           dots read as nothing (owner: "别人看了都不知道什么意思"); a group of
-           people is the glyph Slack/Discord/Teams use for "everyone". `bare`:
-           the tab is the paint, the command adds none (#180: never a card —
-           no data-agent, no Stop, no meter). -->
+           者激活"). The glyph is the existing `bot` — an agent's own mark, so
+           "all the agents" needs no new species (owner, 2026-09-22: "画成
+           Agent 类似的 Logo"; the group-of-people and collab's orbiting dots
+           both failed the glance test) — at 16px, under the avatars' 20px
+           (owner: "按钮有点大"). `bare`: the tab is the paint, the command
+           adds none (#180: never a card — no data-agent, no Stop, no meter). -->
       <span class="all-choice acard" class:sel={recipient === ALL_TARGET} role="presentation"
         onpointerenter={(e) => { if (e.pointerType !== 'touch') allPreview = true; }} onpointerleave={() => { allPreview = false; }}
         onfocusin={() => { allPreview = true; }} onfocusout={() => { allPreview = false; }}>
-        <CommandButton variant="icon" icon="everyone" label={t('hubEveryone')} pressed={recipient === ALL_TARGET} bare
+        <CommandButton variant="icon" icon="bot" label={t('hubEveryone')} pressed={recipient === ALL_TARGET} bare
           hasPopup={recipient === ALL_TARGET ? 'menu' : undefined}
           expanded={recipient === ALL_TARGET ? allMenuOpen : undefined}
           disabled={!selected || !roomReady} onclick={onall} />
@@ -362,7 +363,11 @@
     content: ''; position: absolute; inset: var(--control-paint-inset) 0;
     border-radius: inherit; pointer-events: none; box-sizing: border-box;
     background: var(--card-paint); border: 1px solid var(--card-line);
-    transition: background var(--t-fast), border-color var(--t-fast), inset var(--t-fast);
+    /* --t-move, not --t-fast: switching tabs is the selection MOVING, and the
+       instant swap read as 生硬 (owner, 2026-09-22) — the outgoing and
+       incoming tabs crossfade and reshape over the one movement tempo. */
+    transition: background var(--t-move) ease, border-color var(--t-move) ease,
+      border-radius var(--t-move) ease, inset var(--t-move) ease;
   }
   .acard:hover { --card-paint: var(--surface2); }
   .acard.sel, .acard.preview { --card-paint: var(--bubble-in); --card-line: var(--border); }
@@ -370,7 +375,11 @@
      floor (inset-bottom 0 → the card's bottom = the strip's floor, over the
      hairline), its bottom edge open, top corners the shell's radius. The
      wrapped (expanded) list is a list, so there a lit card stays a closed
-     rounded box. */
+     rounded box. z-index 1: the hairline is the roster's LATER ::after and
+     painted over the tab's bottom — the 1px seam the owner saw between tab
+     and shell ("Tab 和下面的框中间还有一道分界线"); the lit tab must be the
+     one thing above the strip's floor line. */
+  .cards:not(.expanded) .acard.sel, .cards:not(.expanded) .acard.preview { z-index: 1; }
   .cards:not(.expanded) .acard.sel::before, .cards:not(.expanded) .acard.preview::before {
     inset: var(--control-paint-inset) 0 0; border-bottom: 0;
     border-radius: var(--ui-radius-control) var(--ui-radius-control) 0 0;
@@ -429,7 +438,7 @@
   .ava.dim { background: var(--surface2); color: var(--text3); }
   img.ava.dim { background: none !important; filter: grayscale(1); opacity: 0.55; }
   .roster-add { display: flex; align-items: center; flex: none; min-height: var(--control-height); }
-  .all-choice { --control-icon-size: var(--roster-avatar-size); }
+  .all-choice { --control-icon-size: 16px; }
   /* The TAB carries the selected paint; the command inside stays washless
      (engaged would put a colour block back inside the tab) — its accent ink
      is the pressed signal that remains. */

@@ -111,8 +111,6 @@
     <path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>
   {:else if name === 'collab'}
     <circle cx="12" cy="12" r="8"/><circle cx="12" cy="4" r="2.3"/><circle cx="5.1" cy="16" r="2.3"/><circle cx="18.9" cy="16" r="2.3"/>
-  {:else if name === 'everyone'}
-    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
   {:else if name === 'maximize'}
     <path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>
   {:else if name === 'minimize'}

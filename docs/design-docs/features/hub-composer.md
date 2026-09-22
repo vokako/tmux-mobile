@@ -164,6 +164,15 @@ tab (it must reach the floor), so the disclosure wrapper height carries
 the dashed filter ring and the Stop-on-dot all survive unchanged — they
 are function, not the retired chrome.
 
+Two review fixes, same day (owner: "整体看起来比较生硬"): the lit tab sat
+UNDER the roster's hairline — `.roster::after` is a later positioned box, so
+it painted a 1px grey seam across the tab's open bottom ("Tab 和下面的框中间
+还有一道分界线"); the single-row lit tab now carries `z-index: 1`, the one
+thing above the strip's floor. And the swap between tabs snapped: the tab
+paint now transitions background/border/radius/inset on `--t-move` ease —
+switching destination is the selection MOVING, so it crossfades and reshapes
+on the movement tempo (reduced-motion still disables it).
+
 ### All selects the addressed cards (#186, 2026-09-12)
 
 Owner, 15:39: "点击 everyone 图标，应该上方展示好像所有 agent 都被选中了一样。"
@@ -210,10 +219,11 @@ All is the PINNED TAB at the strip's head (board #236, owner, 2026-09-22:
 "不用隐藏，我不展开就看不到吧…都显示全了" — supersedes #204's expanded-only
 gate, whose reason was the 2026-09-17 "藏到展开列表里"): Chrome pins a tab as
 an icon-only tab at the far left, and this is that — always in view,
-collapsed strip included, the `everyone` group-of-people glyph (`collab`'s
-orbiting dots read as nothing to a newcomer — owner: "别人看了都不知道什么意
-思"), avatar-sized (`.all-choice` sets `--control-icon-size:
-var(--roster-avatar-size)`), the same 28/44px native target and props
+collapsed strip included, the agents' own `bot` mark at 16px — under the
+avatars' 20px (owner, 2026-09-22 review: "按钮有点大…不用画人，画成 Agent 类似
+的 Logo" — the group-of-people and `collab`'s orbiting dots both failed the
+glance test; the bot glyph already means "an agent" everywhere else, so "all
+the agents" needs no new species), the same 28/44px native target and props
 (`pressed`, `hasPopup`, `expanded` for the All menu), wired into `Roster`
 (`allMenuOpen`, `onall`). The span is `.acard` so selected All is a LIT TAB
 like any card's; the CommandButton inside is `bare` and its `engaged` wash

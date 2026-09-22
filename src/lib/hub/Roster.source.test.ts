@@ -234,12 +234,13 @@ test("a second click on the recipient's card opens its menu at the card, never d
 
 test('Everyone is the PINNED tab: always at the head, previewing on hover (board #236, supersedes #204)', () => {
   // Owner, 2026-09-22: "不用隐藏，我不展开就看不到吧"; "重新给我设计一个好看的
-  // 图案" (collab's orbiting dots read as nothing — the group-of-people glyph
-  // is the everyone Slack/Teams use); "鼠标悬停…所有的 Agent 被选中或者激活".
+  // 图案…画成 Agent 类似的 Logo" (people and orbiting dots both failed the
+  // glance test — the agents' own bot mark says "the agents"); "按钮有点大" —
+  // 16px glyph under the avatars' 20px; "鼠标悬停…所有的 Agent 被选中或者激活".
   assert.match(source, /<span class="all-choice acard" class:sel=\{recipient === ALL_TARGET\} role="presentation"/u);
-  assert.match(source, /<CommandButton variant="icon" icon="everyone" label=\{t\('hubEveryone'\)\} pressed=\{recipient === ALL_TARGET\} bare/u);
+  assert.match(source, /<CommandButton variant="icon" icon="bot" label=\{t\('hubEveryone'\)\} pressed=\{recipient === ALL_TARGET\} bare/u);
+  assert.match(rule('.all-choice'), /--control-icon-size: 16px/u, 'smaller than an avatar; the hit box stays the row\'s');
   assert.doesNotMatch(source, /\{#if expanded\}\s*\n\s*<span class="all-choice"/u, 'the expanded-only gate is gone');
-  assert.match(rule('.all-choice'), /--control-icon-size: var\(--roster-avatar-size\)/u, 'the glyph is an avatar\'s size; the hit box stays the row\'s');
   assert.doesNotMatch(source, /data-agent="all"/u, '#180: never a card');
   // Hover/focus previews the choice on every live card; touch never previews.
   assert.match(source, /let allPreview = \$state\(false\);/u);
@@ -256,6 +257,10 @@ test('a card is a TAB: no rest chrome, and the lit tab joins the composer shell 
     'the lit tab wears the composer shell\'s own surface, not an accent block');
   assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel::before, \.cards:not\(\.expanded\) \.acard\.preview::before \{\n\s*inset: var\(--control-paint-inset\) 0 0; border-bottom: 0;\n\s*border-radius: var\(--ui-radius-control\) var\(--ui-radius-control\) 0 0;/u,
     'single-row strip: the tab opens its bottom edge onto the shell');
+  assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel, \.cards:not\(\.expanded\) \.acard\.preview \{ z-index: 1; \}/u,
+    'the lit tab stands above the roster hairline — the ::after painted over its bottom as a 1px seam');
+  assert.match(rule('.acard::before'), /transition: background var\(--t-move\) ease, border-color var\(--t-move\) ease,\n\s*border-radius var\(--t-move\) ease, inset var\(--t-move\) ease/u,
+    'switching tabs is movement: the swap crossfades and reshapes, never snaps');
   assert.match(rule('.roster::after'), /left: var\(--composer-inset\); right: var\(--composer-inset\); bottom: 0; height: 1px/u,
     'the strip floor is the shell\'s top hairline, at the shell\'s inset');
 });
