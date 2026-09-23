@@ -247,6 +247,7 @@ test('the filter and the detail level are reachable from menus, not only from a 
   // menu still carries the three detail levels with the current one ticked.
   const items = source.slice(source.indexOf('function agentItems'), source.indexOf('function projectItems'));
   assert.equal([...items.matchAll(/filterItem\(name\)/g)].length, 2, 'live AND stopped agents get the filter verb');
+  assert.match(source, /icon: 'filter',\s*onselect: \(\) => toggleFilter\(name\)/u, 'one funnel for the filter verb — the menu row and the card mark share it');
   assert.match(source, /function toggleFilter\(name\) \{\s*filterAgent = filterAgent === name \? '' : name;/u,
     '#168 ContextMenu retains the toggle without selecting or opening a second menu');
   assert.match(source, /projectItems\(selectedRow, true\)/u, 'the title caret asks for the view rows');

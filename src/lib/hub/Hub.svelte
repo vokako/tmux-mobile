@@ -832,7 +832,7 @@
   }
   const filterItem = (name) => ({
     label: filterAgent === name ? t('hubFilterExit') : t('hubFilterItem'),
-    icon: 'search',
+    icon: 'filter',
     onselect: () => toggleFilter(name),
   });
 

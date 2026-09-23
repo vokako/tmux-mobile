@@ -520,8 +520,8 @@ A heavier avatar ring was the owner's other option; it was not taken
 because that ring is the context meter. Dimming alone said that something
 changed, not what (owner, 14:50: "只是颜色变暗了，没有任何提示…这个 Filter 和
 正常状态的差异太小了"): the filtered card also carries the filter verb's own
-`search` glyph in the marks column, in the marks' `--accent-ink`, and its
-hover note names the mode and the way out (`hubFilterOnNote`).
+`filter` funnel beside the marks column, in the marks' `--accent-ink`, and
+its hover note names the mode and the way out (`hubFilterOnNote`).
 Tests execute the complete click/click/dblclick sequence, not a lone
 synthetic dblclick. Chromium also verifies repeat-to-clear, stopped-card
 menu exclusion and the coarse-pointer long-press filter path.
@@ -697,7 +697,10 @@ line moved to a join layer of its own (`::after` on a tab and on All, the
 group baseline on a lit team) — without it a fractional scale let part of
 a row of floor line or frame through under the tab (Chromium: lum 37 at
 1.5x, 27 at 1.25x, band 31; 31 with it). The strip's scrollport clips at
-the floor, so no enclosure paints into the band.
+the floor, so no enclosure paints into the band. The filter mark is the
+funnel the menu row wears, not a magnifier (owner: "沙漏过滤的样式"), and it
+sits beside the marks column rather than in it — three stacked marks would
+have exceeded the strip and grown it.
 The owner's 09:38 report of a WHITE LINE while switching tabs exposed two
 transient join faults. Chromium 152 at 390px measured the incoming bottom
 inset at 6px immediately after selection, 3.14px after 64ms and -1px only

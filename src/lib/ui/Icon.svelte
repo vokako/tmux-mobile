@@ -23,6 +23,8 @@
     <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
   {:else if name === 'search'}
     <circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+  {:else if name === 'filter'}
+    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
   {:else if name === 'key'}
     <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
   {:else if name === 'send'}

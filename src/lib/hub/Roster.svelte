@@ -275,11 +275,11 @@
               {/if}
             </span>
             <span class="a-name">{a.name}<span class="ac-top"><span class="st" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span></span></span>
-            <span class="agent-marks" class:unmarked={!mentioned && !unread.has(a.name) && filterAgent !== a.name}>
-              {#if filterAgent === a.name}<span class="agent-filter" aria-hidden="true"><Icon name="search" size={12} /></span>{/if}
+            <span class="agent-marks" class:unmarked={!mentioned && !unread.has(a.name)}>
               {#if mentioned}<span class="agent-mention" aria-hidden="true">@</span>{/if}
               {#if unread.has(a.name)}<span class="unread appear-pop" aria-hidden="true"></span>{/if}
             </span>
+            {#if filterAgent === a.name}<span class="agent-filter" aria-hidden="true"><Icon name="filter" size={12} /></span>{/if}
             {#if expanded && a.vitals?.context_pct != null}<span class="ctx-value">{a.vitals.context_pct}%</span>{/if}
           </button>
           {#if showStop(a.name)}
@@ -320,7 +320,7 @@
               {#if backendIcon(backend)}<img class="ava dim" src={backendIcon(backend)} alt={backend} />{:else}<span class="ava dim">{name.slice(0, 1).toUpperCase()}</span>{/if}
             </span>
             <span class="a-name">{name}</span>
-            {#if filterAgent === name}<span class="agent-marks"><span class="agent-filter" aria-hidden="true"><Icon name="search" size={12} /></span></span>{/if}
+            {#if filterAgent === name}<span class="agent-filter" aria-hidden="true"><Icon name="filter" size={12} /></span>{/if}
           </button>
         </div>
       {/each}
@@ -614,11 +614,13 @@
   .ac-top { display: inline-flex; vertical-align: middle; margin-inline-start: 5px; }
   .agent-marks { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-width: 1em; flex: none; }
   .agent-marks.unmarked { display: none; }
-  /* The filter's mark: the glyph its menu row wears, in the marks' accent
+  /* The filter's mark: the funnel its menu row wears, in the marks' accent
      ink — with the other cards dimmed, it says WHICH agent the feed is
      narrowed to, not only that something changed (owner, 2026-09-23: "只是颜色
-     变暗了，没有任何提示…这个 Filter 和正常状态的差异太小了"). */
-  .agent-filter { display: inline-flex; color: var(--accent-ink); }
+     变暗了，没有任何提示…这个 Filter 和正常状态的差异太小了"; then "放大镜好像不
+     太好…用平常我们那种沙漏过滤的样式"). Its own flex child, not a row of the
+     marks column: three stacked marks would exceed the strip and grow it. */
+  .agent-filter { display: inline-flex; flex: none; color: var(--accent-ink); }
   .agent-mention { color: var(--accent-ink); font-family: var(--font-mono); font-size: var(--fs-meta); font-weight: 600; }
   /* Stop stands on the dot: absolutely placed by overDot, so it never widens
      the card (#180's concern) and the dot yields to it while shown. */

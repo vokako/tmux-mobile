@@ -165,8 +165,10 @@ test('double-click focuses live agents without delay and uses the existing filte
   // Dimming alone said "something changed", not "filtered to this one" (owner,
   // 2026-09-23): the filtered card carries the filter verb's own glyph, and its
   // hover note names the mode and the way out.
-  assert.match(source, /\{#if filterAgent === a\.name\}<span class="agent-filter" aria-hidden="true"><Icon name="search" size=\{12\} \/><\/span>\{\/if\}/u);
-  assert.match(source, /class:unmarked=\{!mentioned && !unread\.has\(a\.name\) && filterAgent !== a\.name\}/u);
+  assert.match(source, /<\/span>\n\s*\{#if filterAgent === a\.name\}<span class="agent-filter" aria-hidden="true"><Icon name="filter" size=\{12\} \/><\/span>\{\/if\}/u,
+    'the funnel the menu row wears (owner: "沙漏过滤的样式"), as its own flex child after the marks column — a third stacked mark would grow the strip');
+  assert.match(source, /class:unmarked=\{!mentioned && !unread\.has\(a\.name\)\}/u);
+  assert.match(rule('.agent-filter'), /flex: none/u);
   assert.match(rule('.agent-filter'), /color: var\(--accent-ink\)/u);
   assert.match(source, /return filterAgent === name \? t\('hubFilterOnNote'\) : '';/u);
   assert.doesNotMatch(source, /setTimeout|clearTimeout/u);
