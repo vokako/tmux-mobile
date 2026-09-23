@@ -68,6 +68,14 @@ copied: group membership is not agent status. No nested frame, second
 selection command or new motion tempo. Reason, ordering and measurements:
 [hub-composer.md](hub-composer.md#one-roster-above-the-input-one-stop-operation-board-168-2026-09-11).
 
+**Compact tab floor (owner, 2026-09-23).** The 44px target is the floor.
+Remove empty scrollport/disclosure space above the tabs, not the field's 3px
+top inset. Compact button contents sit slightly lower inside their unchanged
+hit box so the open selected paint has less unused space below the text.
+The coarse strip is 44px high; desktop is 34px. The tab-to-band junction,
+All enclosure and 44px native controls are unchanged. Measurements and the
+superseded 1px field inset: [hub-composer.md](hub-composer.md).
+
 **Strip density correction (2026-09-12, #176).** The owner's screenshot and
 verbatim correction are in hub-composer.md. Card borders/backgrounds, not
 their native hit boxes, use the shared 2px pointer / 6px coarse paint inset;

@@ -227,11 +227,12 @@ where the group shrinks to the container and wraps inside itself. Measured on
 the phone at 390px with five destinations: group right 469 = last tab right
 469, the `+` at 471, the strip scrolling as before.
 
-**The phone strip is at the touch floor, so its air is what shrinks**
+**The phone card is at the touch floor; surplus row air can still shrink**
 (owner, 2026-09-23: "tab 栏可以高度稍低一些…agent 卡片和下边的消息框之间间距小一
-点"). On coarse the row's height comes from `.agent-select`'s 44px minimum, not
-from the paint, so the row cannot go lower without breaking the 44px rule. What
-did come out: the coarse `--roster-paint-height` 34px → 32px (the card's
+点"). On coarse the card's minimum comes from `.agent-select`'s 44px target,
+not from its paint. The first round reduced card paint but left a disclosure
+surplus in the row; that surplus was removed only in the later correction.
+What did come out first: the coarse `--roster-paint-height` 34px → 32px (the card's
 `min-height` was 46px, now 44px = the touch floor exactly), the band's top
 padding 6px → 3px, and the scrollport's top inset 2px → 1px — six pixels of air
 between the cards and the field, none of it target. And the band's `border-top`
@@ -239,9 +240,17 @@ is gone: a full-width top edge drew a horizontal rule between the strip and
 the input area ("Agent card 和下面这个区域中间分隔的横线不要有"), while the lit
 tab above already closes that side of the enclosure and beside it the frame
 steps straight into the band's colour. Measured in both themes, desktop 1280
-and phone 390: single selection and All. The owner then asked for less space
-again: compact composer top padding is 1px, leaving the 44px tab target
-unchanged.
+and phone 390: single selection and All. A further reduction of the band's
+top padding from 3px to 1px missed the owner's intent. The 2026-09-23
+correction restores that 3px and takes the space from INSIDE the tab row:
+the now-unneeded 1px scrollport top inset and 2px disclosure surplus go
+away together (the old upper team marker is gone). The 44px touch target
+remains; compact tab content moves 2px toward its open bottom via
+`--ui-gap` top padding within the same hit box, reducing the visible gap
+below the name without severing the selected tab from the band. Chromium
+152 desktop: row 36px -> 34px, name still 9px above/below, field top 6px;
+at 390px with coarse CSS simulated: row 46px -> 44px, text gaps
+14/14px -> 16/12px, field top 1px -> 3px. Real phone not measured.
 
 ### All selects the addressed cards (#186, 2026-09-12)
 

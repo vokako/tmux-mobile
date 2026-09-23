@@ -354,7 +354,7 @@
      暗"). */
   .cards {
     display: flex; align-items: center; gap: var(--roster-gap); overflow-x: auto; scrollbar-width: none;
-    min-width: 0; min-height: 0; padding: 1px 2px 0;
+    min-width: 0; min-height: 0; padding: 0 2px;
   }
   /* The destinations group: sized to its content, so the multi-select
      enclosure ends after the last tab instead of framing the + and the empty
@@ -477,6 +477,7 @@
     padding: 0 var(--roster-card-inset); text-align: left; cursor: pointer; font-size: var(--fs-ui);
     -webkit-tap-highlight-color: transparent;
   }
+  .roster.compact .agent-select { padding-block-start: var(--ui-gap); }
   .agent-select:focus-visible { outline-color: var(--accent-ink); outline-offset: 0; }
   /* Only a live card carries a dot, so only it reserves the Stop's room. */
   .acard:not(.off) .agent-select { padding-inline-end: var(--roster-dot-reserve); }
@@ -520,6 +521,7 @@
   .all-choice :global(.command-icon svg) { width: 100%; height: 100%; }
   /* Tight on fine pointers; the coarse branch keeps a full finger target. */
   .all-choice :global(.command-button.icon-only) { width: auto; min-width: 0; padding-inline: 2px; }
+  .roster.compact .all-choice :global(.command-button.icon-only) { padding-block-start: var(--ui-gap); }
   /* Touch restores the square: there the box IS the target, not the paint.
      Declared after the tight rule — same specificity, later wins. */
   @media (any-pointer: coarse) {
@@ -529,7 +531,7 @@
      (engaged would put a colour block back inside the tab) — its accent ink
      is the pressed signal that remains. */
   .all-choice :global(.command-button.engaged) { --command-paint: transparent; }
-  /* The strip lost its bottom scrollport inset (the tab must reach the
-     floor), so the disclosure matches card height plus the one inset left. */
-  .roster-toggle { display: flex; align-self: end; align-items: center; height: calc(var(--roster-paint-height) + 2 * var(--control-paint-inset) + 2px); }
+  /* No spare row above the tabs: the disclosure is exactly the card's hit-box
+     height, so the coarse strip stops at its 44px touch floor. */
+  .roster-toggle { display: flex; align-self: end; align-items: center; height: calc(var(--roster-paint-height) + 2 * var(--control-paint-inset)); }
 </style>

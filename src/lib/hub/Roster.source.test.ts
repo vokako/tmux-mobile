@@ -10,10 +10,10 @@ test('cards, Add and disclosure share the strip centre without moving the expand
   assert.match(rule('.cards'), /align-items: center/u);
   const toggle = rule('.roster-toggle');
   assert.match(toggle, /align-items: center/u);
-  assert.match(toggle, /height: calc\(var\(--roster-paint-height\) \+ 2 \* var\(--control-paint-inset\) \+ 2px\)/u,
-    'the disclosure wrapper matches card height plus the one scrollport inset left (#236: the tab reaches the floor)');
-  assert.match(rule('.cards'), /padding: 1px 2px 0/u,
-    '#237: the strip gives back every pixel it can above the row — the row itself sits on the 44px touch floor');
+  assert.match(toggle, /height: calc\(var\(--roster-paint-height\) \+ 2 \* var\(--control-paint-inset\)\)/u,
+    'the disclosure wrapper matches the card target height, without a spare row above it');
+  assert.match(rule('.cards'), /padding: 0 2px/u,
+    '#237: the old top scrollport inset is gone, while the 44px touch target stays intact');
   assert.match(toggle, /align-self: end/u, 'expanding upward keeps the collapse control reachable in place');
   assert.doesNotMatch(toggle, /padding-block-end/u);
 });
@@ -183,6 +183,10 @@ test('density lives in local tokens; full names and native targets do not shrink
   assert.match(roster, /--roster-avatar-size: 20px/u);
   assert.match(roster, /--roster-expanded-max: min\(240px, calc\(32dvh \/ var\(--ui-zoom, 1\)\)\)/u);
   assert.match(rule('.agent-select'), /min-height: var\(--control-height\)/u);
+  assert.match(rule('.roster.compact .agent-select'), /padding-block-start: var\(--ui-gap\)/u,
+    'move content, not the hit box, toward the attached tab floor on compact screens');
+  assert.match(rule('.roster.compact .all-choice :global(.command-button.icon-only)'), /padding-block-start: var\(--ui-gap\)/u,
+    'the pinned All glyph follows the same compact tab alignment');
   assert.match(rule('.acard'), /width: max-content/u, 'only actual content sets card width');
   assert.match(rule('.cards'), /overflow-x: auto/u);
   assert.match(rule('.cards.expanded'), /overflow-y: auto/u);
