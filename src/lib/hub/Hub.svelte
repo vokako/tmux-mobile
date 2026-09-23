@@ -1752,7 +1752,7 @@
                   </button>
                 {/each}
               </div>
-              <CommandButton icon="collab" label={t('hubStartTeam')} disabled={starting}
+              <CommandButton icon="bots" label={t('hubStartTeam')} disabled={starting}
                 onclick={() => openPicker('start')} />
             </div>
           {:else}

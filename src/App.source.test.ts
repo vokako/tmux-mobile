@@ -264,7 +264,7 @@ test('the phone’s tab bar has no Agents icon, and the swipe does not stop ther
 
 test('the desktop rail keeps Agents as a draggable page icon', () => {
   // The whole point of scoping this to touch: nothing about the rail changes.
-  assert.match(source, /agents:\s*\{ icon: 'bot',\s*label: 'agentsTitle' \}/u, 'still a rail item');
+  assert.match(source, /agents:\s*\{ icon: 'bots',\s*label: 'agentsTitle' \}/u, 'still a rail item, wearing the crowd glyph the roster\'s All tab wears (owner, 2026-09-23: "tab 栏上的 icon 也用我们新画的吧")');
   assert.match(rail, /\{#each railSlots as slot \(slot\)\}/u, 'still the user’s draggable order');
   assert.match(source, /\{#if hubEligible && !agentsLivesInSettings\(layout\.isTouchDevice\)\}\s*<div class="page-layer" class:hidden=\{page !== 'agents'\}>/u,
     'and still a page layer — but not mounted on touch, where Settings owns the only instance');

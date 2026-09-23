@@ -111,8 +111,6 @@
     <path d="M17 18 V12 A5 5 0 0 0 12 7 H8"/><polyline points="11 4 7 7 11 10"/>
   {:else if name === 'swap-h'}
     <path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>
-  {:else if name === 'collab'}
-    <circle cx="12" cy="12" r="8"/><circle cx="12" cy="4" r="2.3"/><circle cx="5.1" cy="16" r="2.3"/><circle cx="18.9" cy="16" r="2.3"/>
   {:else if name === 'bots'}
     <!-- Three offset heads share the single bot's rounded face. Rear contours
          stop where the front head begins, so no hidden strokes cross its face

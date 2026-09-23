@@ -639,7 +639,7 @@
       {#if kind === 'teams'}
       {#each teams as tm (tm.name)}
         <button class="side-row team-row" class:open={editingTeam?.name === tm.name && !teamIsNew} onclick={() => startTeam(tm)}>
-          <Icon name="collab" size={13} />
+          <Icon name="bots" size={13} />
           <span class="r-col"><span class="r-name">{tm.name}</span><span class="r-sub">{teamSummary(tm)}</span></span>
         </button>
       {/each}
@@ -861,7 +861,7 @@
                   title={t(m.expanded ? 'teamsCollapseMember' : 'teamsExpandMember')}
                   onclick={() => toggleMember(i)}>
                   {#if m.team}
-                    <span class="member-ava collab"><Icon name="collab" size={15} /></span>
+                    <span class="member-ava team"><Icon name="bots" size={15} /></span>
                   {:else if backendIcon(memberBackend(m))}
                     <img class="member-ava" src={backendIcon(memberBackend(m))} alt={memberBackend(m)} />
                   {:else}
@@ -1189,25 +1189,28 @@
     transition: border-color var(--t-fast), background var(--t-fast), box-shadow var(--t-fast);
   }
   .member.open { border-color: var(--accent-line); box-shadow: 0 7px 22px color-mix(in srgb, var(--text) 8%, transparent); }
+  /* The hover wash is the ROW's, remove command included: on the summary
+     alone it stopped short of the ✕ and left the row's end unlit (owner,
+     2026-09-23: "高亮没有覆盖全，把关闭按钮右边那一块儿给漏掉了"). */
   .member-head {
     display: flex; align-items: stretch; min-height: 64px;
+    transition: background var(--t-fast);
   }
+  .member-head:hover { background: var(--surface2); }
   .member-summary {
     min-width: 0; flex: 1; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto;
     align-items: center; gap: 10px; padding: 9px 10px;
     border: 0; background: none; color: var(--text); text-align: left; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
-    transition: background var(--t-fast);
   }
-  .member-summary:hover { background: var(--surface2); }
   .member-ava {
     width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex: none;
   }
-  .member-ava.collab, .member-ava.fallback {
+  .member-ava.team, .member-ava.fallback {
     display: grid; place-items: center; color: var(--text);
     font: 700 var(--fs-sub)/1 var(--font-display);
   }
-  .member-ava.collab { background: var(--surface2); color: var(--accent); }
+  .member-ava.team { background: var(--surface2); color: var(--accent); }
   .member-copy { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); gap: 2px 9px; min-width: 0; align-items: baseline; }
   .member-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 var(--fs-body)/1.3 var(--font-display); }
   .member-source { min-width: 0; overflow-wrap: anywhere; color: var(--text2); font: 500 var(--fs-sub)/1.3 var(--font-mono); }

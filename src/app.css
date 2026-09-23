@@ -603,6 +603,10 @@ button:disabled {
   transition: background var(--t-fast);
   -webkit-tap-highlight-color: transparent;
 }
+/* A row's leading glyph never shrinks: as a bare flex child the team rows'
+   icon shrank whenever the member line wrapped (owner, 2026-09-23: "前面的
+   icon 大小变了，尤其后面显示多的话"). */
+.side-row > svg { flex: none; }
 .side-row:hover { background: var(--surface2); }
 .side-row.open { background: var(--accent-bg); }
 .side-row.add { color: var(--text3); font-size: var(--fs-ui); }

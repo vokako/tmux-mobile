@@ -1348,7 +1348,7 @@
     terminal: { icon: 'terminal', label: 'terminal' },
     files:    { icon: 'files',    label: 'files' },
     board:    { icon: 'layout',   label: 'board' },
-    agents:   { icon: 'bot',      label: 'agentsTitle' },
+    agents:   { icon: 'bots',     label: 'agentsTitle' },
     prefs:    { icon: 'gear',     label: 'settings' },
   };
   let railOrder = $state(parseRailOrder(localStorage.getItem(RAIL_ORDER_KEY)));
