@@ -483,11 +483,12 @@
   .ava.dim { background: var(--surface2); color: var(--text3); }
   img.ava.dim { background: none !important; filter: grayscale(1); opacity: 0.55; }
   .roster-add { display: flex; align-items: center; flex: none; min-height: var(--control-height); }
-  /* 20px, the avatars' size: two robot heads at the atom's 16px fell below the
-     legibility floor — each head ~7px, the faces mushed (measured at 10x on
-     the real render). The glyph grows, the BOX shrinks (below), so the leading
-     tab still costs less strip than the 28px square it replaced. */
-  .all-choice { --control-icon-size: 20px; }
+  /* The avatars' size (the TOKEN, not a copy of its value): two robot heads at
+     the atom's 16px fell below the legibility floor — each head ~7px, the faces
+     mushed (measured at 10x on the real render). The glyph grows, the BOX
+     shrinks (below), so the leading tab still costs less strip than the 28px
+     square it replaced. */
+  .all-choice { --control-icon-size: var(--roster-avatar-size); }
   .all-choice :global(.command-icon svg) { width: 100%; height: 100%; }
   /* The leading tab gives back the width its square box was spending — it
      should not cost an agent's worth of strip (owner, 2026-09-23: "占的左右空间

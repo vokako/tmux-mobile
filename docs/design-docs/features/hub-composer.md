@@ -285,8 +285,9 @@ an icon-only tab at the far left, and this is that — always in view,
 collapsed strip included, wearing `bots` — a small CROWD of the same bot mark
 a single agent's glyph uses (owner, 2026-09-22: "不用画人，画成 Agent 类似的
 Logo"; 2026-09-23: "可以多画几个机器人"; the group-of-people and `collab`'s
-orbiting dots both failed the glance test). It renders at 20px, the avatars'
-size, because two heads share the 24 viewBox and at the atom's 16px each head
+orbiting dots both failed the glance test). It renders at the avatars' size
+(`--roster-avatar-size`, the token — a second 20px literal would drift from
+it), because two heads share the 24 viewBox and at the atom's 16px each head
 is ~7px — measured at 10× on the real render, the faces mushed. The glyph grew
 and the BOX shrank instead (`width: auto; min-width: 0; padding-inline: 3px`,
 28px → 26px): the leading tab must not cost an agent's worth of strip ("占的左

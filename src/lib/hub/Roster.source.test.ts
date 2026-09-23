@@ -243,7 +243,8 @@ test('Everyone is the PINNED tab: always at the head, previewing on hover (board
   assert.match(source, /<span class="all-choice acard" class:sel=\{recipient === ALL_TARGET\} role="presentation"/u);
   assert.match(source, /<CommandButton variant="icon" icon="bots" label=\{t\('hubEveryone'\)\} pressed=\{recipient === ALL_TARGET\} bare/u,
     '#237: a small CROWD of the bot mark — "可以多画几个机器人"');
-  assert.match(rule('.all-choice'), /--control-icon-size: 20px/u, 'the crowd needs the avatars\' size to read');
+  assert.match(rule('.all-choice'), /--control-icon-size: var\(--roster-avatar-size\)/u,
+    'the crowd needs the avatars\' size to read — through the token, never a copy of 20px');
   assert.match(source, /\.all-choice :global\(\.command-icon svg\) \{ width: 100%; height: 100%; \}/u,
     'the svg fills the sized box — the atom hands Icon no size prop');
   // #237: the leading tab gives back the width its square box spent. Tight by
