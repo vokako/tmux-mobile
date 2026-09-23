@@ -156,7 +156,8 @@ test('the composer scrollbar follows measured overflow and the placeholder names
 
   // Parent-owned wording can change; these are the existing destination keys,
   // now carried by the textarea rather than an inline recipient control.
-  assert.match(source, /recipient === ALL_TARGET \? t\('hubComposerAll'\) : recipient \? t\('hubComposerDm'\)\.replace\('\{name\}', recipient\) : t\('hubComposerRoom'\)/u);
+  assert.match(source, /recipient === ALL_TARGET \? t\('hubComposerAll'\)[\s\S]{0,160}?targetTeam\(recipient\) \? t\('hubComposerTeam'\)[\s\S]{0,160}?t\('hubComposerRoom'\)/u,
+    'a team has its own visible destination instead of looking like one agent');
   assert.doesNotMatch(source, /t\('hubTo(?:All|Room)Hint'\)/u,
     'destination labels need no explanatory subtitle');
 });

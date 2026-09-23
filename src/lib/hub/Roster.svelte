@@ -2,7 +2,7 @@
   import CommandButton from '../ui/CommandButton.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import { untrack } from 'svelte';
-  import { ALL_TARGET } from './hub-composer.ts';
+  import { ALL_TARGET, targetMembers, targetTeam, teamTarget } from './hub-composer.ts';
   import { backendIcon } from '../core/agents.ts';
   import { backendColor, stateDotColor, stateIsLive, chipExtras, ctxColor, fmtElapsed, modelLabel, rosterGroups, sortAgentsForRoster } from './hub.ts';
   import { hoverInfo } from '../ui/hover.ts';
@@ -49,6 +49,7 @@
   /** All is the destination, actually or in preview: then the strip is the
    * lit tab and no card paints its own (one enclosure, no internal lines). */
   const allLit = $derived(recipient === ALL_TARGET || allPreview);
+  const addressedMembers = $derived(new Set(targetMembers(recipient, managedAgents)));
   const showStop = (name) => !coarse && busyNames.includes(name) && (armed === name || interrupting.includes(name));
   /** Places the Stop's centre on the dot's centre — offsets are the card's own
    * coordinate space (the select button is positioned; the card is too). */
@@ -103,7 +104,7 @@
   function selectTarget(name) {
     setRecipient(name);
   }
-  const isAddressed = (name) => recipient === ALL_TARGET || recipient === name;
+  const isAddressed = (name) => addressedMembers.has(name);
   const coarsePointer = () => window.matchMedia('(any-pointer: coarse)').matches;
   /* A menu opened FROM a card sits at the card — left-aligned, the card kept
      visible — like the All button's (#168) and a stopped card's. */
@@ -137,7 +138,10 @@
 
   function destinationNote(name) {
     if (!isAddressed(name)) return '';
-    const destination = recipient === ALL_TARGET ? t('hubToAllLong') : t('hubToDmLong').replace('{name}', `@${name}`);
+    const team = targetTeam(recipient);
+    const destination = recipient === ALL_TARGET ? t('hubToAllLong')
+      : team ? t('hubToTeamLong').replace('{name}', team)
+      : t('hubToDmLong').replace('{name}', `@${name}`);
     const also = extras.length ? t('hubToAlsoHint').replace('{names}', extras.map((n) => `@${n}`).join(', ')) : '';
     return [destination, also].filter(Boolean).join('\n');
   }
@@ -229,10 +233,18 @@
       </span>
       {#each groups as group (group.key)}
       {@const named = !!group.team && group.members.length > 1}
-      <div class="roster-cluster" class:team={named} data-team={named ? group.team : undefined}
+      <div class="roster-cluster" class:team={named} class:team-lit={named && recipient === teamTarget(group.team)} data-team={named ? group.team : undefined}
         role={named ? 'group' : undefined} aria-label={named ? `${t('teamsTitle')} ${group.team}` : undefined}
         animate:flip={{ duration: moveMs() }}>
-        {#if named}<span class="team-label" aria-hidden="true">{group.team}</span>{/if}
+        {#if named}
+          <button type="button" class="team-label"
+            aria-pressed={recipient === teamTarget(group.team)}
+            aria-label={t('hubToTeamLong').replace('{name}', group.team)}
+            use:hoverInfo={() => ({ title: group.team })}
+            onclick={() => setRecipient(teamTarget(group.team))}>
+            <span class="team-name">{group.team}</span>
+          </button>
+        {/if}
       {#each group.members as a (a.name)}
         {@const mentioned = extras.includes(a.name) || extras.includes(ALL_TARGET)}
         {@const pending = interrupting.includes(a.name)}
@@ -379,13 +391,23 @@
     height: calc(var(--roster-gap) / 2); background: var(--text2); pointer-events: none;
   }
   .team-label {
-    display: inline-flex; align-items: center; min-height: var(--roster-ring-size);
+    display: inline-flex; align-items: center; min-height: var(--control-height);
     padding-inline: var(--ui-gap); border-radius: var(--ui-radius-row);
-    white-space: nowrap; color: var(--text); background: var(--control-surface);
+    border: 0; white-space: nowrap; color: var(--text); background: var(--control-surface); cursor: pointer;
     font: 600 var(--fs-meta)/1 var(--font-display);
   }
-  .roster.compact .team-label { display: none; }
-  .roster.compact .cards.expanded .team-label { display: inline-flex; }
+  .team-label:hover { background: var(--control-hover); }
+  .team-label:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
+  .roster.compact .team-label { min-width: var(--control-height); min-height: var(--control-height); max-width: calc(2 * var(--control-height)); }
+  .team-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .roster-cluster.team-lit { background: var(--bubble-in); border-radius: var(--ui-radius-panel) var(--ui-radius-panel) var(--ui-radius-row) var(--ui-radius-row); z-index: 1; }
+  .roster-cluster.team-lit::after {
+    content: ''; position: absolute; inset: 0 0 -1px; border: 1px solid var(--bubble-line); border-bottom: 0;
+    border-radius: inherit; pointer-events: none;
+  }
+  .cards.expanded .roster-cluster.team-lit::after { inset: 0; border-bottom: 1px solid var(--bubble-line); }
+  .roster-cluster.team-lit .acard::before { background: transparent; border-color: transparent; }
+  .roster-cluster.team-lit::before { display: none; }
   .cards:not(.expanded) .tabs:not(.all-lit) .roster-cluster.team .acard.sel { --card-line: var(--text2); }
   .tabs.all-lit .roster-cluster.team::before { display: none; }
   .cards.expanded .roster-cluster.team { flex: 0 1 100%; min-width: 0; flex-wrap: wrap; }
@@ -454,7 +476,7 @@
     inset: var(--control-paint-inset) 0 -1px; border-bottom: 0;
     border-radius: var(--ui-radius-panel) var(--ui-radius-panel) var(--ui-radius-row) var(--ui-radius-row);
   }
-  .cards:not(.expanded) .tabs:not(.all-lit) .acard.sel::before {
+  .cards:not(.expanded) .tabs:not(.all-lit) .roster-cluster:not(.team-lit) .acard.sel::before {
     /* The opaque floor joins the band from the first frame while the tab's
        body still crossfades; otherwise the team baseline shines through it. */
     background-image: linear-gradient(to top, var(--bubble-in) var(--roster-gap), transparent var(--roster-gap));

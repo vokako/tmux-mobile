@@ -1,7 +1,7 @@
 // Pure display logic for the Hub view — testable with node --test, no Svelte.
 import type { HubAgent, HubActivityEvent } from '../core/ws.ts';
 import { backendColorToken } from '../core/agents.ts';
-import { ALL_TARGET, busyTargetsFor } from './hub-composer.ts';
+import { ALL_TARGET, busyTargetsFor, targetMembers, targetTeam, teamRoot } from './hub-composer.ts';
 
 /**
  * THE status colour language — one progression, read at a glance (owner,
@@ -161,8 +161,8 @@ export function backendColor(backend: string | null | undefined): string {
  *   4. the lowest window index, so the answer is stable rather than arbitrary.
  * Returns '' when there is no managed agent and no explicit destination.
  *
- * `stored` distinguishes an agent name, ALL_TARGET, explicit `''` (record
- * only), and null/absent. The two explicit destination modes are kept even
+ * `stored` distinguishes an agent name, a team target, ALL_TARGET, explicit
+ * `''` (record only), and null/absent. The explicit destination modes are kept
  * without agents (#171); null/absent =
  * nobody chose, so the rule seats a lead. Before, '' and unset were the same
  * value, so "no recipient" was re-seated by the next 5 s roster poll. */
@@ -172,6 +172,7 @@ export function pickLead(
   stored?: string | null,
 ): string {
   if (stored === '' || stored === ALL_TARGET) return stored;
+  if (stored && targetTeam(stored)) return targetMembers(stored, agents).length ? stored : '';
   const managed = agents.filter((a) => a.managed);
   if (!managed.length) return '';
   if (stored && managed.some((a) => a.name === stored)) return stored;
@@ -213,7 +214,7 @@ export function rosterGroups(agents: readonly HubAgent[]): { key: string; team: 
   const groups: { key: string; team: string | null; members: HubAgent[] }[] = [];
   const teams = new Map<string, (typeof groups)[number]>();
   for (const agent of agents) {
-    const team = agent.team?.split('/')[0] || null;
+    const team = teamRoot(agent.team);
     if (!team) {
       groups.push({ key: `agent:${agent.name}`, team: null, members: [agent] });
       continue;
@@ -245,6 +246,13 @@ export function addressed(text: string, to: string): string {
   const esc = to.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   if (new RegExp(`^@${esc}(?:[\\s,:;.!?]|$)`, 'u').test(body)) return body;
   return `@${to} ${body}`;
+}
+
+/** Team selection is one room message with the existing exact @name tokens. */
+export function addressedTeam(text: string, members: readonly string[]): string {
+  const body = text.trim();
+  if (!body || !members.length) return body;
+  return `${[...new Set(members)].map((name) => `@${name}`).join(' ')} ${body}`;
 }
 
 /** "2m14s" / "1h03m" / "12s" — how long the current state has held. Compact on

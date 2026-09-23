@@ -34,6 +34,15 @@ test('Roster renders the controlled destination strip (#168)', { timeout: RENDER
     assert.equal(group.getAttribute('role'), 'group');
     assert.match(group.getAttribute('aria-label')!, /dev/u);
     assert.equal(group.querySelector('.team-label')!.textContent, 'dev');
+    assert.equal(group.querySelector('.team-label')!.tagName, 'BUTTON');
+    assert.equal(group.querySelector('.team-label')!.getAttribute('aria-pressed'), 'false');
+    const teamSelected = view({ recipient: 'team:dev' });
+    const selectedGroup = teamSelected.querySelector('.roster-cluster[data-team="dev"]')!;
+    assert.equal(selectedGroup.classList.contains('team-lit'), true);
+    assert.equal(selectedGroup.querySelector('.team-label')!.getAttribute('aria-pressed'), 'true');
+    assert.deepEqual([...selectedGroup.querySelectorAll('.acard.sel[data-agent]')].map((node) => node.getAttribute('data-agent')),
+      ['waiting', 'runner']);
+    assert.equal(card(teamSelected, 'solo').classList.contains('sel'), false);
     assert.deepEqual([...group.querySelectorAll('.acard[data-agent]')].map((node) => node.getAttribute('data-agent')),
       ['waiting', 'runner']);
     assert.equal(card(root, 'solo').closest('.roster-cluster')?.hasAttribute('data-team'), false);

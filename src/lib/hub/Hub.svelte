@@ -36,9 +36,9 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { stateDotColor, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, pickDrawerAgent, addressed, unreadSenders, stoppedAgents, slashCommand, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
+  import { stateDotColor, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, pickDrawerAgent, addressed, addressedTeam, mentionedAgents, unreadSenders, stoppedAgents, slashCommand, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
   import { resolvePathRef } from '../core/path-links.ts';
-  import { ALL_TARGET, attachmentBody, attachToken, busyTargetsFor } from './hub-composer.ts';
+  import { ALL_TARGET, attachmentBody, attachToken, busyTargetsFor, targetMembers, targetTeam } from './hub-composer.ts';
   import { walkFeedGap } from './hub-history.ts';
   import { createHubBackRegistry } from './hub-back.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
@@ -85,9 +85,11 @@
   let lastActivityTs = 0;
   let registry = $state([]);        // RegAgent[]
   let teams = $state([]);           // RegTeam[] — configured agent teams (board #74)
-  // Three ways a message can land, and they are NOT variations of one thing:
+  // A choice of destination never creates a second delivery path:
   //   a name    → typed into that agent's input; exactly one agent is
   //               interrupted and starts a turn. The default (the lead).
+  //   team:root → resolved at send time to that team's current managed names;
+  //               one room line names each member explicitly with @name.
   //   ALL_TARGET→ `@all`: typed into EVERY managed agent's input. Every agent
   //               starts a turn at once, so this is a deliberate act, not a
   //               casual default — it is the expensive one.
@@ -333,6 +335,7 @@
     // The cached roster can seat the recipient immediately — same rule as
     // loadAgents, which will confirm or correct it when the fresh roster lands.
     if (agents.length) recipient = pickLead(agents, registry, hubPrefs.lead(session));
+    if (targetTeam(hubPrefs.lead(session) ?? '') && !recipient) hubPrefs.setLead(session, '');
     filterAgent = ''; // a filter is a reading choice, scoped to its room
     // The drawer follows the project (board #23, owner: "chat的右侧边栏打开
     // 哪个的状态前端帮我记住，这样我切换不同的 project 回来原来的视图还在"):
@@ -471,8 +474,11 @@
       // The recipient follows the room: an agent that left cannot be the
       // recipient, and a room that just gained its first agent gets a lead
       // without the user choosing one. ALL_TARGET is not a window, so it stays.
-      if (recipient && recipient !== ALL_TARGET && !agents.some((a) => a.managed && a.name === recipient)) recipient = '';
-      if (!recipient) recipient = pickLead(agents, registry, hubPrefs.lead(selected));
+      const emptyTeam = !!targetTeam(recipient) && !targetMembers(recipient, agents).length;
+      if (emptyTeam) { recipient = ''; hubPrefs.setLead(selected, ''); }
+      else if (recipient && recipient !== ALL_TARGET && !targetTeam(recipient)
+        && !agents.some((a) => a.managed && a.name === recipient)) recipient = '';
+      if (!recipient && !emptyTeam) recipient = pickLead(agents, registry, hubPrefs.lead(selected));
     } catch (e) {
       if (!alive || request !== rosterReadSequence || selected !== s) return;
       if (report) throw e;
@@ -550,12 +556,19 @@
     // message that quietly left without the file it showed is the failure
     // mode this exists to prevent (review, 2026-09-03).
     if (failed) return;
+    const team = targetTeam(recipient);
+    const members = team ? targetMembers(recipient, agents) : [];
+    const cmd = slashCommand(raw);
+    if (team && !members.length) {
+      setRecipient('');
+      if (!cmd?.to && !mentionedAgents(raw, targetMembers(ALL_TARGET, agents)).length) return;
+    }
     // A SLASH COMMAND goes to the agent's CLI, not to its model, so it is typed
     // verbatim — no `[tmm chat …] human:` stamp, no @address, nothing the TUI
     // would read as prose. It needs a target: an explicit `@name`, else the
-    // composer's recipient. With neither (a room note) there is nobody to run
+    // composer's recipient. A team fans out via the same native per-name RPC
+    // as any explicit address. With neither (a room note) there is nobody to run
     // it, so it stays an ordinary message rather than vanishing.
-    const cmd = slashCommand(raw);
     const cmdTarget = cmd && (cmd.to || (recipient === ALL_TARGET ? 'all' : recipient));
     if (cmd && cmdTarget) {
       const room = selected; // same room-snapshot rule as the message path
@@ -563,7 +576,14 @@
       following = true;
       scrollFeed(true);
       try {
-        await hubCommand(room, cmdTarget, cmd.command);
+        if (team && !cmd.to) {
+          const results = await Promise.allSettled(members.map((name) => hubCommand(room, name, cmd.command)));
+          const errors = results.filter((r) => r.status === 'rejected');
+          if (errors.length === results.length) throw errors[0].reason;
+          if (errors.length) console.warn('team command failed for some members', errors);
+        } else {
+          await hubCommand(room, cmdTarget, cmd.command);
+        }
         if (selected !== room) return;
         await loadFeed();
         scrollFeed(true);
@@ -578,7 +598,7 @@
     // by hand, and an empty recipient posts to the room.
     const atts = pending;
     const body = attachmentBody(raw, atts);
-    const text = addressed(body, recipient);
+    const text = team ? addressedTeam(body, members) : addressed(body, recipient);
     // Room snapshot: everything after the await below must answer to the
     // room this message BELONGS to, never to whichever room is on screen
     // when the RPC returns (lead review, board #25, round 2 — the success

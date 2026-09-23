@@ -53,19 +53,21 @@ expanded grid cells already have stable widths and release that space to names.
 **Team tab group (2026-09-23, #238).** A launched team with at least two live
 members is one contiguous Chrome-style group in the roster; individual member
 tabs and 28/44px targets stay native. The owner's Chrome group screenshot
-supersedes the first thin upper marker: desktop uses a noninteractive
-`--control-surface` name pill at the existing ring height, and a neutral
+supersedes the first thin upper marker: a native team-name button uses the
+`--control-surface` pill and the existing 28/44px targets. A neutral
 `--text2` 1px baseline occupies the bottom pixel of the GROUP only
 (`calc(var(--roster-gap) / 2)`). A selected member uses `--text2` on the
 existing raised tab edge; its bubble fill covers the baseline under that
 tab and still opens into the composer band. No tray-wide line or extra row
-height. Compact hides the pill to protect width; the member hover/ARIA and
-touch menu retain the full team path. The expanded list shows the pill on
-both screens, but no baseline or raised contour. Under All the group baseline
-and contour yield to the destinations' single enclosure; solo and one-member
-teams have no group chrome. The screenshot's green is intentionally not
-copied: group membership is not agent status. No nested frame, second
-selection command or new motion tempo. Reason, ordering and measurements:
+height. Compact limits the label's visible width but preserves its full
+accessible name; tapping it addresses only the current managed members and
+lights one team enclosure, not each internal border. An individual card
+narrows the recipient, All broadens it. The expanded list closes a selected
+team's border rather than pretending to join the band. Under All the group
+baseline and contour yield to the destinations' single enclosure; solo and
+one-member teams have no group chrome. The screenshot's green is intentionally
+not copied: group membership is not agent status. No nested frame, second
+delivery path or new motion tempo. Reason, ordering and measurements:
 [hub-composer.md](hub-composer.md#one-roster-above-the-input-one-stop-operation-board-168-2026-09-11).
 
 **Four tab corners (owner, 2026-09-23).** In the collapsed strip a lit tab

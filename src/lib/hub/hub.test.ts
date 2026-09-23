@@ -1,8 +1,8 @@
 import test from 'node:test';
-import { ALL_TARGET } from './hub-composer.ts';
+import { ALL_TARGET, teamTarget } from './hub-composer.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
+import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 import { rosterGroups, sortAgentsForRoster } from './hub.ts';
 
@@ -487,6 +487,13 @@ test('pickLead: a remembered choice wins while that agent is present', () => {
   assert.equal(pickLead(agents, [], 'gone'), 'dev', 'a departed agent falls back to the rule');
 });
 
+test('pickLead: a remembered team remains only while at least one managed member survives (#239)', () => {
+  const team = teamTarget('dev');
+  const agents = [ag({ name: 'reviewer', team: 'dev/review' }), ag({ name: 'solo' })];
+  assert.equal(pickLead(agents, [], team), team);
+  assert.equal(pickLead(agents.slice(1), [], team), '', 'an empty team becomes an explicit room note, never another agent');
+});
+
 test('pickLead: an explicit ROOM choice is kept; only "nobody chose" seats a lead', () => {
   // Review C (2026-09-03): '' and unset used to be one value, so "send to the
   // room, no recipient" was undone by the next roster poll's pickLead.
@@ -549,6 +556,14 @@ test('addressed always keeps the chip; body mentions ride along', () => {
   assert.equal(addressed('@dev go', 'dev'), '@dev go', 'no @dev @dev');
   assert.equal(addressed('@dev, go', 'dev'), '@dev, go', 'punctuated head counts');
   assert.equal(addressed('@developer go', 'dev'), '@dev @developer go', 'prefix match is word-bounded');
+});
+
+test('addressedTeam prefixes one room message with each current member, never @all (#239)', () => {
+  assert.equal(addressedTeam(' ship it ', ['lead', 'reviewer']), '@lead @reviewer ship it');
+  assert.equal(addressedTeam('@solo check this', ['lead', 'reviewer']), '@lead @reviewer @solo check this',
+    'handwritten addresses remain additive');
+  assert.equal(addressedTeam('go', ['lead', 'lead']), '@lead go', 'one pane receives one group prefix');
+  assert.equal(addressedTeam(' ', ['lead']), '');
 });
 
 test('toolEventParts splits the name off legacy glued-together events', () => {

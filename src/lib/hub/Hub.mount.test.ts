@@ -933,6 +933,83 @@ test('Watch in the shared menu routes the clicked agent on phone and narrow desk
   }
 });
 
+test('team label selects only current members for chat, CLI commands and interrupt (#239)', { timeout: 60000 }, async (context) => {
+  const agents = [
+    { name: 'alice', window: 0, managed: true, agent: 'kiro', state: 'idle', since: 10 },
+    { name: 'bob', window: 1, managed: true, agent: 'codex', state: 'running', since: 20, team: 'review' },
+    { name: 'charlie', window: 2, managed: true, agent: 'codex', state: 'waiting', since: 5, team: 'review/backend' },
+  ];
+  const posts: string[] = [], commands: string[] = [], interrupts: string[] = [];
+  const app = await composerFixture(context, {
+    hubAgents: async () => ({ agents }),
+    hubPost: async (_session: string, body: string) => { posts.push(body); return {}; },
+    hubCommand: async (_session: string, name: string, command: string) => { commands.push(`${name}:${command}`); return {}; },
+    hubAgentInterrupt: async (_session: string, name: string) => { interrupts.push(name); return {}; },
+  });
+  try {
+    const team = app.document.querySelector<HTMLButtonElement>('.roster-cluster[data-team="review"] .team-label')!;
+    assert.ok(team, 'the name itself is a native command target');
+    team.click(); await app.flush();
+    assert.equal(team.getAttribute('aria-pressed'), 'true');
+    assert.deepEqual(['alice', 'bob', 'charlie'].filter((name) => stripCard(app.document, name).classList.contains('sel')), ['bob', 'charlie']);
+    assert.ok(team.closest('.roster-cluster')?.classList.contains('team-lit'), 'one enclosure, not two separate cards');
+    assert.match(app.input.getAttribute('aria-label') ?? app.input.getAttribute('placeholder') ?? '', /team review/iu);
+
+    await app.text('Ship @alice too');
+    app.send.click(); await app.flush();
+    assert.deepEqual(posts, ['@bob @charlie Ship @alice too'], 'a room record names only selected members plus explicit body mentions');
+    await app.text('/compact');
+    app.send.click(); await app.flush();
+    assert.deepEqual(commands, ['bob:/compact', 'charlie:/compact'], 'one verbatim native CLI command per team member');
+    await app.text('@alice /clear');
+    app.send.click(); await app.flush();
+    assert.deepEqual(commands, ['bob:/compact', 'charlie:/compact', 'alice:/clear'], 'an explicit addressee wins over team selection');
+    await app.key('c', { ctrlKey: true }); await app.key('c', { ctrlKey: true });
+    assert.deepEqual(interrupts, ['bob', 'charlie'], 'the same target resolution drives Stop');
+
+    agents.pop();
+    await app.advance(5000);
+    assert.equal(stripCard(app.document, 'bob').classList.contains('sel'), true, 'one member still belongs to the team target');
+    await app.text('Only one left');
+    app.send.click(); await app.flush();
+    assert.equal(posts.at(-1), '@bob Only one left');
+    agents.pop();
+    await app.advance(5000);
+    assert.match(app.input.getAttribute('aria-label') ?? app.input.getAttribute('placeholder') ?? '', /Record in chat only/iu,
+      'an empty team becomes a room note, not a different agent');
+    await app.room('other'); await app.room('fixture');
+    assert.equal(app.document.querySelector('.roster-cluster[data-team="review"]'), null, 'a stale team target never returns after room restore');
+  } finally { await app.close(); }
+});
+
+test('team slash fan-out never offers a duplicate retry after partial delivery (#239)', { timeout: 60000 }, async (context) => {
+  const agents = [
+    { name: 'alice', window: 0, managed: true, agent: 'kiro', state: 'idle', since: 10 },
+    { name: 'bob', window: 1, managed: true, agent: 'kiro', state: 'idle', since: 20, team: 'dev' },
+    { name: 'charlie', window: 2, managed: true, agent: 'kiro', state: 'idle', since: 5, team: 'dev' },
+  ];
+  const commands: string[] = [];
+  const app = await composerFixture(context, {
+    hubAgents: async () => ({ agents }),
+    hubCommand: async (_session: string, name: string, command: string) => {
+      commands.push(`${name}:${command}`);
+      if (name === 'charlie' || command === '/model') throw Error('not delivered');
+      return {};
+    },
+  });
+  try {
+    app.document.querySelector<HTMLButtonElement>('.team-label')!.click(); await app.flush();
+    await app.text('/compact');
+    app.send.click(); await app.flush();
+    assert.deepEqual(commands, ['bob:/compact', 'charlie:/compact']);
+    assert.equal(app.input.value, '', 'a partial success cannot restore a command that would rerun on bob');
+    await app.text('/model');
+    app.send.click(); await app.flush();
+    assert.deepEqual(commands.slice(2), ['bob:/model', 'charlie:/model']);
+    assert.equal(app.input.value, '/model', 'only an all-failed command may be retried without duplication');
+  } finally { await app.close(); }
+});
+
 test('roster disclosure keeps its cards, remembers each room, and holds order during interaction (#168)', { timeout: 60000 }, async (context) => {
   const agents = [
     { name: 'alice', window: 0, managed: true, agent: 'kiro', state: 'idle', since: 1000 },

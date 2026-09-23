@@ -603,13 +603,17 @@ test('a failed attachment is a chip that blocks send, never a console line', () 
 });
 
 test('composer calculations use the pure helpers without moving send or its gates (#117)', () => {
-  assert.match(source, /import \{ ALL_TARGET, attachmentBody, attachToken, busyTargetsFor \} from '\.\/hub-composer\.ts';/u);
+  assert.match(source, /import \{ ALL_TARGET, attachmentBody, attachToken, busyTargetsFor, targetMembers, targetTeam \} from '\.\/hub-composer\.ts';/u);
   const send = /async function send\(\) \{[\s\S]*?\n  \}/u.exec(source)?.[0] ?? '';
   const interpolation = send.indexOf('const body = attachmentBody(raw, atts);');
   assert.ok(interpolation > send.indexOf('if (attaching) return;'));
   assert.ok(interpolation > send.indexOf('if (failed) return;'));
-  assert.match(send, /const body = attachmentBody\(raw, atts\);\s*const text = addressed\(body, recipient\);/u,
-    'the existing address parser still runs after token substitution');
+  assert.match(send, /const body = attachmentBody\(raw, atts\);\s*const text = team \? addressedTeam\(body, members\) : addressed\(body, recipient\);/u,
+    'the same attachment body is addressed to the selected snapshot; team expands to exact members');
+  assert.match(send, /Promise\.allSettled\(members\.map\(\(name\) => hubCommand\(room, name, cmd\.command\)\)\)/u,
+    'a team slash command is the native per-agent command path, not a new server target');
+  assert.match(send, /if \(team && !members\.length\) \{\s*setRecipient\(''\);\s*if \(!cmd\?\.to && !mentionedAgents\(raw, targetMembers\(ALL_TARGET, agents\)\)\.length\) return;/u,
+    'a vanished team stops implicit delivery but an explicit @name still wins');
   assert.match(source, /const tok = attachToken\(a\);/u, 'removal uses the shared spelling');
   assert.match(source, /const tok = attachToken\(item\);/u, 'staging uses that same spelling');
 });

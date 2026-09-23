@@ -232,6 +232,7 @@ const msgs: Record<string, Record<string, string>> = {
     hubWinMore: 'Show {n} more windows',
     hubWinLess: 'Show agent windows only',
     hubComposerDm: 'Chat with {name}…',
+    hubComposerTeam: 'Chat with team {name}…',
     // The hover card's labels (motion.md principle 16) — terse, they sit in a
     // label → value grid.
     hubHoverState: 'state',
@@ -247,6 +248,7 @@ const msgs: Record<string, Record<string, string>> = {
     hubHoverCommand: 'command',
     hubHoverPanes: 'panes',
     hubToDmLong: 'To {name}',
+    hubToTeamLong: 'To team {name}',
     hubToAllLong: 'To all',
     boardHoverReporter: 'reporter',
     boardHoverAssignee: 'assignee',
@@ -824,6 +826,7 @@ const msgs: Record<string, Record<string, string>> = {
     hubWinMore: '显示另外 {n} 个窗口',
     hubWinLess: '只显示 agent 窗口',
     hubComposerDm: '与 {name} 聊天…',
+    hubComposerTeam: '发给小组 {name}…',
     hubHoverState: '状态',
     hubHoverModel: '模型',
     hubHoverCtx: '已用上下文',
@@ -837,6 +840,7 @@ const msgs: Record<string, Record<string, string>> = {
     hubHoverCommand: '命令',
     hubHoverPanes: 'panes',
     hubToDmLong: '发给 {name}',
+    hubToTeamLong: '发给小组 {name}',
     hubToAllLong: '发给所有人',
     boardHoverReporter: '创建者',
     boardHoverAssignee: '指派给',

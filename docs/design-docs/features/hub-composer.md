@@ -604,9 +604,9 @@ individual. Nested team paths (e.g. `dev/review`) share the `dev` group and
 retain the full path in hover/ARIA; a second nested frame would fight the
 small tab bar and the one-enclosure rule for All. A team with only one live
 member has a stable team key but looks exactly like a solo tab. The group
-adds no target, row height or status colour. The owner's Chrome tab-group
+adds no row height or status colour. The owner's Chrome tab-group
 reference (2026-09-23, 558x88) supersedes the first 1px upper marker:
-the desktop team name is a noninteractive pill in `--control-surface`, sized
+the team name is a native choice in a `--control-surface` pill, sized
 within the existing row; a `--text2` baseline sits in the group wrapper's
 bottom pixel, behind the member cards. The selected member already has
 `z-index: 1` and its bubble fill extends 1px into the band: it covers the
@@ -639,16 +639,48 @@ becomes a tray-wide rule nor needs a second covering layer. The frame
 probe at 390px light: at 40ms the body was 7% opaque but the floor was
 fully opaque; video pixel x187,y538 went from grey (97/96/99) straight
 to bubble (239/238/243) with no intermediate line.
-At 390px long labels would crowd the strip, so compact hides the pill and
-the full team path remains in member hover/ARIA and touch-opened menus.
-Expanded mode is a list: its team pill returns even on compact, with no
-baseline or raised contour. Under All selection/preview both group line
-and contour yield to one destinations enclosure. A team is not a recipient
-button; its members remain separate native selection/Stop targets. Stopped
+At 390px long names could bury the strip, so compact caps the team's
+visible text width inside its 44px native button; its full name is in
+ARIA/hover and each member's touch-opened menu. Expanded mode is a list:
+the pill stays and a selected team closes its group border rather than
+pretending to join the band. Under All selection/preview both group line
+and contour yield to one destinations enclosure. Member cards keep
+independent native selection/Stop targets. Stopped
 identities remain outside `.tabs`. The wrapper scrolls as one item and
 wraps members when expanded. A new member appears with `appear-pop`;
 group/member reorders use the one `animate:flip` tempo; removal and a
 one-to-two-member group chrome change cut.
+
+### One team selection, exact member delivery (#239, 2026-09-23)
+
+Owner: "如果是一个 team 的话，我点击 team 的名称，可以一次性选中该
+team 的这几个 Agent". The label is a real button, not an `@all` disguise:
+`team:<root>` is a frontend-only recipient value (the colon cannot occur
+in an agent window name). The single `targetMembers` resolver reads the
+managed roster's recorded `team` path; `dev` includes `dev/review`, never
+a solo window or another team. It drives the pressed cards, composer
+destination, message addresses and busy/interrupt membership. Clicking an
+individual card narrows to one; clicking All broadens to everyone. A team
+group is the ONE selected enclosure, so internal card borders turn off.
+The terminal partition follows an agent only, never the team sentinel.
+
+A chat send takes one snapshot of current member names, prefixes each
+with the server's existing `@name` token and posts ONE room message;
+explicit body mentions remain additive and `@all` is never synthesized.
+If the team empties in the gap before the next roster poll, implicit
+delivery keeps the draft and clears the stale team target; an explicit
+valid `@name` in the text still wins and goes through unchanged.
+There is no new server route. A leading CLI `/command` under team
+selection is typed verbatim through one existing `hub_command` per current
+member, like All's existing broadcast route; a leading explicit `@name`
+still wins. Partial command success leaves the cleared draft alone so a
+retry cannot duplicate commands already typed; if every call fails, the
+draft is restored. A remembered team selection stays while at least one
+member survives; when the last departs the recipient becomes an explicit
+room note, not a silently selected agent elsewhere. The group label
+stays a native 28px pointer / 44px coarse target in collapsed and expanded
+lists. The visible compact name may elide, but its full accessible name
+and the member's touch menu retain the identity.
 
 One shared icon-only CommandButton expands the same keyed list in normal
 flow. The default is one horizontal row; expansion uses 1/2/4 columns and

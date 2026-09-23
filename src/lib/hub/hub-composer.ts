@@ -1,6 +1,32 @@
 import type { AnchorRect } from '../ui/placement.ts';
 
 export const ALL_TARGET = 'all';
+const TEAM_TARGET_PREFIX = 'team:';
+
+export const teamRoot = (path: string | null | undefined): string | null => path?.split('/')[0] || null;
+export const teamTarget = (root: string): string => `${TEAM_TARGET_PREFIX}${root}`;
+export const targetTeam = (target: string): string | null =>
+  target.startsWith(TEAM_TARGET_PREFIX) ? target.slice(TEAM_TARGET_PREFIX.length) || null : null;
+
+interface TargetAgent {
+  name: string;
+  managed: boolean;
+  team?: string | null;
+}
+
+/** One recipient resolution for delivery, selection and interruption.
+ * `team:` cannot collide with a window name: valid_name forbids colons. */
+export function targetMembers(target: string, agents: readonly TargetAgent[]): string[] {
+  if (!target) return [];
+  const team = targetTeam(target);
+  const names = new Set<string>();
+  for (const agent of agents) {
+    if (agent.managed && (target === ALL_TARGET || (team ? teamRoot(agent.team) === team : agent.name === target))) {
+      names.add(agent.name);
+    }
+  }
+  return [...names];
+}
 
 /** Boxes are measured by the browser in textarea-local CSS pixels. A tall
  * touch target can hit the preceding line even when the final line is short. */
@@ -42,6 +68,7 @@ export function signatureLayout({
 interface InterruptAgent {
   name: string;
   managed: boolean;
+  team?: string | null;
   state?: string;
 }
 
@@ -49,16 +76,16 @@ const INTERRUPTIBLE_STATES = new Set(['running', 'working', 'waiting', 'blocked'
 
 /** A card owns only its busy managed members; callers capture before awaiting. */
 export function busyTargetsFor(target: string, agents: readonly InterruptAgent[]): string[] {
-  if (!target) return [];
+  const members = new Set(targetMembers(target, agents));
   return [...new Set(agents
-    .filter((a) => a.managed && (target === ALL_TARGET || a.name === target)
-      && INTERRUPTIBLE_STATES.has(a.state ?? ''))
+    .filter((a) => a.managed && members.has(a.name) && INTERRUPTIBLE_STATES.has(a.state ?? ''))
     .map((a) => a.name))];
 }
 
 interface PaletteAgent {
   name: string;
   managed: boolean;
+  team?: string | null;
   agent?: string | null;
 }
 
@@ -78,9 +105,10 @@ export function paletteBackendFor(
   agents: readonly PaletteAgent[],
 ): string {
   const m = /^\s*@([\w][\w.-]*)\s/u.exec(text ?? '');
-  const name = m ? m[1] : (recipient === ALL_TARGET ? null : recipient);
+  const name = m ? m[1] : (recipient === ALL_TARGET || targetTeam(recipient) ? null : recipient);
   if (name) return agents.find((a) => a.managed && a.name === name)?.agent ?? '';
-  const backends = [...new Set(agents.filter((a) => a.managed).map((a) => a.agent ?? ''))];
+  const members = targetTeam(recipient) ? new Set(targetMembers(recipient, agents)) : null;
+  const backends = [...new Set(agents.filter((a) => a.managed && (!members || members.has(a.name))).map((a) => a.agent ?? ''))];
   return backends.length === 1 ? backends[0]! : 'mixed';
 }
 

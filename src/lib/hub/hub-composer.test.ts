@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ALL_TARGET, attachmentBody, attachToken, busyTargetsFor, paletteBackendFor, signatureLayout } from './hub-composer.ts';
+import { ALL_TARGET, attachmentBody, attachToken, busyTargetsFor, paletteBackendFor, signatureLayout, targetMembers, targetTeam, teamRoot, teamTarget } from './hub-composer.ts';
 import { addressed, commandPalette } from './hub.ts';
 
 const roster = [
@@ -8,6 +8,37 @@ const roster = [
   { name: 'bob', managed: true, agent: 'codex' },
   { name: 'shell', managed: false, agent: 'grok' },
 ];
+
+test('team targets resolve to exactly their current managed members (#239)', () => {
+  const agents = [
+    { name: 'lead', team: 'dev', managed: true, state: 'idle' },
+    { name: 'reviewer', team: 'dev/review', managed: true, state: 'running' },
+    { name: 'solo', managed: true, state: 'running' },
+    { name: 'direct', team: 'dev', managed: false, state: 'running' },
+  ];
+  assert.equal(teamRoot('dev/review'), 'dev');
+  assert.equal(teamRoot(null), null);
+  assert.equal(targetTeam(teamTarget('dev')), 'dev');
+  assert.equal(targetTeam('dev'), null);
+  assert.notEqual(teamTarget('dev'), 'dev', 'the colon is forbidden in real agent names');
+  assert.deepEqual(targetMembers(teamTarget('dev'), agents), ['lead', 'reviewer']);
+  assert.deepEqual(targetMembers(ALL_TARGET, agents), ['lead', 'reviewer', 'solo']);
+  assert.deepEqual(targetMembers('reviewer', agents), ['reviewer']);
+  assert.deepEqual(targetMembers(teamTarget('missing'), agents), []);
+  assert.deepEqual(busyTargetsFor(teamTarget('dev'), agents), ['reviewer']);
+  assert.deepEqual(busyTargetsFor(ALL_TARGET, agents), ['reviewer', 'solo']);
+  assert.deepEqual(busyTargetsFor(teamTarget('dev'), agents.slice(0, 1)), [], 'idle members are not interrupted');
+});
+
+test('team command palette uses its member dialect, not the whole room (#239)', () => {
+  const agents = [
+    { name: 'a', team: 'dev', managed: true, agent: 'kiro' },
+    { name: 'b', team: 'dev/review', managed: true, agent: 'kiro' },
+    { name: 'solo', managed: true, agent: 'codex' },
+  ];
+  assert.equal(paletteBackendFor('/', teamTarget('dev'), agents), 'kiro');
+  assert.equal(paletteBackendFor('@solo /clear', teamTarget('dev'), agents), 'codex', 'explicit @name wins');
+});
 
 test('signature controls share clear text space, not a permanent right column (#186)', () => {
   const box = {

@@ -89,7 +89,7 @@ test('the dot reserves the Stop\'s room, constant, and the Stop wears no wash (b
 });
 
 test('one controlled roster replaces the delayed tap menu whole (#168)', () => {
-  assert.match(source, /import \{ ALL_TARGET \} from '\.\/hub-composer\.ts'/u);
+  assert.match(source, /import \{ ALL_TARGET, targetMembers, targetTeam, teamTarget \} from '\.\/hub-composer\.ts'/u);
   assert.match(source, /const ranked = \$derived\(sortAgentsForRoster\(managedAgents\)\)/u,
     'turn-edge recency stays the one sorting authority');
   assert.match(source, /const groups = \$derived\(rosterGroups\(orderedAgents\)\)/u,
@@ -130,7 +130,8 @@ test('body mentions use chipExtras, separate from selected state and Stop', () =
 
 test('native selection owns hover and context; stopped slots never select or resume', () => {
   assert.match(source, /<button type="button" class="agent-select"\s+aria-pressed=\{isAddressed\(a\.name\)\}/u);
-  assert.match(source, /const isAddressed = \(name\) => recipient === ALL_TARGET \|\| recipient === name/u);
+  assert.match(source, /const addressedMembers = \$derived\(new Set\(targetMembers\(recipient, managedAgents\)\)\)/u);
+  assert.match(source, /const isAddressed = \(name\) => addressedMembers\.has\(name\)/u);
   assert.match(source, /class:sel=\{isAddressed\(a\.name\)\}/u, '#186: paint and accessibility read the same aggregate selection');
   assert.match(source, /use:hoverInfo=\{\(\) => cardInfo\(a\)\}/u);
   assert.match(source, /use:hoverInfo=\{\(\) => offCardInfo\(name\)\}/u);
@@ -309,16 +310,16 @@ test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosur
     'the visual colour swap keeps the one movement tempo');
   assert.doesNotMatch(rule('.acard::before'), /transition:[^;]*(?:inset|border-radius)/u,
     'the geometry that joins the input cannot pass through intermediate frames');
-  assert.match(rule('.cards:not(.expanded) .tabs:not(.all-lit) .acard.sel::before'),
+  assert.match(rule('.cards:not(.expanded) .tabs:not(.all-lit) .roster-cluster:not(.team-lit) .acard.sel::before'),
     /background-image: linear-gradient\(to top, var\(--bubble-in\) var\(--roster-gap\), transparent var\(--roster-gap\)\)/u,
-    'the selected tab owns an instantly opaque floor while its body crossfades');
+    'solo/member tabs own an opaque floor; a selected team paints one enclosing surface instead');
   assert.doesNotMatch(source, /\.roster::after/u, 'the hairline model stays dead');
   assert.match(rule('.roster'), /background: var\(--hub-tab-frame\)/u, 'the contrast comes from the frame going darker');
 });
 
 test('team tabs use the reference pill, broken baseline and raised member contour (#238)', () => {
   assert.match(source, /\{@const named = !!group\.team && group\.members\.length > 1\}/u);
-  assert.match(source, /class:team=\{named\} data-team=\{named \? group\.team : undefined\}/u);
+  assert.match(source, /class:team=\{named\} class:team-lit=\{named && recipient === teamTarget\(group\.team\)\} data-team=\{named \? group\.team : undefined\}/u);
   assert.match(source, /role=\{named \? 'group' : undefined\} aria-label=\{named \? `\$\{t\('teamsTitle'\)\} \$\{group\.team\}` : undefined\}/u);
   assert.match(rule('.roster-cluster'), /display: flex; align-items: center; gap: var\(--roster-gap\); flex: none/u,
     'one non-shrinking unit prevents its tabs from spilling over neighbours on horizontal scroll');
@@ -326,18 +327,24 @@ test('team tabs use the reference pill, broken baseline and raised member contou
     'the baseline spans the group floor, not the tray or the top edge');
   assert.match(rule('.cards:not(.expanded) .roster-cluster.team::before'), /height: calc\(var\(--roster-gap\) \/ 2\); background: var\(--text2\)/u,
     'one neutral pixel uses existing spacing and adds no row height');
-  assert.match(rule('.team-label'), /min-height: var\(--roster-ring-size\)/u, 'the pill fits within the existing tab row');
+  assert.match(rule('.team-label'), /min-height: var\(--control-height\)/u, 'the label is a native target within the existing tab row');
   assert.match(rule('.team-label'), /border-radius: var\(--ui-radius-row\)/u);
   assert.match(rule('.team-label'), /background: var\(--control-surface\)/u);
-  assert.match(rule('.roster.compact .team-label'), /display: none/u, 'long team names never consume a whole tab on the phone');
-  assert.match(rule('.roster.compact .cards.expanded .team-label'), /display: inline-flex/u,
-    'the expanded list has room for the team pill on both screens');
+  assert.match(rule('.roster.compact .team-label'), /min-width: var\(--control-height\); min-height: var\(--control-height\)/u,
+    'a team can be selected on the phone with the full touch target');
+  assert.match(rule('.team-name'), /text-overflow: ellipsis/u, 'long names cannot bury all member tabs on the phone');
   assert.match(rule('.cards:not(.expanded) .tabs:not(.all-lit) .roster-cluster.team .acard.sel'), /--card-line: var\(--text2\)/u,
     'only a lit grouped tab has a raised neutral contour; solos and All keep their original paint');
   assert.match(rule('.tabs.all-lit .roster-cluster.team::before'), /display: none/u, 'All owns the only visible enclosure');
   assert.match(rule('.cards.expanded .roster-cluster.team'), /flex: 0 1 100%; min-width: 0; flex-wrap: wrap/u,
     'the expanded group may wrap without overflowing the narrow list');
-  assert.doesNotMatch(source, /onclick=\{[^}]*group\.team/u, 'a team label is not a second recipient command');
+  assert.match(source, /<button type="button" class="team-label"[\s\S]{0,350}?aria-pressed=\{recipient === teamTarget\(group\.team\)\}[\s\S]{0,350}?onclick=\{\(\) => setRecipient\(teamTarget\(group\.team\)\)\}/u,
+    'the team label is a choice of addressees, never a fake decorative pill');
+  assert.match(rule('.roster-cluster.team-lit'), /background: var\(--bubble-in\)/u, 'team selection is one enclosure');
+  assert.match(rule('.roster-cluster.team-lit .acard::before'), /background: transparent; border-color: transparent/u,
+    'member tab borders do not divide the team enclosure');
+  assert.match(rule('.cards.expanded .roster-cluster.team-lit::after'), /inset: 0; border-bottom: 1px solid var\(--bubble-line\)/u,
+    'the expanded list is a closed group, not an open tab that pretends to reach the band');
 });
 
 test('lower tab corners stay inside the selected paint and clear adjacent targets (#238)', () => {

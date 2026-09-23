@@ -4,7 +4,7 @@
   import CommandButton from '../ui/CommandButton.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import { slashCommand, commandPalette, readlineEdit, pastedFiles, textIsThePaste } from './hub.ts';
-  import { ALL_TARGET, paletteBackendFor, signatureLayout } from './hub-composer.ts';
+  import { ALL_TARGET, paletteBackendFor, signatureLayout, targetTeam } from './hub-composer.ts';
   import { fonts, uiFont } from '../app/fonts.svelte.ts';
 
   let {
@@ -188,7 +188,9 @@
     const c = slashCommand(composerText.trim());
     return !!(c && (c.to || recipient));
   });
-  const composerLabel = $derived(recipient === ALL_TARGET ? t('hubComposerAll') : recipient ? t('hubComposerDm').replace('{name}', recipient) : t('hubComposerRoom'));
+  const composerLabel = $derived(recipient === ALL_TARGET ? t('hubComposerAll')
+    : targetTeam(recipient) ? t('hubComposerTeam').replace('{name}', targetTeam(recipient))
+    : recipient ? t('hubComposerDm').replace('{name}', recipient) : t('hubComposerRoom'));
 
   // Slash completion retains its backend cache and command/argument stages.
   let cmdModels = $state({});
