@@ -369,7 +369,9 @@
 <style>
   .composer {
     position: relative; z-index: 15; flex: none; min-width: 0;
-    padding: 6px var(--composer-inset) 10px;
+    /* Equal air above and below the field (owner, 2026-09-23: "文本输入框上下
+       padding 不太一致，下边有一点点大…把下边调成和上面一样小"). */
+    padding: 6px var(--composer-inset);
     /* The BAND (board #236 round 3, the owner's Chrome screenshot): the
        toolbar under the tab strip, one fill with the lit tab above it —
        colour is what joins them, and its step above the frame is what makes
@@ -385,7 +387,10 @@
        tab). The input stays its own field. */
     background: var(--bubble-in);
     border: 1px solid var(--bubble-line); border-top: 0;
-    border-radius: 0 0 var(--ui-radius-control) var(--ui-radius-control);
+    /* Square lower corners: the band's sides meet the sidebar and the drawer,
+       and a rounded corner there left a small notch against them (owner,
+       2026-09-23: "左下角和右下角…两边的侧边栏应该都是直角…会有一个小缺口"). */
+    border-radius: 0;
   }
   /* An input's radius (--ui-radius-control), not 16px: on a 32px desktop
      shell 16px was a full semicircle and text near the edge read as squeezed
@@ -455,6 +460,6 @@
   @media (any-pointer: coarse) { .cmd-opt { min-height: 44px; } }
   /* Keep the phone field's breathing room: compact the tab row above it,
      not the gap between the tab floor and the input (owner, 2026-09-23). */
-  :global(.hub-root.compact) .composer { padding: 3px var(--composer-inset) 8px; }
+  :global(.hub-root.compact) .composer { padding: 3px var(--composer-inset); }
   :global(.hub-root.compact) .c-input { max-height: calc(28vh / var(--ui-zoom, 1)); }
 </style>

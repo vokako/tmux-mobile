@@ -53,8 +53,9 @@ test('Composer retains its stacking context around the one remaining palette (#1
   assert.match(rule('.cmd-menu'), /z-index: 14/u);
   assert.match(source, /:global\(\.hub-root\.compact\) \.composer/u,
     'the compact ancestor crosses the component boundary without another wrapper');
-  assert.match(rule(':global(.hub-root.compact) .composer'), /padding: 3px var\(--composer-inset\) 8px/u,
-    'the input recovers its top air; the compacting belongs within the tabs');
+  assert.match(rule(':global(.hub-root.compact) .composer'), /padding: 3px var\(--composer-inset\);\s*$/u,
+    'equal air above and below the field (owner, 2026-09-23); the compacting belongs within the tabs');
+  assert.match(rule('.composer'), /padding: 6px var\(--composer-inset\);/u, 'desktop too: the bottom was 10px against a 6px top');
   assert.doesNotMatch(source, /^\s*\.(st|note-dot|live-dot) \{/mu, 'shared atoms are not copied');
 });
 
@@ -180,7 +181,7 @@ test('measured signature actions reuse shared commands without hardcoded avoidan
   assert.match(rule('.compose-shell'), /border: 1px solid var\(--border\); border-radius: var\(--ui-radius-control\)/u);
   // No top border of its own: the band's top edge is the strip's floor line
   // (Roster), which the lit tab breaks — a border here would cross under it.
-  assert.match(rule('.composer'), /background: var\(--bubble-in\);\n\s*border: 1px solid var\(--bubble-line\); border-top: 0;\n\s*border-radius: 0 0 var\(--ui-radius-control\) var\(--ui-radius-control\)/u,
+  assert.match(rule('.composer'), /background: var\(--bubble-in\);\n\s*border: 1px solid var\(--bubble-line\); border-top: 0;\n[\s\S]{0,320}?border-radius: 0;/u,
     'the band wears the agent bubble and closes the enclosure the lit tab opens');
   assert.match(rule('.compose-shell'), /padding: var\(--tool-inset-block\) var\(--menu-item-padding-x\)/u);
   assert.match(source, /const paintInset = parseFloat\(actionsStyle\.getPropertyValue\('--control-paint-inset'\)\) \|\| 0;/u);
