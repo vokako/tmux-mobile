@@ -314,8 +314,8 @@ test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosur
   assert.match(rule('.slide-pill.tab::before'), /inset: var\(--control-paint-inset\) 0 0; box-sizing: border-box/u);
   assert.match(rule('.slide-pill.tab::before'), /background: var\(--bubble-in\); border: 1px solid var\(--card-line\); border-bottom: 0/u,
     'the marker wears the agent bubble and stays open into the band');
-  assert.match(rule('.slide-pill.tab::before'), /border-radius: var\(--ui-radius-panel\) var\(--ui-radius-panel\) 0 0/u,
-    'the tab side meets its outward tangent instead of turning inward');
+  assert.match(rule('.slide-pill.tab::before'), /border-radius: var\(--ui-radius-row\) var\(--ui-radius-row\) 0 0/u,
+    'the card tier and the context ring\'s own curvature; the panel radius read as a half-circle on a 32px tab (owner, 2026-09-23)');
   assert.doesNotMatch(rule('.slide-pill.tab::before'), /transition:[^;]*(?:inset|border-radius|background)/u,
     'the marker MOVES; only its stroke colour crossfades');
   assert.match(rule('.roster.compact .slide-pill.tab::before'), /inset-block-start: var\(--roster-gap\)/u,

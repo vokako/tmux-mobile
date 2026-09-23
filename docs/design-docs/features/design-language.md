@@ -72,7 +72,9 @@ delivery path or new motion tempo. Reason, ordering and measurements:
 
 **Outward tab feet (owner, 2026-09-23).** The first inward lower radii were
 reversed (owner 10:39). Every lit enclosure — a tab, a team group, All —
-keeps its `--ui-radius-panel` top corners and opens into the band through
+keeps its `--ui-radius-row` top corners (17:19: the panel radius "半圆半径变
+大了…稍微小一点显得更加精致"; 12px is the card tier and the 24px context ring's
+own curvature) and opens into the band through
 the SAME pair of outward feet (`.tab-foot`, `--roster-foot-radius` 8px; a
 4px arc read as jagged). The foot's inner column is the side stroke's own
 column, so the stroke turns into the floor tangentially with no vertical
@@ -104,8 +106,8 @@ ring sits WITH its avatar inside the same positioned `.avatar-slot`, never
 separately centred against the card. A shared 18px avatar and 24px ring
 preserve the 1px image gap and 2px stroke. The compact selected tab's paint
 starts at `--roster-gap` instead of the coarse control inset; Chrome-smooth
-top corners take the existing `--ui-radius-panel`, while the group label pill
-takes `--ui-radius-row`. No second radius scale or altered hit box. The
+top corners took `--ui-radius-panel` until the owner's 17:19 correction
+(now `--ui-radius-row`, like the group label pill). No second radius scale or altered hit box. The
 three-head All glyph stays legible at its named 20px roster size, independent
 of the gap between tabs; rendering it at the reduced avatar size blurred it.
 The coarse strip is 44px high; desktop is 34px. The tab-to-band junction,

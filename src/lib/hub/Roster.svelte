@@ -524,7 +524,11 @@
   .slide-pill.tab::before {
     content: ''; position: absolute; inset: var(--control-paint-inset) 0 0; box-sizing: border-box;
     background: var(--bubble-in); border: 1px solid var(--card-line); border-bottom: 0;
-    border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0;
+    /* The card tier's radius, which is also the 24px context ring's: the arc
+       curves as the ring inside it does. The panel radius (14px) read as a
+       half-circle on a 32px tab (owner, 2026-09-23: "半圆半径变大了…稍微小一点
+       显得更加精致一点"). */
+    border-radius: var(--ui-radius-row) var(--ui-radius-row) 0 0;
     transition: border-color var(--t-move) ease;
   }
   .roster.compact .slide-pill.tab::before { inset-block-start: var(--roster-gap); }

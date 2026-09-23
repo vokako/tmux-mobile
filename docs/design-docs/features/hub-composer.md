@@ -261,7 +261,9 @@ more from the text's bottom gap without shrinking the 44px native target.
 The selected tab's paint top inset shrinks from coarse 6px to `--roster-gap`
 (2px), while desktop stays at 2px; the strip itself still has zero top
 padding. Top corners move from `--ui-radius-control` to `--ui-radius-panel`
-(10px -> 14px), the team pill to `--ui-radius-row` (12px); the bottom stays
+(10px -> 14px; reversed to `--ui-radius-row` 12px on 2026-09-23 17:19 — "半圆
+半径变大了…稍微小一点显得更加精致", and 12px is the context ring's own
+curvature), the team pill to `--ui-radius-row` (12px); the bottom stays
 open into the band. Chromium 152 before/after: desktop ring/face 26/20px ->
 24/18px, their centre difference 0 -> 0, row 34px and text bottom 9px
 unchanged; 390px with coarse CSS simulated: 26/20px -> 24/18px, centre
