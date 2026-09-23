@@ -44,9 +44,8 @@ test('everyone leaves the roster whole for the sole Composer command (#180)', as
 test('card paint keeps its inset and the single measured scrolling edge (#180)', () => {
   assert.match(rule('.acard::before'), /inset: var\(--control-paint-inset\) 0/u);
   assert.match(rule('.acard::before'), /pointer-events: none/u);
-  // #236: the strip and the composer shell share ONE inline inset token, so
-  // the lit tab lands exactly on the shell's edge.
-  assert.match(rule('.roster'), /padding: 0 var\(--composer-inset\)/u);
+  // The tab strip has only its scrollport inset; the field retains its inset.
+  assert.match(rule('.roster'), /padding: 0 var\(--composer-inset\) 0 0/u);
   assert.match(rule('.roster'), /gap: 0/u);
   assert.match(source, /class="cards edge-fade"[^>]*use:scrollEdges=\{!expanded\}/u);
 });
@@ -251,7 +250,7 @@ test('Everyone is the PINNED tab: always at the head, previewing on hover (board
   // DEFAULT (desktop, and any device that reports no pointer); the coarse
   // branch restores the square, because on touch the box IS the target — and
   // it must come after the tight rule, which carries the same specificity.
-  assert.match(source, /\.all-choice :global\(\.command-button\.icon-only\) \{ width: auto; min-width: 0; padding-inline: 3px; \}/u);
+  assert.match(source, /\.all-choice :global\(\.command-button\.icon-only\) \{ width: auto; min-width: 0; padding-inline: 2px; \}/u);
   const tight = source.indexOf('.all-choice :global(.command-button.icon-only) { width: auto;');
   const square = source.indexOf('.all-choice :global(.command-button.icon-only) { width: var(--control-height)');
   assert.ok(tight > 0 && square > tight, 'the coarse square must be declared after the tight default');

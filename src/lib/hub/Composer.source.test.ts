@@ -53,6 +53,8 @@ test('Composer retains its stacking context around the one remaining palette (#1
   assert.match(rule('.cmd-menu'), /z-index: 14/u);
   assert.match(source, /:global\(\.hub-root\.compact\) \.composer/u,
     'the compact ancestor crosses the component boundary without another wrapper');
+  assert.match(rule(':global(.hub-root.compact) .composer'), /padding: 1px var\(--composer-inset\) 8px/u,
+    'the phone band starts 1px below the 44px tab target, without reducing that target');
   assert.doesNotMatch(source, /^\s*\.(st|note-dot|live-dot) \{/mu, 'shared atoms are not copied');
 });
 

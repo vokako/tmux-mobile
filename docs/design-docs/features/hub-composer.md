@@ -234,7 +234,9 @@ is gone: a full-width top edge drew a horizontal rule between the strip and
 the input area ("Agent card 和下面这个区域中间分隔的横线不要有"), while the lit
 tab above already closes that side of the enclosure and beside it the frame
 steps straight into the band's colour. Measured in both themes, desktop 1280
-and phone 390: single selection and All.
+and phone 390: single selection and All. The owner then asked for less space
+again: compact composer top padding is 1px, leaving the 44px tab target
+unchanged.
 
 ### All selects the addressed cards (#186, 2026-09-12)
 
@@ -287,14 +289,21 @@ a single agent's glyph uses (owner, 2026-09-22: "不用画人，画成 Agent 类
 Logo"; 2026-09-23: "可以多画几个机器人"; the group-of-people and `collab`'s
 orbiting dots both failed the glance test). It renders at the avatars' size
 (`--roster-avatar-size`, the token — a second 20px literal would drift from
-it), because two heads share the 24 viewBox and at the atom's 16px each head
-is ~7px — measured at 10× on the real render, the faces mushed. The glyph grew
-and the BOX shrank instead (`width: auto; min-width: 0; padding-inline: 3px`,
-28px → 26px): the leading tab must not cost an agent's worth of strip ("占的左
-右空间都压缩一下，更紧凑一些"). The coarse branch restores the square, because
-on touch that box IS the target; it is declared after the tight rule, which
-carries the same specificity. the same 28/44px native target and props
-(`pressed`, `hasPopup`, `expanded` for the All menu), wired into `Roster`
+it). The side-by-side heads each read at about 7px at the atom's 16px size
+and looked muddled even at 20px (owner, 2026-09-23). Three heads now recede
+behind a single readable foreground face; the rear contours end at the front
+head rather than crossing its strokes. The leading tab uses the avatar-size
+token and a 24px fine-pointer box (`20px` icon plus `2px` per side), and the
+strip has no extra leading inset beyond its 2px scrollport padding. The field
+keeps its normal inset; the tab's paint need not start at
+the text field's left edge. On coarse the 44px square remains the touch
+target even though that necessarily keeps some space around the icon.
+Chromium 152 headless, isolated Roster/Composer preview: 24px fine-pointer
+button; narrow viewport with the coarse CSS values applied: 44px All and
+agent targets, 1px from the band top to its input field. The browser's device
+emulation did not report a coarse pointer, so this is not a native phone
+measurement. The tab retains `pressed`, `hasPopup` and `expanded` for the
+All menu, wired into `Roster`
 (`allMenuOpen`, `onall`). The span is `.acard` so selected All is a LIT TAB
 like any card's; the CommandButton inside is `bare` and its `engaged` wash
 is switched off locally — the tab is the paint, a wash inside it would be a

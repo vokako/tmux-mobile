@@ -453,6 +453,6 @@
   /* Less air above the field on the phone: the tab strip's floor and the
      field are one tray, and 6px read as a gap between them (owner,
      2026-09-23: "agent 卡片和下边的消息框之间间距小一点"). */
-  :global(.hub-root.compact) .composer { padding: 3px var(--composer-inset) 8px; }
+  :global(.hub-root.compact) .composer { padding: 1px var(--composer-inset) 8px; }
   :global(.hub-root.compact) .c-input { max-height: calc(28vh / var(--ui-zoom, 1)); }
 </style>

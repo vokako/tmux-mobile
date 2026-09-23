@@ -325,11 +325,13 @@
     --roster-expanded-max: min(240px, calc(32dvh / var(--ui-zoom, 1)));
     position: relative;
     display: grid; grid-template-columns: minmax(0, 1fr) var(--control-height);
-    gap: 0; flex: 0 1 auto; min-width: 0; min-height: 0; padding: 0 var(--composer-inset);
+    gap: 0; flex: 0 1 auto; min-width: 0; min-height: 0;
+    padding: 0 var(--composer-inset) 0 0;
     background: var(--hub-tab-frame);
     container: roster / inline-size;
   }
-  /* The tab strip sits on the tab FRAME; the composer below is the BAND
+  /* The strip starts at its scrollport inset; the field keeps its normal inset.
+     The tab strip sits on the tab FRAME; the composer below is the BAND
      (owner's Chrome screenshot, 2026-09-22: the active tab and the toolbar
      are ONE FILL, the omnibox its own field inside — "从颜色上把它们变成一体…
      底下的框是一个单独的一个输入框"). The join is colour, never a hairline —
@@ -483,19 +485,12 @@
   .ava.dim { background: var(--surface2); color: var(--text3); }
   img.ava.dim { background: none !important; filter: grayscale(1); opacity: 0.55; }
   .roster-add { display: flex; align-items: center; flex: none; min-height: var(--control-height); }
-  /* The avatars' size (the TOKEN, not a copy of its value): two robot heads at
-     the atom's 16px fell below the legibility floor — each head ~7px, the faces
-     mushed (measured at 10x on the real render). The glyph grows, the BOX
-     shrinks (below), so the leading tab still costs less strip than the 28px
-     square it replaced. */
+  /* The foreground bot stays legible at the avatars' size; the two behind it
+     show as partial silhouettes instead of squeezing three faces side by side. */
   .all-choice { --control-icon-size: var(--roster-avatar-size); }
   .all-choice :global(.command-icon svg) { width: 100%; height: 100%; }
-  /* The leading tab gives back the width its square box was spending — it
-     should not cost an agent's worth of strip (owner, 2026-09-23: "占的左右空间
-     都压缩一下，更紧凑一些"). Tight by default (the desktop case, and any
-     device that reports no pointer at all); the coarse branch below restores
-     the square, because there the box IS the touch target. */
-  .all-choice :global(.command-button.icon-only) { width: auto; min-width: 0; padding-inline: 3px; }
+  /* Tight on fine pointers; the coarse branch keeps a full finger target. */
+  .all-choice :global(.command-button.icon-only) { width: auto; min-width: 0; padding-inline: 2px; }
   /* Touch restores the square: there the box IS the target, not the paint.
      Declared after the tight rule — same specificity, later wins. */
   @media (any-pointer: coarse) {
