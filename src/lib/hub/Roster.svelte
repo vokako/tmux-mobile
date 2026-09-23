@@ -363,8 +363,13 @@
        enclosure breaks it with its fill and turns into it through its feet —
        Chrome's toolbar line (owner, 2026-09-23: "圆弧连接的整个 Agent 框上面的
        输入区，应该有一条横着的淡淡的白线延伸"). A background layer, not a
-       border or an overlay: it must paint BELOW every tab. */
-    background-image: linear-gradient(to top, var(--bubble-line) 1px, transparent 1px);
+       border or an overlay: it must paint BELOW every tab. The line is
+       translucent, so it lies on a pixel of band fill, as every other stroke
+       of the enclosure does: over the frame it came out a third dimmer than
+       the tab edge it continues (measured lum 46 vs 65, dark) and read as a
+       thinner line ("粗细好像也不一样", owner, 2026-09-23). */
+    background-image: linear-gradient(to top, var(--bubble-line) 1px, transparent 1px),
+      linear-gradient(to top, var(--bubble-in) 1px, transparent 1px);
     container: roster / inline-size;
   }
   /* The strip starts at its scrollport inset; the field keeps its normal inset.
@@ -424,29 +429,34 @@
   .cards.expanded .roster-cluster.team-lit::after { inset: 0; border-bottom: 1px solid var(--bubble-line); }
   .roster-cluster.team-lit .acard::before { background: transparent; border-color: transparent; }
   .roster-cluster.team-lit::before { display: none; }
-  /* ONE foot for every lit enclosure — a tab, a team, All. The foot's inner
-     column overlaps the enclosure's side stroke, so the arc leaves that
-     stroke tangentially instead of stepping 1px beside it, and its fill
-     covers the stroke's straight stub below the arc (the "竖线和一个圆角" the
-     owner saw on a team, 2026-09-23). It reaches into the neighbour's
-     bottom corner, which is empty at rest and on hover; it takes no
-     pointer. z-index 1 lifts it over a team enclosure's own stroke, which
-     paints after it. */
+  /* ONE foot for every lit enclosure — a tab, a team, All. The arc's ring
+     sits ON the enclosure's side-stroke column, so it leaves that stroke
+     tangentially instead of stepping 1px beside it. The foot box reaches one
+     more pixel INTO the enclosure and fills it: the straight side stroke is
+     pixel-snapped while the arc is not, and at a fractional device scale
+     (1.25, 1.5 — Windows scaling, the UI zoom) the snapped stroke spilled
+     past a foot that ended exactly on it and showed as a stub beside the
+     arc down to the floor ("竖线…对齐得不是很严谨", owner, 2026-09-23). The
+     fill starts where the ring does, so the ring always lies on band fill,
+     like the tab edge above it. It reaches into the neighbour's bottom
+     corner, which is empty at rest and on hover; it takes no pointer.
+     z-index 1 lifts it over a team enclosure's own stroke, which paints
+     after it. */
   .tab-foot {
     display: none; position: absolute; z-index: 1; bottom: 0;
-    width: var(--roster-foot-radius); height: var(--roster-foot-radius); pointer-events: none;
+    width: calc(var(--roster-foot-radius) + 1px); height: var(--roster-foot-radius); pointer-events: none;
   }
   .tab-foot.left {
     left: calc(1px - var(--roster-foot-radius));
-    background: radial-gradient(circle at 0 0, transparent calc(var(--roster-foot-radius) - 1px), var(--bubble-in) calc(var(--roster-foot-radius) - 0.5px));
+    background: radial-gradient(circle at 0 0, transparent calc(var(--roster-foot-radius) - 1px), var(--bubble-in) calc(var(--roster-foot-radius) - 1px));
   }
   .tab-foot.right {
     right: calc(1px - var(--roster-foot-radius));
-    background: radial-gradient(circle at 100% 0, transparent calc(var(--roster-foot-radius) - 1px), var(--bubble-in) calc(var(--roster-foot-radius) - 0.5px));
+    background: radial-gradient(circle at 100% 0, transparent calc(var(--roster-foot-radius) - 1px), var(--bubble-in) calc(var(--roster-foot-radius) - 1px));
   }
-  .tab-foot::after { content: ''; position: absolute; inset: 0; border: 0 solid var(--card-line, var(--bubble-line)); border-bottom-width: 1px; }
-  .tab-foot.left::after { border-right-width: 1px; border-bottom-right-radius: var(--roster-foot-radius); }
-  .tab-foot.right::after { border-left-width: 1px; border-bottom-left-radius: var(--roster-foot-radius); }
+  .tab-foot::after { content: ''; position: absolute; top: 0; bottom: 0; width: var(--roster-foot-radius); box-sizing: border-box; border: 0 solid var(--card-line, var(--bubble-line)); border-bottom-width: 1px; }
+  .tab-foot.left::after { left: 0; border-right-width: 1px; border-bottom-right-radius: var(--roster-foot-radius); }
+  .tab-foot.right::after { right: 0; border-left-width: 1px; border-bottom-left-radius: var(--roster-foot-radius); }
   .cards:not(.expanded) .tabs:not(.all-lit) .roster-cluster:not(.team-lit) .acard.sel .tab-foot,
   .cards:not(.expanded) .roster-cluster.team-lit > .tab-foot,
   .cards:not(.expanded) .tabs.all-lit > .tab-foot { display: block; }

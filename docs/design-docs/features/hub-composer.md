@@ -665,6 +665,19 @@ full width, BELOW every tab ("圆弧连接的整个 Agent 框上面的输入区�
 enclosure breaks it with its fill and its feet turn into it, so it never
 crosses under a tab. Chromium, dark and light, 1300px at 2x: solo, team
 member, team and All each show one continuous stroke from side to floor.
+The owner's 14:50 look ("竖线…对齐得不是很严谨"; "横线，粗细好像也不一样")
+was right at a FRACTIONAL device scale, which 2x hides. The tab's straight
+side stroke is pixel-snapped and the arc is not; at 1.25x and 1.5x the
+snapped stroke landed up to one device pixel inside a foot that ended
+exactly on it, and showed as a stub beside the arc down to the floor. The
+foot box now reaches one pixel into the enclosure and fills it, and its
+ring box is exactly the radius (`box-sizing: border-box` — without it the
+1px border pushed the arc a pixel outward). The floor line was a
+translucent `--bubble-line` over the dark frame while every enclosure
+stroke lies over band fill: measured luminance 46 against 65 at the
+junction, which reads as a thinner line. The floor line now lies on one
+pixel of `--bubble-in` too. Probe columns at 1x, 1.25x, 1.5x and 2x: no
+stub under the arc, floor line 65–67 against the tab edge's 65.
 The owner's 09:38 report of a WHITE LINE while switching tabs exposed two
 transient join faults. Chromium 152 at 390px measured the incoming bottom
 inset at 6px immediately after selection, 3.14px after 64ms and -1px only

@@ -359,12 +359,19 @@ test('one outward foot joins every lit enclosure to the floor line (#238 owner c
   assert.match(rule('.roster'), /--roster-foot-radius: 8px/u, 'a 4px arc at a 1px stroke read as jagged (owner, 2026-09-23)');
   assert.match(rule('.tab-foot'), /position: absolute; z-index: 1; bottom: 0/u,
     'above a team enclosure\'s stroke, which paints after the feet');
-  assert.match(rule('.tab-foot'), /width: var\(--roster-foot-radius\); height: var\(--roster-foot-radius\); pointer-events: none/u);
+  assert.match(rule('.tab-foot'), /width: calc\(var\(--roster-foot-radius\) \+ 1px\); height: var\(--roster-foot-radius\); pointer-events: none/u,
+    'one pixel into the enclosure: at a fractional device scale the snapped side stroke spilled past a foot that ended on it');
+  assert.match(rule('.tab-foot.left'), /transparent calc\(var\(--roster-foot-radius\) - 1px\), var\(--bubble-in\) calc\(var\(--roster-foot-radius\) - 1px\)/u,
+    'the ring lies on band fill, like the tab edge it continues');
+  assert.match(rule('.tab-foot::after'), /width: var\(--roster-foot-radius\); box-sizing: border-box/u,
+    'the ring box is exactly the radius, so the arc lands on the side-stroke column');
   assert.match(rule('.tab-foot.left'), /left: calc\(1px - var\(--roster-foot-radius\)\)/u,
     'the foot\'s inner column IS the side stroke\'s column, so the arc leaves it tangentially (no 1px step)');
   assert.match(rule('.tab-foot.right'), /right: calc\(1px - var\(--roster-foot-radius\)\)/u);
-  assert.match(rule('.tab-foot.left::after'), /border-right-width: 1px; border-bottom-right-radius: var\(--roster-foot-radius\)/u);
-  assert.match(rule('.tab-foot.right::after'), /border-left-width: 1px; border-bottom-left-radius: var\(--roster-foot-radius\)/u);
+  assert.match(rule('.tab-foot.left::after'), /left: 0; border-right-width: 1px; border-bottom-right-radius: var\(--roster-foot-radius\)/u);
+  assert.match(rule('.tab-foot.right::after'), /right: 0; border-left-width: 1px; border-bottom-left-radius: var\(--roster-foot-radius\)/u);
+  assert.match(source, /linear-gradient\(to top, var\(--bubble-line\) 1px, transparent 1px\),\n\s*linear-gradient\(to top, var\(--bubble-in\) 1px, transparent 1px\);/u,
+    'the translucent floor line lies on band fill: over the frame it read a third dimmer and thinner than the tab edge');
   assert.match(source, /\.cards:not\(\.expanded\) \.tabs:not\(\.all-lit\) \.roster-cluster:not\(\.team-lit\) \.acard\.sel \.tab-foot,/u);
   assert.match(source, /\.cards:not\(\.expanded\) \.roster-cluster\.team-lit > \.tab-foot,/u);
   assert.match(source, /\.cards:not\(\.expanded\) \.tabs\.all-lit > \.tab-foot \{ display: block; \}/u,
