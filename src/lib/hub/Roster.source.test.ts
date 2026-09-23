@@ -162,6 +162,13 @@ test('double-click focuses live agents without delay and uses the existing filte
   assert.match(source, /class="cards edge-fade" class:expanded class:filtering=\{!!filterAgent\}/u);
   assert.match(source, /\.cards\.filtering \.acard:not\(\.filtered\) \.agent-select,\n\s*\.cards\.filtering \.team-label,\n\s*\.cards\.filtering \.all-choice \{ opacity: var\(--control-disabled-opacity\); \}/u);
   assert.doesNotMatch(source, /\.acard\.filtered::after/u, 'the dashed outline is replaced, not kept beside the dimming');
+  // Dimming alone said "something changed", not "filtered to this one" (owner,
+  // 2026-09-23): the filtered card carries the filter verb's own glyph, and its
+  // hover note names the mode and the way out.
+  assert.match(source, /\{#if filterAgent === a\.name\}<span class="agent-filter" aria-hidden="true"><Icon name="search" size=\{12\} \/><\/span>\{\/if\}/u);
+  assert.match(source, /class:unmarked=\{!mentioned && !unread\.has\(a\.name\) && filterAgent !== a\.name\}/u);
+  assert.match(rule('.agent-filter'), /color: var\(--accent-ink\)/u);
+  assert.match(source, /return filterAgent === name \? t\('hubFilterOnNote'\) : '';/u);
   assert.doesNotMatch(source, /setTimeout|clearTimeout/u);
 });
 

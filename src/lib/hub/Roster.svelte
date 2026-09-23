@@ -1,5 +1,6 @@
 <script>
   import CommandButton from '../ui/CommandButton.svelte';
+  import Icon from '../ui/Icon.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import { untrack } from 'svelte';
   import { ALL_TARGET, targetMembers, targetTeam, teamTarget } from './hub-composer.ts';
@@ -166,7 +167,7 @@
     lines.push({ label: t('hubHoverTarget'), value: `${selected}:${a.window}` });
     if (selectedRow?.project.path) lines.push({ label: t('hubHoverPath'), value: selectedRow.project.path });
     const text = [a.vitals?.effort, a.vitals?.branch].filter(Boolean).join(' · ');
-    return { title: a.name, lines, text, note: destinationNote(a.name) };
+    return { title: a.name, lines, text, note: [destinationNote(a.name), filterNote(a.name)].filter(Boolean).join('\n') };
   }
 
   function offCardInfo(name) {
@@ -174,7 +175,11 @@
     const lines = [{ label: t('hubHoverState'), value: t('hubStopped') }];
     if (slot?.command) lines.push({ label: t('hubHoverModel'), value: slot.command });
     if (selectedRow?.project.path) lines.push({ label: t('hubHoverPath'), value: selectedRow.project.path });
-    return { title: name, lines };
+    return { title: name, lines, note: filterNote(name) };
+  }
+  /** The mode names itself and its way out where the pointer already is. */
+  function filterNote(name) {
+    return filterAgent === name ? t('hubFilterOnNote') : '';
   }
 
   // Native keyboard clicks have no pointer point; keep their context menu at the card.
@@ -270,7 +275,8 @@
               {/if}
             </span>
             <span class="a-name">{a.name}<span class="ac-top"><span class="st" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span></span></span>
-            <span class="agent-marks" class:unmarked={!mentioned && !unread.has(a.name)}>
+            <span class="agent-marks" class:unmarked={!mentioned && !unread.has(a.name) && filterAgent !== a.name}>
+              {#if filterAgent === a.name}<span class="agent-filter" aria-hidden="true"><Icon name="search" size={12} /></span>{/if}
               {#if mentioned}<span class="agent-mention" aria-hidden="true">@</span>{/if}
               {#if unread.has(a.name)}<span class="unread appear-pop" aria-hidden="true"></span>{/if}
             </span>
@@ -314,6 +320,7 @@
               {#if backendIcon(backend)}<img class="ava dim" src={backendIcon(backend)} alt={backend} />{:else}<span class="ava dim">{name.slice(0, 1).toUpperCase()}</span>{/if}
             </span>
             <span class="a-name">{name}</span>
+            {#if filterAgent === name}<span class="agent-marks"><span class="agent-filter" aria-hidden="true"><Icon name="search" size={12} /></span></span>{/if}
           </button>
         </div>
       {/each}
@@ -582,6 +589,11 @@
   .ac-top { display: inline-flex; vertical-align: middle; margin-inline-start: 5px; }
   .agent-marks { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-width: 1em; flex: none; }
   .agent-marks.unmarked { display: none; }
+  /* The filter's mark: the glyph its menu row wears, in the marks' accent
+     ink — with the other cards dimmed, it says WHICH agent the feed is
+     narrowed to, not only that something changed (owner, 2026-09-23: "只是颜色
+     变暗了，没有任何提示…这个 Filter 和正常状态的差异太小了"). */
+  .agent-filter { display: inline-flex; color: var(--accent-ink); }
   .agent-mention { color: var(--accent-ink); font-family: var(--font-mono); font-size: var(--fs-meta); font-weight: 600; }
   /* Stop stands on the dot: absolutely placed by overDot, so it never widens
      the card (#180's concern) and the dot yields to it while shown. */

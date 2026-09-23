@@ -517,7 +517,11 @@ are talking to. The feed's sticky banner with its ✕ and the dashed card
 outline are deleted — one indicator, and the exit is where the entry was:
 double-click again, the card menu's Show everything, or the back gesture.
 A heavier avatar ring was the owner's other option; it was not taken
-because that ring is the context meter.
+because that ring is the context meter. Dimming alone said that something
+changed, not what (owner, 14:50: "只是颜色变暗了，没有任何提示…这个 Filter 和
+正常状态的差异太小了"): the filtered card also carries the filter verb's own
+`search` glyph in the marks column, in the marks' `--accent-ink`, and its
+hover note names the mode and the way out (`hubFilterOnNote`).
 Tests execute the complete click/click/dblclick sequence, not a lone
 synthetic dblclick. Chromium also verifies repeat-to-clear, stopped-card
 menu exclusion and the coarse-pointer long-press filter path.
