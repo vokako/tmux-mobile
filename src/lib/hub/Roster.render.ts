@@ -25,14 +25,29 @@ test('Roster renders the controlled destination strip (#168)', { timeout: RENDER
   const select = (root: DocumentFragment, name: string) => card(root, name).querySelector('button.agent-select')!;
   const stop = (root: DocumentFragment, name: string) => card(root, name).querySelector('.agent-stop > button');
 
-  await ctx.test('native sibling controls use global turn order with team identity in ARIA, not group order', () => {
+  await ctx.test('team tabs form one named unit while retaining native member controls', () => {
     const root = view();
     assert.equal(root.children.length, 1);
     assert.equal(root.querySelectorAll('.roster').length, 1);
-    assert.equal(root.querySelectorAll('.tgroup').length, 0);
+    const group = root.querySelector('.roster-cluster[data-team="dev"]')!;
+    assert.equal(root.querySelectorAll('.roster-cluster[data-team]').length, 1);
+    assert.equal(group.getAttribute('role'), 'group');
+    assert.match(group.getAttribute('aria-label')!, /dev/u);
+    assert.equal(group.querySelector('.team-label')!.textContent, 'dev');
+    assert.deepEqual([...group.querySelectorAll('.acard[data-agent]')].map((node) => node.getAttribute('data-agent')),
+      ['waiting', 'runner']);
+    assert.equal(card(root, 'solo').closest('.roster-cluster')?.hasAttribute('data-team'), false);
+    const alone = view({ managedAgents: agents.filter((a) => a.name !== 'waiting') });
+    assert.equal(alone.querySelector('.roster-cluster[data-team="dev"]'), null,
+      'one live team member is a plain tab, not a titled group');
+    assert.equal(alone.querySelector('.acard[data-agent="runner"]')?.closest('.roster-cluster')?.hasAttribute('data-team'), false);
+    assert.equal(root.querySelector('.roster-cluster[data-team="dev"] .acard.off'), null,
+      'stopped slots stay outside the destination group');
     assert.deepEqual([...root.querySelectorAll('.acard[data-agent]')].map((node) => node.getAttribute('data-agent')),
       ['waiting', 'runner', 'solo', 'paused']);
     assert.match(select(root, 'waiting').getAttribute('aria-label')!, /dev\/review/u);
+    assert.equal(view({ recipient: 'all' }).querySelectorAll('.tabs.all-lit .roster-cluster[data-team="dev"] .acard.sel').length, 2,
+      'All still selects every member through the one outer enclosure');
     assert.doesNotMatch(root.textContent!, /State:|stopped|@all/u, 'state words live only in hover/ARIA');
     assert.equal(select(root, 'runner').getAttribute('aria-pressed'), 'true');
     assert.equal(select(root, 'waiting').getAttribute('aria-pressed'), 'false');

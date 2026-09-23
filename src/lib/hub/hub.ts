@@ -206,6 +206,29 @@ export function sortAgentsForRoster(agents: readonly HubAgent[]): HubAgent[] {
     || a.window - b.window);
 }
 
+/** Keep a launched team together without inventing another activity rank.
+ * Call with the already sorted (or hover-held) list: the first member fixes
+ * the group's position, and members retain their relative recency order. */
+export function rosterGroups(agents: readonly HubAgent[]): { key: string; team: string | null; members: HubAgent[] }[] {
+  const groups: { key: string; team: string | null; members: HubAgent[] }[] = [];
+  const teams = new Map<string, (typeof groups)[number]>();
+  for (const agent of agents) {
+    const team = agent.team?.split('/')[0] || null;
+    if (!team) {
+      groups.push({ key: `agent:${agent.name}`, team: null, members: [agent] });
+      continue;
+    }
+    let group = teams.get(team);
+    if (!group) {
+      group = { key: `team:${team}`, team, members: [] };
+      teams.set(team, group);
+      groups.push(group);
+    }
+    group.members.push(agent);
+  }
+  return groups;
+}
+
 /** The body to post for `text` addressed at `to`. `''` means everyone (the
  * room's broadcast), and an explicit `@` anywhere means the user is addressing
  * people by hand — never rewrite that. */

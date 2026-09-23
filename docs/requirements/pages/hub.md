@@ -112,8 +112,10 @@ completion).
 - Tapping a card makes that agent the composer's **recipient** (and the
   remembered project lead — `pickLead`).
 - **Agent teams** (board #74): agents started as one configured team wear a
-  dashed group frame with the team name as a micro label; the group scrolls
-  as one unit of the strip. The empty-room preset lists configured teams as
+  Chrome-style tab group: a team label and a restrained upper marker;
+  the group scrolls as one unit of the strip. Nested team members remain
+  inside their root team's group, with their full path in hover/ARIA.
+  The empty-room preset lists configured teams as
   one-tap starts beside the single agents, and the "Start a team" picker
   offers them above the ad-hoc pick (the brief applies to every member).
   On the desktop the Agents page is a category page like Settings: the

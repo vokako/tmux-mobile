@@ -44,10 +44,24 @@ without visible state words. One chevron reveals the same list in flow, with
 1/2/4 columns at 360/720px roster-container thresholds and a maximum height of
 `min(240px, 32dvh / --ui-zoom)`, scrolling internally. Native targets remain
 28/44px; 20px avatars, 6px card gaps and 4px internal gaps replace the provisional two-line
-geometry. State stays available in hover/ARIA, team adjacency yields to
-turn-level activity order, and long names may wrap in expanded cells.
+geometry. State stays available in hover/ARIA, turn-level activity order
+places team groups by their highest-ranked member, and long names may wrap in
+expanded cells.
 An empty mention/unread slot reserves width only in the horizontal strip;
 expanded grid cells already have stable widths and release that space to names.
+
+**Team tab group (2026-09-23, #238).** A launched team with at least two live
+members is one contiguous Chrome-style group in the roster; individual member
+tabs and 28/44px targets stay native. Its only extra paint is a neutral
+`--text3` upper marker: absolutely positioned in the existing top 1px
+(`calc(var(--roster-gap) / 2)`), leaving 1px/5px clear to the fine/coarse tab
+paint and adding no row height. The team name is a noninteractive label on
+desktop; compact hides it so long names never crowd the strip, while each
+member's hover/ARIA and touch menu retain the full team path. Under All the
+marker yields to the destinations' single enclosure; solo and one-member
+teams have no group chrome. No team status colour, nested frame, second
+selection command or new motion tempo. Reason, ordering and measured width:
+[hub-composer.md](hub-composer.md#one-roster-above-the-input-one-stop-operation-board-168-2026-09-11).
 
 **Strip density correction (2026-09-12, #176).** The owner's screenshot and
 verbatim correction are in hub-composer.md. Card borders/backgrounds, not

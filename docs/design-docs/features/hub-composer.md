@@ -564,8 +564,33 @@ prompt start while running, ask time while waiting, and end time while
 idle/failed, not the latest tool call. The server's existing no-hook fallback
 is unchanged; the client adds no pane reading, clock, telemetry field or
 history scan.
-Global order replaces `groupRoster`; team paths remain in hover and accessible
-names, rather than forcing members to remain adjacent.
+The 2026-09-11 global-order decision replaced the earlier team frame so every
+agent could move independently. The owner clarified on 2026-09-23 that a
+launched team should read as one Chrome tab group. `sortAgentsForRoster`
+still owns the busy/recency rank; `rosterGroups` gathers members by root team
+path after that sort, placing the whole group where its highest-ranked member
+would have been and preserving the sorted order inside it. Solo agents stay
+individual. Nested team paths (e.g. `dev/review`) share the `dev` group and
+retain the full path in hover/ARIA; a second nested frame would fight the
+small tab bar and the one-enclosure rule for All. A team with only one live
+member has a stable team key but looks exactly like a solo tab. The group
+adds no target, background, row height or status colour. Its neutral
+`--text3` marker occupies the strip's first `calc(--roster-gap / 2)` pixel
+(1px today); the lit tab begins at the existing paint inset (2px fine, 6px
+coarse), with a gap before its top edge. On desktop the team name precedes
+the grouped tabs. At 390px the `dev` label cost 30.39px including insets,
+below the smallest member tab's 74.59px, but valid long team names can
+exceed a tab; compact layout shows the marker only, with full team path in
+the member hover/ARIA and touch-opened menu. In Chromium 152 with three team
+members plus two solos at 390px (coarse CSS values simulated), marker-only
+group overhead is 8px, the group scrolls as one 280px unit, and the strip
+remains 46px high. Under All selection or preview
+the markers disappear: the destinations remain one enclosure. A team is not
+a recipient button; its members remain separate native selection/Stop
+targets. Stopped identities remain outside `.tabs`.
+The wrapper scrolls as one item and wraps members when expanded. A new member
+appears with the existing `appear-pop`; group/member reorders use the one
+`animate:flip` tempo; removal and a one-to-two-member marker change cut.
 
 One shared icon-only CommandButton expands the same keyed list in normal
 flow. The default is one horizontal row; expansion uses 1/2/4 columns and

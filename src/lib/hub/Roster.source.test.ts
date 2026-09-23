@@ -89,7 +89,9 @@ test('the dot reserves the Stop\'s room, constant, and the Stop wears no wash (b
 test('one controlled roster replaces the delayed tap menu whole (#168)', () => {
   assert.match(source, /import \{ ALL_TARGET \} from '\.\/hub-composer\.ts'/u);
   assert.match(source, /const ranked = \$derived\(sortAgentsForRoster\(managedAgents\)\)/u,
-    'owner 07:09 replaces team adjacency with turn-edge recency');
+    'turn-edge recency stays the one sorting authority');
+  assert.match(source, /const groups = \$derived\(rosterGroups\(orderedAgents\)\)/u,
+    'grouping follows the hover-held order instead of re-sorting identities');
   assert.match(source, /onselect: setRecipient = \(\) => \{\}/u);
   assert.match(source, /function selectTarget\(name\) \{\s*setRecipient\(name\);/u, '#196: a click selects; Record only in the menu deselects');
   assert.doesNotMatch(source, /selectTarget\(ALL_TARGET\)/u);
@@ -166,8 +168,9 @@ test('identity, readiness and motion retain their existing authorities', () => {
   assert.match(source, /class:live-dot=\{stateIsLive\(a\.state\)\} style:background=\{stateDotColor\(a\.state\)\}/u);
   assert.doesNotMatch(source, /<span>\{stateLabel\(a\.state\)\}<\/span>|agent-state|stateNeedsYou/u,
     'owner 07:09 retains state wording in accessible/hover facts only');
-  assert.match(source, /\{#each orderedAgents as a \(a\.name\)\}/u);
-  assert.equal([...source.matchAll(/animate:flip=\{\{ duration: moveMs\(\) \}\}/gu)].length, 2);
+  assert.match(source, /\{#each groups as group \(group\.key\)\}/u);
+  assert.match(source, /\{#each group\.members as a \(a\.name\)\}/u);
+  assert.equal([...source.matchAll(/animate:flip=\{\{ duration: moveMs\(\) \}\}/gu)].length, 3);
   assert.doesNotMatch(source, /^\s*\.st \{/mu, 'the shared Hub dot box is not copied');
   assert.match(source, /const slotBackend = \(name\) => \(selectedRow\?\.slots \?\? \[\]\)\.find\(\(s\) => s\.window_name === name\)\?\.command;/u);
   assert.match(source, /img class="ava dim" src=\{backendIcon\(backend\)\}/u);
@@ -295,4 +298,20 @@ test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosur
     'switching tabs is movement: the swap crossfades and reshapes, never snaps');
   assert.doesNotMatch(source, /\.roster::after/u, 'the hairline model stays dead');
   assert.match(rule('.roster'), /background: var\(--hub-tab-frame\)/u, 'the contrast comes from the frame going darker');
+});
+
+test('team tabs are a thin neutral marker, never a second selection enclosure (#238)', () => {
+  assert.match(source, /\{@const named = !!group\.team && group\.members\.length > 1\}/u);
+  assert.match(source, /class:team=\{named\} data-team=\{named \? group\.team : undefined\}/u);
+  assert.match(source, /role=\{named \? 'group' : undefined\} aria-label=\{named \? `\$\{t\('teamsTitle'\)\} \$\{group\.team\}` : undefined\}/u);
+  assert.match(rule('.roster-cluster'), /display: flex; align-items: center; gap: var\(--roster-gap\); flex: none/u,
+    'one non-shrinking unit prevents its tabs from spilling over neighbours on horizontal scroll');
+  assert.match(rule('.roster-cluster.team::before'), /position: absolute; inset: 0 0 auto; height: calc\(var\(--roster-gap\) \/ 2\)/u,
+    'the marker uses the existing 2px gap to paint only the first 1px without growing the strip');
+  assert.match(rule('.roster-cluster.team::before'), /background: var\(--text3\)/u, 'group identity is neutral, not a status colour');
+  assert.match(rule('.roster.compact .team-label'), /display: none/u, 'long team names never consume a whole tab on the phone');
+  assert.match(rule('.tabs.all-lit .roster-cluster.team::before'), /display: none/u, 'All owns the only visible enclosure');
+  assert.match(rule('.cards.expanded .roster-cluster.team'), /flex: 0 1 100%; min-width: 0; flex-wrap: wrap/u,
+    'the expanded group may wrap without overflowing the narrow list');
+  assert.doesNotMatch(source, /onclick=\{[^}]*group\.team/u, 'a team label is not a second recipient command');
 });

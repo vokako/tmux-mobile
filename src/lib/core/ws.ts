@@ -805,9 +805,9 @@ export interface HubAgent {
    * chat participants; direct windows (shells, agents the user started by
    * hand) exist in the terminal drawer only. */
   managed: boolean;
-  /** The configured team this window was started as part of (board #74);
-   * null for a solo agent. Roster hover/ARIA retain this identity independently
-   * of the global activity order. */
+  /** The configured team path this window was started as part of (board #74);
+   * null for a solo agent. The roster groups by root path; hover/ARIA retain
+   * the full sub-team identity. */
   team?: string | null;
   state: string;
   detail: string;

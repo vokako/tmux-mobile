@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
-import { sortAgentsForRoster } from './hub.ts';
+import { rosterGroups, sortAgentsForRoster } from './hub.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
   ts: 0, window: 'w1', kind: 'tool', text: '', ...e,
@@ -118,6 +118,39 @@ test('sortAgentsForRoster: copies the array without mutating or cloning agents',
   const sortedEmpty = sortAgentsForRoster(empty);
   assert.deepEqual(sortedEmpty, []);
   assert.notEqual(sortedEmpty, empty);
+});
+
+test('rosterGroups: team and sub-team stay together at their most active member', () => {
+  const agents = [
+    ag({ name: 'solo-busy', state: 'running', since: 90, window: 1 }),
+    ag({ name: 'reviewer', team: 'dev/review', state: 'waiting', since: 80, window: 2 }),
+    ag({ name: 'another-busy', state: 'running', since: 70, window: 3 }),
+    ag({ name: 'dev-lead', team: 'dev', state: 'idle', since: 50, window: 4 }),
+    ag({ name: 'ops', team: 'ops', state: 'idle', since: 40, window: 5 }),
+    ag({ name: 'solo-idle', state: 'idle', since: 30, window: 6 }),
+  ];
+  const ranked = sortAgentsForRoster(agents);
+  const groups = rosterGroups(ranked);
+  assert.deepEqual(groups.map(({ key, team, members }) => [key, team, members.map(({ name }) => name)]), [
+    ['agent:solo-busy', null, ['solo-busy']],
+    ['team:dev', 'dev', ['reviewer', 'dev-lead']],
+    ['agent:another-busy', null, ['another-busy']],
+    ['team:ops', 'ops', ['ops']],
+    ['agent:solo-idle', null, ['solo-idle']],
+  ]);
+  assert.deepEqual(ranked, sortAgentsForRoster(agents), 'grouping never changes the sorting authority');
+  assert.equal(groups[1]?.members[0], agents[1], 'the group holds the original agent objects');
+});
+
+test('rosterGroups: empty or missing team paths do not create false groups', () => {
+  const agents = Object.freeze([
+    Object.freeze(ag({ name: 'a', team: '' })),
+    Object.freeze(ag({ name: 'b', team: null })),
+  ]);
+  assert.deepEqual(rosterGroups(agents).map((g) => g.key), ['agent:a', 'agent:b']);
+  assert.equal(rosterGroups([ag({ name: 'only', team: 'dev/review' })])[0]?.key, 'team:dev',
+    'a one-member team keeps its group key as a second member joins');
+  assert.equal(rosterGroups([]).length, 0);
 });
 
 

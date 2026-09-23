@@ -986,7 +986,30 @@ test('roster disclosure keeps its cards, remembers each room, and holds order du
     bobStop.click(); await app.flush();
     assert.deepEqual(interrupts, ['bob']);
     assert.equal(selectedCard(app.document), 'alice');
-    assert.deepEqual(order(), ['bob', 'alice', 'charlie']);
+    assert.deepEqual(order(), ['bob', 'charlie', 'alice'], 'the whole team follows its most active member');
+  } finally { await app.close(); }
+});
+
+test('a second live team member reveals group chrome without remounting its first tab (#238)', { timeout: 60000 }, async (context) => {
+  const agents = [
+    { name: 'alice', window: 0, managed: true, agent: 'kiro', state: 'idle', since: 10 },
+    { name: 'bob', window: 1, managed: true, agent: 'codex', state: 'running', since: 20, team: 'review' },
+  ];
+  const app = await composerFixture(context, { hubAgents: async () => ({ agents }) });
+  try {
+    const bob = stripCard(app.document, 'bob');
+    const cluster = bob.closest('.roster-cluster')!;
+    assert.equal(cluster.hasAttribute('data-team'), false, 'one live member is an ordinary tab');
+    agents.push({ name: 'charlie', window: 2, managed: true, agent: 'codex', state: 'idle', since: 5, team: 'review' });
+    await app.advance(5000);
+    assert.equal(stripCard(app.document, 'bob'), bob, 'joining never remounts the first member');
+    assert.equal(bob.closest('.roster-cluster'), cluster, 'the stable group key retains the wrapper');
+    assert.equal(cluster.getAttribute('data-team'), 'review');
+    assert.deepEqual([...cluster.querySelectorAll<HTMLElement>('.acard[data-agent]')].map((x) => x.dataset.agent), ['bob', 'charlie']);
+    agents.pop();
+    await app.advance(5000);
+    assert.equal(bob.closest('.roster-cluster'), cluster, 'losing the second member only removes group chrome');
+    assert.equal(cluster.hasAttribute('data-team'), false);
   } finally { await app.close(); }
 });
 

@@ -4,7 +4,7 @@
   import { untrack } from 'svelte';
   import { ALL_TARGET } from './hub-composer.ts';
   import { backendIcon } from '../core/agents.ts';
-  import { backendColor, stateDotColor, stateIsLive, chipExtras, ctxColor, fmtElapsed, modelLabel, sortAgentsForRoster } from './hub.ts';
+  import { backendColor, stateDotColor, stateIsLive, chipExtras, ctxColor, fmtElapsed, modelLabel, rosterGroups, sortAgentsForRoster } from './hub.ts';
   import { hoverInfo } from '../ui/hover.ts';
   import { longpress } from '../ui/longpress.ts';
   import { anchorOf } from '../ui/placement.ts';
@@ -92,6 +92,7 @@
     const held = new Set(heldOrder.names);
     return [...heldOrder.names.map((name) => current.get(name)).filter(Boolean), ...ranked.filter((a) => !held.has(a.name))];
   });
+  const groups = $derived(rosterGroups(orderedAgents));
   $effect(() => {
     void selected; void expanded;
     if (cardsEl) { cardsEl.scrollLeft = 0; cardsEl.scrollTop = 0; }
@@ -226,7 +227,13 @@
           expanded={recipient === ALL_TARGET ? allMenuOpen : undefined}
           disabled={!selected || !roomReady} onclick={onall} />
       </span>
-      {#each orderedAgents as a (a.name)}
+      {#each groups as group (group.key)}
+      {@const named = !!group.team && group.members.length > 1}
+      <div class="roster-cluster" class:team={named} data-team={named ? group.team : undefined}
+        role={named ? 'group' : undefined} aria-label={named ? `${t('teamsTitle')} ${group.team}` : undefined}
+        animate:flip={{ duration: moveMs() }}>
+        {#if named}<span class="team-label" aria-hidden="true">{group.team}</span>{/if}
+      {#each group.members as a (a.name)}
         {@const mentioned = extras.includes(a.name) || extras.includes(ALL_TARGET)}
         {@const pending = interrupting.includes(a.name)}
         <!-- Selection and interruption are sibling native targets, never nested buttons. -->
@@ -272,6 +279,8 @@
               style:--ctx-amount={`${pct}%`} style:--ctx-color={ctxColor(a.vitals.context_pct)}></div>
           {/if}
         </div>
+      {/each}
+      </div>
       {/each}
       </div>
       {#each stopped as name (name)}
@@ -360,6 +369,19 @@
      the container and wrap inside itself. */
   .tabs { display: flex; align-items: center; gap: var(--roster-gap); flex: none; }
   .cards.expanded .tabs { flex: 0 1 auto; min-width: 0; flex-wrap: wrap; align-content: start; }
+  /* Chrome-style group identity is a label and an upper marker, not a card
+     behind the cards. The group is one flex item in the scrolling strip;
+     solos use the same wrapper without the group chrome. */
+  .roster-cluster { display: flex; align-items: center; gap: var(--roster-gap); flex: none; position: relative; }
+  .roster-cluster.team { margin-inline: var(--roster-gap); padding-inline: var(--roster-gap); }
+  .roster-cluster.team::before {
+    content: ''; position: absolute; inset: 0 0 auto; height: calc(var(--roster-gap) / 2);
+    border-radius: var(--ui-radius-control); background: var(--text3); pointer-events: none;
+  }
+  .team-label { padding-inline: var(--roster-gap); white-space: nowrap; color: var(--text2); font: 600 var(--fs-meta)/1 var(--font-display); }
+  .roster.compact .team-label { display: none; }
+  .tabs.all-lit .roster-cluster.team::before { display: none; }
+  .cards.expanded .roster-cluster.team { flex: 0 1 100%; min-width: 0; flex-wrap: wrap; }
   /* MULTI-SELECT IS ONE ENCLOSURE (owner, 2026-09-22: "如果是选择多个 Agent，
      就用一个大的包边。注意 Agent 和 Agent 之间的卡片不要有很多线拐来拐去，就是
      一个大的包边"): under All — and while the All tab previews it — the
