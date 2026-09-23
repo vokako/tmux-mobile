@@ -38,6 +38,7 @@ function row(id: string, live: boolean, lastSeen?: number): ProjectRow {
       autostart: false,
       created_at: 100,
       last_seen_at: lastSeen,
+      last_up_at: lastSeen,
       archived: false,
     },
     slots: [],
@@ -90,13 +91,30 @@ test('a live agent window carries its icon from the running process', () => {
   assert.ok(chips[0]?.agentIcon?.endsWith('kiro.svg'));
 });
 
-test('live projects sort first, then by when tmux last had them', () => {
+test('live projects sort first, then by when they last came up', () => {
   const rows = sortRows([
     row('cold', false, 500),
     row('warm', false, 900),
     row('open', true, 100),
   ]);
   assert.deepEqual(rows.map((r) => r.project.id), ['open', 'warm', 'cold']);
+});
+
+test('an open project outranks a closed one however recent its conversation (owner, 2026-09-23)', () => {
+  const closed = row('closed', false, 900); closed.project.room = 'room:closed';
+  const open = row('open', true, 100);
+  const rows = sortRows([closed, open], { 'room:closed': Date.now() });
+  assert.deepEqual(rows.map((r) => r.project.id), ['open', 'closed']);
+});
+
+test('a project created a moment ago heads its group even before its first message', () => {
+  const talked = row('talked', true, 100); talked.project.room = 'room:talked';
+  const fresh = row('fresh', true); fresh.project.created_at = 2_000;
+  const rows = sortRows([talked, fresh], { 'room:talked': 1_500_000 });
+  assert.deepEqual(rows.map((r) => r.project.id), ['fresh', 'talked'],
+    'an empty new project no longer falls to the bottom for having no conversation');
+  const later = sortRows([talked, fresh], { 'room:talked': 2_500_000 });
+  assert.deepEqual(later.map((r) => r.project.id), ['talked', 'fresh'], 'a newer message wins again');
 });
 
 test('a project with no recorded activity falls back to its creation time', () => {
@@ -119,22 +137,22 @@ test('Chat and Terminal project rows share one updated time and one label', () =
   assert.equal(projectAgeLabel(p, {}, 900_000 + 2 * 3600_000), '2h');
 });
 
-test('the conversation orders the sidebar, not whichever session tmux touched last', () => {
-  // The symptom this fixes: `last_seen_at` is rewritten by the capturer on every
-  // tick, so for a live project it always means "just now" — every live project
-  // floats up and their order is arbitrary.
-  const a = row('a', true, 1_000_000);   // live, captured a moment ago
-  const b = row('b', true, 1_000_001);   // live, captured a moment later
+test('open first, then activity: the conversation counts, the capturer tick does not', () => {
+  // `last_seen_at` is rewritten by the capturer on every tick, so for a live
+  // project it always means "just now" — it orders nothing and is ignored.
+  const a = row('a', true, 1_000_000);   // live, came up a moment ago
+  const b = row('b', true, 1_000_001);   // live, came up a moment later
   const c = row('c', false, 500);        // stopped ages ago
   a.project.room = 'proj:a';
   b.project.room = 'proj:b';
   c.project.room = 'proj:c';
-  // We talked in C most recently, then A. Never in B.
+  // We talked in C most recently, then A. Never in B. C is CLOSED, so it goes
+  // last regardless (owner, 2026-09-23: 已打开的优先排在前面).
   const talk = { 'proj:c': 9_000_000_000, 'proj:a': 8_000_000_000 };
-  assert.deepEqual(sortRows([a, b, c], talk).map((r) => r.project.id), ['c', 'a', 'b'],
-    'newest conversation first; the one nobody talked in goes last');
+  assert.deepEqual(sortRows([a, b, c], talk).map((r) => r.project.id), ['a', 'b', 'c'],
+    'open projects first; among them the newest conversation beats a mere up');
 
-  // Without the map, nothing changes: the Projects page keeps its own ordering.
+  // Without the map, the up times order the open ones and the closed one stays last.
   assert.deepEqual(sortRows([a, b, c]).map((r) => r.project.id), ['b', 'a', 'c']);
 
   // A project with no `room` recorded falls back to the derived id, because the
@@ -145,10 +163,10 @@ test('the conversation orders the sidebar, not whichever session tmux touched la
     .map((r) => r.project.id), ['d', 'c']);
 
   // Seconds vs milliseconds: the projects table is in seconds and the bus is in
-  // ms, so a conversation must never lose to a raw `last_seen_at`.
+  // ms, so a 2023 conversation must beat a 2020 up, not lose to its raw number.
   const talked = row('talked', false, 1);
   talked.project.room = 'proj:talked';
-  const busy = row('busy', false, 1_800_000_000);   // seconds: ~2027
+  const busy = row('busy', false, 1_600_000_000);   // seconds: 2020
   assert.deepEqual(
     sortRows([busy, talked], { 'proj:talked': 1_700_000_000_000 }).map((r) => r.project.id),
     ['talked', 'busy'],

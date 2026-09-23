@@ -138,34 +138,29 @@ export function projectAgeLabel(
 }
 
 /**
- * Order projects by the CONVERSATION, newest first — "把我们最近的对话默认排在最上
- * 面" (owner, 2026-08-19). `talk` maps room id → newest message timestamp (ms),
- * from `hub_rooms`.
+ * Order projects: OPEN ones first, then by activity, newest first (owner,
+ * 2026-09-23: "已打开的优先排在前面，没有打开的排在后面…然后分别按照时间由近到远").
+ * Activity is the newest of the room's last message (`talk`: room id → ms,
+ * from `hub_rooms`) and when the project last came up or was created — so a
+ * project created a moment ago, still empty, heads its group instead of
+ * falling to the bottom for having no conversation yet (the owner's report).
  *
- * Why the conversation and not `last_seen_at`: the capturer writes `last_seen_at`
- * on every tick, so for a LIVE project it always means "just now" — every live
- * project floats to the top and their order is whichever one tmux was captured
- * last, which is no signal at all. A message timestamp only moves when somebody
- * actually says something.
- *
- * Projects nobody has talked in keep the old rule underneath (live first, then
- * when tmux last had the session, then creation): there is no conversation to
- * order them by, and they should not outrank one that exists.
+ * Not `last_seen_at`: the capturer rewrites it on every tick, so for a live
+ * project it always means "just now" and orders nothing (2026-08-19). Rows
+ * are seconds, the bus is milliseconds: normalise before comparing, or a
+ * creation time looks like 1970 next to a message.
  *
  * The `talk` argument stays optional for project-only servers without Hub
  * support; production Chat, Terminal and Board all pass the same grouped map.
  */
 export function sortRows(rows: ProjectRow[], talk: Record<string, number> = {}): ProjectRow[] {
-  // seconds in the projects table, milliseconds on the bus: normalise before any
-  // comparison, or a creation time looks like 1970 next to a message.
-  const seen = (r: ProjectRow) =>
-    (r.project.last_seen_at ?? r.project.last_up_at ?? r.project.created_at ?? 0) * 1000;
-  const said = (r: ProjectRow) => talk[r.project.room ?? `proj:${r.project.session}`] ?? 0;
+  const activity = (r: ProjectRow) => Math.max(
+    talk[r.project.room ?? `proj:${r.project.session}`] ?? 0,
+    (r.project.last_up_at ?? r.project.created_at ?? 0) * 1000,
+  );
   return rows.slice().sort((a, b) => {
-    const [sa, sb] = [said(a), said(b)];
-    if (sa !== sb) return sb - sa;          // both talked, or one did: newest wins
     if (a.live !== b.live) return a.live ? -1 : 1;
-    return seen(b) - seen(a);
+    return activity(b) - activity(a);
   });
 }
 
