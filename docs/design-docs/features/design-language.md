@@ -80,7 +80,9 @@ stub. The feet take no pointer and reach into a neighbour's empty bottom
 corner; tab gaps stay `--roster-gap`. The band's top edge is the strip's
 floor line: a full-width `--bubble-line` pixel painted as the strip's
 background, which each lit enclosure breaks and its feet turn into.
-Expanded list cards keep their closed row radius and no feet. The All crowd
+Expanded list cards keep their closed row radius and no feet. In the
+collapsed row the tab chain stretches to the strip's height: a tab is
+attached to the floor, so its box reaches it however tall the strip is. The All crowd
 has a named 20px icon metric, not avatar size plus a spacing token, so
 the group symbol stays legible when flex gaps change. No added row height
 or paint over another target. Switching tabs crossfades paint colour
@@ -771,8 +773,9 @@ by the contract above, not extended by new page-local overrides.
   一个稍微淡白色的边"). The contrast comes from the strip's `--hub-tab-frame`
   going DARKER beneath (per-theme opaque, dark `#06060a`, light `#e2e2e8`),
   never from a brighter tab ("会不会有点过亮了？…把其他地方变得更暗的方式来解
-  决"). The lit tab overlaps the band's top edge by 1px with the same fill, so
-  the outline breaks exactly at the junction. The band's top edge is the
+  决"). The lit tab's fill overlaps the floor line and the band's top edge by
+  1px through a join layer of its own (the paint box and its strokes end at
+  the floor), so the outline breaks exactly at the junction. The band's top edge is the
   strip's faint floor line, which the lit enclosure breaks and its outward
   feet turn into (2026-09-23; the earlier "中间分隔的横线不要有" was about a
   line that also crossed under the lit tab). MULTI-SELECT IS ONE ENCLOSURE: under All (and while All previews)

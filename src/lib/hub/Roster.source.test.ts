@@ -296,7 +296,14 @@ test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosur
   // The lit tab overlaps the band's top edge by 1px with the SAME fill, so the
   // outline breaks exactly at the junction — no seam, no stub of line.
   assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel \{ z-index: 1; \}/u);
-  assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel::before \{[\s\S]{0,240}?inset: var\(--control-paint-inset\) 0 -1px; border-bottom: 0;/u);
+  assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel::before \{[\s\S]{0,480}?inset: var\(--control-paint-inset\) 0 0; border-bottom: 0;/u,
+    'the fill ends at the floor line it covers; reaching into the band put a tick of side stroke under the line');
+  assert.doesNotMatch(source, /inset: 0 0 -1px/u, 'no enclosure PAINT reaches into the band: its strokes would tick under the floor line');
+  assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel::after,\n\s*\.cards:not\(\.expanded\) \.tabs\.all-lit::after,\n\s*\.cards:not\(\.expanded\) \.roster-cluster\.team-lit::before \{\n\s*content: ''; position: absolute; inset: auto 0 -1px; height: 2px;\n\s*background: var\(--bubble-in\)/u,
+    'one join layer for every lit enclosure: fill over the floor line and 1px into the band, strokes untouched (a 1px layer left 35 at 1.5x)');
+  assert.doesNotMatch(source, /\.roster-cluster\.team-lit::before \{ display: none; \}/u, 'the lit group\'s baseline is its join, not hidden');
+  assert.match(source, /\.cards:not\(\.expanded\) \.tabs, \.cards:not\(\.expanded\) \.roster-cluster, \.cards:not\(\.expanded\) \.acard \{ align-self: stretch; \}/u,
+    'a tab is attached to the floor, so its box reaches it however tall the strip is (owner\'s macOS build, 2026-09-23)');
   assert.match(rule('.cards:not(.expanded) .acard.sel::before'), /border-radius: var\(--ui-radius-panel\) var\(--ui-radius-panel\) 0 0/u,
     'the tab side meets its outward tangent instead of turning inward');
   assert.match(rule('.roster.compact .cards:not(.expanded) .acard.sel::before'), /inset-block-start: var\(--roster-gap\)/u,

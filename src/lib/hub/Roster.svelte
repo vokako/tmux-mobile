@@ -409,6 +409,13 @@
      the container and wrap inside itself. */
   .tabs { display: flex; align-items: center; gap: var(--roster-gap); flex: none; }
   .cards.expanded .tabs { flex: 0 1 auto; min-width: 0; flex-wrap: wrap; align-content: start; }
+  /* The tab chain spans the strip's full height: a tab is attached to the
+     FLOOR, so its box must reach it. Centred at its 34px minimum, it floated
+     whenever any sibling made the strip taller — the owner's macOS build
+     showed the floor line running under both feet and the arcs landing about
+     a pixel above it (2026-09-23, 15:07). The + and the disclosure stay
+     centred. */
+  .cards:not(.expanded) .tabs, .cards:not(.expanded) .roster-cluster, .cards:not(.expanded) .acard { align-self: stretch; }
   /* The group is one flex item in the scrolling strip; solos use the same
      wrapper without group chrome. Its baseline sits BEHIND a lit tab, whose
      fill covers the line and whose raised edge opens into the composer. */
@@ -430,12 +437,27 @@
   .team-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .roster-cluster.team-lit { background: var(--bubble-in); border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0; z-index: 1; }
   .roster-cluster.team-lit::after {
-    content: ''; position: absolute; inset: 0 0 -1px; border: 1px solid var(--bubble-line); border-bottom: 0;
+    content: ''; position: absolute; inset: 0; border: 1px solid var(--bubble-line); border-bottom: 0;
     border-radius: inherit; pointer-events: none;
   }
   .cards.expanded .roster-cluster.team-lit::after { inset: 0; border-bottom: 1px solid var(--bubble-line); }
   .roster-cluster.team-lit .acard::before { background: transparent; border-color: transparent; }
-  .roster-cluster.team-lit::before { display: none; }
+  /* The join: the enclosure's own fill over the floor-line pixel and one
+     pixel into the band — for a tab, a team and All alike, as a layer of its
+     own. The paint box ends at the floor, so its side strokes end there too
+     (reaching into the band, they ticked a pixel below the floor line:
+     owner's screenshot, 2026-09-23 15:07), and this layer is what keeps a
+     fractional device scale from letting part of a row of floor line or
+     frame through at the junction. Measured under the tab, band 31: without
+     it 37 at 1.5x and 27 at 1.25x; a 1px layer over the floor line alone
+     still 35 and 27; this 2px overlap 31 and 31. For a lit team the group
+     baseline becomes this join. */
+  .cards:not(.expanded) .acard.sel::after,
+  .cards:not(.expanded) .tabs.all-lit::after,
+  .cards:not(.expanded) .roster-cluster.team-lit::before {
+    content: ''; position: absolute; inset: auto 0 -1px; height: 2px;
+    background: var(--bubble-in); pointer-events: none;
+  }
   /* ONE foot for every lit enclosure — a tab, a team, All. The arc's ring
      sits ON the enclosure's side-stroke column, so it leaves that stroke
      tangentially instead of stepping 1px beside it. The foot box reaches one
@@ -482,7 +504,7 @@
      rounded lower corners made it a closed box sitting on the band (owner,
      2026-09-23: "成了一个圆角矩形"). */
   .tabs.all-lit::before {
-    content: ''; position: absolute; inset: 0 0 -1px; pointer-events: none;
+    content: ''; position: absolute; inset: 0; pointer-events: none;
     background: var(--bubble-in); border: 1px solid var(--bubble-line); border-bottom: 0;
     border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0;
   }
@@ -533,9 +555,12 @@
      stays a closed rounded box. */
   .cards:not(.expanded) .acard.sel { z-index: 1; }
   .cards:not(.expanded) .acard.sel::before {
-    /* -1px: the tab's own fill covers the band's top edge under it, so the
-       enclosure is continuous and no stub of line shows at the junction. */
-    inset: var(--control-paint-inset) 0 -1px; border-bottom: 0;
+    /* The fill ends AT the floor. The strip's last pixel is the floor line,
+       which this covers; the band beneath starts at the same coordinate, so
+       the join below overlaps it. It once reached 1px INTO the band, and so
+       did its side strokes — a bright tick under each lit edge below the
+       floor line (owner's screenshot, 2026-09-23 15:07). */
+    inset: var(--control-paint-inset) 0 0; border-bottom: 0;
     border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0;
   }
   .cards:not(.expanded) .tabs:not(.all-lit) .roster-cluster:not(.team-lit) .acard.sel::before {

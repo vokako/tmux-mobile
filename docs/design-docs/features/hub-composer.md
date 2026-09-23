@@ -205,7 +205,7 @@ tab joins.
 **Multi-select is ONE enclosure** ("如果是选择多个 Agent，就用一个大的包边。
 注意 Agent 和 Agent 之间的卡片不要有很多线拐来拐去"): under All — and while
 the All tab PREVIEWS it — `.tabs.all-lit` makes the DESTINATIONS GROUP the
-lit tab (one fill, one edge, `margin-bottom: -1px` into the band) and
+lit tab (one fill, one edge, its join over the floor line) and
 switches every card's own paint off. No border logic between siblings exists
 to zigzag, and the per-card `preview` class is gone with it: hovering All
 shows exactly the shape clicking produces.
@@ -622,7 +622,7 @@ reference (2026-09-23, 558x88) supersedes the first 1px upper marker:
 the team name is a native choice in a `--control-surface` pill, sized
 within the existing row; a `--text2` baseline sits in the group wrapper's
 bottom pixel, behind the member cards. The selected member already has
-`z-index: 1` and its bubble fill extends 1px into the band: it covers the
+`z-index: 1` and its bubble fill covers the floor-line pixel: it covers the
 baseline beneath that tab. Its existing open-bottom outline takes `--text2`
 only inside a group, rising from the group's baseline without sealing the
 tab off from the composer. Solo tabs keep the normal faint bubble edge.
@@ -682,6 +682,22 @@ stroke lies over band fill: measured luminance 46 against 65 at the
 junction, which reads as a thinner line. The floor line now lies on one
 pixel of `--bubble-in` too. Probe columns at 1x, 1.25x, 1.5x and 2x: no
 stub under the arc, floor line 65–67 against the tab edge's 65.
+The owner's own screenshots (15:07, macOS desktop, a 2x display at about
+1.4 UI zoom) still showed both arcs landing a pixel ABOVE the floor line,
+the line running on under each foot, and a bright tick of side stroke
+below the line at each lit edge. WebKit cannot run on this host, so the
+cause was read off the pixels: the tick sat on the floor line's rows, so
+the card's bottom was a pixel above the strip's — the card was CENTRED at
+its 34px minimum in a strip that something had made taller. Now the tab
+chain (`.tabs`, the group, the card) stretches to the strip's height in the
+collapsed row, so a tab reaches the floor however tall the strip is; the
+paint box ends AT the floor instead of 1px into the band, so its side
+strokes cannot tick below the line; and the fill's overlap of the floor
+line moved to a join layer of its own (`::after` on a tab and on All, the
+group baseline on a lit team) — without it a fractional scale let part of
+a row of floor line or frame through under the tab (Chromium: lum 37 at
+1.5x, 27 at 1.25x, band 31; 31 with it). The strip's scrollport clips at
+the floor, so no enclosure paints into the band.
 The owner's 09:38 report of a WHITE LINE while switching tabs exposed two
 transient join faults. Chromium 152 at 390px measured the incoming bottom
 inset at 6px immediately after selection, 3.14px after 64ms and -1px only
