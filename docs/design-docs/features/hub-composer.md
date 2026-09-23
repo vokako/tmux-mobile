@@ -701,6 +701,37 @@ the floor, so no enclosure paints into the band. The filter mark is the
 funnel the menu row wears, not a magnifier (owner: "沙漏过滤的样式"), and it
 sits beside the marks column rather than in it — three stacked marks would
 have exceeded the strip and grown it.
+
+**The enclosure is ONE marker that travels** (owner, 2026-09-23 16:58: "点击
+不同 Agent 的标签进行切换时，会看到好像先标了一个框，然后又闪过去了…切换的动
+画不是很丝滑"; motion principle 14). Until then each card lit in place: its
+fill and edge crossfaded on `--t-move` while its feet, its opaque floor and
+the join popped in the first frame — a frame appearing, then the fill
+catching up, which is the flash. Now the lit enclosure — fill, edge, both
+feet and the join into the band — is one `.slide-pill.tab` inside `.tabs`,
+placed by the shared `slideIndicator` (`ui/indicator.ts`, the same
+mechanism as the rail and every segmented control) and gliding by
+transform and width on `--t-move` from the old destination to the new one.
+Its target is the lit card (`.acard.sel[data-agent]`), the lit team group
+(`.roster-cluster.team-lit`) or, under All and while All previews, the
+group's own extent (an inert `.tabs-extent` box), so a card, a team and All
+are the same marker at a different width; a lit member of a group wears the
+raised `--text2` contour through `.raised`, and only that colour crossfades.
+In the strip a lit card, team or All paints nothing of its own any more (the
+hover wash stays on unlit cards, as in Chrome); the wrapped list keeps its
+closed boxes per element, and the marker is unmounted there. The marker is
+the LAST child of `.tabs` (the All tab stays its first) and sits under the
+cards and over the group baseline: both are `z-index: -1` inside `.tabs`,
+now a stacking context, and the marker comes later in the DOM, so the
+baseline shows exactly where the marker is not. The measure is layout (offsets),
+so the marker is not fooled by the press scale or the root zoom; its box is
+integer offsets, up to half a pixel wider than the card, inside the gap.
+Frames at a 2.5s tempo: card → card, card → team and team → All each show
+one enclosure in flight with both feet, nothing popping. Same day, the band
+under the strip got equal air above and below the field (6px, was 10px
+below; compact 3px, was 8px) and square lower corners — the band's sides
+meet the sidebar and the drawer, and the rounded corner left a notch
+against them ("左下角和右下角…两边的侧边栏应该都是直角…会有一个小缺口").
 The owner's 09:38 report of a WHITE LINE while switching tabs exposed two
 transient join faults. Chromium 152 at 390px measured the incoming bottom
 inset at 6px immediately after selection, 3.14px after 64ms and -1px only

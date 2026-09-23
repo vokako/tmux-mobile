@@ -12,6 +12,7 @@
   import { flip } from 'svelte/animate';
   import { moveMs } from '../ui/motion.ts';
   import { scrollEdges } from '../ui/scroll-edges.ts';
+  import { slideIndicator } from '../ui/indicator.ts';
 
   let {
     selected = '', compact = false, managedAgents = [], stopped = [], selectedRow = null,
@@ -95,6 +96,13 @@
     return [...heldOrder.names.map((name) => current.get(name)).filter(Boolean), ...ranked.filter((a) => !held.has(a.name))];
   });
   const groups = $derived(rosterGroups(orderedAgents));
+  /* The ONE marker's destination (motion principle 14): the whole group under
+     All (and while All previews), the lit team, or the lit card. Empty when
+     nothing in the strip is the recipient (the room itself). */
+  const litTeam = $derived(targetTeam(recipient));
+  const litInGroup = $derived(!allLit && !litTeam && groups.some((g) => !!g.team && g.members.length > 1 && g.members.some((m) => m.name === recipient)));
+  const markerTarget = $derived(allLit ? ':scope > .tabs-extent' : litTeam ? '.roster-cluster.team-lit' : managedAgents.some((a) => a.name === recipient) ? '.acard.sel[data-agent]' : '');
+  const markerKey = $derived([recipient, allLit, expanded, orderedAgents.map((a) => a.name).join(',')].join('|'));
   $effect(() => {
     void selected; void expanded;
     if (cardsEl) { cardsEl.scrollLeft = 0; cardsEl.scrollTop = 0; }
@@ -214,7 +222,7 @@
            +, a stopped identity and the empty space after them are not
            destinations, and framing them was what made the All enclosure "有点
            过分大了" (owner, 2026-09-22). -->
-      <div class="tabs" class:all-lit={allLit}>
+      <div class="tabs" class:all-lit={allLit} use:slideIndicator={{ key: markerKey, active: markerTarget, hidden: expanded || !markerTarget }}>
       <!-- Everyone: the PINNED tab at the strip's head (board #236, owner,
            2026-09-22: "不用隐藏，我不展开就看不到吧…都显示全了"). Chrome pins a
            tab as an icon-only tab at the far left; this is that — always in
@@ -296,13 +304,23 @@
                 onclick={(e) => { e.stopPropagation(); interrupt(a.name); }} />
             </span>
           {/if}
-          <span class="tab-foot left" aria-hidden="true"></span><span class="tab-foot right" aria-hidden="true"></span>
         </div>
       {/each}
-      <span class="tab-foot left" aria-hidden="true"></span><span class="tab-foot right" aria-hidden="true"></span>
       </div>
       {/each}
-      <span class="tab-foot left" aria-hidden="true"></span><span class="tab-foot right" aria-hidden="true"></span>
+      <!-- ONE HIGHLIGHT THAT TRAVELS (motion principle 14): the lit
+           enclosure — fill, edge, both feet, the join into the band — is
+           this one marker, placed by slideIndicator, gliding from the old
+           destination to the new one. A card, a team and All are the same
+           marker at a different width. Last in the group so the All tab
+           stays its first child; it paints beneath the cards by z-index. -->
+      {#if !expanded && markerTarget}
+        <span class="slide-pill tab" class:raised={litInGroup} aria-hidden="true">
+          <span class="tab-foot left"></span><span class="tab-foot right"></span>
+        </span>
+      {/if}
+      <!-- The measurement box for All: the group's own extent. -->
+      <span class="tabs-extent" aria-hidden="true"></span>
       </div>
       {#each stopped as name (name)}
         {@const backend = slotBackend(name)}
@@ -407,7 +425,7 @@
      tabs: group right 198 vs. last tab right 368, stopped card left 200).
      The wrapped list is the opposite case: there the group SHOULD shrink to
      the container and wrap inside itself. */
-  .tabs { display: flex; align-items: center; gap: var(--roster-gap); flex: none; }
+  .tabs { display: flex; align-items: center; gap: var(--roster-gap); flex: none; position: relative; z-index: 0; }
   .cards.expanded .tabs { flex: 0 1 auto; min-width: 0; flex-wrap: wrap; align-content: start; }
   /* The tab chain spans the strip's full height: a tab is attached to the
      FLOOR, so its box must reach it. Centred at its 34px minimum, it floated
@@ -423,7 +441,7 @@
   .roster-cluster.team { margin-inline: var(--roster-gap); padding-inline: var(--roster-gap); }
   .cards:not(.expanded) .roster-cluster.team::before {
     content: ''; position: absolute; inset: auto var(--roster-gap) 0;
-    height: calc(var(--roster-gap) / 2); background: var(--text2); pointer-events: none;
+    height: calc(var(--roster-gap) / 2); background: var(--text2); pointer-events: none; z-index: -1;
   }
   .team-label {
     display: inline-flex; align-items: center; min-height: var(--control-height);
@@ -435,29 +453,15 @@
   .team-label:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
   .roster.compact .team-label { min-width: var(--control-height); min-height: var(--control-height); max-width: calc(2 * var(--control-height)); }
   .team-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .roster-cluster.team-lit { background: var(--bubble-in); border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0; z-index: 1; }
-  .roster-cluster.team-lit::after {
-    content: ''; position: absolute; inset: 0; border: 1px solid var(--bubble-line); border-bottom: 0;
+  /* The wrapped (expanded) list is a list: there a lit team is a closed
+     rounded box of its own, and its member cards draw no border inside it. In
+     the single-row strip the marker below carries the enclosure. */
+  .cards.expanded .roster-cluster.team-lit { background: var(--bubble-in); border-radius: var(--ui-radius-panel); }
+  .cards.expanded .roster-cluster.team-lit::after {
+    content: ''; position: absolute; inset: 0; border: 1px solid var(--bubble-line);
     border-radius: inherit; pointer-events: none;
   }
-  .cards.expanded .roster-cluster.team-lit::after { inset: 0; border-bottom: 1px solid var(--bubble-line); }
-  .roster-cluster.team-lit .acard::before { background: transparent; border-color: transparent; }
-  /* The join: the enclosure's own fill over the floor-line pixel and one
-     pixel into the band — for a tab, a team and All alike, as a layer of its
-     own. The paint box ends at the floor, so its side strokes end there too
-     (reaching into the band, they ticked a pixel below the floor line:
-     owner's screenshot, 2026-09-23 15:07), and this layer is what keeps a
-     fractional device scale from letting part of a row of floor line or
-     frame through at the junction. Measured under the tab, band 31: without
-     it 37 at 1.5x and 27 at 1.25x; a 1px layer over the floor line alone
-     still 35 and 27; this 2px overlap 31 and 31. For a lit team the group
-     baseline becomes this join. */
-  .cards:not(.expanded) .acard.sel::after,
-  .cards:not(.expanded) .tabs.all-lit::after,
-  .cards:not(.expanded) .roster-cluster.team-lit::before {
-    content: ''; position: absolute; inset: auto 0 -1px; height: 2px;
-    background: var(--bubble-in); pointer-events: none;
-  }
+  .cards.expanded .roster-cluster.team-lit .acard::before { background: transparent; border-color: transparent; }
   /* ONE foot for every lit enclosure — a tab, a team, All. The arc's ring
      sits ON the enclosure's side-stroke column, so it leaves that stroke
      tangentially instead of stepping 1px beside it. The foot box reaches one
@@ -472,7 +476,7 @@
      z-index 1 lifts it over a team enclosure's own stroke, which paints
      after it. */
   .tab-foot {
-    display: none; position: absolute; z-index: 1; bottom: 0;
+    display: block; position: absolute; z-index: 1; bottom: 0;
     width: calc(var(--roster-foot-radius) + 1px); height: var(--roster-foot-radius); pointer-events: none;
   }
   .tab-foot.left {
@@ -486,30 +490,54 @@
   .tab-foot::after { content: ''; position: absolute; top: 0; bottom: 0; width: var(--roster-foot-radius); box-sizing: border-box; border: 0 solid var(--card-line, var(--bubble-line)); border-bottom-width: 1px; }
   .tab-foot.left::after { left: 0; border-right-width: 1px; border-bottom-right-radius: var(--roster-foot-radius); }
   .tab-foot.right::after { right: 0; border-left-width: 1px; border-bottom-left-radius: var(--roster-foot-radius); }
-  .cards:not(.expanded) .tabs:not(.all-lit) .roster-cluster:not(.team-lit) .acard.sel .tab-foot,
-  .cards:not(.expanded) .roster-cluster.team-lit > .tab-foot,
-  .cards:not(.expanded) .tabs.all-lit > .tab-foot { display: block; }
-  .roster-cluster.team-lit > .tab-foot { --card-line: var(--bubble-line); }
-  .cards:not(.expanded) .tabs:not(.all-lit) .roster-cluster.team .acard.sel { --card-line: var(--text2); }
   .tabs.all-lit .roster-cluster.team::before { display: none; }
   .cards.expanded .roster-cluster.team { flex: 0 1 100%; min-width: 0; flex-wrap: wrap; }
   /* MULTI-SELECT IS ONE ENCLOSURE (owner, 2026-09-22: "如果是选择多个 Agent，
      就用一个大的包边。注意 Agent 和 Agent 之间的卡片不要有很多线拐来拐去，就是
      一个大的包边"): under All — and while the All tab previews it — the
      DESTINATIONS GROUP is the lit tab, one fill and one edge around it, and
-     the per-card paint switches off (below). Every internal line is gone by
-     construction, not by patching borders between siblings. */
-  .tabs.all-lit { position: relative; z-index: 1; }
-  /* The same open-bottom silhouette as one tab and one team, feet included:
-     rounded lower corners made it a closed box sitting on the band (owner,
-     2026-09-23: "成了一个圆角矩形"). */
-  .tabs.all-lit::before {
+     the per-card paint switches off. Every internal line is gone by
+     construction, not by patching borders between siblings. In the strip
+     the marker grows to the group's extent; the wrapped list closes it as a
+     box of its own. */
+  .cards.expanded .tabs.all-lit::before {
     content: ''; position: absolute; inset: 0; pointer-events: none;
-    background: var(--bubble-in); border: 1px solid var(--bubble-line); border-bottom: 0;
-    border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0;
+    background: var(--bubble-in); border: 1px solid var(--bubble-line); border-radius: var(--ui-radius-panel);
   }
-  .cards.expanded .tabs.all-lit::before { inset: 0; border-bottom: 1px solid var(--bubble-line); border-radius: var(--ui-radius-panel); }
-  .tabs.all-lit .acard::before { background: transparent; border-color: transparent; }
+  .cards.expanded .tabs.all-lit .acard::before { background: transparent; border-color: transparent; }
+  .tabs-extent { position: absolute; inset: 0; pointer-events: none; }
+  /* ONE HIGHLIGHT THAT TRAVELS (motion principle 14; owner, 2026-09-23:
+     "切换的动画不是很丝滑…先标了一个框，然后又闪过去了"): the lit enclosure —
+     fill, edge, both feet and the join into the band — is ONE marker, the
+     shared `.slide-pill` placed by `slideIndicator`, that glides from the old
+     destination to the new one on --t-move (transform and width, the atom's
+     own allowance). Before, each card lit in place: its fill crossfaded
+     while its feet and floor popped, which read as a frame appearing and
+     then flashing away. The marker sits under the cards and over the group
+     baseline: both are z -1 in the group's stacking context, and the marker
+     comes later in the DOM, so the baseline shows exactly where the marker
+     is not. */
+  .slide-pill.tab {
+    --card-line: var(--bubble-line);
+    background: none; box-shadow: none; border-radius: 0; z-index: -1;
+  }
+  .slide-pill.tab::before {
+    content: ''; position: absolute; inset: var(--control-paint-inset) 0 0; box-sizing: border-box;
+    background: var(--bubble-in); border: 1px solid var(--card-line); border-bottom: 0;
+    border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0;
+    transition: border-color var(--t-move) ease;
+  }
+  .roster.compact .slide-pill.tab::before { inset-block-start: var(--roster-gap); }
+  /* A lit member inside a group wears the raised neutral contour (#238). */
+  .slide-pill.tab.raised { --card-line: var(--text2); }
+  /* The join: the enclosure's own fill over the floor-line pixel and one
+     pixel into the band, as a layer of its own so the side strokes end AT the
+     floor (reaching into the band, they ticked a pixel below the floor line:
+     owner's screenshot, 2026-09-23 15:07), while the fill still overlaps the
+     junction, where a fractional device scale otherwise lets part of a row of
+     floor line or frame through (measured under the tab, band 31: without it
+     37 at 1.5x and 27 at 1.25x; a 1px layer 35 and 27; this 2px overlap 31). */
+  .slide-pill.tab::after { content: ''; position: absolute; inset: auto 0 -1px; height: 2px; background: var(--bubble-in); pointer-events: none; }
   .cards:not(.expanded)::-webkit-scrollbar { display: none; }
   .cards.expanded {
     flex-wrap: wrap; align-content: start;
@@ -549,26 +577,11 @@
      context ring keep their colours: they are live facts, not chrome. */
   .tabs:not(.all-lit) .acard:not(.sel):not(.off) { color: var(--text2); }
   .acard { transition: color var(--t-move) ease; }
-  /* Attached only in the single-row strip: the fill reaches the floor
-     (inset-bottom 0), top corners the control radius — Chrome's active-tab
-     silhouette. The wrapped (expanded) list is a list, so there a lit card
-     stays a closed rounded box. */
-  .cards:not(.expanded) .acard.sel { z-index: 1; }
-  .cards:not(.expanded) .acard.sel::before {
-    /* The fill ends AT the floor. The strip's last pixel is the floor line,
-       which this covers; the band beneath starts at the same coordinate, so
-       the join below overlaps it. It once reached 1px INTO the band, and so
-       did its side strokes — a bright tick under each lit edge below the
-       floor line (owner's screenshot, 2026-09-23 15:07). */
-    inset: var(--control-paint-inset) 0 0; border-bottom: 0;
-    border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0;
-  }
-  .cards:not(.expanded) .tabs:not(.all-lit) .roster-cluster:not(.team-lit) .acard.sel::before {
-    /* The opaque floor joins the band from the first frame while the tab's
-       body still crossfades; otherwise the team baseline shines through it. */
-    background-image: linear-gradient(to top, var(--bubble-in) var(--roster-gap), transparent var(--roster-gap));
-  }
-  .roster.compact .cards:not(.expanded) .acard.sel::before { inset-block-start: var(--roster-gap); }
+  /* In the single-row strip the lit card paints NOTHING of its own — the
+     marker carries the enclosure — and the hover wash stays on the unlit
+     cards, as in Chrome. The wrapped (expanded) list is a list, so there a
+     lit card stays a closed rounded box of its own. */
+  .cards:not(.expanded) .acard.sel { --card-paint: transparent; --card-line: transparent; }
   /* The one-agent reading filter is shown IN the strip: the filtered card
      keeps its light and every other destination dims — no banner above the
      feed and no ✕ to find (owner, 2026-09-23: "把当前的卡片直接亮起，其他全部

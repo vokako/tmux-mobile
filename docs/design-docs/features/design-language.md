@@ -82,7 +82,12 @@ floor line: a full-width `--bubble-line` pixel painted as the strip's
 background, which each lit enclosure breaks and its feet turn into.
 Expanded list cards keep their closed row radius and no feet. In the
 collapsed row the tab chain stretches to the strip's height: a tab is
-attached to the floor, so its box reaches it however tall the strip is. The All crowd
+attached to the floor, so its box reaches it however tall the strip is.
+The lit enclosure is ONE travelling marker (`.slide-pill.tab`, placed by
+`slideIndicator`, motion principle 14): fill, edge, feet and join glide
+from the old destination to the new one; no card lights in place in the
+strip. The band under it has equal 6px/3px air above and below the field
+and square lower corners against the sidebar and drawer. The All crowd
 has a named 20px icon metric, not avatar size plus a spacing token, so
 the group symbol stays legible when flex gaps change. No added row height
 or paint over another target. Switching tabs crossfades paint colour
