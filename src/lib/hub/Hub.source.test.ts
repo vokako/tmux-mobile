@@ -584,8 +584,8 @@ test('a stage job dies with its room, and nothing sends while one is in flight (
     'a failed post restores only into its own room');
   // The slash-command branch is the same function, same race, same rule.
   assert.match(sendFn, /await hubCommand\(room, cmdTarget, cmd\.command\);/u);
-  assert.match(sendFn, /if \(selected === room\) composerText = raw;/u,
-    'a failed command restores only into its own room');
+  assert.match(sendFn, /if \(selected === room\) \{\s*composerText = raw;\s*commandFeedbackLifetime\.update\(feedbackToken, \{/u,
+    'a failed command restores text and shows feedback only in its original room');
 });
 
 test('a failed attachment is a chip that blocks send, never a console line', () => {
@@ -616,6 +616,17 @@ test('composer calculations use the pure helpers without moving send or its gate
     'a vanished team stops implicit delivery but an explicit @name still wins');
   assert.match(source, /const tok = attachToken\(a\);/u, 'removal uses the shared spelling');
   assert.match(source, /const tok = attachToken\(item\);/u, 'staging uses that same spelling');
+});
+
+test('command failures use the shared anchored feedback surface (#239 review)', () => {
+  assert.match(source, /const commandFeedbackLifetime = createFeedbackLifetime\(value => \{ commandFeedback = value; \}\);/u);
+  assert.match(source, /onDestroy\(\(\) => commandFeedbackLifetime\.dispose\(\)\);/u);
+  assert.match(source, /const failedNames = members\.filter\(\(_name, i\) => results\[i\]\.status === 'rejected'\)/u);
+  assert.match(source, /hubCommandFailedFor'\)\.replace\('\{command\}', commandName\)\.replace\('\{names\}', failedNames\.join\(', '\)\)/u);
+  assert.match(source, /if \(selected === room\) \{\s*composerText = raw;\s*commandFeedbackLifetime\.update\(feedbackToken, \{/u);
+  assert.match(source, /<div class="composer-feedback pop-layer" use:feedbackPosition=/u);
+  assert.match(source, /<OperationFeedback value=\{commandFeedback\} ondismiss=\{commandFeedbackLifetime\.clear\} \/>/u);
+  assert.doesNotMatch(source, /class="command-error"|class="config-error composer-error"/u, 'no second error species');
 });
 
 test('the title caret expands the NAME — left-aligned on its real rect (board #32)', () => {

@@ -69,6 +69,7 @@ test('Composer owns local UI state, while transport and capture ordering stay ou
   assert.match(source, /onfocus=\{onfocus\}/u);
   assert.match(source, /export function caret\(\) \{ return composerEl\?\.selectionStart; \}/u);
   assert.match(source, /export function focus\(\) \{ composerEl\?\.focus\(\); \}/u);
+  assert.match(source, /export function feedbackAnchor\(\) \{ return shellEl; \}/u);
   assert.match(source, /export function hasTransient\(\) \{ return !!palette; \}/u);
 });
 

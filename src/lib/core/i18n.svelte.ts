@@ -233,6 +233,8 @@ const msgs: Record<string, Record<string, string>> = {
     hubWinLess: 'Show agent windows only',
     hubComposerDm: 'Chat with {name}…',
     hubComposerTeam: 'Chat with team {name}…',
+    hubCommandFailed: '{command} failed',
+    hubCommandFailedFor: '{command} failed for: {names}',
     // The hover card's labels (motion.md principle 16) — terse, they sit in a
     // label → value grid.
     hubHoverState: 'state',
@@ -827,6 +829,8 @@ const msgs: Record<string, Record<string, string>> = {
     hubWinLess: '只显示 agent 窗口',
     hubComposerDm: '与 {name} 聊天…',
     hubComposerTeam: '发给小组 {name}…',
+    hubCommandFailed: '{command} 执行失败',
+    hubCommandFailedFor: '{command} 未送达：{names}',
     hubHoverState: '状态',
     hubHoverModel: '模型',
     hubHoverCtx: '已用上下文',

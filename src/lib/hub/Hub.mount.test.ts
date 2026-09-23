@@ -1003,10 +1003,18 @@ test('team slash fan-out never offers a duplicate retry after partial delivery (
     app.send.click(); await app.flush();
     assert.deepEqual(commands, ['bob:/compact', 'charlie:/compact']);
     assert.equal(app.input.value, '', 'a partial success cannot restore a command that would rerun on bob');
+    const partial = app.document.querySelector('.composer-feedback [role="alert"]');
+    assert.match(partial?.textContent ?? '', /\/compact failed for: charlie/u,
+      'the human sees exactly which member did not run the command');
     await app.text('/model');
     app.send.click(); await app.flush();
     assert.deepEqual(commands.slice(2), ['bob:/model', 'charlie:/model']);
     assert.equal(app.input.value, '/model', 'only an all-failed command may be retried without duplication');
+    const failed = app.document.querySelector('.composer-feedback [role="alert"]');
+    assert.match(failed?.textContent ?? '', /\/model failed/u, 'all failures are visible too');
+    assert.doesNotMatch(failed?.textContent ?? '', /not delivered/u, 'RPC details are not surfaced');
+    await app.room('other');
+    assert.equal(app.document.querySelector('.composer-feedback'), null, 'feedback does not leak into another room');
   } finally { await app.close(); }
 });
 

@@ -298,6 +298,7 @@
 
   async function selectProject(session) {
     headerCopyLifetime.clear();
+    commandFeedbackLifetime.clear();
     selectionGeneration++;
     actionReadError = ''; actionRefreshing = false;
     // An unsent line belongs to the conversation it was written for. Park it on
@@ -572,15 +573,20 @@
     const cmdTarget = cmd && (cmd.to || (recipient === ALL_TARGET ? 'all' : recipient));
     if (cmd && cmdTarget) {
       const room = selected; // same room-snapshot rule as the message path
+      const feedbackToken = commandFeedbackLifetime.begin();
+      commandFeedbackAnchor = composer?.feedbackAnchor() ?? null;
+      const commandName = cmd.command.split(/\s/u, 1)[0];
       composerText = '';
       following = true;
       scrollFeed(true);
       try {
         if (team && !cmd.to) {
           const results = await Promise.allSettled(members.map((name) => hubCommand(room, name, cmd.command)));
-          const errors = results.filter((r) => r.status === 'rejected');
-          if (errors.length === results.length) throw errors[0].reason;
-          if (errors.length) console.warn('team command failed for some members', errors);
+          const failedNames = members.filter((_name, i) => results[i].status === 'rejected');
+          if (failedNames.length === results.length) throw results[0].reason;
+          if (failedNames.length && selected === room) commandFeedbackLifetime.update(feedbackToken, {
+            kind: 'error', message: t('hubCommandFailedFor').replace('{command}', commandName).replace('{names}', failedNames.join(', ')),
+          });
         } else {
           await hubCommand(room, cmdTarget, cmd.command);
         }
@@ -589,7 +595,12 @@
         scrollFeed(true);
       } catch (e) {
         console.warn('hub command failed', e);
-        if (selected === room) composerText = raw;
+        if (selected === room) {
+          composerText = raw;
+          commandFeedbackLifetime.update(feedbackToken, {
+            kind: 'error', message: t('hubCommandFailed').replace('{command}', commandName),
+          });
+        }
       }
       return;
     }
@@ -831,6 +842,7 @@
    * keeps it — before, '' was "unset" and the next roster poll re-seated a lead
    * the user had just dismissed (review C, 2026-09-03). */
   function setRecipient(name) {
+    if (recipient !== name) commandFeedbackLifetime.clear();
     recipient = name;
     if (selected) hubPrefs.setLead(selected, name);
     // An OPEN terminal partition follows the selection (board #91): choosing
@@ -1541,6 +1553,10 @@
   const headerCopyLifetime = createFeedbackLifetime(value => { headerCopyFeedback = value; });
   $effect(() => { if (!visible) headerCopyLifetime.clear(); });
   onDestroy(() => headerCopyLifetime.dispose());
+  let commandFeedback = $state(null), commandFeedbackAnchor = $state(null);
+  const commandFeedbackLifetime = createFeedbackLifetime(value => { commandFeedback = value; });
+  $effect(() => { if (!visible) commandFeedbackLifetime.clear(); });
+  onDestroy(() => commandFeedbackLifetime.dispose());
   function doubleClickCopy(el, initialValue) {
     let value = initialValue;
     const onDoubleClick = () => {
@@ -1773,6 +1789,14 @@
         onfocus={() => { following = true; scrollFeed(true); setTimeout(() => scrollFeed(true), 300); }}
         onheightchange={() => { if (following) scrollFeed(true); }}
         registerBack={onGoBack ? backLayers.register : null} />
+      {#if commandFeedback && commandFeedbackAnchor}
+        <div class="composer-feedback pop-layer" use:feedbackPosition={{
+          trigger: commandFeedbackAnchor, bounds: commandFeedbackAnchor.closest('main'),
+          keepClear: commandFeedbackAnchor.closest('.composer'),
+        }}>
+          <OperationFeedback value={commandFeedback} ondismiss={commandFeedbackLifetime.clear} />
+        </div>
+      {/if}
     </main>
 
     {#if drawerShown && !compact}
@@ -1871,6 +1895,7 @@
 
 <style>
   .header-copy-feedback { position: fixed; z-index: 8; }
+  .composer-feedback { position: fixed; z-index: 16; }
   .action-read-error { display: flex; align-items: center; gap: var(--tool-gap); padding: calc(2 * var(--ui-gap)) calc(3 * var(--ui-gap)); }
   .action-read-error span { min-width: 0; overflow-wrap: anywhere; }
   .hub-root {

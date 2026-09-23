@@ -23,6 +23,7 @@
   // composer's only transient layer. The keyboard sequence has no visible state.
   export function caret() { return composerEl?.selectionStart; }
   export function focus() { composerEl?.focus(); }
+  export function feedbackAnchor() { return shellEl; }
   export function hasTransient() { return !!palette; }
   export function dismissOutside(e) {
     const t = e.target;

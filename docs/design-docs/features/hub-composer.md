@@ -675,7 +675,13 @@ selection is typed verbatim through one existing `hub_command` per current
 member, like All's existing broadcast route; a leading explicit `@name`
 still wins. Partial command success leaves the cleared draft alone so a
 retry cannot duplicate commands already typed; if every call fails, the
-draft is restored. A remembered team selection stays while at least one
+draft is restored. Both cases now use the shared `OperationFeedback`
+anchored to the composer's field: a partial failure names only the members
+who did NOT receive `/command`, and an all-failed error names the command.
+No raw transport exception reaches the screen. Errors persist until
+dismissed, the next command, recipient change or room change; the local
+feedback lifetime invalidates stale async outcomes. A remembered team
+selection stays while at least one
 member survives; when the last departs the recipient becomes an explicit
 room note, not a silently selected agent elsewhere. The group label
 stays a native 28px pointer / 44px coarse target in collapsed and expanded
