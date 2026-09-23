@@ -124,3 +124,12 @@ test('the two-line project ROW is one shared skeleton — Chat and Board wear it
   // `.dot` would leak into them.
   assert.ok(!/(^|\n)\.dot\s*\{/.test(css), 'no bare global .dot — it must stay qualified to .proj-row');
 });
+
+test('the project row yields its wash to the travelling marker — after .side-row.open in the cascade', async () => {
+  const css = await readFile(new URL('../../app.css', import.meta.url), 'utf8');
+  const lit = css.indexOf('.side-row.open { background: var(--accent-bg); }');
+  const yields = css.indexOf('.proj-row.open { background: none; }');
+  assert.ok(lit > 0 && yields > 0);
+  assert.ok(yields > lit, 'equal specificity: the override must come later or the in-place wash wins (codex review, 2026-09-23)');
+  assert.match(css, /\.proj-row \{[^}]*position: relative;/u, 'rows paint above the marker');
+});
