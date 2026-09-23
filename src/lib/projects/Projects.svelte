@@ -21,6 +21,7 @@
   import { moveMs } from '../ui/motion.ts';
   import { declaredWindowChips, liveWindowChips, projectAgeLabel, shortPath, sortRows } from './projects.ts';
   import Icon from '../ui/Icon.svelte';
+  import { slideIndicator } from '../ui/indicator.ts';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { longpress } from '../ui/longpress.ts';
@@ -28,8 +29,10 @@
   import type { HoverInfo, HoverLine } from '../ui/hover.svelte.ts';
   import { t } from '../core/i18n.svelte.ts';
 
-  let { visible = false, openTerminal, panes = {}, onTracked = () => {}, onReady = () => {}, onGoBack = null, dense = false, activeTarget = '' }: {
+  let { visible = false, openTerminal, panes = {}, onTracked = () => {}, onReady = () => {}, onGoBack = null, dense = false, activeTarget = '', oncreate = null }: {
     visible?: boolean;
+    /** The sidebar head's New project command (dense only); the host owns the dialog. */
+    oncreate?: (() => void) | null;
     openTerminal: (session: string, target: string, command?: string) => void;
     /** Live panes per session, already loaded by the Sessions page. */
     panes?: Record<string, TmuxPane[]>;
@@ -260,7 +263,13 @@
 </script>
 
 {#if supported && sorted.length > 0}
-  <section class="projects" class:dense class:reveal={firstFill}>
+  <section class="projects" class:dense class:reveal={firstFill}
+    use:slideIndicator={{ key: `${activeTarget}|${sorted.map((r) => r.project.id).join(',')}`, active: '.proj.open', hidden: !dense || !activeTarget }}>
+    {#if dense}
+      <!-- The shown project's wash glides between rows (motion principle 14),
+           the same marker the Chat and Board sidebars carry. -->
+      <span class="slide-pill soft" aria-hidden="true"></span>
+    {/if}
     <div class="group-label" class:side-h={dense} class:side-toggle-row={dense}>
       {#if dense}
         <!-- A sidebar section header is a LABEL, not a control: the Chat
@@ -271,6 +280,12 @@
              the mismatches the owner named (board #235: "projects 后面写的
              project 数量等等，这些都给我对齐一下"). -->
         <span>{t('projects')}</span>
+        {#if oncreate}
+          <!-- New project at the head, as in Chat's sidebar (owner, 2026-09-23). -->
+          <button class="icon-btn head-add" aria-label={t('projectNew')} title={t('projectNew')} onclick={oncreate}>
+            <Icon name="plus" size={13} />
+          </button>
+        {/if}
       {:else}
         <!-- The word alone here too (#235 follow-up): with every sidebar
              count gone, the page header's badge was the last of its species
@@ -435,10 +450,15 @@
     background: none; border: none; border-radius: var(--ui-radius-row); padding: 8px 10px; gap: 2px;
   }
   .projects.dense .proj:hover { background: var(--surface2); }
-  /* The project whose pane the terminal is SHOWING — the same selected wash
-     the Chat sidebar's open row wears (.side-row.open), so "where am I" reads
+  /* The project whose pane the terminal is SHOWING wears the same selected
+     wash as the Chat sidebar's open row — carried by the travelling
+     .slide-pill above, not drawn in place, so switching projects glides
      identically in both sidebars. */
-  .projects.dense .proj.open { background: var(--accent-bg); }
+  .projects.dense .proj.open { background: none; }
+  .projects.dense { position: relative; }
+  .projects.dense > :global(.slide-pill) { border-radius: var(--ui-radius-row); }
+  .projects.dense .group-label { justify-content: space-between; }
+  .projects.dense .head-add { width: 24px; height: 24px; padding: 0; flex: none; color: var(--text3); }
   .projects.dense .proj.live { border: none; }
   .projects.dense .proj-main { padding: 0; align-items: center; }
   /* Chat's first line, verbatim: an 8px gap before the ⋯ column, and the ⋯

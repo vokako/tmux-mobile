@@ -399,7 +399,25 @@ Four costs grew with paged history and were paid on every 5–10 s tick or scrol
 
 the two-step message archive (2026-08-19) was retired on owner request (2026-08-21, "没有消息删除 不需要这个功能，彻底去掉吧") — a tapped message offers exactly Copy and Raw, and the room stays the record. The `hub_msg_archive/restore/purge` RPCs, the `msg_archive` snapshot table (state.db v10) and `hub_log`'s filter against `projects::archived_ids` all REMAIN as server API (an older client's hidden messages stay hidden; purge deletes from the room's own store — state.db `hub_msgs` since board #107 — messages first, archive rows after).
 
-### The sidebar is ordered by the CONVERSATION
+### The sidebar is ordered: open projects first, then by activity
+
+**Since 2026-09-23** (owner: "已打开的优先排在前面，没有打开的排在后面；然后
+分别按照时间由近到远进行排序"; the report: a project just created, still
+without an agent, "直接排到后面了"): `sortRows` puts live projects before
+closed ones and orders each group by ACTIVITY, newest first — the newest of
+the room's last message and the project's `last_up_at`/`created_at`. A fresh
+empty project therefore heads its group. The conversation-only order below
+is what it supersedes; its reason for refusing `last_seen_at` still holds
+and still applies. The same day the three project sidebars — Chat, Terminal,
+Board — moved the open row's wash onto ONE travelling `.slide-pill.soft`
+placed by `slideIndicator` (motion principle 14: "阴影直接滑动过来"), so
+picking another project glides the wash there instead of one row switching
+off and another on; the rows keep `.open` for state and draw no wash in
+place. Chat's and Terminal's **New project** command sits at the head of
+the list as an `icon-btn` ("每次还得滚动到最下边才能新建"); the Terminal's
+foot row remains only while there is no list to head.
+
+### The conversation order it replaced (2026-08-19 → 2026-09-23)
 
 `sortRows(rows, talk)` sorts by the newest message per room (`hub_rooms` → one `SELECT room, MAX(ts) … GROUP BY room`, answered BEFORE `handle_hub_request`'s session gate because it is about every room), because `last_seen_at` is rewritten by the capturer on every tick — for a live project it always means "just now", so every live project floated to the top in whatever order tmux was captured, which is no signal at all (owner, 2026-08-19: "把我们最近的对话默认排在最上面"). Projects nobody has talked in keep the old rule underneath (live first, then `last_seen_at`): there is no conversation to order them by and they must not outrank one that exists. Two traps, both tested: the projects table is in SECONDS and the bus in MILLISECONDS, and a row with no `room` falls back to `proj:<session>`. Chat, Terminal and Board all load the grouped map and render `projectAgeLabel(row, talk, now)`: conversation timestamp first, tmux last-seen/up/creation only when no room has spoken, one formatter everywhere. The optional `talk` default survives only for callers on a server without Hub support.
 

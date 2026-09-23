@@ -603,6 +603,11 @@ button:disabled {
   transition: background var(--t-fast);
   -webkit-tap-highlight-color: transparent;
 }
+/* The open project row draws NO wash of its own: in the Chat, Terminal and
+   Board sidebars the accent wash is ONE `.slide-pill.soft` that glides to the
+   picked row (motion principle 14; owner, 2026-09-23: "阴影直接滑动过来"). Other
+   `.side-row.open` wearers (Agents' definitions, Settings) still light in place. */
+.proj-row.open { background: none; }
 /* A row's leading glyph never shrinks: as a bare flex child the team rows'
    icon shrank whenever the member line wrapped (owner, 2026-09-23: "前面的
    icon 大小变了，尤其后面显示多的话"). */
@@ -710,7 +715,10 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
    were lifted to prevent, so the row's skeleton lives HERE now too. The dot
    is scoped to .proj-row (a bare global `.dot` would leak into Sessions'
    and the Terminal sidebar's own scoped dots). */
-.proj-row { align-items: flex-start; }
+.proj-row { align-items: flex-start; 
+  /* Above the sidebars' travelling wash (`.slide-pill.soft`, 2026-09-23). */
+  position: relative;
+}
 .proj-row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--status-ok); flex: none; margin-top: 6px; }
 .proj-row .dot.off { background: var(--text3); }
 .p-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; font-family: var(--font-display); }

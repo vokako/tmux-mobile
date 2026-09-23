@@ -11,6 +11,7 @@
   import { hoverInfo } from '../ui/hover.ts';
   import type { HoverInfo } from '../ui/hover.svelte.ts';
   import { flip } from 'svelte/animate';
+  import { slideIndicator } from '../ui/indicator.ts';
   import { moveMs } from '../ui/motion.ts';
 
   type MenuPosition = { x: number; y: number }
@@ -41,6 +42,10 @@
     onmenu = () => {}, onrestore = () => {}, onpurge = () => {},
   }: Props = $props();
   let trashOpen = $state(false);
+  /* The open row's wash is ONE marker that glides (motion principle 14); it
+     re-measures when the choice or the order changes. */
+  const rowKey = $derived([selected, rows.map((r) => r.project.id).join(',')].join('|'));
+  const rowLit = $derived(rows.some((r) => r.project.session === selected));
 
   function rowInfo(row: ProjectRow): HoverInfo {
     const n = rowAgentCounts(row, panes);
@@ -61,8 +66,19 @@
 {/if}
 <aside class="sidebar" class:side-sheet={compact} class:sheet={compact} class:open={compact && open}>
   {#if !compact}<SideHandle />{/if}
-  <div class="side-scroll subtle-scroll" use:scrollFade>
-    <div class="side-h side-head side-toggle-row"><span>{t('hubProjects')}</span></div>
+  <div class="side-scroll subtle-scroll" use:scrollFade use:slideIndicator={{ key: rowKey, active: '.proj-row.open', hidden: !rowLit }}>
+    <!-- The chosen project's wash: one marker that glides to the newly picked
+         row instead of one row switching off and another on (owner,
+         2026-09-23: "阴影直接滑动过来，增加一些动画衔接的感觉"). -->
+    <span class="slide-pill soft" aria-hidden="true"></span>
+    <div class="side-h side-head side-toggle-row"><span>{t('hubProjects')}</span>
+      <!-- New project at the head, reachable without scrolling the list
+           (owner, 2026-09-23: "每次还得滚动到最下边才能新建"); the row at the
+           foot went with it. -->
+      <button class="icon-btn head-add" aria-label={t('projectNew')} title={t('projectNew')} onclick={oncreate}>
+        <Icon name="plus" size={13} />
+      </button>
+    </div>
     {#each rows as row (row.project.id)}
       <div class="side-row proj-row" role="group" aria-label={row.project.name} class:open={row.project.session === selected}
         class:appear={!!rowsBase && !rowsBase.has(row.project.id)}
@@ -99,9 +115,6 @@
         </button>
       </div>
     {/each}
-    <button class="side-row add" onclick={oncreate}>
-      <Icon name="plus" size={13} />{t('projectNew')}
-    </button>
     {#if trash.length}
       <button class="side-row add trash-bar" onclick={() => trashOpen = !trashOpen}>
         <Icon name={trashOpen ? 'chevron-down' : 'trash'} size={13} />
@@ -133,11 +146,15 @@
     font: inherit; cursor: pointer;
   }
   .row-menu { width: 24px; height: 24px; padding: 0; flex: none; align-self: center; color: var(--text3); }
+  .head-add { width: 24px; height: 24px; padding: 0; flex: none; color: var(--text3); }
+  /* The rows' place above the wash and their absent in-place wash live with
+     the shared row atoms in app.css. */
+  .side-scroll > :global(.slide-pill) { border-radius: var(--ui-radius-row); }
 
   .sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
   /* Sheet geometry/motion and project-row atoms remain in app.css. */
   .sidebar.sheet .side-row { min-height: 44px; }
-  .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
+  .side-scroll { flex: 1; overflow-y: auto; padding: 8px; position: relative; }
   /* The head is a row; the Hub's riding collapse toggle overlays its right end
      (#197). The look (face, size, tracking, padding) stays app.css's .side-h. */
   .side-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }

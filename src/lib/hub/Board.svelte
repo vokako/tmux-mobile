@@ -636,7 +636,11 @@
   {#if !embedded}
   <aside class="sidebar" class:side-sheet={narrowVp} class:open={narrowVp && sideOpen} bind:this={sideEl}>
     <SideHandle />
-    <div class="side-scroll subtle-scroll" use:scrollFade>
+    <div class="side-scroll subtle-scroll" use:scrollFade
+      use:slideIndicator={{ key: `${cur}|${projects.map((p) => p.project.session).join(',')}`, active: '.proj-row.open', hidden: !projects.some((p) => p.project.session === cur) }}>
+      <!-- The chosen project's wash glides (motion principle 14), as in the
+           Chat and Terminal sidebars. -->
+      <span class="slide-pill soft" aria-hidden="true"></span>
       <div class="side-h side-toggle-row">{t('hubProjects')}</div>
       <!-- The Chat sidebar's two-line row, atom for atom (board #39: "board
            侧边栏的样式也要和 chat terminal 的侧边栏对齐"): dot + name + age up
@@ -971,7 +975,8 @@
      is .side-h/.side-row's own 10px in app.css, but the container padding
      was Board's silent 0 and the whole list sat 8px left of Chat's (board
      #39: "我看 projects 这些写的位置都不一样"). */
-  .side-scroll { flex: 1; overflow-y: auto; min-height: 0; padding: 8px; }
+  .side-scroll { flex: 1; overflow-y: auto; min-height: 0; padding: 8px; position: relative; }
+  .side-scroll > :global(.slide-pill) { border-radius: var(--ui-radius-row); }
   /* The count on a column chip: tabular so 9→10 does not wiggle the row. */
   .b-count { font-variant-numeric: tabular-nums; }
   /* Embedded in the Hub's right drawer: one column, the drawer names the

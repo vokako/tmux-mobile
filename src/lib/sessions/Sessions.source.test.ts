@@ -27,7 +27,9 @@ test('the sidebar creates a project with the shared row, not its own button', ()
   // full-width bordered button in a bottom bar, which is what made the two
   // sidebars read as different apps even though the dialog behind them is the
   // same one (owner, 2026-08-19).
-  assert.match(source, /\{#if !chips\}\s*<button class="side-row add"[\s\S]*?projectNew/u);
+  assert.match(source, /\{#if !chips && trackedReady && !hasProjects\}\s*<button class="side-row add"[\s\S]*?projectNew/u,
+    'the foot row remains only while there is no list to head (owner, 2026-09-23: the command moved to the Projects head)');
+  assert.match(source, /oncreate=\{\(\) => showNew = true\}/u, 'the Projects head opens the same dialog');
   // The page dialect keeps its button — but only there.
   assert.match(source, /\{#if chips\}\s*<button class="new-btn"/u);
 });

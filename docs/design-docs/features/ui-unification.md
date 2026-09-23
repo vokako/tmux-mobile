@@ -259,7 +259,9 @@ Adoption:
     bottom bar, next to Chat's and Agents' `.side-row.add` rows — the same
     dialog behind two unrelated-looking controls. The sidebar now renders the
     shared row (measured identical to Chat's: 223×35, 12.5px, radius 9, padding
-    8px 10px, same ink), the bottom bar keeps only the two list utilities
+    8px 10px, same ink) — since 2026-09-23 only while the list is empty; with a
+    list, both sidebars put the command at the head as an `icon-btn` (owner:
+    "每次还得滚动到最下边才能新建") — the bottom bar keeps only the two list utilities
     (search + refresh, right-aligned), and the `.new-btn` survives solely in
     the page dialect. The row sits in `Sessions`, not in `Projects`, because
     that section hides itself when there is nothing to list — an empty project

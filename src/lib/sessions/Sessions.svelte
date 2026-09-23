@@ -578,6 +578,7 @@
       {panes}
       dense={!chips}
       {activeTarget}
+      oncreate={() => showNew = true}
       onGoBack={(fn) => projectsGoBack = fn}
       onTracked={(names) => { trackedSessions = names; trackedReady = true; }}
       onReady={(reload) => reloadProjects = reload} />
@@ -587,10 +588,11 @@
          is why the two sidebars read as different apps even though they open
          the identical dialog (owner, 2026-08-19). Outside the sidebar (the
          page dialect, `chips`) the bottom bar keeps its button.
-         It lives HERE rather than inside `Projects` because that section hides
-         itself when there is nothing to list — and an empty project list is
-         exactly when the create row matters most. -->
-    {#if !chips}
+         Since 2026-09-23 the command sits at the Projects head (owner: "每次还
+         得滚动到最下边才能新建"), and this row remains ONLY while there is no
+         list to head: `Projects` hides itself when there is nothing to list,
+         and an empty project list is exactly when creating matters most. -->
+    {#if !chips && trackedReady && !hasProjects}
       <button class="side-row add" onclick={() => showNew = true}>
         <Icon name="plus" size={13} />{t('projectNew')}
       </button>

@@ -268,7 +268,9 @@ PanePicker, the Hub agent menu, the server menu and the hover card wear
 Preferences segmented controls and the Board status slider
 (pill), Files/Git tabs ✓, the Hub drawer's view toggle; 2026-09-23 the Hub
 agent strip's lit tab enclosure (`.slide-pill.tab`, fill + edge + feet,
-gliding between a card, a team and All — hub-composer.md). Done 2026-09-04 in
+gliding between a card, a team and All — hub-composer.md), and the open
+project row of the Chat, Terminal and Board sidebars (`.slide-pill.soft`,
+the accent wash gliding to the picked row — hub-feed.md). Done 2026-09-04 in
 the terminal/Sessions/Files/Projects/Team pass: GitPanel's Status/Log tabs
 and TeamTemplates' template list (both `.slide-pill`). Skipped on purpose:
 the Terminal chip strip (scrolling AgentChips), the Sessions MRU chips and
