@@ -43,8 +43,8 @@ The owner's 07:09 final selection (quoted in hub-composer.md) is single-line,
 without visible state words. One chevron reveals the same list in flow, with
 1/2/4 columns at 360/720px roster-container thresholds and a maximum height of
 `min(240px, 32dvh / --ui-zoom)`, scrolling internally. Native targets remain
-28/44px; 20px avatars, 6px card gaps and 4px internal gaps replace the provisional two-line
-geometry. State stays available in hover/ARIA, turn-level activity order
+28/44px; the original 20px avatars, 6px card gaps and 4px internal gaps
+replaced the provisional two-line geometry. State stays available in hover/ARIA, turn-level activity order
 places team groups by their highest-ranked member, and long names may wrap in
 expanded cells.
 An empty mention/unread slot reserves width only in the horizontal strip;
@@ -70,8 +70,16 @@ selection command or new motion tempo. Reason, ordering and measurements:
 
 **Compact tab floor (owner, 2026-09-23).** The 44px target is the floor.
 Remove empty scrollport/disclosure space above the tabs, not the field's 3px
-top inset. Compact button contents sit slightly lower inside their unchanged
-hit box so the open selected paint has less unused space below the text.
+top inset. Compact button contents sit lower inside their unchanged hit box
+so the open selected paint has less unused space below the text; the context
+ring sits WITH its avatar inside the same positioned `.avatar-slot`, never
+separately centred against the card. A shared 18px avatar and 24px ring
+preserve the 1px image gap and 2px stroke. The compact selected tab's paint
+starts at `--roster-gap` instead of the coarse control inset; Chrome-smooth
+top corners take the existing `--ui-radius-panel`, while the group label pill
+takes `--ui-radius-row`. No second radius scale or altered hit box. The
+three-head All glyph stays legible at the derived avatar size + roster gap
+(20px today); rendering it at the reduced avatar size blurred the crowd.
 The coarse strip is 44px high; desktop is 34px. The tab-to-band junction,
 All enclosure and 44px native controls are unchanged. Measurements and the
 superseded 1px field inset: [hub-composer.md](hub-composer.md).
@@ -97,8 +105,8 @@ not an extra pagination menu, overlay or independent animation.
 
 **Avatar capacity rings (#180, 2026-09-12).** The owner's 14:26 correction
 and superseded choices are recorded verbatim in hub-composer.md. Card width
-must not be the scale of a capacity reading: every circular 20px avatar now
-has the same 26px outer meter, 1px image gap and 2px stroke. Pointer/coarse
+must not be the scale of a capacity reading: every circular 18px avatar now
+has the same 24px outer meter, 1px image gap and 2px stroke. Pointer/coarse
 card paint is 30/34px, with existing inset paint around unchanged 28/44px
 native commands. Cards size to actual content; only busy Stop occupies an
 action slot, Watch remains in ContextMenu, and expanded cards wrap rather

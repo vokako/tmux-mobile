@@ -251,6 +251,23 @@ below the name without severing the selected tab from the band. Chromium
 152 desktop: row 36px -> 34px, name still 9px above/below, field top 6px;
 at 390px with coarse CSS simulated: row 46px -> 44px, text gaps
 14/14px -> 16/12px, field top 1px -> 3px. Real phone not measured.
+The owner's 08:55 correction found the remaining root cause: the compact
+button's shifted content put the avatar centre 2px BELOW its context ring,
+which was independently positioned against the card. The ring now lives in
+`.avatar-slot` beside the image, sharing its centre by construction. Ring
+and avatar shrink from 26/20px to 24/18px; their 1px gap and 2px stroke
+remain. Compact content padding uses two existing `--ui-gap`s, taking 2px
+more from the text's bottom gap without shrinking the 44px native target.
+The selected tab's paint top inset shrinks from coarse 6px to `--roster-gap`
+(2px), while desktop stays at 2px; the strip itself still has zero top
+padding. Top corners move from `--ui-radius-control` to `--ui-radius-panel`
+(10px -> 14px), the team pill to `--ui-radius-row` (12px); the bottom stays
+open into the band. Chromium 152 before/after: desktop ring/face 26/20px ->
+24/18px, their centre difference 0 -> 0, row 34px and text bottom 9px
+unchanged; 390px with coarse CSS simulated: 26/20px -> 24/18px, centre
+difference 2px -> 0, text bottom 12px -> 10px, selected paint top 6px ->
+2px, row and hit box both 44px. The meter role and exact percentage remain
+in accessibility output. Real Android WebView remains to be checked.
 
 ### All selects the addressed cards (#186, 2026-09-12)
 
@@ -301,14 +318,17 @@ an icon-only tab at the far left, and this is that — always in view,
 collapsed strip included, wearing `bots` — a small CROWD of the same bot mark
 a single agent's glyph uses (owner, 2026-09-22: "不用画人，画成 Agent 类似的
 Logo"; 2026-09-23: "可以多画几个机器人"; the group-of-people and `collab`'s
-orbiting dots both failed the glance test). It renders at the avatars' size
-(`--roster-avatar-size`, the token — a second 20px literal would drift from
-it). The side-by-side heads each read at about 7px at the atom's 16px size
+orbiting dots both failed the glance test). It used the avatars' size
+(`--roster-avatar-size`, the token). The side-by-side heads each read at about
+7px at the atom's 16px size
 and looked muddled even at 20px (owner, 2026-09-23). Three heads now recede
 behind a single readable foreground face; the rear contours end at the front
-head rather than crossing its strokes. The leading tab uses the avatar-size
-token and a 24px fine-pointer box (`20px` icon plus `2px` per side), and the
-strip has no extra leading inset beyond its 2px scrollport padding. The field
+head rather than crossing its strokes. When the avatar shrank from 20px to
+18px, rendering three heads at 18px became soft; the leading tab now derives
+its 20px glyph from the avatar-size token plus `--roster-gap`, not a second
+pixel constant. Its fine-pointer box stays 24px (`20px` icon plus `2px` per
+side), and the strip has no extra leading inset beyond its 2px scrollport
+padding. The field
 keeps its normal inset; the tab's paint need not start at
 the text field's left edge. On coarse the 44px square remains the touch
 target even though that necessarily keeps some space around the icon.
@@ -371,9 +391,10 @@ After comparing card-ground fill and an avatar ring, the owner superseded
 the temporary fill choice at 14:26:
 > 背景色有一个不好的是有可能卡片宽度不一样，大家对进度感知不一样，要不用圆环的方案吧，注意头像一定用圆形，圆环刚好包括头像大一圈。然后 agent 卡片现在右边的空白太多了，就自适应卡片宽度，不要 撑开这么多。agent 卡片现在高度有点太低了，已经贴近头像边边了，可以稍微留一点边冗余，包括给进度圆环留冗余，还有颜色，就绿黄橙红，不要有中间插值不好看的过渡色，看着颜色怪怪的
 
-Use one 26px outer ring around a circular 20px avatar: 1px of ground
-separates the image from a 2px stroke. The card paints 30px high for pointers
-and 34px for coarse input, leaving 2px/4px outside the ring. Its container
+The original 26px outer ring around a 20px avatar shrank to 24px around
+18px after the owner requested a smaller, properly centred pair. Still, 1px
+of ground separates the image from a 2px stroke. The card paints 30px high
+for pointers and 34px for coarse input, leaving 3px/5px outside the ring. Its container
 includes the existing paint inset; native commands remain 28/44px. Avatar
 and ring stay round through the one app.css corner-policy owner.
 The existing meter exposes its bounded value and exact reading through ARIA;

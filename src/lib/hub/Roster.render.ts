@@ -135,6 +135,8 @@ test('Roster renders the controlled destination strip (#168)', { timeout: RENDER
       assert.equal(meter.getAttribute('aria-valuenow'), String(Math.min(100, pct)));
       assert.equal(meter.style.getPropertyValue('--ctx-amount'), `${Math.min(100, pct)}%`);
       assert.ok(card(root, 'runner').querySelector('.avatar-slot .ava'));
+      assert.equal(meter.parentElement?.classList.contains('avatar-slot'), true,
+        'the avatar and meter share one positioned box so their centres cannot drift');
     }
     assert.equal(view().querySelector('.ctx-ring'), null, 'unknown is absent, not a guessed zero');
     const expanded = view({ expanded: true, managedAgents: [{ ...agents[0], vitals: { context_pct: 125 } }] });

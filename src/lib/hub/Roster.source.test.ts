@@ -23,8 +23,10 @@ test('context meters surround equal circular avatars with room inside the card (
   assert.match(rule('.acard'), /position: relative/u);
   const bar = rule('.ctx-ring');
   assert.match(bar, /position: absolute/u);
+  assert.match(bar, /left: 0; top: 0/u, 'the ring is positioned in the same box as the icon, not independently in the card');
+  assert.match(rule('.avatar-slot'), /position: relative/u);
   assert.match(bar, /width: var\(--roster-ring-size\); height: var\(--roster-ring-size\)/u);
-  assert.match(rule('.roster'), /--roster-ring-size: 26px/u);
+  assert.match(rule('.roster'), /--roster-ring-size: 24px/u);
   assert.match(rule('.roster'), /--roster-paint-height: 30px/u);
   assert.match(source, /\.roster \{ --roster-paint-height: 32px; \}/u,
     '#237: the phone row is 32px — the 44px touch floor lives on .agent-select, not the paint');
@@ -180,12 +182,12 @@ test('identity, readiness and motion retain their existing authorities', () => {
 
 test('density lives in local tokens; full names and native targets do not shrink', () => {
   const roster = rule('.roster');
-  assert.match(roster, /--roster-avatar-size: 20px/u);
+  assert.match(roster, /--roster-avatar-size: 18px/u);
   assert.match(roster, /--roster-expanded-max: min\(240px, calc\(32dvh \/ var\(--ui-zoom, 1\)\)\)/u);
   assert.match(rule('.agent-select'), /min-height: var\(--control-height\)/u);
-  assert.match(rule('.roster.compact .agent-select'), /padding-block-start: var\(--ui-gap\)/u,
-    'move content, not the hit box, toward the attached tab floor on compact screens');
-  assert.match(rule('.roster.compact .all-choice :global(.command-button.icon-only)'), /padding-block-start: var\(--ui-gap\)/u,
+  assert.match(rule('.roster.compact .agent-select'), /padding-block-start: calc\(2 \* var\(--ui-gap\)\)/u,
+    'move content and its shared ring box within the unchanged hit target');
+  assert.match(rule('.roster.compact .all-choice :global(.command-button.icon-only)'), /padding-block-start: calc\(2 \* var\(--ui-gap\)\)/u,
     'the pinned All glyph follows the same compact tab alignment');
   assert.match(rule('.acard'), /width: max-content/u, 'only actual content sets card width');
   assert.match(rule('.cards'), /overflow-x: auto/u);
@@ -249,8 +251,8 @@ test('Everyone is the PINNED tab: always at the head, previewing on hover (board
   assert.match(source, /<span class="all-choice acard" class:sel=\{recipient === ALL_TARGET\} role="presentation"/u);
   assert.match(source, /<CommandButton variant="icon" icon="bots" label=\{t\('hubEveryone'\)\} pressed=\{recipient === ALL_TARGET\} bare/u,
     '#237: a small CROWD of the bot mark — "可以多画几个机器人"');
-  assert.match(rule('.all-choice'), /--control-icon-size: var\(--roster-avatar-size\)/u,
-    'the crowd needs the avatars\' size to read — through the token, never a copy of 20px');
+  assert.match(rule('.all-choice'), /--control-icon-size: calc\(var\(--roster-avatar-size\) \+ var\(--roster-gap\)\)/u,
+    'the small crowd needs a little more than one avatar; derive its legible size from the token');
   assert.match(source, /\.all-choice :global\(\.command-icon svg\) \{ width: 100%; height: 100%; \}/u,
     'the svg fills the sized box — the atom hands Icon no size prop');
   // #237: the leading tab gives back the width its square box spent. Tight by
@@ -284,10 +286,15 @@ test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosur
   // outline breaks exactly at the junction — no seam, no stub of line.
   assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel \{ z-index: 1; \}/u);
   assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel::before \{[\s\S]{0,240}?inset: var\(--control-paint-inset\) 0 -1px; border-bottom: 0;/u);
+  assert.match(rule('.cards:not(.expanded) .acard.sel::before'), /border-radius: var\(--ui-radius-panel\) var\(--ui-radius-panel\) 0 0/u,
+    'Chrome-smooth top corners use the existing panel radius while the bottom stays open');
+  assert.match(rule('.roster.compact .cards:not(.expanded) .acard.sel::before'), /inset-block-start: var\(--roster-gap\)/u,
+    'the compact tab uses existing gap geometry instead of an extra coarse top gutter');
   // Multi-select: the STRIP is the lit tab — one fill, one edge, no lines
   // between siblings, and the per-card paint switches off by construction.
   assert.match(rule('.tabs.all-lit'), /background: var\(--bubble-in\)/u);
   assert.match(rule('.tabs.all-lit'), /border: 1px solid var\(--bubble-line\); border-bottom: 0/u);
+  assert.match(rule('.tabs.all-lit'), /border-radius: var\(--ui-radius-panel\) var\(--ui-radius-panel\) 0 0/u);
   assert.match(rule('.tabs.all-lit'), /margin-bottom: -1px; padding-bottom: 1px; position: relative; z-index: 1/u);
   assert.match(source, /\.tabs\.all-lit \.acard::before \{ background: transparent; border-color: transparent; \}/u);
   // Round 6: the enclosure belongs to the DESTINATIONS group, sized to its
@@ -315,7 +322,7 @@ test('team tabs use the reference pill, broken baseline and raised member contou
   assert.match(rule('.cards:not(.expanded) .roster-cluster.team::before'), /height: calc\(var\(--roster-gap\) \/ 2\); background: var\(--text2\)/u,
     'one neutral pixel uses existing spacing and adds no row height');
   assert.match(rule('.team-label'), /min-height: var\(--roster-ring-size\)/u, 'the pill fits within the existing tab row');
-  assert.match(rule('.team-label'), /border-radius: var\(--ui-radius-control\)/u);
+  assert.match(rule('.team-label'), /border-radius: var\(--ui-radius-row\)/u);
   assert.match(rule('.team-label'), /background: var\(--control-surface\)/u);
   assert.match(rule('.roster.compact .team-label'), /display: none/u, 'long team names never consume a whole tab on the phone');
   assert.match(rule('.roster.compact .cards.expanded .team-label'), /display: inline-flex/u,

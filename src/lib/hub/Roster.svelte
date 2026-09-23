@@ -250,6 +250,12 @@
             use:longpress={{ onlongpress: (at) => oncontext(at, a.name, touchInfo(() => cardInfo(a))) }}>
             <span class="avatar-slot">
               {#if backendIcon(a.agent)}<img class="ava" src={backendIcon(a.agent)} alt={a.agent} />{:else}<span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>{/if}
+              {#if a.vitals?.context_pct != null}
+                {@const pct = Math.max(0, Math.min(100, a.vitals.context_pct))}
+                <span class="ctx-ring" role="meter" aria-label={t('hubCtxUsed')}
+                  aria-valuemin="0" aria-valuemax="100" aria-valuenow={pct} aria-valuetext={`${a.vitals.context_pct}%`}
+                  style:--ctx-amount={`${pct}%`} style:--ctx-color={ctxColor(a.vitals.context_pct)}></span>
+              {/if}
             </span>
             <span class="a-name">{a.name}<span class="ac-top"><span class="st" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span></span></span>
             <span class="agent-marks" class:unmarked={!mentioned && !unread.has(a.name)}>
@@ -271,12 +277,6 @@
                 {pending} disabled={pending}
                 onclick={(e) => { e.stopPropagation(); interrupt(a.name); }} />
             </span>
-          {/if}
-          {#if a.vitals?.context_pct != null}
-            {@const pct = Math.max(0, Math.min(100, a.vitals.context_pct))}
-            <div class="ctx-ring" role="meter" aria-label={t('hubCtxUsed')}
-              aria-valuemin="0" aria-valuemax="100" aria-valuenow={pct} aria-valuetext={`${a.vitals.context_pct}%`}
-              style:--ctx-amount={`${pct}%`} style:--ctx-color={ctxColor(a.vitals.context_pct)}></div>
           {/if}
         </div>
       {/each}
@@ -316,8 +316,8 @@
 
 <style>
   .roster {
-    --roster-avatar-size: 20px;
-    --roster-ring-size: 26px;
+    --roster-avatar-size: 18px;
+    --roster-ring-size: 24px;
     --roster-ring-stroke: 2px;
     --roster-paint-height: 30px;
     --roster-card-inset: 4px;
@@ -380,7 +380,7 @@
   }
   .team-label {
     display: inline-flex; align-items: center; min-height: var(--roster-ring-size);
-    padding-inline: var(--ui-gap); border-radius: var(--ui-radius-control);
+    padding-inline: var(--ui-gap); border-radius: var(--ui-radius-row);
     white-space: nowrap; color: var(--text); background: var(--control-surface);
     font: 600 var(--fs-meta)/1 var(--font-display);
   }
@@ -398,7 +398,7 @@
   .tabs.all-lit {
     background: var(--bubble-in);
     border: 1px solid var(--bubble-line); border-bottom: 0;
-    border-radius: var(--ui-radius-control) var(--ui-radius-control) 0 0;
+    border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0;
     /* 1px into the band: the same fill, so no sub-pixel gap can open at the
        junction on a fractional zoom. */
     margin-bottom: -1px; padding-bottom: 1px; position: relative; z-index: 1;
@@ -454,14 +454,15 @@
     /* -1px: the tab's own fill covers the band's top edge under it, so the
        enclosure is continuous and no stub of line shows at the junction. */
     inset: var(--control-paint-inset) 0 -1px; border-bottom: 0;
-    border-radius: var(--ui-radius-control) var(--ui-radius-control) 0 0;
+    border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0;
   }
+  .roster.compact .cards:not(.expanded) .acard.sel::before { inset-block-start: var(--roster-gap); }
   .acard.filtered::after {
     content: ''; position: absolute; inset: var(--control-paint-inset) 0; border: 1px dashed var(--text2);
     border-radius: inherit; pointer-events: none;
   }
   .ctx-ring {
-    position: absolute; left: var(--roster-card-inset); top: calc(50% - var(--roster-ring-size) / 2);
+    position: absolute; left: 0; top: 0;
     width: var(--roster-ring-size); height: var(--roster-ring-size); border-radius: 50%;
     background: conic-gradient(var(--ctx-color) var(--ctx-amount), var(--border) 0);
     mask: radial-gradient(farthest-side, transparent calc(100% - var(--roster-ring-stroke)), var(--control-overlay-dark) 0);
@@ -477,7 +478,7 @@
     padding: 0 var(--roster-card-inset); text-align: left; cursor: pointer; font-size: var(--fs-ui);
     -webkit-tap-highlight-color: transparent;
   }
-  .roster.compact .agent-select { padding-block-start: var(--ui-gap); }
+  .roster.compact .agent-select { padding-block-start: calc(2 * var(--ui-gap)); }
   .agent-select:focus-visible { outline-color: var(--accent-ink); outline-offset: 0; }
   /* Only a live card carries a dot, so only it reserves the Stop's room. */
   .acard:not(.off) .agent-select { padding-inline-end: var(--roster-dot-reserve); }
@@ -507,7 +508,7 @@
        on `.agent-select`'s min-height, not on the painted row. */
     .roster { --roster-paint-height: 32px; }
   }
-  .avatar-slot { width: var(--roster-ring-size); height: var(--roster-ring-size); display: grid; place-items: center; flex: none; }
+  .avatar-slot { position: relative; width: var(--roster-ring-size); height: var(--roster-ring-size); display: grid; place-items: center; flex: none; }
   .ava { width: var(--roster-avatar-size); height: var(--roster-avatar-size); flex: none; border-radius: 50%; object-fit: contain; display: grid; place-items: center; }
   .ctx-value { width: 4ch; flex: none; text-align: right; font: var(--fs-meta)/1 var(--font-mono); color: var(--text2); white-space: nowrap; }
   .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--status-danger); flex: none; }
@@ -515,13 +516,13 @@
   .ava.dim { background: var(--surface2); color: var(--text3); }
   img.ava.dim { background: none !important; filter: grayscale(1); opacity: 0.55; }
   .roster-add { display: flex; align-items: center; flex: none; min-height: var(--control-height); }
-  /* The foreground bot stays legible at the avatars' size; the two behind it
-     show as partial silhouettes instead of squeezing three faces side by side. */
-  .all-choice { --control-icon-size: var(--roster-avatar-size); }
+  /* Three faces need one gap more than a single avatar to remain legible.
+     Derive the size from the avatar token, not a second pixel constant. */
+  .all-choice { --control-icon-size: calc(var(--roster-avatar-size) + var(--roster-gap)); }
   .all-choice :global(.command-icon svg) { width: 100%; height: 100%; }
   /* Tight on fine pointers; the coarse branch keeps a full finger target. */
   .all-choice :global(.command-button.icon-only) { width: auto; min-width: 0; padding-inline: 2px; }
-  .roster.compact .all-choice :global(.command-button.icon-only) { padding-block-start: var(--ui-gap); }
+  .roster.compact .all-choice :global(.command-button.icon-only) { padding-block-start: calc(2 * var(--ui-gap)); }
   /* Touch restores the square: there the box IS the target, not the paint.
      Declared after the tight rule — same specificity, later wins. */
   @media (any-pointer: coarse) {
