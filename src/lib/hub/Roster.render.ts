@@ -186,7 +186,8 @@ test('Roster renders the controlled destination strip (#168)', { timeout: RENDER
   await ctx.test('empty/closed rooms retain add; loading and long names remain honest', () => {
     assert.ok(view({ managedAgents: [], stopped: [], managedNames: [], busyNames: [] }).querySelector('.roster-add button'));
     assert.equal(view({ selected: '' }).querySelector('.roster'), null);
-    assert.ok(view({ roomReady: false }).querySelector('.sk-cards[aria-hidden="true"]'));
+    assert.ok(view({ roomReady: false, managedAgents: [], stopped: [] }).querySelector('.sk-cards[aria-hidden="true"]'));
+    assert.equal(view({ roomReady: false }).querySelector('.sk-cards'), null, 'placeholders never sit in front of rendered cards');
     assert.equal(view({ roomReady: false }).querySelector('[data-agent="all"]'), null, 'no empty-all verdict before first answer');
     const name = 'a-very-long-agent-name-with-identity-intact';
     const root = view({ managedAgents: [{ ...agents[0], name }], managedNames: [name], busyNames: [name] });

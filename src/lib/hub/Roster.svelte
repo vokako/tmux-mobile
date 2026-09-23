@@ -211,7 +211,10 @@
       onpointercancel={clearPress} onclickcapture={clearPress}
       onfocusin={() => { focused = true; }}
       onfocusout={(e) => { focused = !!e.relatedTarget && e.currentTarget.contains(e.relatedTarget); if (!focused) clearPress(); }}>
-      {#if !roomReady}
+      <!-- Only while there is nothing to show: with cards already rendered the
+           three shimmering placeholders sat in front of them (owner, 2026-09-23:
+           "Agent 卡片都已经渲染出来了，前面还有 3 个空的过渡动画"). -->
+      {#if !roomReady && !managedAgents.length && !stopped.length}
         <div class="skel-wrap sk-cards" aria-hidden="true">
           <span class="skel sk-card"></span><span class="skel sk-card"></span><span class="skel sk-card"></span>
         </div>

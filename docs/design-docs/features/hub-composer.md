@@ -729,7 +729,10 @@ baseline shows exactly where the marker is not. The measure is layout (offsets),
 so the marker is not fooled by the press scale or the root zoom; its box is
 integer offsets, up to half a pixel wider than the card, inside the gap.
 Frames at a 2.5s tempo: card → card, card → team and team → All each show
-one enclosure in flight with both feet, nothing popping. Same day, the band
+one enclosure in flight with both feet, nothing popping. The strip's
+skeleton (three shimmering cards) shows only while there is nothing to
+show — with the cards already rendered it sat in front of them on a room
+switch (owner, 17:38: "Agent 卡片都已经渲染出来了，前面还有 3 个空的过渡动画"). Same day, the band
 under the strip got equal air above and below the field (6px, was 10px
 below; compact 3px, was 8px) and square lower corners — the band's sides
 meet the sidebar and the drawer, and the rounded corner left a notch

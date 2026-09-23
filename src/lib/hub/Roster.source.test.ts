@@ -176,7 +176,8 @@ test('double-click focuses live agents without delay and uses the existing filte
 
 test('identity, readiness and motion retain their existing authorities', () => {
   assert.match(source, /\{#if selected\}\s*<div class="roster"/u);
-  assert.match(source, /\{#if !roomReady\}\s*<div class="skel-wrap sk-cards" aria-hidden="true">/u);
+  assert.match(source, /\{#if !roomReady && !managedAgents\.length && !stopped\.length\}\s*<div class="skel-wrap sk-cards" aria-hidden="true">/u,
+    'placeholders only while there is nothing to show — never in front of rendered cards (owner, 2026-09-23)');
   assert.match(source, /class:reveal=\{justLoaded\}/u);
   assert.match(source, /class:appear-pop=\{!!rosterBase && !rosterBase\.has\(a\.name\)\}/u);
   assert.match(source, /class:live-dot=\{stateIsLive\(a\.state\)\} style:background=\{stateDotColor\(a\.state\)\}/u);
