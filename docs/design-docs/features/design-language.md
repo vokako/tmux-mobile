@@ -68,6 +68,19 @@ copied: group membership is not agent status. No nested frame, second
 selection command or new motion tempo. Reason, ordering and measurements:
 [hub-composer.md](hub-composer.md#one-roster-above-the-input-one-stop-operation-board-168-2026-09-11).
 
+**Four tab corners (owner, 2026-09-23).** In the collapsed strip a lit tab
+uses `--ui-radius-panel` at its top and `--ui-radius-row` at its lower
+corners; the selected All enclosure follows the same contour. The bottom
+border remains absent, so both still open into the band. The lower curves
+stay INSIDE the tab's paint/hit area: the 2px gap between cards and the
+neighbour's Stop cannot safely host Chrome's outward concave flares.
+Expanded list cards keep their own closed row radius. No new shape/tempo
+or paint outside another hit area. Switching tabs crossfades paint colour
+on `--t-move`, but the joining inset/corner geometry switches immediately;
+the selected, collapsed, non-All tab has a 2px opaque floor in its own
+`--bubble-in` fill, so the group baseline cannot flash through during the
+colour fade. See [hub-composer.md](hub-composer.md) for the frame evidence.
+
 **Compact tab floor (owner, 2026-09-23).** The 44px target is the floor.
 Remove empty scrollport/disclosure space above the tabs, not the field's 3px
 top inset. Compact button contents sit lower inside their unchanged hit box

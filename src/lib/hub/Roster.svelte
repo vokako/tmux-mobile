@@ -398,7 +398,7 @@
   .tabs.all-lit {
     background: var(--bubble-in);
     border: 1px solid var(--bubble-line); border-bottom: 0;
-    border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0;
+    border-radius: var(--ui-radius-panel) var(--ui-radius-panel) var(--ui-radius-row) var(--ui-radius-row);
     /* 1px into the band: the same fill, so no sub-pixel gap can open at the
        junction on a fractional zoom. */
     margin-bottom: -1px; padding-bottom: 1px; position: relative; z-index: 1;
@@ -431,11 +431,9 @@
     content: ''; position: absolute; inset: var(--control-paint-inset) 0;
     border-radius: inherit; pointer-events: none; box-sizing: border-box;
     background: var(--card-paint); border: 1px solid var(--card-line);
-    /* --t-move, not --t-fast: switching tabs is the selection MOVING, and the
-       instant swap read as 生硬 (owner, 2026-09-22) — the outgoing and
-       incoming tabs crossfade and reshape over the one movement tempo. */
-    transition: background var(--t-move) ease, border-color var(--t-move) ease,
-      border-radius var(--t-move) ease, inset var(--t-move) ease;
+    /* Crossfade the ink, but switch the joining geometry immediately: an
+       animated bottom inset exposed the group baseline beneath a new tab. */
+    transition: background var(--t-move) ease, border-color var(--t-move) ease;
   }
   .acard:hover { --card-paint: var(--surface2); }
   .acard.sel { --card-paint: var(--bubble-in); --card-line: var(--bubble-line); }
@@ -454,7 +452,12 @@
     /* -1px: the tab's own fill covers the band's top edge under it, so the
        enclosure is continuous and no stub of line shows at the junction. */
     inset: var(--control-paint-inset) 0 -1px; border-bottom: 0;
-    border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0;
+    border-radius: var(--ui-radius-panel) var(--ui-radius-panel) var(--ui-radius-row) var(--ui-radius-row);
+  }
+  .cards:not(.expanded) .tabs:not(.all-lit) .acard.sel::before {
+    /* The opaque floor joins the band from the first frame while the tab's
+       body still crossfades; otherwise the team baseline shines through it. */
+    background-image: linear-gradient(to top, var(--bubble-in) var(--roster-gap), transparent var(--roster-gap));
   }
   .roster.compact .cards:not(.expanded) .acard.sel::before { inset-block-start: var(--roster-gap); }
   .acard.filtered::after {

@@ -616,6 +616,29 @@ tab off from the composer. Solo tabs keep the normal faint bubble edge.
 This is not a return to #236's deleted tray-wide rule: only the team itself
 draws a baseline. The screenshot uses green; this implementation keeps a
 neutral line because membership is not a status or selection colour.
+The owner next asked for bottom LEFT and RIGHT rounding too (2026-09-23,
+09:26). Collapsed selected tabs and All now carry `--ui-radius-row` lower
+corners inside their own paint; `border-bottom: 0` and the bubble fill
+still join the band. Chrome's outward concave flares would reach about
+12px into a neighbour, while this strip gives tabs only `--roster-gap`
+(2px) and a busy neighbour's Stop may occupy that edge. The inner
+corner is deliberately used instead of painting over another target.
+The owner's 09:38 report of a WHITE LINE while switching tabs exposed two
+transient join faults. Chromium 152 at 390px measured the incoming bottom
+inset at 6px immediately after selection, 3.14px after 64ms and -1px only
+after 230ms; the outgoing tab retracted the other way while its bottom
+border returned immediately. The 1px group baseline showed through for
+the 200ms animation. The selected tab's joining geometry (inset and
+corner radius) now switches immediately; only background and border colour
+crossfade on `--t-move`. Colour alone would still fade the new tab's fill
+from transparent and leak the group baseline. The collapsed, non-All
+selected tab therefore owns an immediately opaque `--bubble-in` floor of
+`--roster-gap` pixels (2px) INSIDE its own paint. It reaches the band in the
+first frame while the rest of the fill fades; the group line neither
+becomes a tray-wide rule nor needs a second covering layer. The frame
+probe at 390px light: at 40ms the body was 7% opaque but the floor was
+fully opaque; video pixel x187,y538 went from grey (97/96/99) straight
+to bubble (239/238/243) with no intermediate line.
 At 390px long labels would crowd the strip, so compact hides the pill and
 the full team path remains in member hover/ARIA and touch-opened menus.
 Expanded mode is a list: its team pill returns even on compact, with no

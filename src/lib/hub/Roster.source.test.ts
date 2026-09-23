@@ -286,15 +286,15 @@ test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosur
   // outline breaks exactly at the junction — no seam, no stub of line.
   assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel \{ z-index: 1; \}/u);
   assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel::before \{[\s\S]{0,240}?inset: var\(--control-paint-inset\) 0 -1px; border-bottom: 0;/u);
-  assert.match(rule('.cards:not(.expanded) .acard.sel::before'), /border-radius: var\(--ui-radius-panel\) var\(--ui-radius-panel\) 0 0/u,
-    'Chrome-smooth top corners use the existing panel radius while the bottom stays open');
+  assert.match(rule('.cards:not(.expanded) .acard.sel::before'), /border-radius: var\(--ui-radius-panel\) var\(--ui-radius-panel\) var\(--ui-radius-row\) var\(--ui-radius-row\)/u,
+    'both lower corners turn inside the hit box while the bottom border stays open');
   assert.match(rule('.roster.compact .cards:not(.expanded) .acard.sel::before'), /inset-block-start: var\(--roster-gap\)/u,
     'the compact tab uses existing gap geometry instead of an extra coarse top gutter');
   // Multi-select: the STRIP is the lit tab — one fill, one edge, no lines
   // between siblings, and the per-card paint switches off by construction.
   assert.match(rule('.tabs.all-lit'), /background: var\(--bubble-in\)/u);
   assert.match(rule('.tabs.all-lit'), /border: 1px solid var\(--bubble-line\); border-bottom: 0/u);
-  assert.match(rule('.tabs.all-lit'), /border-radius: var\(--ui-radius-panel\) var\(--ui-radius-panel\) 0 0/u);
+  assert.match(rule('.tabs.all-lit'), /border-radius: var\(--ui-radius-panel\) var\(--ui-radius-panel\) var\(--ui-radius-row\) var\(--ui-radius-row\)/u);
   assert.match(rule('.tabs.all-lit'), /margin-bottom: -1px; padding-bottom: 1px; position: relative; z-index: 1/u);
   assert.match(source, /\.tabs\.all-lit \.acard::before \{ background: transparent; border-color: transparent; \}/u);
   // Round 6: the enclosure belongs to the DESTINATIONS group, sized to its
@@ -305,8 +305,13 @@ test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosur
   assert.match(rule('.cards.expanded .tabs'), /flex: 0 1 auto; min-width: 0; flex-wrap: wrap/u,
     'only the wrapped list shrinks the group — there it wraps inside itself');
   assert.doesNotMatch(source, /\.cards\.all-lit/u, 'the row-wide enclosure is gone');
-  assert.match(rule('.acard::before'), /transition: background var\(--t-move\) ease, border-color var\(--t-move\) ease,\n\s*border-radius var\(--t-move\) ease, inset var\(--t-move\) ease/u,
-    'switching tabs is movement: the swap crossfades and reshapes, never snaps');
+  assert.match(rule('.acard::before'), /transition: background var\(--t-move\) ease, border-color var\(--t-move\) ease/u,
+    'the visual colour swap keeps the one movement tempo');
+  assert.doesNotMatch(rule('.acard::before'), /transition:[^;]*(?:inset|border-radius)/u,
+    'the geometry that joins the input cannot pass through intermediate frames');
+  assert.match(rule('.cards:not(.expanded) .tabs:not(.all-lit) .acard.sel::before'),
+    /background-image: linear-gradient\(to top, var\(--bubble-in\) var\(--roster-gap\), transparent var\(--roster-gap\)\)/u,
+    'the selected tab owns an instantly opaque floor while its body crossfades');
   assert.doesNotMatch(source, /\.roster::after/u, 'the hairline model stays dead');
   assert.match(rule('.roster'), /background: var\(--hub-tab-frame\)/u, 'the contrast comes from the frame going darker');
 });
@@ -333,4 +338,12 @@ test('team tabs use the reference pill, broken baseline and raised member contou
   assert.match(rule('.cards.expanded .roster-cluster.team'), /flex: 0 1 100%; min-width: 0; flex-wrap: wrap/u,
     'the expanded group may wrap without overflowing the narrow list');
   assert.doesNotMatch(source, /onclick=\{[^}]*group\.team/u, 'a team label is not a second recipient command');
+});
+
+test('lower tab corners stay inside the selected paint and clear adjacent targets (#238)', () => {
+  assert.match(rule('.cards:not(.expanded) .acard.sel::before'), /border-bottom: 0/u,
+    'the selected tab stays open into the composer band');
+  assert.doesNotMatch(source, /tab-flare|clip-path/u, 'no outward paint crosses a neighbouring tab or Stop');
+  assert.match(rule('.cards:not(.expanded) .roster-cluster.team::before'), /inset: auto var\(--roster-gap\) 0/u,
+    'only the group carries a baseline; never the full tray');
 });
