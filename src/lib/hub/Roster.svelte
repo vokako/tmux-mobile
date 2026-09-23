@@ -290,8 +290,10 @@
                 onclick={(e) => { e.stopPropagation(); interrupt(a.name); }} />
             </span>
           {/if}
+          <span class="tab-foot left" aria-hidden="true"></span><span class="tab-foot right" aria-hidden="true"></span>
         </div>
       {/each}
+      <span class="tab-foot left" aria-hidden="true"></span><span class="tab-foot right" aria-hidden="true"></span>
       </div>
       {/each}
       </div>
@@ -330,6 +332,7 @@
   .roster {
     --roster-avatar-size: 18px;
     --roster-ring-size: 24px;
+    --roster-all-icon-size: 20px;
     --roster-ring-stroke: 2px;
     --roster-paint-height: 30px;
     --roster-card-inset: 4px;
@@ -380,11 +383,13 @@
      The wrapped list is the opposite case: there the group SHOULD shrink to
      the container and wrap inside itself. */
   .tabs { display: flex; align-items: center; gap: var(--roster-gap); flex: none; }
+  .cards:not(.expanded) .tabs { gap: var(--ui-gap); }
   .cards.expanded .tabs { flex: 0 1 auto; min-width: 0; flex-wrap: wrap; align-content: start; }
   /* The group is one flex item in the scrolling strip; solos use the same
      wrapper without group chrome. Its baseline sits BEHIND a lit tab, whose
      fill covers the line and whose raised edge opens into the composer. */
   .roster-cluster { display: flex; align-items: center; gap: var(--roster-gap); flex: none; position: relative; }
+  .cards:not(.expanded) .roster-cluster { gap: var(--ui-gap); }
   .roster-cluster.team { margin-inline: var(--roster-gap); padding-inline: var(--roster-gap); }
   .cards:not(.expanded) .roster-cluster.team::before {
     content: ''; position: absolute; inset: auto var(--roster-gap) 0;
@@ -400,7 +405,7 @@
   .team-label:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
   .roster.compact .team-label { min-width: var(--control-height); min-height: var(--control-height); max-width: calc(2 * var(--control-height)); }
   .team-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .roster-cluster.team-lit { background: var(--bubble-in); border-radius: var(--ui-radius-panel) var(--ui-radius-panel) var(--ui-radius-row) var(--ui-radius-row); z-index: 1; }
+  .roster-cluster.team-lit { background: var(--bubble-in); border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0; z-index: 1; }
   .roster-cluster.team-lit::after {
     content: ''; position: absolute; inset: 0 0 -1px; border: 1px solid var(--bubble-line); border-bottom: 0;
     border-radius: inherit; pointer-events: none;
@@ -408,6 +413,30 @@
   .cards.expanded .roster-cluster.team-lit::after { inset: 0; border-bottom: 1px solid var(--bubble-line); }
   .roster-cluster.team-lit .acard::before { background: transparent; border-color: transparent; }
   .roster-cluster.team-lit::before { display: none; }
+  .tab-foot {
+    display: none; position: absolute; bottom: 0; width: var(--ui-gap); height: var(--ui-gap);
+    pointer-events: none;
+  }
+  .tab-foot.left {
+    left: calc(-1 * var(--ui-gap));
+    background: radial-gradient(circle at 0 0, transparent calc(var(--ui-gap) - var(--roster-gap) / 2), var(--bubble-in) var(--ui-gap));
+  }
+  .tab-foot.right {
+    right: calc(-1 * var(--ui-gap));
+    background: radial-gradient(circle at 100% 0, transparent calc(var(--ui-gap) - var(--roster-gap) / 2), var(--bubble-in) var(--ui-gap));
+  }
+  .tab-foot::before {
+    content: ''; position: absolute; top: 0; width: calc(var(--roster-gap) / 2);
+    height: var(--ui-gap); background: var(--bubble-in);
+  }
+  .tab-foot.left::before { right: calc(-1 * var(--roster-gap) / 2); }
+  .tab-foot.right::before { left: calc(-1 * var(--roster-gap) / 2); }
+  .tab-foot::after { content: ''; position: absolute; inset: 0; }
+  .tab-foot.left::after { border-right: 1px solid var(--card-line, var(--bubble-line)); border-bottom: 1px solid var(--card-line, var(--bubble-line)); border-bottom-right-radius: var(--ui-gap); }
+  .tab-foot.right::after { border-left: 1px solid var(--card-line, var(--bubble-line)); border-bottom: 1px solid var(--card-line, var(--bubble-line)); border-bottom-left-radius: var(--ui-gap); }
+  .cards:not(.expanded) .tabs:not(.all-lit) .roster-cluster:not(.team-lit) .acard.sel .tab-foot,
+  .cards:not(.expanded) .roster-cluster.team-lit > .tab-foot { display: block; }
+  .roster-cluster.team-lit > .tab-foot { --card-line: var(--bubble-line); }
   .cards:not(.expanded) .tabs:not(.all-lit) .roster-cluster.team .acard.sel { --card-line: var(--text2); }
   .tabs.all-lit .roster-cluster.team::before { display: none; }
   .cards.expanded .roster-cluster.team { flex: 0 1 100%; min-width: 0; flex-wrap: wrap; }
@@ -474,7 +503,7 @@
     /* -1px: the tab's own fill covers the band's top edge under it, so the
        enclosure is continuous and no stub of line shows at the junction. */
     inset: var(--control-paint-inset) 0 -1px; border-bottom: 0;
-    border-radius: var(--ui-radius-panel) var(--ui-radius-panel) var(--ui-radius-row) var(--ui-radius-row);
+    border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0;
   }
   .cards:not(.expanded) .tabs:not(.all-lit) .roster-cluster:not(.team-lit) .acard.sel::before {
     /* The opaque floor joins the band from the first frame while the tab's
@@ -541,9 +570,8 @@
   .ava.dim { background: var(--surface2); color: var(--text3); }
   img.ava.dim { background: none !important; filter: grayscale(1); opacity: 0.55; }
   .roster-add { display: flex; align-items: center; flex: none; min-height: var(--control-height); }
-  /* Three faces need one gap more than a single avatar to remain legible.
-     Derive the size from the avatar token, not a second pixel constant. */
-  .all-choice { --control-icon-size: calc(var(--roster-avatar-size) + var(--roster-gap)); }
+  /* Three faces need their own readable icon size, independent of tab spacing. */
+  .all-choice { --control-icon-size: var(--roster-all-icon-size); }
   .all-choice :global(.command-icon svg) { width: 100%; height: 100%; }
   /* Tight on fine pointers; the coarse branch keeps a full finger target. */
   .all-choice :global(.command-button.icon-only) { width: auto; min-width: 0; padding-inline: 2px; }

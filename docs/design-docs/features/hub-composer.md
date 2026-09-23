@@ -324,9 +324,9 @@ orbiting dots both failed the glance test). It used the avatars' size
 and looked muddled even at 20px (owner, 2026-09-23). Three heads now recede
 behind a single readable foreground face; the rear contours end at the front
 head rather than crossing its strokes. When the avatar shrank from 20px to
-18px, rendering three heads at 18px became soft; the leading tab now derives
-its 20px glyph from the avatar-size token plus `--roster-gap`, not a second
-pixel constant. Its fine-pointer box stays 24px (`20px` icon plus `2px` per
+18px, rendering three heads at 18px became soft; the leading tab now has
+its own `--roster-all-icon-size` at 20px, independent of the gap between
+tabs. Its fine-pointer box stays 24px (`20px` icon plus `2px` per
 side), and the strip has no extra leading inset beyond its 2px scrollport
 padding. The field
 keeps its normal inset; the tab's paint need not start at
@@ -617,12 +617,25 @@ This is not a return to #236's deleted tray-wide rule: only the team itself
 draws a baseline. The screenshot uses green; this implementation keeps a
 neutral line because membership is not a status or selection colour.
 The owner next asked for bottom LEFT and RIGHT rounding too (2026-09-23,
-09:26). Collapsed selected tabs and All now carry `--ui-radius-row` lower
-corners inside their own paint; `border-bottom: 0` and the bubble fill
-still join the band. Chrome's outward concave flares would reach about
-12px into a neighbour, while this strip gives tabs only `--roster-gap`
-(2px) and a busy neighbour's Stop may occupy that edge. The inner
-corner is deliberately used instead of painting over another target.
+09:26). The first attempt rounded INWARD using `--ui-radius-row`; at
+10:39 the owner corrected the direction to Chrome's small outward tangent.
+The collapsed strip now widens ONLY its between-tab flex gaps from
+`--roster-gap` (2px) to `--ui-gap` (4px). A selected named tab's two tangent
+feet are 4px arcs confined to those real gaps, with the lower stroke of
+the old vertical border removed only where the arc begins. The selected
+team group has the same feet on its outer edges; All at the viewport's
+left edge retains its original inner corners. The expanded list keeps
+its old 2px gaps and no feet. The fill under each arc is the same
+`--bubble-in` as the selected tab and composer, so `border-bottom: 0`
+still joins the band. `--roster-gap` stays 2px: its eleven other readers,
+including the group baseline and the instantly opaque join, must not
+move with visual tab spacing. The All icon gets a named 20px roster metric
+instead of avatar size plus gap. Chromium 152 at 390px with three team
+members and two solos: the destinations width is 512.81px -> 524.81px
+(+12px), scroll content 563px -> 575px, row and native targets stay
+44px. Selected member's left/right feet ended exactly at the adjacent
+pill/member hit-box edges with zero overlap. The owner's width tradeoff
+is explicit: each of the six widened gaps costs 2px.
 The owner's 09:38 report of a WHITE LINE while switching tabs exposed two
 transient join faults. Chromium 152 at 390px measured the incoming bottom
 inset at 6px immediately after selection, 3.14px after 64ms and -1px only

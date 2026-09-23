@@ -252,8 +252,9 @@ test('Everyone is the PINNED tab: always at the head, previewing on hover (board
   assert.match(source, /<span class="all-choice acard" class:sel=\{recipient === ALL_TARGET\} role="presentation"/u);
   assert.match(source, /<CommandButton variant="icon" icon="bots" label=\{t\('hubEveryone'\)\} pressed=\{recipient === ALL_TARGET\} bare/u,
     '#237: a small CROWD of the bot mark — "可以多画几个机器人"');
-  assert.match(rule('.all-choice'), /--control-icon-size: calc\(var\(--roster-avatar-size\) \+ var\(--roster-gap\)\)/u,
-    'the small crowd needs a little more than one avatar; derive its legible size from the token');
+  assert.match(rule('.roster'), /--roster-all-icon-size: 20px/u, 'three heads have their own readable icon metric');
+  assert.match(rule('.all-choice'), /--control-icon-size: var\(--roster-all-icon-size\)/u,
+    'All must not grow when the between-tab gap changes');
   assert.match(source, /\.all-choice :global\(\.command-icon svg\) \{ width: 100%; height: 100%; \}/u,
     'the svg fills the sized box — the atom hands Icon no size prop');
   // #237: the leading tab gives back the width its square box spent. Tight by
@@ -287,8 +288,8 @@ test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosur
   // outline breaks exactly at the junction — no seam, no stub of line.
   assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel \{ z-index: 1; \}/u);
   assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel::before \{[\s\S]{0,240}?inset: var\(--control-paint-inset\) 0 -1px; border-bottom: 0;/u);
-  assert.match(rule('.cards:not(.expanded) .acard.sel::before'), /border-radius: var\(--ui-radius-panel\) var\(--ui-radius-panel\) var\(--ui-radius-row\) var\(--ui-radius-row\)/u,
-    'both lower corners turn inside the hit box while the bottom border stays open');
+  assert.match(rule('.cards:not(.expanded) .acard.sel::before'), /border-radius: var\(--ui-radius-panel\) var\(--ui-radius-panel\) 0 0/u,
+    'the tab side meets its outward tangent instead of turning inward');
   assert.match(rule('.roster.compact .cards:not(.expanded) .acard.sel::before'), /inset-block-start: var\(--roster-gap\)/u,
     'the compact tab uses existing gap geometry instead of an extra coarse top gutter');
   // Multi-select: the STRIP is the lit tab — one fill, one edge, no lines
@@ -303,6 +304,8 @@ test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosur
   // destinations (owner: "不要把加号后面的这些区域也都框出来").
   assert.match(rule('.tabs'), /display: flex; align-items: center; gap: var\(--roster-gap\); flex: none/u,
     'the group must NOT shrink in the scrolling strip: its flex:none cards would spill out of it and the + would draw on top (review 2026-09-22)');
+  assert.match(rule('.cards:not(.expanded) .tabs'), /gap: var\(--ui-gap\)/u, 'only collapsed tab-to-tab gaps widen for the outward tangent');
+  assert.match(rule('.cards:not(.expanded) .roster-cluster'), /gap: var\(--ui-gap\)/u, 'the group also gives its members actual flare room');
   assert.match(rule('.cards.expanded .tabs'), /flex: 0 1 auto; min-width: 0; flex-wrap: wrap/u,
     'only the wrapped list shrinks the group — there it wraps inside itself');
   assert.doesNotMatch(source, /\.cards\.all-lit/u, 'the row-wide enclosure is gone');
@@ -347,10 +350,20 @@ test('team tabs use the reference pill, broken baseline and raised member contou
     'the expanded list is a closed group, not an open tab that pretends to reach the band');
 });
 
-test('lower tab corners stay inside the selected paint and clear adjacent targets (#238)', () => {
+test('outward feet occupy only the collapsed tab gap, tangent at the floor (#238 owner correction)', () => {
   assert.match(rule('.cards:not(.expanded) .acard.sel::before'), /border-bottom: 0/u,
     'the selected tab stays open into the composer band');
-  assert.doesNotMatch(source, /tab-flare|clip-path/u, 'no outward paint crosses a neighbouring tab or Stop');
+  assert.match(rule('.tab-foot'), /bottom: 0; width: var\(--ui-gap\); height: var\(--ui-gap\)/u);
+  assert.match(rule('.tab-foot'), /pointer-events: none/u);
+  assert.match(rule('.tab-foot.left'), /left: calc\(-1 \* var\(--ui-gap\)\)/u);
+  assert.match(rule('.tab-foot.right'), /right: calc\(-1 \* var\(--ui-gap\)\)/u);
+  assert.match(rule('.tab-foot::before'), /width: calc\(var\(--roster-gap\) \/ 2\)/u,
+    'the selected side border is removed only where the new tangent starts');
+  assert.match(rule('.tab-foot.left::after'), /border-bottom-right-radius: var\(--ui-gap\)/u);
+  assert.match(rule('.tab-foot.right::after'), /border-bottom-left-radius: var\(--ui-gap\)/u);
+  assert.match(source, /\.cards:not\(\.expanded\) \.tabs:not\(\.all-lit\) \.roster-cluster:not\(\.team-lit\) \.acard\.sel \.tab-foot,/u);
+  assert.match(source, /\.cards:not\(\.expanded\) \.roster-cluster\.team-lit > \.tab-foot \{ display: block; \}/u);
+  assert.doesNotMatch(rule('.cards.expanded .tabs'), /var\(--ui-gap\)/u, 'expanded list spacing stays compact and has no outward feet');
   assert.match(rule('.cards:not(.expanded) .roster-cluster.team::before'), /inset: auto var\(--roster-gap\) 0/u,
     'only the group carries a baseline; never the full tray');
 });

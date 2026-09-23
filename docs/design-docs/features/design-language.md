@@ -70,14 +70,20 @@ not copied: group membership is not agent status. No nested frame, second
 delivery path or new motion tempo. Reason, ordering and measurements:
 [hub-composer.md](hub-composer.md#one-roster-above-the-input-one-stop-operation-board-168-2026-09-11).
 
-**Four tab corners (owner, 2026-09-23).** In the collapsed strip a lit tab
-uses `--ui-radius-panel` at its top and `--ui-radius-row` at its lower
-corners; the selected All enclosure follows the same contour. The bottom
-border remains absent, so both still open into the band. The lower curves
-stay INSIDE the tab's paint/hit area: the 2px gap between cards and the
-neighbour's Stop cannot safely host Chrome's outward concave flares.
-Expanded list cards keep their own closed row radius. No new shape/tempo
-or paint outside another hit area. Switching tabs crossfades paint colour
+**Outward tab feet (owner, 2026-09-23).** The first inward lower radii were
+reversed (owner 10:39). A lit named tab now keeps its `--ui-radius-panel`
+top corners and opens into the band through two SMALL outward tangent
+feet. Each arc fits exactly within the collapsed strip's `--ui-gap` (4px)
+between tabs and cannot cover a neighbour or Stop. Only the flex gaps
+between collapsed tabs widened; shared `--roster-gap` stays 2px because
+it also owns the group baseline and opaque join. With three team members
+and two solos at 390px, six gaps each gain 2px, adding 12px to the strip
+width. A selected team group gets feet at its OUTER edges; All at the
+viewport edge retains its existing inner lower radius instead. Expanded
+list cards keep their closed row radius and original gap. The All crowd
+has a named 20px icon metric, not avatar size plus a spacing token, so
+the group symbol stays legible when flex gaps change. No added row height
+or paint over another target. Switching tabs crossfades paint colour
 on `--t-move`, but the joining inset/corner geometry switches immediately;
 the selected, collapsed, non-All tab has a 2px opaque floor in its own
 `--bubble-in` fill, so the group baseline cannot flash through during the
@@ -93,8 +99,8 @@ preserve the 1px image gap and 2px stroke. The compact selected tab's paint
 starts at `--roster-gap` instead of the coarse control inset; Chrome-smooth
 top corners take the existing `--ui-radius-panel`, while the group label pill
 takes `--ui-radius-row`. No second radius scale or altered hit box. The
-three-head All glyph stays legible at the derived avatar size + roster gap
-(20px today); rendering it at the reduced avatar size blurred the crowd.
+three-head All glyph stays legible at its named 20px roster size, independent
+of the gap between tabs; rendering it at the reduced avatar size blurred it.
 The coarse strip is 44px high; desktop is 34px. The tab-to-band junction,
 All enclosure and 44px native controls are unchanged. Measurements and the
 superseded 1px field inset: [hub-composer.md](hub-composer.md).
