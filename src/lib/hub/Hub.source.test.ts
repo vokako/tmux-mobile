@@ -87,7 +87,7 @@ test('Hub keeps Feed coordination and exposes only the agreed reading boundary (
   assert.match(source, /following = true;\n\s*if \(feed\.length\) scrollFeed\(true\);/u,
     'room entry keeps its original tail intent');
   assert.match(source, /if \(filterAgent\) \{ filterAgent = ''; return true; \}/u);
-  assert.match(source, /onclearfilter=\{\(\) => \{ filterAgent = ''; \}\}/u);
+  assert.doesNotMatch(source, /onclearfilter/u, 'the filter shows and leaves in the strip, not a feed banner (owner, 2026-09-23)');
   assert.match(source, /--msg-max: min\(84%, 1360px\);/u,
     'the parent width token still agrees with Feed measurement');
   assert.match(source, /\{#snippet emptyFeed\(\)\}[\s\S]*?addAgents\(\[r\.name\], '', 'start'\)[\s\S]*?\{\/snippet\}/u,

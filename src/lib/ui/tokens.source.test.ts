@@ -77,7 +77,6 @@ const ROUND_ALLOWED: { file: string; match: string; why: string }[] = [
   { file: 'lib/ui/OperationFeedback.svelte', match: 'progress', why: 'a progress bar' },
   { file: 'lib/ui/AgentChip.svelte', match: '', why: 'a chip (membership/destination), not a button' },
   { file: 'lib/hub/Feed.svelte', match: '.day-pill', why: 'a date tag' },
-  { file: 'lib/hub/Feed.svelte', match: '.filter-pill', why: 'a state tag' },
   { file: 'lib/hub/Feed.svelte', match: 'width: 5px; height: 5px', why: 'a dot' },
   { file: 'lib/hub/Feed.svelte', match: '.s-live', why: 'a dot' },
   { file: 'lib/hub/AgentsPage.svelte', match: 'object-fit: cover', why: 'an avatar' },

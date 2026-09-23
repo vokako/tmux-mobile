@@ -189,7 +189,7 @@ danger semantics.
   5px with them (#219 — 7 on 20 read as circles in the Files toolbar). The
   circle/capsule exceptions, by reason: agent avatars, the composer's Send
   (`CommandButton round`, its only wearer), the switch knob/track, tags and
-  chips (day/filter pills, count badges, `.pick`/AgentChip membership), input
+  chips (day pills, count badges, `.pick`/AgentChip membership), input
   capsules (the sessions search), dots, spinners, progress bars. The list is
   the allowlist of `tokens.source.test.ts` — a new circle or capsule on a
   button fails it. Field/menu/dialog radii stay `--control-radius 12`,

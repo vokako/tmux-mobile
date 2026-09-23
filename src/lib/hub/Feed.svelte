@@ -20,13 +20,13 @@
 
   let {
     blocks = [], agents = [], managedNames = [], selected = '', visible = false, compact = false,
-    roomReady = false, justLoaded = false, openedAt = Infinity, filterAgent = '',
+    roomReady = false, justLoaded = false, openedAt = Infinity,
     loadingOlder = false, histMore = false, actMore = false, stepsRows = STEPS_ROWS,
     following = $bindable(true), newBelow = $bindable(false),
     stateLabel = (state) => state, emptyFeed = null,
     onseen: markSeen = () => {}, onolder: loadOlder = async () => {},
     onpath: routePathRef = () => {}, onboard = () => {}, onimage = () => {},
-    onclearfilter = () => {}, registerActions = null,
+    registerActions = null,
   } = $props();
 
   // A resize snapshot belongs to one room. Tool disclosures, copied-label
@@ -579,19 +579,6 @@
 <div class="feed-wrap">
 <div class="feed subtle-scroll" class:reveal-tail={justLoaded} bind:this={feedEl} onscroll={onFeedScroll}
   onloadcapture={onContentLoad} onerrorcapture={onContentLoad}>
-  <!-- The double-click filter is a MODE, so it says so (board #3, owner:
-       "注意ui上体现我们现在的筛选状态，以及可以再退出"): a compact pill
-       INSIDE the feed — as a feed-wrap sibling it became a full-height
-       left COLUMN (feed-wrap is row flex; reopened #3). Sticky at the
-       top so the mode stays visible while reading; content-width. -->
-  {#if filterAgent}
-    <div class="filter-pill appear">
-      <Icon name="search" size={12} />
-      <span class="f-label">{t('hubFilterOn')}</span>
-      <span class="f-name">@{filterAgent}</span>
-      <CommandButton variant="icon" icon="x" label={t('hubFilterExit')} onclick={onclearfilter} />
-    </div>
-  {/if}
   <!-- Low-presence paging feedback at the very top: fetching, or the
        confirmed beginning once both walks are parked (board #9). -->
   {#if roomReady && (loadingOlder || (!histMore && !actMore))}
@@ -1345,22 +1332,4 @@
   .older-hint { text-align: center; color: var(--text3); font-size: var(--fs-micro); padding: 2px 0 6px; }
   .older-more { display: block; width: 100%; background: none; border: none; cursor: pointer; transition: color var(--t-fast); }
   .older-more:hover { color: var(--accent); }
-
-  /* The filter mode's pill: a compact, content-width capsule pinned at the
-     feed's top — accent-tinted so it reads as a STATE, not a message. Sticky
-     (not a layout row): it must never own a column or squeeze the feed
-     (reopened #3: as a feed-wrap sibling it displayed as the left half). */
-  .filter-pill {
-    position: sticky; top: 0; z-index: 9; /* above pinned bubbles (6) and the action overlay (8) */
-    align-self: center;
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 3px 6px 3px 12px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--accent) 10%, var(--bg));
-    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-    color: var(--text2); font-size: var(--fs-meta);
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
-  }
-  .filter-pill .f-name { color: var(--accent); font-weight: 650; font-family: var(--font-mono); }
-
 </style>

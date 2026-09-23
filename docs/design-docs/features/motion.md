@@ -227,7 +227,7 @@ server-switcher trigger (`.quarter-turn`, 90° — 180° is visually identical).
 
 **Wave 3 — things that enter** (`.appear*`): fresh feed blocks (gated on
 `ts > openedAt`), attachment / recipient-extra / unread / needs-you chips,
-the interrupt pill, `.m-acts` rows, filter pill, error and info lines
+the interrupt pill, `.m-acts` rows, error and info lines
 everywhere, reconnect and push banners, to-tail buttons (Hub + Terminal),
 toasts (Terminal, Files copy/download), selection toolbar, search bar,
 new-item / rename / commit rows, drop hint, system vitals first reading,

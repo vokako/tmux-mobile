@@ -686,7 +686,7 @@ test('Roster ContextMenu filters without selecting and a stopped surface never r
       assert.ok(filter);
       filter.click();
       await app.flush();
-      assert.equal(!!app.document.querySelector('.filter-pill'), shouldFilter);
+      assert.equal(!!app.document.querySelector('.cards.filtering'), shouldFilter);
       assert.equal(selectedCard(app.document), recipientBeforeFilter, 'filtering never changes delivery');
     }
   } finally {
@@ -861,11 +861,11 @@ test('desktop double-click focuses an agent and toggles its reading filter witho
     assert.equal(selectedCard(app.document), 'alice');
     await double();
     assert.equal(selectedCard(app.document), 'bob');
-    assert.ok(app.document.querySelector('.filter-pill'));
+    assert.ok(app.document.querySelector('.cards.filtering'));
     assert.ok(stripCard(app.document, 'bob').classList.contains('filtered'));
     await double();
     assert.equal(selectedCard(app.document), 'bob');
-    assert.equal(app.document.querySelector('.filter-pill'), null);
+    assert.equal(app.document.querySelector('.cards.filtering'), null);
     assert.equal(stripCard(app.document, 'bob').classList.contains('filtered'), false);
   } finally { await app.close(); }
 });
@@ -887,7 +887,7 @@ test('stopped-card double-click only filters and closes its click menu (#173)', 
     await app.flush();
     assert.equal(selectedCard(app.document), 'alice');
     assert.equal(app.document.querySelector('.ctx'), null);
-    assert.ok(app.document.querySelector('.filter-pill'));
+    assert.ok(app.document.querySelector('.cards.filtering'));
     assert.ok(stripCard(app.document, 'paused').classList.contains('filtered'));
   } finally { await app.close(); }
 });

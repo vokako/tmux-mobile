@@ -190,7 +190,7 @@
 
 {#if selected}
   <div class="roster" class:compact>
-    <div class="cards edge-fade" class:expanded class:reveal={justLoaded} id={cardsId} bind:this={cardsEl} use:scrollEdges={!expanded}
+    <div class="cards edge-fade" class:expanded class:filtering={!!filterAgent} class:reveal={justLoaded} id={cardsId} bind:this={cardsEl} use:scrollEdges={!expanded}
       role="group" aria-label={t('agentsTitle')}
       onpointerenter={(e) => { hovering = e.pointerType !== 'touch'; }}
       onpointerleave={() => { hovering = false; clearPress(); }}
@@ -527,10 +527,16 @@
     background-image: linear-gradient(to top, var(--bubble-in) var(--roster-gap), transparent var(--roster-gap));
   }
   .roster.compact .cards:not(.expanded) .acard.sel::before { inset-block-start: var(--roster-gap); }
-  .acard.filtered::after {
-    content: ''; position: absolute; inset: var(--control-paint-inset) 0; border: 1px dashed var(--text2);
-    border-radius: inherit; pointer-events: none;
-  }
+  /* The one-agent reading filter is shown IN the strip: the filtered card
+     keeps its light and every other destination dims — no banner above the
+     feed and no ✕ to find (owner, 2026-09-23: "把当前的卡片直接亮起，其他全部
+     变暗"). Double-clicking the card again, or its menu's Show everything,
+     leaves the mode. The tab paint is untouched: dimming says "not in view",
+     the paint still says who you are talking to. */
+  .agent-select, .team-label, .all-choice { transition: opacity var(--t-move) ease; }
+  .cards.filtering .acard:not(.filtered) .agent-select,
+  .cards.filtering .team-label,
+  .cards.filtering .all-choice { opacity: var(--control-disabled-opacity); }
   .ctx-ring {
     position: absolute; left: 0; top: 0;
     width: var(--roster-ring-size); height: var(--roster-ring-size); border-radius: 50%;
@@ -538,7 +544,7 @@
     mask: radial-gradient(farthest-side, transparent calc(100% - var(--roster-ring-stroke)), var(--control-overlay-dark) 0);
     pointer-events: none;
   }
-  @media (prefers-reduced-motion: reduce) { .acard::before { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .acard::before, .agent-select, .team-label, .all-choice { transition: none; } }
   .cards.expanded .acard { max-width: 100%; }
   .agent-select {
     position: relative;

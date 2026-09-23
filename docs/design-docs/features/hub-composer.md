@@ -506,9 +506,18 @@ clamp could cover the trigger when neither side fits the full menu; limiting
 height to the larger side keeps the second click reachable and scrolls the
 menu internally. Other menu callers retain their existing placement.
 Coarse pointers and keyboard users retain the ContextMenu filter command,
-which remains a reading-only choice. A filtered card carries a neutral dashed
-inner outline and an accessible label; recipient selection keeps its
-separate accent fill/border. The feed's existing filter indicator remains.
+which remains a reading-only choice. The strip IS the filter indicator
+(owner, 2026-09-23: "不要在上面显示了，直接在我们的 Agent tab 栏做强化显示…
+把当前的卡片直接亮起，其他全部变暗"): while a filter is on, `.cards.filtering`
+dims every other card, the team labels and the All tab to
+`--control-disabled-opacity` (an opacity crossfade on `--t-move`), and the
+filtered card keeps full ink and an accessible label. The tab paint is
+untouched, so dimming says "not in view" and the paint still says who you
+are talking to. The feed's sticky banner with its ✕ and the dashed card
+outline are deleted — one indicator, and the exit is where the entry was:
+double-click again, the card menu's Show everything, or the back gesture.
+A heavier avatar ring was the owner's other option; it was not taken
+because that ring is the context meter.
 Tests execute the complete click/click/dblclick sequence, not a lone
 synthetic dblclick. Chromium also verifies repeat-to-clear, stopped-card
 menu exclusion and the coarse-pointer long-press filter path.

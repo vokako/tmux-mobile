@@ -1760,10 +1760,10 @@
           {/if}
       {/snippet}
       <Feed bind:this={feedView} {blocks} {agents} {managedNames} {selected} {visible} {compact}
-        {roomReady} {justLoaded} {openedAt} {filterAgent} {loadingOlder} {histMore} {actMore}
+        {roomReady} {justLoaded} {openedAt} {loadingOlder} {histMore} {actMore}
         stepsRows={hubPrefs.stepsRows} {stateLabel} {emptyFeed} bind:following bind:newBelow
         onseen={markSeen} onolder={loadOlder} onpath={routePathRef}
-        onclearfilter={() => { filterAgent = ''; }} onimage={(url) => { shotView = url; }}
+        onimage={(url) => { shotView = url; }}
         onboard={(id) => {
           if (mobile || compact) { openBoardTab?.(selected, id); return; }
           drawerIssueReq = { session: selected, id, n: (drawerIssueReq?.n ?? 0) + 1 };

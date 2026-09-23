@@ -109,21 +109,10 @@ test('the feed layers remain below the Composer stacking context', () => {
   }
 });
 
-test('the agent filter remains visible and leavable inside the feed (board #3)', () => {
-  // The mode is visible and leavable: a compact pill INSIDE the feed names
-  // the agent (reopened #3: as a feed-wrap sibling it rendered as a
-  // full-height left column — feed-wrap is row flex), ✕ clears it, and the
-  // back gesture peels it before the drawer.
-  assert.match(source, /class="filter-pill appear"/u, 'the filter pill lives inside the feed');
-  const wrapIdx = source.indexOf('<div class="feed-wrap">');
-  const feedIdx = source.indexOf('<div class="feed subtle-scroll"');
-  const pillIdx = source.indexOf('class="filter-pill appear"');
-  assert.ok(wrapIdx < feedIdx && feedIdx < pillIdx, 'the pill is a FEED child, never a feed-wrap sibling');
-  const pill = /\.filter-pill \{([^}]*)\}/u.exec(source)?.[1] ?? '';
-  assert.match(pill, /align-self: center/u, 'content width — it owns no column');
-  assert.match(pill, /position: sticky/u, 'and stays visible while reading');
-  assert.ok(!pill.includes('width: 100%'), 'never full width');
-  assert.match(source, /onclick=\{onclearfilter\}/u, 'the banner requests the parent-owned filter exit');
+test('the agent filter is shown by the strip, never a banner in the feed (owner, 2026-09-23)', () => {
+  // "目前上方会显示一个'只看这个 Agent'的卡片，我觉得不要在上面显示了，直接在我们的
+  // Agent tab 栏做强化显示" — the mode's state and its exit live on the cards.
+  assert.doesNotMatch(source, /filter-pill|onclearfilter|filterAgent/u);
 });
 
 test('compact tail padding contains the floating command targets without opening-time layout changes (#166)', () => {

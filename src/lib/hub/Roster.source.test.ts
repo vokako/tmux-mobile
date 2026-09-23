@@ -157,9 +157,11 @@ test('double-click focuses live agents without delay and uses the existing filte
   assert.match(source, /onfilter\(name\);/u);
   assert.match(source, /anchor: anchorOf\(trigger\), align: 'left', trigger, keepTriggerClear: true/u);
   assert.match(source, /class:filtered=\{filterAgent === a\.name\}/u);
-  assert.match(rule('.acard.filtered::after'), /border: 1px dashed var\(--text2\)/u);
-  assert.match(rule('.acard.filtered::after'), /inset: var\(--control-paint-inset\) 0/u,
-    'the compact filter border must stay outside the avatar instead of crossing its lower pixels');
+  // The mode is shown in the strip (owner, 2026-09-23: "把当前的卡片直接亮起，
+  // 其他全部变暗"): every other destination dims; the tab paint is untouched.
+  assert.match(source, /class="cards edge-fade" class:expanded class:filtering=\{!!filterAgent\}/u);
+  assert.match(source, /\.cards\.filtering \.acard:not\(\.filtered\) \.agent-select,\n\s*\.cards\.filtering \.team-label,\n\s*\.cards\.filtering \.all-choice \{ opacity: var\(--control-disabled-opacity\); \}/u);
+  assert.doesNotMatch(source, /\.acard\.filtered::after/u, 'the dashed outline is replaced, not kept beside the dimming');
   assert.doesNotMatch(source, /setTimeout|clearTimeout/u);
 });
 
