@@ -574,23 +574,28 @@ individual. Nested team paths (e.g. `dev/review`) share the `dev` group and
 retain the full path in hover/ARIA; a second nested frame would fight the
 small tab bar and the one-enclosure rule for All. A team with only one live
 member has a stable team key but looks exactly like a solo tab. The group
-adds no target, background, row height or status colour. Its neutral
-`--text3` marker occupies the strip's first `calc(--roster-gap / 2)` pixel
-(1px today); the lit tab begins at the existing paint inset (2px fine, 6px
-coarse), with a gap before its top edge. On desktop the team name precedes
-the grouped tabs. At 390px the `dev` label cost 30.39px including insets,
-below the smallest member tab's 74.59px, but valid long team names can
-exceed a tab; compact layout shows the marker only, with full team path in
-the member hover/ARIA and touch-opened menu. In Chromium 152 with three team
-members plus two solos at 390px (coarse CSS values simulated), marker-only
-group overhead is 8px, the group scrolls as one 280px unit, and the strip
-remains 46px high. Under All selection or preview
-the markers disappear: the destinations remain one enclosure. A team is not
-a recipient button; its members remain separate native selection/Stop
-targets. Stopped identities remain outside `.tabs`.
-The wrapper scrolls as one item and wraps members when expanded. A new member
-appears with the existing `appear-pop`; group/member reorders use the one
-`animate:flip` tempo; removal and a one-to-two-member marker change cut.
+adds no target, row height or status colour. The owner's Chrome tab-group
+reference (2026-09-23, 558x88) supersedes the first 1px upper marker:
+the desktop team name is a noninteractive pill in `--control-surface`, sized
+within the existing row; a `--text2` baseline sits in the group wrapper's
+bottom pixel, behind the member cards. The selected member already has
+`z-index: 1` and its bubble fill extends 1px into the band: it covers the
+baseline beneath that tab. Its existing open-bottom outline takes `--text2`
+only inside a group, rising from the group's baseline without sealing the
+tab off from the composer. Solo tabs keep the normal faint bubble edge.
+This is not a return to #236's deleted tray-wide rule: only the team itself
+draws a baseline. The screenshot uses green; this implementation keeps a
+neutral line because membership is not a status or selection colour.
+At 390px long labels would crowd the strip, so compact hides the pill and
+the full team path remains in member hover/ARIA and touch-opened menus.
+Expanded mode is a list: its team pill returns even on compact, with no
+baseline or raised contour. Under All selection/preview both group line
+and contour yield to one destinations enclosure. A team is not a recipient
+button; its members remain separate native selection/Stop targets. Stopped
+identities remain outside `.tabs`. The wrapper scrolls as one item and
+wraps members when expanded. A new member appears with `appear-pop`;
+group/member reorders use the one `animate:flip` tempo; removal and a
+one-to-two-member group chrome change cut.
 
 One shared icon-only CommandButton expands the same keyed list in normal
 flow. The default is one horizontal row; expansion uses 1/2/4 columns and

@@ -300,16 +300,24 @@ test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosur
   assert.match(rule('.roster'), /background: var\(--hub-tab-frame\)/u, 'the contrast comes from the frame going darker');
 });
 
-test('team tabs are a thin neutral marker, never a second selection enclosure (#238)', () => {
+test('team tabs use the reference pill, broken baseline and raised member contour (#238)', () => {
   assert.match(source, /\{@const named = !!group\.team && group\.members\.length > 1\}/u);
   assert.match(source, /class:team=\{named\} data-team=\{named \? group\.team : undefined\}/u);
   assert.match(source, /role=\{named \? 'group' : undefined\} aria-label=\{named \? `\$\{t\('teamsTitle'\)\} \$\{group\.team\}` : undefined\}/u);
   assert.match(rule('.roster-cluster'), /display: flex; align-items: center; gap: var\(--roster-gap\); flex: none/u,
     'one non-shrinking unit prevents its tabs from spilling over neighbours on horizontal scroll');
-  assert.match(rule('.roster-cluster.team::before'), /position: absolute; inset: 0 0 auto; height: calc\(var\(--roster-gap\) \/ 2\)/u,
-    'the marker uses the existing 2px gap to paint only the first 1px without growing the strip');
-  assert.match(rule('.roster-cluster.team::before'), /background: var\(--text3\)/u, 'group identity is neutral, not a status colour');
+  assert.match(rule('.cards:not(.expanded) .roster-cluster.team::before'), /position: absolute; inset: auto var\(--roster-gap\) 0/u,
+    'the baseline spans the group floor, not the tray or the top edge');
+  assert.match(rule('.cards:not(.expanded) .roster-cluster.team::before'), /height: calc\(var\(--roster-gap\) \/ 2\); background: var\(--text2\)/u,
+    'one neutral pixel uses existing spacing and adds no row height');
+  assert.match(rule('.team-label'), /min-height: var\(--roster-ring-size\)/u, 'the pill fits within the existing tab row');
+  assert.match(rule('.team-label'), /border-radius: var\(--ui-radius-control\)/u);
+  assert.match(rule('.team-label'), /background: var\(--control-surface\)/u);
   assert.match(rule('.roster.compact .team-label'), /display: none/u, 'long team names never consume a whole tab on the phone');
+  assert.match(rule('.roster.compact .cards.expanded .team-label'), /display: inline-flex/u,
+    'the expanded list has room for the team pill on both screens');
+  assert.match(rule('.cards:not(.expanded) .tabs:not(.all-lit) .roster-cluster.team .acard.sel'), /--card-line: var\(--text2\)/u,
+    'only a lit grouped tab has a raised neutral contour; solos and All keep their original paint');
   assert.match(rule('.tabs.all-lit .roster-cluster.team::before'), /display: none/u, 'All owns the only visible enclosure');
   assert.match(rule('.cards.expanded .roster-cluster.team'), /flex: 0 1 100%; min-width: 0; flex-wrap: wrap/u,
     'the expanded group may wrap without overflowing the narrow list');

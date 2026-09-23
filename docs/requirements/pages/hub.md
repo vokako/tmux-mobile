@@ -112,7 +112,9 @@ completion).
 - Tapping a card makes that agent the composer's **recipient** (and the
   remembered project lead — `pickLead`).
 - **Agent teams** (board #74): agents started as one configured team wear a
-  Chrome-style tab group: a team label and a restrained upper marker;
+  Chrome-style tab group: a filled name pill, a group-only lower baseline
+  and a raised outline around a selected member; compact hides the pill,
+  while the expanded list shows the pill without tab-strip lines.
   the group scrolls as one unit of the strip. Nested team members remain
   inside their root team's group, with their full path in hover/ARIA.
   The empty-room preset lists configured teams as

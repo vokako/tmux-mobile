@@ -369,17 +369,24 @@
      the container and wrap inside itself. */
   .tabs { display: flex; align-items: center; gap: var(--roster-gap); flex: none; }
   .cards.expanded .tabs { flex: 0 1 auto; min-width: 0; flex-wrap: wrap; align-content: start; }
-  /* Chrome-style group identity is a label and an upper marker, not a card
-     behind the cards. The group is one flex item in the scrolling strip;
-     solos use the same wrapper without the group chrome. */
+  /* The group is one flex item in the scrolling strip; solos use the same
+     wrapper without group chrome. Its baseline sits BEHIND a lit tab, whose
+     fill covers the line and whose raised edge opens into the composer. */
   .roster-cluster { display: flex; align-items: center; gap: var(--roster-gap); flex: none; position: relative; }
   .roster-cluster.team { margin-inline: var(--roster-gap); padding-inline: var(--roster-gap); }
-  .roster-cluster.team::before {
-    content: ''; position: absolute; inset: 0 0 auto; height: calc(var(--roster-gap) / 2);
-    border-radius: var(--ui-radius-control); background: var(--text3); pointer-events: none;
+  .cards:not(.expanded) .roster-cluster.team::before {
+    content: ''; position: absolute; inset: auto var(--roster-gap) 0;
+    height: calc(var(--roster-gap) / 2); background: var(--text2); pointer-events: none;
   }
-  .team-label { padding-inline: var(--roster-gap); white-space: nowrap; color: var(--text2); font: 600 var(--fs-meta)/1 var(--font-display); }
+  .team-label {
+    display: inline-flex; align-items: center; min-height: var(--roster-ring-size);
+    padding-inline: var(--ui-gap); border-radius: var(--ui-radius-control);
+    white-space: nowrap; color: var(--text); background: var(--control-surface);
+    font: 600 var(--fs-meta)/1 var(--font-display);
+  }
   .roster.compact .team-label { display: none; }
+  .roster.compact .cards.expanded .team-label { display: inline-flex; }
+  .cards:not(.expanded) .tabs:not(.all-lit) .roster-cluster.team .acard.sel { --card-line: var(--text2); }
   .tabs.all-lit .roster-cluster.team::before { display: none; }
   .cards.expanded .roster-cluster.team { flex: 0 1 100%; min-width: 0; flex-wrap: wrap; }
   /* MULTI-SELECT IS ONE ENCLOSURE (owner, 2026-09-22: "如果是选择多个 Agent，
