@@ -71,16 +71,16 @@ delivery path or new motion tempo. Reason, ordering and measurements:
 [hub-composer.md](hub-composer.md#one-roster-above-the-input-one-stop-operation-board-168-2026-09-11).
 
 **Outward tab feet (owner, 2026-09-23).** The first inward lower radii were
-reversed (owner 10:39). A lit named tab now keeps its `--ui-radius-panel`
-top corners and opens into the band through two SMALL outward tangent
-feet. Each arc fits exactly within the collapsed strip's `--ui-gap` (4px)
-between tabs and cannot cover a neighbour or Stop. Only the flex gaps
-between collapsed tabs widened; shared `--roster-gap` stays 2px because
-it also owns the group baseline and opaque join. With three team members
-and two solos at 390px, six gaps each gain 2px, adding 12px to the strip
-width. A selected team group gets feet at its OUTER edges; All at the
-viewport edge retains its existing inner lower radius instead. Expanded
-list cards keep their closed row radius and original gap. The All crowd
+reversed (owner 10:39). Every lit enclosure — a tab, a team group, All —
+keeps its `--ui-radius-panel` top corners and opens into the band through
+the SAME pair of outward feet (`.tab-foot`, `--roster-foot-radius` 8px; a
+4px arc read as jagged). The foot's inner column is the side stroke's own
+column, so the stroke turns into the floor tangentially with no vertical
+stub. The feet take no pointer and reach into a neighbour's empty bottom
+corner; tab gaps stay `--roster-gap`. The band's top edge is the strip's
+floor line: a full-width `--bubble-line` pixel painted as the strip's
+background, which each lit enclosure breaks and its feet turn into.
+Expanded list cards keep their closed row radius and no feet. The All crowd
 has a named 20px icon metric, not avatar size plus a spacing token, so
 the group symbol stays legible when flex gaps change. No added row height
 or paint over another target. Switching tabs crossfades paint colour
@@ -772,10 +772,10 @@ by the contract above, not extended by new page-local overrides.
   going DARKER beneath (per-theme opaque, dark `#06060a`, light `#e2e2e8`),
   never from a brighter tab ("会不会有点过亮了？…把其他地方变得更暗的方式来解
   决"). The lit tab overlaps the band's top edge by 1px with the same fill, so
-  the outline breaks exactly at the junction. The band draws NO top edge: a
-  full-width line there is a horizontal rule across the tray ("中间分隔的横线
-  不要有"), and beside the lit tab the frame simply steps into the band's
-  colour. MULTI-SELECT IS ONE ENCLOSURE: under All (and while All previews)
+  the outline breaks exactly at the junction. The band's top edge is the
+  strip's faint floor line, which the lit enclosure breaks and its outward
+  feet turn into (2026-09-23; the earlier "中间分隔的横线不要有" was about a
+  line that also crossed under the lit tab). MULTI-SELECT IS ONE ENCLOSURE: under All (and while All previews)
   the DESTINATIONS GROUP (`.tabs` — the All tab plus the live agents, sized to
   its content) is the lit tab — one fill, one edge, zero lines between
   siblings ("就用一个大的包边…不要有很多线拐来拐去") — and per-card paint

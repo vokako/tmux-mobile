@@ -12,8 +12,8 @@ test('cards, Add and disclosure share the strip centre without moving the expand
   assert.match(toggle, /align-items: center/u);
   assert.match(toggle, /height: calc\(var\(--roster-paint-height\) \+ 2 \* var\(--control-paint-inset\)\)/u,
     'the disclosure wrapper matches the card target height, without a spare row above it');
-  assert.match(rule('.cards'), /padding: 0 2px/u,
-    '#237: the old top scrollport inset is gone, while the 44px touch target stays intact');
+  assert.match(rule('.cards'), /padding: 0 2px 0 var\(--roster-foot-radius\)/u,
+    '#237: no top scrollport inset; the start inset is room for the first enclosure\'s outward foot');
   assert.match(toggle, /align-self: end/u, 'expanding upward keeps the collapse control reachable in place');
   assert.doesNotMatch(toggle, /padding-block-end/u);
 });
@@ -294,18 +294,17 @@ test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosur
     'the compact tab uses existing gap geometry instead of an extra coarse top gutter');
   // Multi-select: the STRIP is the lit tab — one fill, one edge, no lines
   // between siblings, and the per-card paint switches off by construction.
-  assert.match(rule('.tabs.all-lit'), /background: var\(--bubble-in\)/u);
-  assert.match(rule('.tabs.all-lit'), /border: 1px solid var\(--bubble-line\); border-bottom: 0/u);
-  assert.match(rule('.tabs.all-lit'), /border-radius: var\(--ui-radius-panel\) var\(--ui-radius-panel\) var\(--ui-radius-row\) var\(--ui-radius-row\)/u);
-  assert.match(rule('.tabs.all-lit'), /margin-bottom: -1px; padding-bottom: 1px; position: relative; z-index: 1/u);
+  assert.match(rule('.tabs.all-lit'), /position: relative; z-index: 1/u);
+  assert.match(rule('.tabs.all-lit::before'), /background: var\(--bubble-in\); border: 1px solid var\(--bubble-line\); border-bottom: 0/u);
+  assert.match(rule('.tabs.all-lit::before'), /border-radius: var\(--ui-radius-panel\) var\(--ui-radius-panel\) 0 0/u,
+    'All is an open tab into the band, never a rounded box sitting on it (owner, 2026-09-23: "成了一个圆角矩形")');
   assert.match(source, /\.tabs\.all-lit \.acard::before \{ background: transparent; border-color: transparent; \}/u);
   // Round 6: the enclosure belongs to the DESTINATIONS group, sized to its
   // content — the +, a stopped identity and the space behind them are not
   // destinations (owner: "不要把加号后面的这些区域也都框出来").
   assert.match(rule('.tabs'), /display: flex; align-items: center; gap: var\(--roster-gap\); flex: none/u,
     'the group must NOT shrink in the scrolling strip: its flex:none cards would spill out of it and the + would draw on top (review 2026-09-22)');
-  assert.match(rule('.cards:not(.expanded) .tabs'), /gap: var\(--ui-gap\)/u, 'only collapsed tab-to-tab gaps widen for the outward tangent');
-  assert.match(rule('.cards:not(.expanded) .roster-cluster'), /gap: var\(--ui-gap\)/u, 'the group also gives its members actual flare room');
+  assert.equal(rule('.cards:not(.expanded) .tabs'), '', 'the feet reach into the empty bottom corner of a neighbour; no gap widens for them');
   assert.match(rule('.cards.expanded .tabs'), /flex: 0 1 auto; min-width: 0; flex-wrap: wrap/u,
     'only the wrapped list shrinks the group — there it wraps inside itself');
   assert.doesNotMatch(source, /\.cards\.all-lit/u, 'the row-wide enclosure is gone');
@@ -316,7 +315,9 @@ test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosur
   assert.match(rule('.cards:not(.expanded) .tabs:not(.all-lit) .roster-cluster:not(.team-lit) .acard.sel::before'),
     /background-image: linear-gradient\(to top, var\(--bubble-in\) var\(--roster-gap\), transparent var\(--roster-gap\)\)/u,
     'solo/member tabs own an opaque floor; a selected team paints one enclosing surface instead');
-  assert.doesNotMatch(source, /\.roster::after/u, 'the hairline model stays dead');
+  assert.doesNotMatch(source, /\.roster::after/u, 'the floor line is a background layer, never an overlay above the tabs');
+  assert.match(rule('.roster'), /background-image: linear-gradient\(to top, var\(--bubble-line\) 1px, transparent 1px\)/u,
+    'the band\'s faint top edge runs the full width and the lit enclosure breaks it (owner, 2026-09-23)');
   assert.match(rule('.roster'), /background: var\(--hub-tab-frame\)/u, 'the contrast comes from the frame going darker');
 });
 
@@ -350,20 +351,25 @@ test('team tabs use the reference pill, broken baseline and raised member contou
     'the expanded list is a closed group, not an open tab that pretends to reach the band');
 });
 
-test('outward feet occupy only the collapsed tab gap, tangent at the floor (#238 owner correction)', () => {
+test('one outward foot joins every lit enclosure to the floor line (#238 owner corrections)', () => {
   assert.match(rule('.cards:not(.expanded) .acard.sel::before'), /border-bottom: 0/u,
     'the selected tab stays open into the composer band');
-  assert.match(rule('.tab-foot'), /bottom: 0; width: var\(--ui-gap\); height: var\(--ui-gap\)/u);
-  assert.match(rule('.tab-foot'), /pointer-events: none/u);
-  assert.match(rule('.tab-foot.left'), /left: calc\(-1 \* var\(--ui-gap\)\)/u);
-  assert.match(rule('.tab-foot.right'), /right: calc\(-1 \* var\(--ui-gap\)\)/u);
-  assert.match(rule('.tab-foot::before'), /width: calc\(var\(--roster-gap\) \/ 2\)/u,
-    'the selected side border is removed only where the new tangent starts');
-  assert.match(rule('.tab-foot.left::after'), /border-bottom-right-radius: var\(--ui-gap\)/u);
-  assert.match(rule('.tab-foot.right::after'), /border-bottom-left-radius: var\(--ui-gap\)/u);
+  assert.match(rule('.roster'), /--roster-foot-radius: 8px/u, 'a 4px arc at a 1px stroke read as jagged (owner, 2026-09-23)');
+  assert.match(rule('.tab-foot'), /position: absolute; z-index: 1; bottom: 0/u,
+    'above a team enclosure\'s stroke, which paints after the feet');
+  assert.match(rule('.tab-foot'), /width: var\(--roster-foot-radius\); height: var\(--roster-foot-radius\); pointer-events: none/u);
+  assert.match(rule('.tab-foot.left'), /left: calc\(1px - var\(--roster-foot-radius\)\)/u,
+    'the foot\'s inner column IS the side stroke\'s column, so the arc leaves it tangentially (no 1px step)');
+  assert.match(rule('.tab-foot.right'), /right: calc\(1px - var\(--roster-foot-radius\)\)/u);
+  assert.match(rule('.tab-foot.left::after'), /border-right-width: 1px; border-bottom-right-radius: var\(--roster-foot-radius\)/u);
+  assert.match(rule('.tab-foot.right::after'), /border-left-width: 1px; border-bottom-left-radius: var\(--roster-foot-radius\)/u);
   assert.match(source, /\.cards:not\(\.expanded\) \.tabs:not\(\.all-lit\) \.roster-cluster:not\(\.team-lit\) \.acard\.sel \.tab-foot,/u);
-  assert.match(source, /\.cards:not\(\.expanded\) \.roster-cluster\.team-lit > \.tab-foot \{ display: block; \}/u);
-  assert.doesNotMatch(rule('.cards.expanded .tabs'), /var\(--ui-gap\)/u, 'expanded list spacing stays compact and has no outward feet');
+  assert.match(source, /\.cards:not\(\.expanded\) \.roster-cluster\.team-lit > \.tab-foot,/u);
+  assert.match(source, /\.cards:not\(\.expanded\) \.tabs\.all-lit > \.tab-foot \{ display: block; \}/u,
+    'All wears the same feet as one tab and one team');
+  assert.equal((source.match(/<span class="tab-foot left" aria-hidden="true"><\/span><span class="tab-foot right" aria-hidden="true"><\/span>/gu) ?? []).length, 3,
+    'feet on a card, a team group and the destinations group');
+  assert.doesNotMatch(source, /\.tab-foot::before/u, 'no stub patch: the foot itself covers the side stroke below the arc');
   assert.match(rule('.cards:not(.expanded) .roster-cluster.team::before'), /inset: auto var\(--roster-gap\) 0/u,
-    'only the group carries a baseline; never the full tray');
+    'the group baseline stays the group\'s own');
 });

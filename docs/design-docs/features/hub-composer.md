@@ -636,6 +636,26 @@ members and two solos: the destinations width is 512.81px -> 524.81px
 44px. Selected member's left/right feet ended exactly at the adjacent
 pill/member hit-box edges with zero overlap. The owner's width tradeoff
 is explicit: each of the six widened gaps costs 2px.
+The owner's 14:29 review of that round found three faults, one root: each
+lit enclosure (tab, team, All) drew its own silhouette. The 4px arc at a
+1px stroke read as a staircase, and it sat in the gap one column OUTSIDE
+the tab's side stroke, so the stroke went straight to the floor and the
+arc started 1px beside it — on a team this read as "一个竖线和一个圆角";
+All kept rounded lower corners ("成了一个圆角矩形"). Now ONE `.tab-foot`
+pair serves all three: `--roster-foot-radius` (8px), its inner column ON
+the side stroke's column (`calc(1px - radius)`), its fill covering the
+stroke's stub below the arc, `z-index: 1` above a team enclosure's own
+stroke. All's paint moved to `.tabs.all-lit::before` with the same open
+bottom. The feet reach into the neighbour's empty bottom corner rather
+than a widened gap, so the between-tab gaps are back to `--roster-gap` and
+the +12px is gone; the scrollport's start inset is the foot radius so the
+All enclosure's left foot is not clipped. The band's top edge came back as
+the strip's floor line — a `--bubble-line` background pixel across the
+full width, BELOW every tab ("圆弧连接的整个 Agent 框上面的输入区，应该有一
+条横着的淡淡的白线延伸"). Unlike the deleted round-3 hairline, the lit
+enclosure breaks it with its fill and its feet turn into it, so it never
+crosses under a tab. Chromium, dark and light, 1300px at 2x: solo, team
+member, team and All each show one continuous stroke from side to floor.
 The owner's 09:38 report of a WHITE LINE while switching tabs exposed two
 transient join faults. Chromium 152 at 390px measured the incoming bottom
 inset at 6px immediately after selection, 3.14px after 64ms and -1px only

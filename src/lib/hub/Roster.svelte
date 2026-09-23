@@ -296,6 +296,7 @@
       <span class="tab-foot left" aria-hidden="true"></span><span class="tab-foot right" aria-hidden="true"></span>
       </div>
       {/each}
+      <span class="tab-foot left" aria-hidden="true"></span><span class="tab-foot right" aria-hidden="true"></span>
       </div>
       {#each stopped as name (name)}
         {@const backend = slotBackend(name)}
@@ -345,6 +346,11 @@
        好像没有留边距…停止按钮都超出 agent 卡片框了"; board #211). */
     --roster-dot-reserve: 12px;
     --roster-gap: 2px;
+    /* The lit tab's outward foot: Chrome's tangent from the tab side into the
+       floor. 8px, not the 4px gap it first had to fit in — a 4px arc at a 1px
+       stroke is a staircase, not a curve (owner, 2026-09-23: "锯齿比较严重，
+       不是很光滑"). */
+    --roster-foot-radius: 8px;
     --roster-control-gap: 2px;
     --roster-expanded-max: min(240px, calc(32dvh / var(--ui-zoom, 1)));
     position: relative;
@@ -352,6 +358,13 @@
     gap: 0; flex: 0 1 auto; min-width: 0; min-height: 0;
     padding: 0 var(--composer-inset) 0 0;
     background: var(--hub-tab-frame);
+    /* The band's TOP EDGE is the strip's floor pixel: the faint bubble line
+       runs the full width and meets the band's own side edges, and every lit
+       enclosure breaks it with its fill and turns into it through its feet —
+       Chrome's toolbar line (owner, 2026-09-23: "圆弧连接的整个 Agent 框上面的
+       输入区，应该有一条横着的淡淡的白线延伸"). A background layer, not a
+       border or an overlay: it must paint BELOW every tab. */
+    background-image: linear-gradient(to top, var(--bubble-line) 1px, transparent 1px);
     container: roster / inline-size;
   }
   /* The strip starts at its scrollport inset; the field keeps its normal inset.
@@ -369,7 +382,7 @@
      暗"). */
   .cards {
     display: flex; align-items: center; gap: var(--roster-gap); overflow-x: auto; scrollbar-width: none;
-    min-width: 0; min-height: 0; padding: 0 2px;
+    min-width: 0; min-height: 0; padding: 0 2px 0 var(--roster-foot-radius);
   }
   /* The destinations group: sized to its content, so the multi-select
      enclosure ends after the last tab instead of framing the + and the empty
@@ -383,13 +396,11 @@
      The wrapped list is the opposite case: there the group SHOULD shrink to
      the container and wrap inside itself. */
   .tabs { display: flex; align-items: center; gap: var(--roster-gap); flex: none; }
-  .cards:not(.expanded) .tabs { gap: var(--ui-gap); }
   .cards.expanded .tabs { flex: 0 1 auto; min-width: 0; flex-wrap: wrap; align-content: start; }
   /* The group is one flex item in the scrolling strip; solos use the same
      wrapper without group chrome. Its baseline sits BEHIND a lit tab, whose
      fill covers the line and whose raised edge opens into the composer. */
   .roster-cluster { display: flex; align-items: center; gap: var(--roster-gap); flex: none; position: relative; }
-  .cards:not(.expanded) .roster-cluster { gap: var(--ui-gap); }
   .roster-cluster.team { margin-inline: var(--roster-gap); padding-inline: var(--roster-gap); }
   .cards:not(.expanded) .roster-cluster.team::before {
     content: ''; position: absolute; inset: auto var(--roster-gap) 0;
@@ -413,29 +424,32 @@
   .cards.expanded .roster-cluster.team-lit::after { inset: 0; border-bottom: 1px solid var(--bubble-line); }
   .roster-cluster.team-lit .acard::before { background: transparent; border-color: transparent; }
   .roster-cluster.team-lit::before { display: none; }
+  /* ONE foot for every lit enclosure — a tab, a team, All. The foot's inner
+     column overlaps the enclosure's side stroke, so the arc leaves that
+     stroke tangentially instead of stepping 1px beside it, and its fill
+     covers the stroke's straight stub below the arc (the "竖线和一个圆角" the
+     owner saw on a team, 2026-09-23). It reaches into the neighbour's
+     bottom corner, which is empty at rest and on hover; it takes no
+     pointer. z-index 1 lifts it over a team enclosure's own stroke, which
+     paints after it. */
   .tab-foot {
-    display: none; position: absolute; bottom: 0; width: var(--ui-gap); height: var(--ui-gap);
-    pointer-events: none;
+    display: none; position: absolute; z-index: 1; bottom: 0;
+    width: var(--roster-foot-radius); height: var(--roster-foot-radius); pointer-events: none;
   }
   .tab-foot.left {
-    left: calc(-1 * var(--ui-gap));
-    background: radial-gradient(circle at 0 0, transparent calc(var(--ui-gap) - var(--roster-gap) / 2), var(--bubble-in) var(--ui-gap));
+    left: calc(1px - var(--roster-foot-radius));
+    background: radial-gradient(circle at 0 0, transparent calc(var(--roster-foot-radius) - 1px), var(--bubble-in) calc(var(--roster-foot-radius) - 0.5px));
   }
   .tab-foot.right {
-    right: calc(-1 * var(--ui-gap));
-    background: radial-gradient(circle at 100% 0, transparent calc(var(--ui-gap) - var(--roster-gap) / 2), var(--bubble-in) var(--ui-gap));
+    right: calc(1px - var(--roster-foot-radius));
+    background: radial-gradient(circle at 100% 0, transparent calc(var(--roster-foot-radius) - 1px), var(--bubble-in) calc(var(--roster-foot-radius) - 0.5px));
   }
-  .tab-foot::before {
-    content: ''; position: absolute; top: 0; width: calc(var(--roster-gap) / 2);
-    height: var(--ui-gap); background: var(--bubble-in);
-  }
-  .tab-foot.left::before { right: calc(-1 * var(--roster-gap) / 2); }
-  .tab-foot.right::before { left: calc(-1 * var(--roster-gap) / 2); }
-  .tab-foot::after { content: ''; position: absolute; inset: 0; }
-  .tab-foot.left::after { border-right: 1px solid var(--card-line, var(--bubble-line)); border-bottom: 1px solid var(--card-line, var(--bubble-line)); border-bottom-right-radius: var(--ui-gap); }
-  .tab-foot.right::after { border-left: 1px solid var(--card-line, var(--bubble-line)); border-bottom: 1px solid var(--card-line, var(--bubble-line)); border-bottom-left-radius: var(--ui-gap); }
+  .tab-foot::after { content: ''; position: absolute; inset: 0; border: 0 solid var(--card-line, var(--bubble-line)); border-bottom-width: 1px; }
+  .tab-foot.left::after { border-right-width: 1px; border-bottom-right-radius: var(--roster-foot-radius); }
+  .tab-foot.right::after { border-left-width: 1px; border-bottom-left-radius: var(--roster-foot-radius); }
   .cards:not(.expanded) .tabs:not(.all-lit) .roster-cluster:not(.team-lit) .acard.sel .tab-foot,
-  .cards:not(.expanded) .roster-cluster.team-lit > .tab-foot { display: block; }
+  .cards:not(.expanded) .roster-cluster.team-lit > .tab-foot,
+  .cards:not(.expanded) .tabs.all-lit > .tab-foot { display: block; }
   .roster-cluster.team-lit > .tab-foot { --card-line: var(--bubble-line); }
   .cards:not(.expanded) .tabs:not(.all-lit) .roster-cluster.team .acard.sel { --card-line: var(--text2); }
   .tabs.all-lit .roster-cluster.team::before { display: none; }
@@ -446,14 +460,16 @@
      DESTINATIONS GROUP is the lit tab, one fill and one edge around it, and
      the per-card paint switches off (below). Every internal line is gone by
      construction, not by patching borders between siblings. */
-  .tabs.all-lit {
-    background: var(--bubble-in);
-    border: 1px solid var(--bubble-line); border-bottom: 0;
-    border-radius: var(--ui-radius-panel) var(--ui-radius-panel) var(--ui-radius-row) var(--ui-radius-row);
-    /* 1px into the band: the same fill, so no sub-pixel gap can open at the
-       junction on a fractional zoom. */
-    margin-bottom: -1px; padding-bottom: 1px; position: relative; z-index: 1;
+  .tabs.all-lit { position: relative; z-index: 1; }
+  /* The same open-bottom silhouette as one tab and one team, feet included:
+     rounded lower corners made it a closed box sitting on the band (owner,
+     2026-09-23: "成了一个圆角矩形"). */
+  .tabs.all-lit::before {
+    content: ''; position: absolute; inset: 0 0 -1px; pointer-events: none;
+    background: var(--bubble-in); border: 1px solid var(--bubble-line); border-bottom: 0;
+    border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0;
   }
+  .cards.expanded .tabs.all-lit::before { inset: 0; border-bottom: 1px solid var(--bubble-line); border-radius: var(--ui-radius-panel); }
   .tabs.all-lit .acard::before { background: transparent; border-color: transparent; }
   .cards:not(.expanded)::-webkit-scrollbar { display: none; }
   .cards.expanded {
