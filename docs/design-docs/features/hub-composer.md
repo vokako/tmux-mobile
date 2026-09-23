@@ -220,7 +220,16 @@ tabs: group right 198 vs. last tab right 368, stopped card left 200). The
 wrapped list is the opposite case and keeps `flex: 0 1 auto; min-width: 0`,
 where the group shrinks to the container and wraps inside itself. Measured on
 the phone at 390px with five destinations: group right 469 = last tab right
-469, the `+` at 471, the strip scrolling as before. And the band's `border-top`
+469, the `+` at 471, the strip scrolling as before.
+
+**The phone strip is at the touch floor, so its air is what shrinks**
+(owner, 2026-09-23: "tab 栏可以高度稍低一些…agent 卡片和下边的消息框之间间距小一
+点"). On coarse the row's height comes from `.agent-select`'s 44px minimum, not
+from the paint, so the row cannot go lower without breaking the 44px rule. What
+did come out: the coarse `--roster-paint-height` 34px → 32px (the card's
+`min-height` was 46px, now 44px = the touch floor exactly), the band's top
+padding 6px → 3px, and the scrollport's top inset 2px → 1px — six pixels of air
+between the cards and the field, none of it target. And the band's `border-top`
 is gone: a full-width top edge drew a horizontal rule between the strip and
 the input area ("Agent card 和下面这个区域中间分隔的横线不要有"), while the lit
 tab above already closes that side of the enclosure and beside it the frame
@@ -273,11 +282,17 @@ All is the PINNED TAB at the strip's head (board #236, owner, 2026-09-22:
 "不用隐藏，我不展开就看不到吧…都显示全了" — supersedes #204's expanded-only
 gate, whose reason was the 2026-09-17 "藏到展开列表里"): Chrome pins a tab as
 an icon-only tab at the far left, and this is that — always in view,
-collapsed strip included, the agents' own `bot` mark at 16px — under the
-avatars' 20px (owner, 2026-09-22 review: "按钮有点大…不用画人，画成 Agent 类似
-的 Logo" — the group-of-people and `collab`'s orbiting dots both failed the
-glance test; the bot glyph already means "an agent" everywhere else, so "all
-the agents" needs no new species), the same 28/44px native target and props
+collapsed strip included, wearing `bots` — a small CROWD of the same bot mark
+a single agent's glyph uses (owner, 2026-09-22: "不用画人，画成 Agent 类似的
+Logo"; 2026-09-23: "可以多画几个机器人"; the group-of-people and `collab`'s
+orbiting dots both failed the glance test). It renders at 20px, the avatars'
+size, because two heads share the 24 viewBox and at the atom's 16px each head
+is ~7px — measured at 10× on the real render, the faces mushed. The glyph grew
+and the BOX shrank instead (`width: auto; min-width: 0; padding-inline: 3px`,
+28px → 26px): the leading tab must not cost an agent's worth of strip ("占的左
+右空间都压缩一下，更紧凑一些"). The coarse branch restores the square, because
+on touch that box IS the target; it is declared after the tight rule, which
+carries the same specificity. the same 28/44px native target and props
 (`pressed`, `hasPopup`, `expanded` for the All menu), wired into `Roster`
 (`allMenuOpen`, `onall`). The span is `.acard` so selected All is a LIT TAB
 like any card's; the CommandButton inside is `bare` and its `engaged` wash

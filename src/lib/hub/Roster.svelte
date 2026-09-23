@@ -212,16 +212,16 @@
            wears the same tab paint (lit when All IS the recipient). Hovering
            or focusing it PREVIEWS the choice: every live card lights as it
            would after the click (owner: "鼠标悬停…看到的就是所有的 Agent 被选中或
-           者激活"). The glyph is the existing `bot` — an agent's own mark, so
-           "all the agents" needs no new species (owner, 2026-09-22: "画成
-           Agent 类似的 Logo"; the group-of-people and collab's orbiting dots
-           both failed the glance test) — at 16px, under the avatars' 20px
-           (owner: "按钮有点大"). `bare`: the tab is the paint, the command
-           adds none (#180: never a card — no data-agent, no Stop, no meter). -->
+           者激活"). The glyph is `bots` — a small CROWD of the same bot mark a
+           single agent wears, so "all the agents" needs no new species (owner,
+           2026-09-22: "画成 Agent 类似的 Logo"; 2026-09-23: "可以多画几个机器人";
+           the group-of-people and collab's orbiting dots both failed the glance
+           test). `bare`: the tab is the paint, the command adds none (#180:
+           never a card — no data-agent, no Stop, no meter). -->
       <span class="all-choice acard" class:sel={recipient === ALL_TARGET} role="presentation"
         onpointerenter={(e) => { if (e.pointerType !== 'touch') allPreview = true; }} onpointerleave={() => { allPreview = false; }}
         onfocusin={() => { allPreview = true; }} onfocusout={() => { allPreview = false; }}>
-        <CommandButton variant="icon" icon="bot" label={t('hubEveryone')} pressed={recipient === ALL_TARGET} bare
+        <CommandButton variant="icon" icon="bots" label={t('hubEveryone')} pressed={recipient === ALL_TARGET} bare
           hasPopup={recipient === ALL_TARGET ? 'menu' : undefined}
           expanded={recipient === ALL_TARGET ? allMenuOpen : undefined}
           disabled={!selected || !roomReady} onclick={onall} />
@@ -343,7 +343,7 @@
      暗"). */
   .cards {
     display: flex; align-items: center; gap: var(--roster-gap); overflow-x: auto; scrollbar-width: none;
-    min-width: 0; min-height: 0; padding: 2px 2px 0;
+    min-width: 0; min-height: 0; padding: 1px 2px 0;
   }
   /* The destinations group: sized to its content, so the multi-select
      enclosure ends after the last tab instead of framing the + and the empty
@@ -469,7 +469,11 @@
   .agent-stop { position: absolute; z-index: 1; left: var(--dot-x, 50%); top: var(--dot-y, 50%); transform: translate(-50%, -50%); display: flex; align-items: center; }
   .acard.stop-shown .ac-top { visibility: hidden; }
   @media (any-pointer: coarse) {
-    .roster { --roster-paint-height: 34px; }
+    /* 32, not 34: the phone's strip sat taller than it needed and pushed the
+       input down (owner, 2026-09-23: "tab 栏可以高度稍低一些…agent 卡片和下边
+       的消息框之间间距小一点"). The 44px touch floor is unaffected — it lives
+       on `.agent-select`'s min-height, not on the painted row. */
+    .roster { --roster-paint-height: 32px; }
   }
   .avatar-slot { width: var(--roster-ring-size); height: var(--roster-ring-size); display: grid; place-items: center; flex: none; }
   .ava { width: var(--roster-avatar-size); height: var(--roster-avatar-size); flex: none; border-radius: 50%; object-fit: contain; display: grid; place-items: center; }
@@ -479,7 +483,23 @@
   .ava.dim { background: var(--surface2); color: var(--text3); }
   img.ava.dim { background: none !important; filter: grayscale(1); opacity: 0.55; }
   .roster-add { display: flex; align-items: center; flex: none; min-height: var(--control-height); }
-  .all-choice { --control-icon-size: 16px; }
+  /* 20px, the avatars' size: two robot heads at the atom's 16px fell below the
+     legibility floor — each head ~7px, the faces mushed (measured at 10x on
+     the real render). The glyph grows, the BOX shrinks (below), so the leading
+     tab still costs less strip than the 28px square it replaced. */
+  .all-choice { --control-icon-size: 20px; }
+  .all-choice :global(.command-icon svg) { width: 100%; height: 100%; }
+  /* The leading tab gives back the width its square box was spending — it
+     should not cost an agent's worth of strip (owner, 2026-09-23: "占的左右空间
+     都压缩一下，更紧凑一些"). Tight by default (the desktop case, and any
+     device that reports no pointer at all); the coarse branch below restores
+     the square, because there the box IS the touch target. */
+  .all-choice :global(.command-button.icon-only) { width: auto; min-width: 0; padding-inline: 3px; }
+  /* Touch restores the square: there the box IS the target, not the paint.
+     Declared after the tight rule — same specificity, later wins. */
+  @media (any-pointer: coarse) {
+    .all-choice :global(.command-button.icon-only) { width: var(--control-height); min-width: var(--control-height); padding-inline: 0; }
+  }
   /* The TAB carries the selected paint; the command inside stays washless
      (engaged would put a colour block back inside the tab) — its accent ink
      is the pressed signal that remains. */

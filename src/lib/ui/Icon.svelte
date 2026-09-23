@@ -111,6 +111,19 @@
     <path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>
   {:else if name === 'collab'}
     <circle cx="12" cy="12" r="8"/><circle cx="12" cy="4" r="2.3"/><circle cx="5.1" cy="16" r="2.3"/><circle cx="18.9" cy="16" r="2.3"/>
+  {:else if name === 'bots'}
+    <!-- A FEW robots, not a person: "all the agents" as a small crowd of the
+         same bot mark the single-agent glyph uses (owner, 2026-09-23: "可以多
+         画几个机器人"). Two heads, the back one raised and smaller, drawn with
+         a gap — an overlap would cross strokes at this size and read as noise.
+         Local stroke-width 1.7: two heads share the 24 box, so each is drawn
+         at roughly half scale and the shared 2px stroke would swallow the
+         faces. Its wearer renders it at 20px (see .all-choice). -->
+    <rect x="1.3" y="7.2" width="10.4" height="11.4" rx="3.2" stroke-width="1.7"/>
+    <circle cx="4.9" cy="12.9" r="1.2" fill="currentColor" stroke="none"/><circle cx="8.3" cy="12.9" r="1.2" fill="currentColor" stroke="none"/>
+    <path d="M6.5 4.3v2.9" stroke-width="1.7"/>
+    <rect x="14" y="4.8" width="8.7" height="9.8" rx="2.8" stroke-width="1.7"/>
+    <circle cx="17" cy="9.7" r="1.1" fill="currentColor" stroke="none"/><circle cx="19.8" cy="9.7" r="1.1" fill="currentColor" stroke="none"/>
   {:else if name === 'maximize'}
     <path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>
   {:else if name === 'minimize'}

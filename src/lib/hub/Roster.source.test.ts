@@ -12,6 +12,8 @@ test('cards, Add and disclosure share the strip centre without moving the expand
   assert.match(toggle, /align-items: center/u);
   assert.match(toggle, /height: calc\(var\(--roster-paint-height\) \+ 2 \* var\(--control-paint-inset\) \+ 2px\)/u,
     'the disclosure wrapper matches card height plus the one scrollport inset left (#236: the tab reaches the floor)');
+  assert.match(rule('.cards'), /padding: 1px 2px 0/u,
+    '#237: the strip gives back every pixel it can above the row — the row itself sits on the 44px touch floor');
   assert.match(toggle, /align-self: end/u, 'expanding upward keeps the collapse control reachable in place');
   assert.doesNotMatch(toggle, /padding-block-end/u);
 });
@@ -24,7 +26,8 @@ test('context meters surround equal circular avatars with room inside the card (
   assert.match(bar, /width: var\(--roster-ring-size\); height: var\(--roster-ring-size\)/u);
   assert.match(rule('.roster'), /--roster-ring-size: 26px/u);
   assert.match(rule('.roster'), /--roster-paint-height: 30px/u);
-  assert.match(source, /\.roster \{ --roster-paint-height: 34px; \}/u);
+  assert.match(source, /\.roster \{ --roster-paint-height: 32px; \}/u,
+    '#237: the phone row is 32px — the 44px touch floor lives on .agent-select, not the paint');
   assert.match(bar, /pointer-events: none/u);
   assert.match(bar, /conic-gradient/u);
   assert.doesNotMatch(bar, /transition/u, 'colour thresholds never pass through intermediate hues');
@@ -238,8 +241,19 @@ test('Everyone is the PINNED tab: always at the head, previewing on hover (board
   // glance test — the agents' own bot mark says "the agents"); "按钮有点大" —
   // 16px glyph under the avatars' 20px; "鼠标悬停…所有的 Agent 被选中或者激活".
   assert.match(source, /<span class="all-choice acard" class:sel=\{recipient === ALL_TARGET\} role="presentation"/u);
-  assert.match(source, /<CommandButton variant="icon" icon="bot" label=\{t\('hubEveryone'\)\} pressed=\{recipient === ALL_TARGET\} bare/u);
-  assert.match(rule('.all-choice'), /--control-icon-size: 16px/u, 'smaller than an avatar; the hit box stays the row\'s');
+  assert.match(source, /<CommandButton variant="icon" icon="bots" label=\{t\('hubEveryone'\)\} pressed=\{recipient === ALL_TARGET\} bare/u,
+    '#237: a small CROWD of the bot mark — "可以多画几个机器人"');
+  assert.match(rule('.all-choice'), /--control-icon-size: 20px/u, 'the crowd needs the avatars\' size to read');
+  assert.match(source, /\.all-choice :global\(\.command-icon svg\) \{ width: 100%; height: 100%; \}/u,
+    'the svg fills the sized box — the atom hands Icon no size prop');
+  // #237: the leading tab gives back the width its square box spent. Tight by
+  // DEFAULT (desktop, and any device that reports no pointer); the coarse
+  // branch restores the square, because on touch the box IS the target — and
+  // it must come after the tight rule, which carries the same specificity.
+  assert.match(source, /\.all-choice :global\(\.command-button\.icon-only\) \{ width: auto; min-width: 0; padding-inline: 3px; \}/u);
+  const tight = source.indexOf('.all-choice :global(.command-button.icon-only) { width: auto;');
+  const square = source.indexOf('.all-choice :global(.command-button.icon-only) { width: var(--control-height)');
+  assert.ok(tight > 0 && square > tight, 'the coarse square must be declared after the tight default');
   assert.doesNotMatch(source, /\{#if expanded\}\s*\n\s*<span class="all-choice"/u, 'the expanded-only gate is gone');
   assert.doesNotMatch(source, /data-agent="all"/u, '#180: never a card');
   // Hover/focus previews the choice — the STRIP lights as one enclosure,
