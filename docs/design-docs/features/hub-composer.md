@@ -100,12 +100,17 @@ inset (`--menu-item-padding-x`) since #203: its 16px radius on a 32px desktop
 shell was a full semicircle and the first glyph, 6px from the border, read as
 squeezed into it (owner: "尤其是文字在靠近边缘的位置 感觉被挤到了半圆里面一样"); the
 50px phone shell had read as a rounded rectangle all along. Since board #236
-(round 3) the composer paints the BAND: full-width `--surface` under the tab
-strip, the same fill the lit tab wears — the owner's Chrome screenshot: the
-active tab and the toolbar are one colour, the omnibox its own field inside
-("底下的框是一个单独的一个输入框 但上面整体上你有这种tab 的这种样"). The shell
-itself stays a complete bordered field. `--composer-inset` remains the ONE
-inline inset both components consume from `.hub-root`.
+(round 3) the composer paints the BAND: a full-width fill under the tab strip,
+the same fill the lit tab wears — the owner's Chrome screenshot: the active tab
+and the toolbar are one colour, the omnibox its own field inside ("底下的框是一
+个单独的一个输入框 但上面整体上你有这种tab 的这种样"). Round 5 made that fill the
+agent bubble's (`--bubble-in`/`--bubble-line`); round 3's `--surface` is gone.
+The shell itself stays a complete bordered field. `--composer-inset` is the
+BAND's inline inset, which the strip consumes on its RIGHT only: since #237 the
+strip has no leading inset beyond its 2px scrollport padding, so the first tab
+starts at the column's edge the way a Chrome tab strip meets the window, while
+the field keeps its inset — the lit tab's left edge no longer has to meet the
+field's.
 
 This explicitly reverses the #168/#180 no-mirror/side-column layout rule:
 the mirror was unnecessary for a separate row, but is necessary for the
