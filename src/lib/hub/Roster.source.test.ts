@@ -365,8 +365,10 @@ test('team tabs use the reference pill, broken baseline and raised member contou
   assert.match(rule('.cards:not(.expanded) .roster-cluster.team::before'), /height: calc\(var\(--roster-gap\) \/ 2\); background: var\(--text2\)/u,
     'one neutral pixel uses existing spacing and adds no row height');
   assert.match(rule('.team-label'), /min-height: var\(--control-height\)/u, 'the label is a native target within the existing tab row');
-  assert.match(rule('.team-label'), /border-radius: var\(--ui-radius-row\)/u);
-  assert.match(rule('.team-label'), /background: var\(--control-surface\)/u);
+  assert.match(rule('.team-label'), /color: var\(--text2\); background: none/u,
+    'a word, not a block: the pill read as a big square beside the tabs (owner, 2026-09-24)');
+  assert.match(source, /\.team-label:hover, \.team-label\[aria-pressed="true"\] \{ color: var\(--text\); \}/u, 'it speaks through ink alone');
+  assert.doesNotMatch(source, /\.team-label:hover \{ background/u, 'no wash returns on hover');
   assert.match(rule('.roster.compact .team-label'), /min-width: var\(--control-height\); min-height: var\(--control-height\)/u,
     'a team can be selected on the phone with the full touch target');
   assert.match(rule('.team-name'), /text-overflow: ellipsis/u, 'long names cannot bury all member tabs on the phone');

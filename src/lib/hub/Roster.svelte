@@ -446,13 +446,19 @@
     content: ''; position: absolute; inset: auto var(--roster-gap) 0;
     height: calc(var(--roster-gap) / 2); background: var(--text2); pointer-events: none; z-index: -1;
   }
+  /* The group's name is a WORD, not a block: the pill grew with the name and
+     read as a big square beside the small tabs (owner, 2026-09-24: "小组名有一
+     个方块，这个方块有时候太大…直接显示名字就好"). Still a native button with
+     the full target; it speaks through ink alone — the inactive tabs' --text2,
+     the lit tabs' --text on hover and when the team is the recipient. */
   .team-label {
     display: inline-flex; align-items: center; min-height: var(--control-height);
     padding-inline: var(--ui-gap); border-radius: var(--ui-radius-row);
-    border: 0; white-space: nowrap; color: var(--text); background: var(--control-surface); cursor: pointer;
+    border: 0; white-space: nowrap; color: var(--text2); background: none; cursor: pointer;
     font: 600 var(--fs-meta)/1 var(--font-display);
+    transition: color var(--t-move) ease;
   }
-  .team-label:hover { background: var(--control-hover); }
+  .team-label:hover, .team-label[aria-pressed="true"] { color: var(--text); }
   .team-label:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
   .roster.compact .team-label { min-width: var(--control-height); min-height: var(--control-height); max-width: calc(2 * var(--control-height)); }
   .team-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

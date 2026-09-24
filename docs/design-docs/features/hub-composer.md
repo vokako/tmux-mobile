@@ -621,8 +621,11 @@ small tab bar and the one-enclosure rule for All. A team with only one live
 member has a stable team key but looks exactly like a solo tab. The group
 adds no row height or status colour. The owner's Chrome tab-group
 reference (2026-09-23, 558x88) supersedes the first 1px upper marker:
-the team name is a native choice in a `--control-surface` pill, sized
-within the existing row; a `--text2` baseline sits in the group wrapper's
+the team name is a native choice sized within the existing row — a
+`--control-surface` pill until 2026-09-24, when the owner found the block
+"有时候太大" and asked for the bare name: it now speaks through ink alone
+(`--text2`, `--text` on hover and when the team is the recipient); a
+`--text2` baseline sits in the group wrapper's
 bottom pixel, behind the member cards. The selected member already has
 `z-index: 1` and its bubble fill covers the floor-line pixel: it covers the
 baseline beneath that tab. Its existing open-bottom outline takes `--text2`

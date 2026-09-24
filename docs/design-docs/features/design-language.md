@@ -53,8 +53,10 @@ expanded grid cells already have stable widths and release that space to names.
 **Team tab group (2026-09-23, #238).** A launched team with at least two live
 members is one contiguous Chrome-style group in the roster; individual member
 tabs and 28/44px targets stay native. The owner's Chrome group screenshot
-supersedes the first thin upper marker: a native team-name button uses the
-`--control-surface` pill and the existing 28/44px targets. A neutral
+supersedes the first thin upper marker: a native team-name button keeps the
+existing 28/44px targets and, since 2026-09-24, no pill — the block read too
+large beside the tabs, so the name is ink alone (`--text2`, `--text` when
+hovered or chosen). A neutral
 `--text2` 1px baseline occupies the bottom pixel of the GROUP only
 (`calc(var(--roster-gap) / 2)`). A selected member uses `--text2` on the
 existing raised tab edge; its bubble fill covers the baseline under that
