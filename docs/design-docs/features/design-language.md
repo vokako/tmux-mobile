@@ -112,7 +112,13 @@ top corners took `--ui-radius-panel` until the owner's 17:19 correction
 (now `--ui-radius-row`, like the group label pill). No second radius scale or altered hit box. The
 three-head All glyph stays legible at its named 20px roster size, independent
 of the gap between tabs; rendering it at the reduced avatar size blurred it.
-The coarse strip is 44px high; desktop is 34px. The tab-to-band junction,
+The coarse strip was 44px high against the desktop's 34 until 2026-09-24,
+when the owner asked the phone to match the desktop ("手机对齐一下桌面…tab 栏高
+度比桌面预留的还要大…'发送给所有人'的按钮预留的都要宽"): the roster now sets the
+desktop's 2px paint inset on coarse too, so the row is 36px and the All, +
+and disclosure commands are 36px squares — a scoped exception to the 44px
+touch floor like `.compact-tools`, and the content shove that lowered
+compact button contents is gone with the gutter it compensated. The tab-to-band junction,
 All enclosure and 44px native controls are unchanged. Measurements and the
 superseded 1px field inset: [hub-composer.md](hub-composer.md).
 

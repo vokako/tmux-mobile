@@ -28,6 +28,10 @@ test('context meters surround equal circular avatars with room inside the card (
   assert.match(bar, /width: var\(--roster-ring-size\); height: var\(--roster-ring-size\)/u);
   assert.match(rule('.roster'), /--roster-ring-size: 24px/u);
   assert.match(rule('.roster'), /--roster-paint-height: 30px/u);
+  assert.match(source, /\.roster \{ --control-height: 36px; --control-paint-inset: 2px; \}/u,
+    'the phone strip wears the desktop geometry: a 36px row and 36px commands, not 44 (owner, 2026-09-24)');
+  assert.doesNotMatch(source, /padding-block-start: calc\(2 \* var\(--ui-gap\)\)/u, 'no content shove: the paint inset is the desktop\'s, so content sits as on desktop');
+  assert.doesNotMatch(source, /\.roster\.compact \.slide-pill\.tab::before/u, 'one paint inset for both pointers');
   assert.match(source, /\.roster \{ --roster-paint-height: 32px; \}/u,
     '#237: the phone row is 32px — the 44px touch floor lives on .agent-select, not the paint');
   assert.match(bar, /pointer-events: none/u);
@@ -198,10 +202,6 @@ test('density lives in local tokens; full names and native targets do not shrink
   assert.match(roster, /--roster-avatar-size: 18px/u);
   assert.match(roster, /--roster-expanded-max: min\(240px, calc\(32dvh \/ var\(--ui-zoom, 1\)\)\)/u);
   assert.match(rule('.agent-select'), /min-height: var\(--control-height\)/u);
-  assert.match(rule('.roster.compact .agent-select'), /padding-block-start: calc\(2 \* var\(--ui-gap\)\)/u,
-    'move content and its shared ring box within the unchanged hit target');
-  assert.match(rule('.roster.compact .all-choice :global(.command-button.icon-only)'), /padding-block-start: calc\(2 \* var\(--ui-gap\)\)/u,
-    'the pinned All glyph follows the same compact tab alignment');
   assert.match(rule('.acard'), /width: max-content/u, 'only actual content sets card width');
   assert.match(rule('.cards'), /overflow-x: auto/u);
   assert.match(rule('.cards.expanded'), /overflow-y: auto/u);
@@ -319,8 +319,6 @@ test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosur
     'the card tier and the context ring\'s own curvature; the panel radius read as a half-circle on a 32px tab (owner, 2026-09-23)');
   assert.doesNotMatch(rule('.slide-pill.tab::before'), /transition:[^;]*(?:inset|border-radius|background)/u,
     'the marker MOVES; only its stroke colour crossfades');
-  assert.match(rule('.roster.compact .slide-pill.tab::before'), /inset-block-start: var\(--roster-gap\)/u,
-    'the compact tab uses existing gap geometry instead of an extra coarse top gutter');
   assert.match(rule('.slide-pill.tab::after'), /inset: auto 0 -1px; height: 2px; background: var\(--bubble-in\)/u,
     'the marker\'s join: fill over the floor line and 1px into the band, strokes untouched (a 1px layer left 35 at 1.5x)');
   assert.doesNotMatch(source, /inset: 0 0 -1px/u, 'no enclosure PAINT reaches into the band: its strokes would tick under the floor line');

@@ -540,7 +540,6 @@
     border-radius: var(--ui-radius-row) var(--ui-radius-row) 0 0;
     transition: border-color var(--t-move) ease;
   }
-  .roster.compact .slide-pill.tab::before { inset-block-start: var(--roster-gap); }
   /* A lit member inside a group wears the raised neutral contour (#238). */
   .slide-pill.tab.raised { --card-line: var(--text2); }
   /* The join: the enclosure's own fill over the floor-line pixel and one
@@ -622,7 +621,6 @@
     padding: 0 var(--roster-card-inset); text-align: left; cursor: pointer; font-size: var(--fs-ui);
     -webkit-tap-highlight-color: transparent;
   }
-  .roster.compact .agent-select { padding-block-start: calc(2 * var(--ui-gap)); }
   .agent-select:focus-visible { outline-color: var(--accent-ink); outline-offset: 0; }
   /* Only a live card carries a dot, so only it reserves the Stop's room. */
   .acard:not(.off) .agent-select { padding-inline-end: var(--roster-dot-reserve); }
@@ -655,9 +653,17 @@
   @media (any-pointer: coarse) {
     /* 32, not 34: the phone's strip sat taller than it needed and pushed the
        input down (owner, 2026-09-23: "tab 栏可以高度稍低一些…agent 卡片和下边
-       的消息框之间间距小一点"). The 44px touch floor is unaffected — it lives
-       on `.agent-select`'s min-height, not on the painted row. */
+       的消息框之间间距小一点"). */
     .roster { --roster-paint-height: 32px; }
+    /* The phone strip wears the DESKTOP's geometry (owner, 2026-09-24: "手机对
+       齐一下桌面吧…手机上的 tab 栏高度，甚至比桌面上的预留的还要大；有些按钮，比如
+       '发送给所有人'的那个按钮，预留的都要宽"): the paint inset is the desktop's
+       2px, so the 32px paint makes a 36px row against the desktop's 34, and
+       the All, + and disclosure commands are 36px squares instead of 44. Like
+       `.compact-tools`, a deliberate, scoped exception to the 44px touch
+       floor — the row is a dense strip of tabs, and its targets stay 36px on
+       both axes. The Stop keeps its own compact-tools slot. */
+    .roster { --control-height: 36px; --control-paint-inset: 2px; }
   }
   .avatar-slot { position: relative; width: var(--roster-ring-size); height: var(--roster-ring-size); display: grid; place-items: center; flex: none; }
   .ava { width: var(--roster-avatar-size); height: var(--roster-avatar-size); flex: none; border-radius: 50%; object-fit: contain; display: grid; place-items: center; }
@@ -672,7 +678,6 @@
   .all-choice :global(.command-icon svg) { width: 100%; height: 100%; }
   /* Tight on fine pointers; the coarse branch keeps a full finger target. */
   .all-choice :global(.command-button.icon-only) { width: auto; min-width: 0; padding-inline: 2px; }
-  .roster.compact .all-choice :global(.command-button.icon-only) { padding-block-start: calc(2 * var(--ui-gap)); }
   /* Touch restores the square: there the box IS the target, not the paint.
      Declared after the tight rule — same specificity, later wins. */
   @media (any-pointer: coarse) {

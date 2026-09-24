@@ -227,6 +227,14 @@ where the group shrinks to the container and wraps inside itself. Measured on
 the phone at 390px with five destinations: group right 469 = last tab right
 469, the `+` at 471, the strip scrolling as before.
 
+**Superseded 2026-09-24 — the phone strip matches the desktop.** Measured on a
+390px touch profile: row 44 → 36, All/+/disclosure 44×44 → 36×36, paint inset
+6 → 2, the 32px paint unchanged; the compact `padding-block-start` shove on
+the tab and All contents and the compact marker inset are deleted, since the
+desktop inset needs neither. The owner's call ("手机对齐一下桌面…比桌面预留的还
+要大…预留的都要宽") overrides the 44px floor here, as `.compact-tools` already
+does for the dense tool groups; targets stay 36px on both axes.
+
 **The phone card is at the touch floor; surplus row air can still shrink**
 (owner, 2026-09-23: "tab 栏可以高度稍低一些…agent 卡片和下边的消息框之间间距小一
 点"). On coarse the card's minimum comes from `.agent-select`'s 44px target,
