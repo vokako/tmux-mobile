@@ -133,3 +133,10 @@ test('the project row yields its wash to the travelling marker — after .side-r
   assert.ok(yields > lit, 'equal specificity: the override must come later or the in-place wash wins (codex review, 2026-09-23)');
   assert.match(css, /\.proj-row \{[^}]*position: relative;/u, 'rows paint above the marker');
 });
+
+test('the row menu rides the title line and only that line keeps its room (owner, 2026-09-24)', async () => {
+  const css = await readFile(new URL('../../app.css', import.meta.url), 'utf8');
+  assert.match(css, /\.proj-row \.row-menu \{ position: absolute; right: 10px; top: 6px; width: 24px; height: 24px; \}/u,
+    'as a column beside the whole row the ⋯ took 32px from every agent line');
+  assert.match(css, /\.proj-row:has\(\.row-menu\) \.p-top \{ padding-right: 32px; \}/u, 'Board rows, without a menu, reserve nothing');
+});

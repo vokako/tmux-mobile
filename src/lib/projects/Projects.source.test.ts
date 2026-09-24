@@ -25,3 +25,9 @@ test('Terminal Projects uses the same update clock as Chat', () => {
   assert.equal([...source.matchAll(/projectAgeLabel\(row, talkMap, tick\)/gu)].length, 2,
     'the row and its hover card use the one shared formatter');
 });
+
+test('the dense row menu rides the title line, as in Chat (owner, 2026-09-24)', () => {
+  assert.match(source, /\.projects\.dense \.line \{ padding-right: 32px; \}/u, 'only the title line keeps the 24+8 room');
+  assert.match(source, /\.projects\.dense \.row-menu \{ position: absolute; right: 10px; top: 6px; \}/u);
+  assert.doesNotMatch(source, /\.projects\.dense \.proj-top \{[^}]*padding-right/u, 'the windows beneath take the full width');
+});

@@ -415,7 +415,14 @@ picking another project glides the wash there instead of one row switching
 off and another on; the rows keep `.open` for state and draw no wash in
 place. Chat's and Terminal's **New project** command sits at the head of
 the list as an `icon-btn` ("每次还得滚动到最下边才能新建"); the Terminal's
-foot row remains only while there is no list to head.
+foot row remains only while there is no list to head. The row's ⋯ rides
+the TITLE line (2026-09-24, "三个小点…挤占了底下列出的 Agent 的空间…放到标题
+行"): as a column beside the whole row it took 24px + 8px from every agent
+line as well — measured 157px of 203px for the chips; now the chips take the
+full 189px and only the title line keeps the room. It is absolute (a pick
+button cannot nest a menu button), centred on the 20px title line at
+`top: 6px`; `.proj-row:has(.row-menu)` scopes the room, so Board rows, which
+have no menu, reserve nothing. The Terminal's dense rows follow the same rule.
 
 ### The conversation order it replaced (2026-08-19 → 2026-09-23)
 

@@ -145,7 +145,7 @@
     padding: 0; border: 0; background: none; color: inherit; text-align: left;
     font: inherit; cursor: pointer;
   }
-  .row-menu { width: 24px; height: 24px; padding: 0; flex: none; align-self: center; color: var(--text3); }
+  .row-menu { padding: 0; color: var(--text3); } /* its place is the shared atom's (app.css) */
   .head-add { width: 24px; height: 24px; padding: 0; flex: none; color: var(--text3); }
   /* The rows' place above the wash and their absent in-place wash live with
      the shared row atoms in app.css. */

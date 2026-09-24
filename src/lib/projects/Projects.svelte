@@ -461,14 +461,14 @@
   .projects.dense .head-add { width: 24px; height: 24px; padding: 0; flex: none; color: var(--text3); }
   .projects.dense .proj.live { border: none; }
   .projects.dense .proj-main { padding: 0; align-items: center; }
-  /* Chat's first line, verbatim: an 8px gap before the ⋯ column, and the ⋯
-     CENTRED on the whole row rather than inflating the first line (in Chat
-     the menu is the row's sibling column; here it leaves the flow, the line
-     reserves its 24+8 width, and the name→chips rhythm stops depending on a
-     button's height). */
+  /* Chat's first line, verbatim: an 8px gap before the ⋯, which leaves the
+     flow so the name→chips rhythm never depends on a button's height. */
   .projects.dense .proj { position: relative; }
-  .projects.dense .proj-top { gap: 8px; align-items: flex-start; padding-right: 32px; }
-  .projects.dense .row-menu { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); }
+  .projects.dense .proj-top { gap: 8px; align-items: flex-start; }
+  /* The ⋯ rides the TITLE line, as in Chat's rows (owner, 2026-09-24): only
+     that line keeps its 24+8 room; the windows beneath take the full width. */
+  .projects.dense .line { padding-right: 32px; }
+  .projects.dense .row-menu { position: absolute; right: 10px; top: 6px; }
   /* Chat's dot language, verbatim: 6px, --status-ok when live, --text3 when
      down, no glow (the 7px accent-glow dot is the card dialect). The name
      takes `.p-name`'s 550, not the card's 600. */

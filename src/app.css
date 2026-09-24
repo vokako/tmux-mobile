@@ -726,6 +726,15 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 .p-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; font-family: var(--font-display); }
 .p-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .p-top { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+/* The row's ⋯ rides the TITLE line. As a column beside the whole row it took
+   24px + an 8px gap from every agent line beneath as well (owner, 2026-09-24:
+   "三个小点…挤占了底下列出的 Agent 的空间…放到标题行"). Absolute, because the
+   pick is a button and a button cannot nest one; only the title line keeps
+   its room (measured: the line is 20px in an 8px-padded row, so a 24px
+   command centred on it starts at 6px). Rows without a menu (Board) reserve
+   nothing. */
+.proj-row .row-menu { position: absolute; right: 10px; top: 6px; width: 24px; height: 24px; }
+.proj-row:has(.row-menu) .p-top { padding-right: 32px; }
 
 /* ── The RUNNING cue: ONE treatment for "a turn is open", app-wide ────────
    The status language says accent = in motion, grey = at rest, and the colour
