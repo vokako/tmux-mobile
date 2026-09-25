@@ -284,9 +284,11 @@ every system family).
 
 Settings → Appearance (`fonts.svelte.ts`, localStorage `tmux_font`). All
 three font roles stand together there — content, display, terminal family —
-one "which fonts" cluster; the Terminal page keeps size and line spacing,
-which are terminal geometry, not typography (owner, 2026-09-21, board #233:
-"终端的显示字体和其他字体设置应该在一起，现在有点乱").
+one "which fonts" cluster (owner, 2026-09-21, board #233: "终端的显示字体和其
+他字体设置应该在一起，现在有点乱"). The terminal's size and line spacing followed
+the family there on 2026-09-25 — the owner reads them as the terminal's look
+("Terminal 的一些风格设置，都应该算到 Appearance 里面") — and the one-row
+Terminal category was retired.
 
 The editable control offers ONLY families the device resolves: the
 suggestion pool (`COMMON_MONO`/`COMMON_SANS`) is probed through

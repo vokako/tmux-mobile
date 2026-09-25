@@ -256,10 +256,10 @@ test('font validation locks its row and restores the confirmed family on failure
 test('numeric preferences use shared bounds and apply without a page Save', async context => {
   const sizes: number[] = [];
   const app = await mount(context, {
-    tab: 'terminal', props: { fontSize: 6, onFontSize: (size: number) => { sizes.push(size); } },
+    tab: 'appearance', props: { fontSize: 6, onFontSize: (size: number) => { sizes.push(size); } },
   });
   try {
-    const stepper = app.document.querySelector('[role="group"][aria-label="Font"]')!;
+    const stepper = app.document.querySelector('[role="group"][aria-label="Terminal font size"]')!;
     const minus = stepper.querySelector<HTMLButtonElement>('button:first-child')!;
     const plus = stepper.querySelector<HTMLButtonElement>('button:last-child')!;
     assert.equal(minus.disabled, true);

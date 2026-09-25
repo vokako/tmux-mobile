@@ -34,12 +34,14 @@ test('the category exists only where Agents is not a page of its own', () => {
     'four rows, each labelled with its section’s own name, in one AGENT group');
   assert.match(source, /<AgentsPage\s+section=\{tab\}/u, 'the one instance is narrowed by the category, never copied');
   // The two-group order (owner, 2026-09-05: "分成两组：1. 关于本身应用层面的
-  // 一些设置 2. 关于 Agent 层面的设置"): the APP group — Appearance,
-  // Notifications, Terminal, (Shortcuts,) Connection — precedes the AGENT
-  // group. Connection ends the APP group as its way out; it no longer trails
+  // 一些设置 2. 关于 Agent 层面的设置"): the APP group — Appearance, Chat,
+  // Notifications, (Shortcuts,) Connection — precedes the AGENT group. Chat
+  // (feed detail, tool rows) replaced the one-row Terminal category on
+  // 2026-09-25: terminal size and spacing are the terminal's LOOK and sit in
+  // Appearance with its font (owner, 2026-09-24). Connection ends the APP group as its way out; it no longer trails
   // the agent rows (the pre-group "Connection stays last" rule, superseded).
   const list = source.match(/const groups = \$derived\(\[[\s\S]*?\]\);/u)?.[0] ?? '';
-  const order = ['appearance', 'notifications', 'terminal', 'shortcuts', 'connection', 'agents', 'teams', 'skills', 'mcp']
+  const order = ['appearance', 'chat', 'notifications', 'shortcuts', 'connection', 'agents', 'teams', 'skills', 'mcp']
     .map((id) => list.indexOf(`id: '${id}'`));
   assert.ok(order.every((i) => i >= 0), 'every category sits in the grouped list');
   assert.deepEqual([...order].sort((a, b) => a - b), order, 'app group first, Connection last inside it, then the agent group');
@@ -106,7 +108,7 @@ test('category and address rows explain themselves with the one hover card (moti
   // A category row's label is terse; the card says what is inside (one i18n
   // hint per category, kept OUTSIDE `tabs` so the pinned list shape holds).
   assert.match(source, /class="side-row" class:open=\{tab === item\.id\} onclick=\{\(\) => selectTab\(item\.id\)\}\s*use:hoverInfo=\{\(\) => \(\{ title: item\.label\(\), text: TAB_HINTS\[item\.id\]/u);
-  for (const id of ['appearance', 'notifications', 'terminal', 'shortcuts', 'agents', 'teams', 'skills', 'mcp', 'connection']) {
+  for (const id of ['appearance', 'chat', 'notifications', 'shortcuts', 'agents', 'teams', 'skills', 'mcp', 'connection']) {
     assert.match(source, new RegExp(`${id}: 'settings[A-Za-z]+Hint'`, 'u'), `${id} has a hint`);
   }
   // An address row: the address and its state (current / dialing / alternate);

@@ -119,7 +119,9 @@
    *  the REAL AgentsPage narrowed to one section, so the desktop page and the
    *  four phone pages cannot drift apart. */
   const AGENT_TABS = ['agents', 'teams', 'skills', 'mcp'];
-  const validStoredTab = storedTab === 'connection' || storedTab === 'shortcuts' || storedTab === 'notifications' || storedTab === 'terminal' || (storedTab != null && AGENT_TABS.includes(storedTab));
+  // A stored 'terminal' (the category retired 2026-09-25) falls through to
+  // Appearance, where its rows now live.
+  const validStoredTab = storedTab === 'connection' || storedTab === 'shortcuts' || storedTab === 'notifications' || storedTab === 'chat' || (storedTab != null && AGENT_TABS.includes(storedTab));
   const initialTab = validStoredTab ? storedTab : 'appearance';
   let tab = $state<string>(initialTab);
   if (storedTab && storedTab !== initialTab) localStorage.setItem(TAB_KEY, initialTab);
@@ -198,8 +200,8 @@
     {
       id: 'app', label: () => t('settingsGroupApp'), rows: [
         { id: 'appearance', label: () => t('settingsAppearance') },
+        { id: 'chat', label: () => t('settingsChat') },
         { id: 'notifications', label: () => t('settingsNotifications') },
-        { id: 'terminal', label: () => t('settingsTerminal') },
         ...(showShortcuts ? [{ id: 'shortcuts', label: () => t('settingsShortcuts') }] : []),
         { id: 'connection', label: () => t('settingsConnection') },
       ],
@@ -218,7 +220,7 @@
    *  the row's label is terse, the card says what is inside. Kept apart from
    *  `tabs` so the list stays the shape the source tests pin. */
   const TAB_HINTS: Record<string, string> = {
-    appearance: 'settingsAppearanceHint', notifications: 'settingsNotificationsHint', terminal: 'settingsTerminalHint',
+    appearance: 'settingsAppearanceHint', chat: 'settingsChatHint', notifications: 'settingsNotificationsHint',
     shortcuts: 'settingsShortcutsHint', agents: 'settingsAgentsHint', teams: 'settingsTeamsHint',
     skills: 'settingsSkillsHint', mcp: 'settingsMcpHint', connection: 'settingsConnectionHint',
   };
@@ -610,21 +612,19 @@
               options={[{ value: 'auto', label: t('layoutAuto') }, { value: 'desktop', label: t('layoutDesktop') }, { value: 'mobile', label: t('layoutMobile') }]} />
             </div>
           </div>
-          <div class="preference-row">
-            <div class="pref-label"><strong class="config-field-label">{t('hubFeedLevel')}</strong></div>
-            <div class="pref-control">
-            <Segmented value={hubPrefs.feedLevel} onchange={(l) => hubPrefs.setFeedLevel(l)} ariaLabel={t('hubFeedLevel')}
-              options={[{ value: 'chat', label: t('hubFeedChat') }, { value: 'status', label: t('hubFeedStatus') }, { value: 'tools', label: t('hubFeedTools') }]} />
+          {#if showUiZoom}
+            <div class="preference-row">
+              <div class="pref-label"><strong class="config-field-label">{t('uiZoom')}</strong></div>
+              <fieldset class="pref-control config-fields" aria-busy={zoomCommand.pending}>
+                <Stepper value={uiZoom} min={UI_ZOOM_MIN} max={UI_ZOOM_MAX} step={UI_ZOOM_STEP}
+                  label={t('uiZoom')} format={(value) => `${Math.round(value * 100)}%`} disabled={zoomCommand.pending}
+                  decreaseLabel={`${t('configDecrease')} ${t('uiZoom')}`}
+                  increaseLabel={`${t('configIncrease')} ${t('uiZoom')}`}
+                  onchange={(value) => runCommand(zoomCommand, () => onUiZoom(value))} />
+                {#if zoomCommand.error}<small class="config-error appear" role="alert">{zoomCommand.error}</small>{/if}
+              </fieldset>
             </div>
-          </div>
-          <div class="preference-row">
-            <div class="pref-label"><strong class="config-field-label">{t('hubStepsRows')}</strong></div>
-            <div class="pref-control">
-              <Stepper value={hubPrefs.stepsRows} min={3} max={30} label={t('hubStepsRows')}
-                decreaseLabel={`${t('configDecrease')} ${t('hubStepsRows')}`}
-                increaseLabel={`${t('configIncrease')} ${t('hubStepsRows')}`} onchange={hubPrefs.setStepsRows} />
-            </div>
-          </div>
+          {/if}
           <div class="preference-row">
             <div class="pref-label" use:hoverInfo={() => ({ title: t('uiFontBody'), text: t('uiFontBodyHint') })}><strong class="config-field-label">{t('uiFontBody')}</strong></div>
             <fieldset class="pref-control config-fields" aria-busy={fontState.ui.pending}>
@@ -645,8 +645,10 @@
           </div>
           <!-- The terminal's FAMILY stands with the other two font roles — one
                "which fonts" cluster (owner, 2026-09-21, board #233: "终端的显
-               示字体和其他字体设置应该在一起"). Size and line spacing stay on
-               the Terminal page: they are terminal geometry, not typography. -->
+               示字体和其他字体设置应该在一起"). Its size and line spacing follow
+               it here: the owner reads them as the terminal's LOOK, which is
+               what this page is (2026-09-24: "Terminal 的一些风格设置，都应该算
+               到 Appearance 里面"), and the one-row Terminal category is gone. -->
           <div class="preference-row">
             <div class="pref-label" use:hoverInfo={() => ({ title: t('fontFamily'), text: t('fontFamilyHint') })}><strong class="config-field-label">{t('fontFamily')}</strong></div>
             <fieldset class="pref-control config-fields" aria-busy={fontState.mono.pending}>
@@ -656,19 +658,43 @@
               {#if fontState.mono.invalid}<small class="config-error font-error appear" role="alert">{t('fontFamilyInvalid')}</small>{/if}
             </fieldset>
           </div>
-          {#if showUiZoom}
-            <div class="preference-row">
-              <div class="pref-label"><strong class="config-field-label">{t('uiZoom')}</strong></div>
-              <fieldset class="pref-control config-fields" aria-busy={zoomCommand.pending}>
-                <Stepper value={uiZoom} min={UI_ZOOM_MIN} max={UI_ZOOM_MAX} step={UI_ZOOM_STEP}
-                  label={t('uiZoom')} format={(value) => `${Math.round(value * 100)}%`} disabled={zoomCommand.pending}
-                  decreaseLabel={`${t('configDecrease')} ${t('uiZoom')}`}
-                  increaseLabel={`${t('configIncrease')} ${t('uiZoom')}`}
-                  onchange={(value) => runCommand(zoomCommand, () => onUiZoom(value))} />
-                {#if zoomCommand.error}<small class="config-error appear" role="alert">{zoomCommand.error}</small>{/if}
-              </fieldset>
+          <div class="preference-row">
+            <div class="pref-label"><strong class="config-field-label">{t('font')}</strong></div>
+            <div class="pref-control">
+              <Stepper value={fontSize} min={6} max={40} label={t('font')} format={(value) => `${value}px`}
+                decreaseLabel={`${t('configDecrease')} ${t('font')}`}
+                increaseLabel={`${t('configIncrease')} ${t('font')}`} onchange={onFontSize} />
             </div>
-          {/if}
+          </div>
+          <div class="preference-row">
+            <div class="pref-label"><strong class="config-field-label">{t('lineHeight')}</strong></div>
+            <div class="pref-control">
+              <Slider value={terminalPrefs.lineHeight} min={LINE_HEIGHT_MIN} max={LINE_HEIGHT_MAX} step={0.05}
+                label={t('lineHeight')} resetLabel={`${t('configReset')} ${t('lineHeight')}`}
+                defaultValue={1} format={(value) => value.toFixed(2)} onchange={setLineHeight} />
+            </div>
+          </div>
+        </div>
+      {:else if tab === 'chat'}
+        <!-- How much of the CONVERSATION the feed shows: its own category, not
+             rows under Appearance — they set what is said, not how it looks
+             (owner, 2026-09-24: "梳理的逻辑没有很好…目录结构要清晰一些"). -->
+        <div class="config-section">
+          <div class="preference-row">
+            <div class="pref-label"><strong class="config-field-label">{t('hubFeedLevel')}</strong></div>
+            <div class="pref-control">
+            <Segmented value={hubPrefs.feedLevel} onchange={(l) => hubPrefs.setFeedLevel(l)} ariaLabel={t('hubFeedLevel')}
+              options={[{ value: 'chat', label: t('hubFeedChat') }, { value: 'status', label: t('hubFeedStatus') }, { value: 'tools', label: t('hubFeedTools') }]} />
+            </div>
+          </div>
+          <div class="preference-row">
+            <div class="pref-label"><strong class="config-field-label">{t('hubStepsRows')}</strong></div>
+            <div class="pref-control">
+              <Stepper value={hubPrefs.stepsRows} min={3} max={30} label={t('hubStepsRows')}
+                decreaseLabel={`${t('configDecrease')} ${t('hubStepsRows')}`}
+                increaseLabel={`${t('configIncrease')} ${t('hubStepsRows')}`} onchange={hubPrefs.setStepsRows} />
+            </div>
+          </div>
         </div>
       {:else if tab === 'notifications'}
         <div class="config-section">
@@ -691,25 +717,6 @@
               <CommandButton label={t('hubNotifyTestAction')} icon="bell" pending={notifyBusy} onclick={testNotify} />
               {#if notifyTested}<div class="config-note appear" role="status">{t('hubNotifyTestSent')}</div>{/if}
               {#if notifyError}<div class="config-error appear" role="alert">{notifyError}</div>{/if}
-            </div>
-          </div>
-        </div>
-      {:else if tab === 'terminal'}
-        <div class="config-section">
-          <div class="preference-row">
-            <div class="pref-label"><strong class="config-field-label">{t('font')}</strong></div>
-            <div class="pref-control">
-              <Stepper value={fontSize} min={6} max={40} label={t('font')} format={(value) => `${value}px`}
-                decreaseLabel={`${t('configDecrease')} ${t('font')}`}
-                increaseLabel={`${t('configIncrease')} ${t('font')}`} onchange={onFontSize} />
-            </div>
-          </div>
-          <div class="preference-row">
-            <div class="pref-label"><strong class="config-field-label">{t('lineHeight')}</strong></div>
-            <div class="pref-control">
-              <Slider value={terminalPrefs.lineHeight} min={LINE_HEIGHT_MIN} max={LINE_HEIGHT_MAX} step={0.05}
-                label={t('lineHeight')} resetLabel={`${t('configReset')} ${t('lineHeight')}`}
-                defaultValue={1} format={(value) => value.toFixed(2)} onchange={setLineHeight} />
             </div>
           </div>
         </div>

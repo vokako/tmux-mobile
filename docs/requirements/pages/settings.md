@@ -14,9 +14,9 @@ settings, then Agent-level settings; a lone group hides its label — desktop,
 where Agents is a page of its own, reads as one plain list):
 
 **App** — about the application itself; Connection ends the group as its way out
-- **Appearance** — theme, language, responsive layout, chat detail, interface scale, and the three font roles (content, display, terminal family)
-- **Notifications** — message notifications On/Off, the level (Finished / Replies / Everything) and a test row
-- **Terminal** — terminal font size and line spacing (the family picker lives with the other font roles under Appearance)
+- **Appearance** — how the app looks: theme, language, responsive layout, interface scale, the three font roles (content, display, terminal family), then the terminal's size and line spacing (owner, 2026-09-24: the terminal's style settings belong to Appearance; the one-row Terminal category is retired)
+- **Chat** — how much of the conversation the feed shows: chat detail and tool rows (moved out of Appearance 2026-09-25: they set what is said, not how it looks)
+- **Notifications** — message notifications On/Off, the level (Finished / Replies / Everything) and a test row (its own category, owner 2026-09-02)
 - **Shortcuts** — configurable desktop navigation and Terminal window bindings (desktop only)
 - **Connection** — current server/addresses, optimize/share/disconnect, debug
 
@@ -51,7 +51,7 @@ where Agents is a page of its own, reads as one plain list):
 - Message notifications (own category): `ui/Switch`, persisted immediately to localStorage `tmux_notify`; turning it on is the user gesture that previews the cue and requests system-notification permission (Android's runtime prompt inside the app). The caption says when only sound can play. The separate test command plays the cue and attempts a notification; it cannot race an outstanding permission request. Moved here from the Hub header (board #72).
 - Desktop interface scale (60%–180%, persisted to localStorage `tmux_ui_zoom`; Cmd/Ctrl `+`, `-`, and `0` use the same value)
 - Terminal font size control (`ui/Stepper`, 6-40px), independent from interface scale; tool-row count and interface scale use the same Stepper with their own bounds and localized action names
-- Terminal font family (in Appearance with the other two font roles; the list offers only families the DEVICE resolves — the suggestion pool is probed with the same registry check the validator uses, so nothing offered can fail on pick; another family may still be typed; only a valid local font is applied and persisted to localStorage `tmux_font`; empty = system default)
+- Terminal font family (in Appearance with the other two font roles, followed by the terminal's size and line spacing; the list offers only families the DEVICE resolves — the suggestion pool is probed with the same registry check the validator uses, so nothing offered can fail on pick; another family may still be typed; only a valid local font is applied and persisted to localStorage `tmux_font`; empty = system default)
 - Terminal line spacing (0.40–1.60, persisted to localStorage `tmux_line_height`; applies live to every normal, split, and Team terminal)
 - Line spacing uses `ui/Slider`, with its native range semantics, visible numeric value and named reset command
 - Debug uses the same `ui/Switch` in Connection; the floating log panel retains its existing drag and position behavior

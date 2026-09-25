@@ -302,7 +302,8 @@ test('the permission request and the audio unlock ride the SETTINGS toggle, neve
   assert.match(prefs, /\{t\('hubNotify'\)\}/u, 'a labelled setting-row');
   // Its OWN category (owner, 2026-09-02: "应该在一个单独的 notification 二级页面"),
   // right after Appearance, never a row under it.
-  assert.match(prefs, /\{ id: 'appearance', label: \(\) => t\('settingsAppearance'\) \},\s*\n\s*\{ id: 'notifications', label: \(\) => t\('settingsNotifications'\) \},/u);
+  assert.match(prefs, /\{ id: 'appearance', label: \(\) => t\('settingsAppearance'\) \},\s*\n\s*\{ id: 'chat', label: \(\) => t\('settingsChat'\) \},\s*\n\s*\{ id: 'notifications', label: \(\) => t\('settingsNotifications'\) \},/u,
+    'Notifications stays its own category (owner, 2026-09-02), after the Chat category that took the feed rows (2026-09-25)');
   const appearance = prefs.slice(prefs.indexOf("{#if tab === 'appearance'}"), prefs.indexOf("{:else if tab === 'notifications'}"));
   assert.ok(appearance.length > 0 && !appearance.includes('hubNotify'), 'no notification row under Appearance');
   assert.match(prefs, /storedTab === 'notifications'/u, 'the category is restorable');
