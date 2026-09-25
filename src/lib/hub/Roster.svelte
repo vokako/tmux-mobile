@@ -457,6 +457,9 @@
     border: 0; white-space: nowrap; color: var(--text2); background: none; cursor: pointer;
     font: 600 var(--fs-meta)/1 var(--font-display);
     transition: color var(--t-move) ease;
+    /* No native tap flash: the platform's grey block on touch was the "方块"
+       the owner saw at the instant of tapping the name (2026-09-25). */
+    -webkit-tap-highlight-color: transparent;
   }
   .team-label:hover, .team-label[aria-pressed="true"] { color: var(--text); }
   .team-label:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
@@ -685,8 +688,14 @@
   }
   /* The TAB carries the selected paint; the command inside stays washless
      (engaged would put a colour block back inside the tab) — its accent ink
-     is the pressed signal that remains. */
-  .all-choice :global(.command-button.engaged) { --command-paint: transparent; }
+     is the pressed signal that remains. The override has to name the
+     engaged HOVER and ACTIVE states too: CommandButton's own rules for them
+     outrank a bare `.engaged` override, so the wash came back on hover and,
+     on a phone, stuck after every tap (owner, 2026-09-25: "选中状态下按钮好像有
+     一个背景色"). */
+  .all-choice :global(.command-button.engaged),
+  .all-choice :global(.command-button.engaged:hover:not(:disabled)),
+  .all-choice :global(.command-button.engaged:active:not(:disabled)) { --command-paint: transparent; }
   /* No spare row above the tabs: the disclosure is exactly the card's hit-box
      height, so the coarse strip stops at its 44px touch floor. */
   .roster-toggle { display: flex; align-self: end; align-items: center; height: calc(var(--roster-paint-height) + 2 * var(--control-paint-inset)); }
