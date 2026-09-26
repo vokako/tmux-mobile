@@ -18,8 +18,8 @@
 
 ## What this is
 
-You run Kiro CLI, Claude Code, Codex, Grok or OMP inside tmux on your Mac or
-Linux box. tmux-mobile is the **shell** around that: it connects those real
+You run Kiro CLI, Claude Code, Codex, Grok, OMP or Kimi Code inside tmux on
+your Mac or Linux box. tmux-mobile is the **shell** around that: it connects those real
 sessions to a phone or a desktop window, gives every project a chat room where
 you and your agents talk, and lets agents spawn, brief and review one another.
 
@@ -79,11 +79,13 @@ The full tenets, with the reasoning and the incidents behind each one, are in
 
 ## What you can do
 
-- **Hub** — one room per project. Talk to an agent with `@name`, to everyone
-  with `@all`. Spawn agents from the registry (Kiro / Claude Code / Codex /
-  Grok / OMP) or a whole configured team; watch their derived status live; open
-  any agent's terminal, the project's files or the task board in a drawer
-  without leaving the conversation.
+- **Hub** — one room per project. Talk to an agent with `@name`, to a whole
+  team by its name, or to everyone with `@all`. The live agents are a tab
+  strip above the input, teams grouped like browser tab groups; double-click
+  one to read only its messages. Spawn agents from the registry (Kiro / Claude
+  Code / Codex / Grok / OMP / Kimi) or a whole configured team; watch their
+  derived status live; open any agent's terminal, the project's files or the
+  task board in a drawer without leaving the conversation.
 - **Task board** — todo / doing / review / done per project; assigning an issue
   notifies the agent, moving it to review notifies the reporter; agents work
   the board with `tmm board`.
@@ -96,13 +98,17 @@ The full tenets, with the reasoning and the incidents behind each one, are in
   overlays agent TUIs instead of resizing them, a window switcher with agent
   icons, and a back-to-tail control that also shows new output.
 - **Files** — browse, preview (Markdown, code, images, PDF, CSV, HTML, PPTX)
-  and edit; path references in chat or in a preview open in place with a
-  working Back; stage, diff, commit and push with the built-in git panel.
+  and edit, with a full-screen reading mode on the phone; path references in
+  chat or in a preview open in place with a working Back; stage, diff, commit
+  and push with the built-in git panel.
 - **Sessions & projects** — every tmux session is a project. Bring a project
-  up, take it down, archive it; rename it by name, never by folder.
-- **Settings** — terminal font, family and line spacing; interface scaling on
-  desktop; light / dark / auto; English / 中文; several named servers with
-  LAN, Tailscale and WAN addresses that fail over.
+  up, take it down, archive it; rename it by name, never by folder. Open
+  projects list first, newest activity on top.
+- **Settings** — Appearance (light / dark / auto, English / 中文, layout,
+  interface scale on desktop, the content, interface and terminal fonts,
+  terminal size and line spacing), Chat detail, notifications, desktop
+  shortcuts, and several named servers with LAN, Tailscale and WAN addresses
+  that fail over.
 - **Notifications & vitals** — an away client can play a cue or post a system
   notification when an agent needs you; low-frequency CPU, memory and disk
   readings sit in the sidebar.
