@@ -186,6 +186,7 @@ and terminal ancestor restrictions remain unchanged.
 | `.chev` + `.open` | disclosure caret turns 90° (closed ▸ → open ▾) | `--t-move` |
 | `.flip` + `.on` | up↔down arrow, or the rail's drawn `panel-left` toggle (#202): its inner chevron, not the stable panel frame, turns 180° on `--t-move` | `--t-move` |
 | `.quarter-turn` + `.on` | a 180°-symmetric swap trigger turns a visible 90° | `--t-move` |
+| `.tab-glyph` + `.on`, `glyph-*` parts in `ui/Icon.svelte` | a navigation tab's icon (desktop rail, phone tab bar, the disconnected gear) settles into its chosen pose and moves back when left (board #240): the terminal prompt steps forward and its cursor shortens, the chat bubble's three dots type in (40ms apart), the gear turns 90°, the files page tilts −10°, the board flips, the agents crew rises behind the front bot. One held transition, ease-out, so a rapid switch reverses mid-flight; outside the atom every part rests | `--t-move` |
 | `.appear` | something enters: fade in | `--t-fast` |
 | `.appear-rise` | a block/banner enters: fade + rise 6px | `--t-move` |
 | `.appear-pop` | a badge/dot/small chip enters: fade + scale from 0.6 | `--t-fast` |
@@ -249,7 +250,7 @@ drag, Settings history rows.
 
 **Done 2026-09-03, shell / Settings / ui pass** (App, Preferences, Settings,
 SystemStatus, ConfirmDialog, Select, SideHandle, InstallPrompt, Lightbox,
-app.css atoms): tab bar, gear (turns 30° while Settings is open), split
+app.css atoms): tab bar, gear (turns 30° while Settings is open; 90° through `.tab-glyph` since #240), split
 toggle, reconnect banner, rail drop line and rail-slot flip after a drag,
 server-switcher and Settings server-row swap glyphs (90° quarter-turn), page slides stilled;
 Preferences segmented/stepper/address/shortcut/hook controls and error

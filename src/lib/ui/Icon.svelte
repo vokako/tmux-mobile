@@ -10,11 +10,17 @@
   {:else if name === 'sessions'}
     <rect x="2" y="3" width="20" height="18" rx="2"/><path d="M8 21V7"/><path d="M2 7h20"/>
   {:else if name === 'terminal'}
-    <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+    <!-- The page glyphs carry `glyph-*` PARTS that move only inside a chosen
+         `.tab-glyph` (board #240, app.css): the prompt steps forward and the
+         cursor shortens; the chat bubble starts typing; the gear turns; the
+         page tilts up; the board flips; the crew rises behind the front bot.
+         Outside the atom every part rests, so the drawing reads as before. -->
+    <polyline class="glyph-step" points="4 17 10 11 4 5"/><line class="glyph-cursor" x1="12" y1="19" x2="20" y2="19"/>
   {:else if name === 'chat'}
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+    <circle class="glyph-talk" cx="8" cy="10" r="1.25" fill="currentColor" stroke="none"/><circle class="glyph-talk" cx="12" cy="10" r="1.25" fill="currentColor" stroke="none"/><circle class="glyph-talk" cx="16" cy="10" r="1.25" fill="currentColor" stroke="none"/>
   {:else if name === 'gear'}
-    <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    <g class="glyph-spin"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></g>
   {:else if name === 'palette'}
     <path d="M12 3a9 9 0 0 0 0 18h1.5a2 2 0 0 0 0-4H12a2 2 0 0 1 0-4h3a6 6 0 0 0 0-12z"/><circle cx="7.5" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="9.5" cy="6.5" r="1" fill="currentColor" stroke="none"/><circle cx="14" cy="6" r="1" fill="currentColor" stroke="none"/>
   {:else if name === 'link'}
@@ -115,13 +121,13 @@
     <!-- Three offset heads share the single bot's rounded face. Rear contours
          stop where the front head begins, so no hidden strokes cross its face
          at the 20px roster size. -->
-    <g stroke-width="1.6" opacity="0.65">
+    <g class="glyph-crew" stroke-width="1.6" opacity="0.65">
       <path d="M12 5.8a2.4 2.4 0 0 1 2.4-2.4h5.2A2.4 2.4 0 0 1 22 5.8v3.1"/>
       <path d="M17 3.4V1.8"/>
       <circle cx="15.4" cy="7" r="0.95" fill="currentColor" stroke="none"/>
       <circle cx="19.1" cy="7" r="0.95" fill="currentColor" stroke="none"/>
     </g>
-    <g stroke-width="1.7" opacity="0.8">
+    <g class="glyph-crew" stroke-width="1.7" opacity="0.8">
       <path d="M12.6 6.7H5a2.5 2.5 0 0 0-2.5 2.5v5.6A2.2 2.2 0 0 0 4.7 17h3"/>
       <path d="M7.4 4.7v2"/>
       <circle cx="5.3" cy="12" r="1.05" fill="currentColor" stroke="none"/>
@@ -137,7 +143,7 @@
   {:else if name === 'info'}
     <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
   {:else if name === 'files'}
-    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+    <g class="glyph-tilt"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></g>
   {:else if name === 'eye'}
     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
   {:else if name === 'eye-off'}
@@ -177,7 +183,7 @@
   {:else if name === 'menu'}
     <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
   {:else if name === 'layout'}
-    <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/>
+    <g class="glyph-flip"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></g>
   {/if}
 </svg>
 

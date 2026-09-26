@@ -85,6 +85,26 @@ test('every placed popover wears .pop-layer and no component keeps a private opa
   }
 });
 
+test('a navigation tab glyph settles into a chosen pose and back (#240)', () => {
+  assert.match(appCss, /\.tab-glyph :is\([^)]*\)\s*\{\s*transition:\s*transform var\(--t-move\) ease-out, opacity var\(--t-move\) ease-out;/u,
+    'one held transition on --t-move, so leaving moves back the way it came');
+  for (const [part, pose] of [['step', 'translateX'], ['cursor', 'scaleX'], ['spin', 'rotate\\(90deg\\)'], ['tilt', 'rotate'], ['flip', 'scaleX\\(-1\\)'], ['crew', 'translateY']]) {
+    assert.match(appCss, new RegExp(`\\.tab-glyph\\.on \\.glyph-${part} \\{ transform: ${pose}`, 'u'), `.glyph-${part} has a chosen pose`);
+  }
+  assert.match(appCss, /\.glyph-talk \{ opacity: 0; transform: scale\(0\.4\); \}/u, 'the chat dots rest hidden outside the atom');
+  assert.match(appCss, /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[^}]*\.tab-glyph :is\([^)]*\)[^{]*\{\s*transition:\s*none;/u, 'stilled under reduced motion');
+  const icon = readFileSync(join(root, 'src/lib/ui/Icon.svelte'), 'utf8');
+  for (const part of ['step', 'cursor', 'talk', 'spin', 'tilt', 'flip', 'crew']) {
+    assert.match(icon, new RegExp(`class="glyph-${part}"`, 'u'), `Icon names the .glyph-${part} part`);
+  }
+  const app = readFileSync(join(root, 'src/App.svelte'), 'utf8');
+  assert.match(app, /<span class="tab-glyph" class:on=\{page === slot\}><Icon name=\{RAIL_ITEMS\[slot\]\.icon\}/u, 'the rail icons wear it');
+  for (const [page, name] of [['hub', 'chat'], ['board', 'layout'], ['files', 'files'], ['terminal', 'terminal'], ['prefs', 'gear']]) {
+    assert.match(app, new RegExp(`<span class="tab-glyph" class:on=\\{page === '${page}'\\}><Icon name="${name}" size=\\{19\\}`, 'u'), `the tab bar's ${name} wears it`);
+  }
+  assert.doesNotMatch(app, /\.gear-btn[^{]*svg[^{]*\{[^}]*rotate/u, 'the gear has no private turn beside the atom');
+});
+
 test('no component re-implements an atom or reaches for svelte/transition', () => {
   for (const file of components) {
     const src = readFileSync(file, 'utf8');

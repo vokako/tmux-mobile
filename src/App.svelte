@@ -1557,7 +1557,7 @@
         <span class="brand-text">tmux<span class="brand-accent">mobile</span></span>
       </div>
       <div class="nav-right">
-        <button class="gear-btn" class:active={page === 'prefs'} aria-label={t('settings')} use:hoverInfo={() => ({ title: t('settings') })} onclick={togglePrefs}><Icon name="gear" size={16} /></button>
+        <button class="gear-btn" class:active={page === 'prefs'} aria-label={t('settings')} use:hoverInfo={() => ({ title: t('settings') })} onclick={togglePrefs}><span class="tab-glyph" class:on={page === 'prefs'}><Icon name="gear" size={16} /></span></button>
       </div>
     </nav>
   {:else if !layout.isTouchDevice}
@@ -1625,7 +1625,7 @@
             aria-current={page === slot ? 'page' : undefined}
             onpointerdown={(e) => railPointerDown(e, slot)}
             onclick={() => railActivate(slot)}
-          ><Icon name={RAIL_ITEMS[slot].icon} size={17} /></button>
+          ><span class="tab-glyph" class:on={page === slot}><Icon name={RAIL_ITEMS[slot].icon} size={17} /></span></button>
         {/if}
         </div>
       {/each}
@@ -1870,24 +1870,24 @@
            desktop rail keeps its travelling wash (motion.md §1.14). -->
       {#if hubEligible}
         <button class:active={page === 'hub'} aria-current={page === 'hub' ? 'page' : undefined} onclick={() => switchTab('hub')}>
-          <Icon name="chat" size={19} /><span>{t('hub')}</span>
+          <span class="tab-glyph" class:on={page === 'hub'}><Icon name="chat" size={19} /></span><span>{t('hub')}</span>
         </button>
         <button class:active={page === 'board'} aria-current={page === 'board' ? 'page' : undefined} onclick={() => switchTab('board')}>
-          <Icon name="layout" size={19} /><span>{t('board')}</span>
+          <span class="tab-glyph" class:on={page === 'board'}><Icon name="layout" size={19} /></span><span>{t('board')}</span>
         </button>
       {/if}
       <button class:active={page === 'files'} aria-current={page === 'files' ? 'page' : undefined} onclick={() => switchTab('files')}>
-        <Icon name="files" size={19} /><span>{t('files')}</span>
+        <span class="tab-glyph" class:on={page === 'files'}><Icon name="files" size={19} /></span><span>{t('files')}</span>
       </button>
       <button class:active={page === 'terminal'} aria-current={page === 'terminal' ? 'page' : undefined} onclick={() => switchTab('terminal')}>
-        <Icon name="terminal" size={19} /><span>{t('terminal')}</span>
+        <span class="tab-glyph" class:on={page === 'terminal'}><Icon name="terminal" size={19} /></span><span>{t('terminal')}</span>
       </button>
       <!-- No Agents icon here: on a phone the agent configuration is a CATEGORY
            OF SETTINGS (nav-state's agentsLivesInSettings), because this row had
            one tab too many (owner, 2026-08-29: "不用单独在底下一行展示了，现在
            看着有点多底下的标签"). The desktop rail keeps it as a page. -->
       <button class:active={page === 'prefs'} aria-current={page === 'prefs' ? 'page' : undefined} onclick={togglePrefs}>
-        <Icon name="gear" size={19} /><span>{t('settings')}</span>
+        <span class="tab-glyph" class:on={page === 'prefs'}><Icon name="gear" size={19} /></span><span>{t('settings')}</span>
       </button>
     </nav>
   {/if}
@@ -2126,11 +2126,8 @@
   }
   .gear-btn:active { color: var(--accent); }
   .gear-btn.active { color: var(--accent); background: var(--accent-bg); }
-  /* The gear TURNS a notch while Settings is open — "settings is open" is a
-     state, and a state change is a movement (motion.md §1.4). */
-  .gear-btn :global(svg) { transition: transform var(--t-move) ease; }
-  .gear-btn.active :global(svg) { transform: rotate(30deg); }
-  @media (prefers-reduced-motion: reduce) { .gear-btn :global(svg) { transition: none; } }
+  /* The gear's turn while Settings is open is the shared .tab-glyph atom
+     (app.css, board #240) — the same 90° the rail and tab bar gears make. */
 
 
   .brand {

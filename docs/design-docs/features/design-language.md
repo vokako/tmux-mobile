@@ -245,7 +245,8 @@ danger semantics.
   removed with the send/interrupt dual mode in #168. Every looping animation
   stills under `prefers-reduced-motion`. **Micro-motion** (owner, 2026-09-03:
   a state change is a movement, not a swap): a glyph that reads two ways
-  TURNS (`.chev`/`.flip`/`.quarter-turn`), things that enter fade or rise in (`.appear*`),
+  TURNS (`.chev`/`.flip`/`.quarter-turn`), a chosen navigation tab's icon
+  settles into its own pose and back (`.tab-glyph`, #240), things that enter fade or rise in (`.appear*`),
   a control's selected clothes cross-fade (`.state-ctl`), a keyed list
   reorders with `animate:flip` on `moveMs()`; exits are cuts, layout is never
   animated, `svelte/transition` is not used. The full principles, vocabulary
