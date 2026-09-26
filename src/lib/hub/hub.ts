@@ -168,7 +168,6 @@ export function backendColor(backend: string | null | undefined): string {
  * value, so "no recipient" was re-seated by the next 5 s roster poll. */
 export function pickLead(
   agents: readonly HubAgent[],
-  registry: readonly { name: string; can_hire?: boolean }[],
   stored?: string | null,
 ): string {
   if (stored === '' || stored === ALL_TARGET) return stored;
@@ -177,9 +176,7 @@ export function pickLead(
   if (!managed.length) return '';
   if (stored && managed.some((a) => a.name === stored)) return stored;
   if (managed.length === 1) return managed[0]!.name;
-  const canHire = new Set(registry.filter((r) => r.can_hire).map((r) => r.name));
-  const lead = managed.find((a) => canHire.has(a.name));
-  if (lead) return lead.name;
+  // No Manager role since 2026-09-26: the lowest window is the stable seat.
   return managed.slice().sort((a, b) => a.window - b.window)[0]!.name;
 }
 

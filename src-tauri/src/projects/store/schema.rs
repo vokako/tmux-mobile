@@ -9,7 +9,7 @@ use super::registry::{DEFAULT_KIMI_SYSTEM, DEFAULT_OMP_MODEL, DEFAULT_OMP_SYSTEM
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 22;
+const SCHEMA_VERSION: i64 = 23;
 
 impl Store {
     /// Ensure the durable half of Board editability exists, then
@@ -560,8 +560,8 @@ impl Store {
             // the insert never runs again, so deleting it sticks.
             self.conn
                 .execute(
-                    "INSERT INTO reg_agents (name, backend, model, effort, system, skills, mcp, can_hire, created_at, updated_at)
-                     SELECT 'omp', 'omp', ?2, '', ?1, '[\"tmm-cli\",\"mem\",\"mcp-cli\"]', '[]', 1,
+                    "INSERT INTO reg_agents (name, backend, model, effort, system, skills, mcp, created_at, updated_at)
+                     SELECT 'omp', 'omp', ?2, '', ?1, '[\"tmm-cli\",\"mem\",\"mcp-cli\"]', '[]',
                             CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER)
                      WHERE (SELECT COUNT(*) FROM reg_agents) > 0
                        AND NOT EXISTS (SELECT 1 FROM reg_agents WHERE name = 'omp')",
@@ -632,15 +632,30 @@ impl Store {
             // search); model empty = the user's own default_model.
             self.conn
                 .execute(
-                    "INSERT INTO reg_agents (name, backend, model, effort, system, skills, mcp, can_hire, created_at, updated_at)
+                    "INSERT INTO reg_agents (name, backend, model, effort, system, skills, mcp, created_at, updated_at)
                      SELECT 'kimi', 'kimi', '', '', ?1, '[\"tmm-cli\",\"mem\",\"mcp-cli\"]',
-                            '[{\"name\":\"kiro-web-search\",\"command\":\"uvx\",\"args\":[\"kiro-web-search==0.1.3\"]}]', 1,
+                            '[{\"name\":\"kiro-web-search\",\"command\":\"uvx\",\"args\":[\"kiro-web-search==0.1.3\"]}]',
                             CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER)
                      WHERE (SELECT COUNT(*) FROM reg_agents) > 0
                        AND NOT EXISTS (SELECT 1 FROM reg_agents WHERE name = 'kimi')",
                     rusqlite::params![DEFAULT_KIMI_SYSTEM],
                 )
                 .map_err(|e| format!("migrate to 22: {e}"))?;
+        }
+        if version < 23 {
+            // The Manager flag is retired (owner, 2026-09-26): hiring is an
+            // ability every agent has through `tmm`, so a per-definition grant
+            // gated nothing worth gating. The column goes with the field.
+            let has_column = self
+                .conn
+                .prepare("SELECT 1 FROM pragma_table_info('reg_agents') WHERE name = 'can_hire'")
+                .and_then(|mut s| s.exists([]))
+                .map_err(|e| format!("migrate to 23: {e}"))?;
+            if has_column {
+                self.conn
+                    .execute_batch("ALTER TABLE reg_agents DROP COLUMN can_hire;")
+                    .map_err(|e| format!("migrate to 23: {e}"))?;
+            }
         }
         Ok(())
     }
@@ -936,7 +951,6 @@ mod tests {
             let omp = store.reg_get("omp").unwrap().expect("v18 backfills the omp default");
             assert_eq!(omp.system, DEFAULT_OMP_SYSTEM);
             assert_eq!(omp.model, DEFAULT_OMP_MODEL, "the backfill pins Fable 5.1 like the seed");
-            assert!(omp.can_hire, "the default is a Manager like its four siblings");
             assert_eq!(omp.skills, r#"["tmm-cli","mem","mcp-cli"]"#);
             // Deleting the default now sticks: the stamp is v18, the insert
             // is history.
@@ -954,7 +968,6 @@ mod tests {
                 system: "My own omp persona.".into(),
                 skills: "[]".into(),
                 mcp: "[]".into(),
-                can_hire: false,
             };
             store.reg_save(&custom, 2).unwrap();
             store.conn.pragma_update(None, "user_version", 17).unwrap();
@@ -988,7 +1001,6 @@ mod tests {
             let kimi = store.reg_get("kimi").unwrap().expect("v22 backfills the kimi default");
             assert_eq!(kimi.system, DEFAULT_KIMI_SYSTEM);
             assert_eq!(kimi.model, "", "empty = the user's own default_model, carried into the home");
-            assert!(kimi.can_hire);
             assert_eq!(kimi.skills, r#"["tmm-cli","mem","mcp-cli"]"#);
             assert!(kimi.mcp.contains("kiro-web-search"), "Bedrock K3 has no built-in search");
             assert_eq!(
@@ -1008,7 +1020,6 @@ mod tests {
                 system: "My own kimi persona.".into(),
                 skills: "[]".into(),
                 mcp: "[]".into(),
-                can_hire: false,
             };
             store.reg_save(&custom, 2).unwrap();
             store.conn.pragma_update(None, "user_version", 21).unwrap();

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { compileMount } from '../test/mount.ts';
 
 const compiled = compileMount(new URL('./Preferences.svelte', import.meta.url), [new URL('../core/ws.ts', import.meta.url)]);
-const alpha = { name: 'alpha', backend: 'codex', model: '', system: 'Original', skills: '[]', mcp: '[]', can_hire: false };
+const alpha = { name: 'alpha', backend: 'codex', model: '', system: 'Original', skills: '[]', mcp: '[]' };
 const rpc = {
   registryList: async () => ({ agents: [alpha] }),
   teamsList: async () => ({ teams: [] }), skillsList: async () => ({ skills: [] }),

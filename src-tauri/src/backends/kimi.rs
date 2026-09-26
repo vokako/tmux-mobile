@@ -694,7 +694,6 @@ pattern = "Bash(rm -rf*)"
             system: String::new(),
             skills: "[]".into(),
             mcp: r#"[{"name":"kiro-web-search","command":"uvx","args":["kiro-web-search==0.1.3"]}]"#.into(),
-            can_hire: true,
         };
         let r = render_kimi(&def, "k1", &home, &ws, "You are k1.", &[]).unwrap();
         assert_eq!(r.cmd, "command kimi --auto -m bedrock-kimi-k3");

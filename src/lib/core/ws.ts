@@ -963,7 +963,6 @@ export interface RegAgent {
   system: string;
   skills: string;
   mcp: string;
-  can_hire: boolean;
 }
 export const registryList = () => call<{ agents: RegAgent[] }>('registry_list');
 export const registrySave = (def: RegAgent) => call('registry_save', { def });

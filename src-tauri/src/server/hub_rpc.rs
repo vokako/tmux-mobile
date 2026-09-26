@@ -627,7 +627,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
         }
 
         // Spawn a registry agent into this project (tmm spawn / the UI's
-        // "+ agent"). can_hire-gated when an agent asks; capped per project.
+        // "+ agent"). Capped per project; no per-definition hiring gate.
         // A configured TEAM, started at once (board #74): every member spawns
         // as an ordinary managed agent; the room records one `spawned` line
         // per member, in the grammar the client already reads.

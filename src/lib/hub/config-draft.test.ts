@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { configFingerprint, configPayload, configValid, type ConfigDraft, type AgentDraft } from './config-draft.ts';
 
-const agent: AgentDraft = { name: 'alpha', backend: 'codex', model: '', system: 'Original', can_hire: true,
+const agent: AgentDraft = { name: 'alpha', backend: 'codex', model: '', system: 'Original',
   skillSel: ['missing'], mcpSel: ['remote'], mcpExtra: [{ expanded: true, nested: { token: 'fixture' } }] };
 
 test('agent payload preserves unknown references and inline MCP values', () => {

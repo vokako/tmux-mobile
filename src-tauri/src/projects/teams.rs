@@ -241,7 +241,7 @@ mod tests {
     use super::*;
 
     fn agent(name: &str, system: &str) -> RegAgent {
-        RegAgent { name: name.into(), backend: "claude".into(), model: String::new(), effort: String::new(), system: system.into(), skills: "[]".into(), mcp: "[]".into(), can_hire: false }
+        RegAgent { name: name.into(), backend: "claude".into(), model: String::new(), effort: String::new(), system: system.into(), skills: "[]".into(), mcp: "[]".into() }
     }
     fn team(members: &str) -> RegTeam {
         RegTeam { name: "dev-squad".into(), description: "Ships features end to end.".into(), members: members.into() }

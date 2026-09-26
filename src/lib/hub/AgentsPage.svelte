@@ -408,7 +408,6 @@
       model: agent.model ?? '',
       effort: agent.effort ?? '',
       system: agent.system ?? '',
-      can_hire: false,
       skillSel: skillEntries.filter((x) => typeof x === 'string'),
       mcpSel: mcpEntries.filter((x) => typeof x === 'string'),
       mcpExtra: mcpEntries.filter((x) => typeof x !== 'string'),
@@ -590,7 +589,7 @@
             mcpSel: mcpEntries.filter((x) => typeof x === 'string'),
             mcpExtra: mcpEntries.filter((x) => typeof x !== 'string'),
           }
-        : { name: '', backend: defaultBackend(), model: '', effort: '', system: '', can_hire: false, skillSel: [], mcpSel: [], mcpExtra: [] };
+        : { name: '', backend: defaultBackend(), model: '', effort: '', system: '', skillSel: [], mcpSel: [], mcpExtra: [] };
       rememberDraft();
     });
   }
@@ -624,9 +623,6 @@
           {#if backendIcon(d.backend)}<img class="ava" src={backendIcon(d.backend)} alt={d.backend} />{:else}<span class="ava" style:background={backendColor(d.backend)}>{d.name.slice(0, 1).toUpperCase()}</span>{/if}
           <span class="r-name">{d.name}</span>
           <span class="r-backend">{d.backend}</span>
-          <!-- can_hire: the boxed M = Manager (board #7) — one atom, the
-               words live in the title. -->
-          {#if d.can_hire}<span class="m-badge" title={t('agentsManagerHint')} aria-label={t('agentsManagerHint')}>M</span>{/if}
         </button>
       {/each}
       <button class="side-row add" onclick={() => startEdit(null)}>
@@ -1021,8 +1017,6 @@
               ariaLabel={t('agentsEffort')} />
           </label>
         </div>
-        <Switch checked={editing.can_hire} label={t('agentsManager')} disabled={saving || removing}
-          onchange={next => editing.can_hire = next} />
         <label class="config-field"><span class="config-field-label">{t('agentsSystem')}</span>
           <textarea class="config-input" rows="6" bind:value={editing.system} placeholder={t('agentsSystemPh')}></textarea>
         </label>
@@ -1130,10 +1124,6 @@
   .r-backend { font-family: var(--font-mono); font-size: var(--fs-sub); color: var(--text3); flex: none; }
   /* A wash, not a drawn frame: borders on inner micro atoms read as chrome
      (owner, 2026-08-24 audit; same rule as the sys-line atoms). */
-  /* The Manager atom (board #7): a boxed M, shared verbatim with Hub.svelte
-     (no app.css edits allowed there either — the source test pins the two
-     declarations to the same text). Words live in title/aria. */
-  .m-badge { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border: 1px solid var(--accent); border-radius: 4px; color: var(--accent); font-size: var(--fs-micro); font-weight: 700; line-height: 1; }
 
   .mid { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   /* Skill files as a quiet list — rows in the wash hover family, the

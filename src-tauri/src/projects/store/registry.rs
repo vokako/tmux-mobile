@@ -85,8 +85,6 @@ pub struct RegAgent {
     /// JSON array of MCP server defs ({name, command/url, args, env, headers}).
     #[serde(default = "empty_json_array")]
     pub mcp: String,
-    #[serde(default)]
-    pub can_hire: bool,
 }
 
 pub(super) fn empty_json_array() -> String {
@@ -118,7 +116,6 @@ pub(super) fn row_to_reg_agent(r: &rusqlite::Row<'_>) -> rusqlite::Result<RegAge
         system: r.get(4)?,
         skills: r.get(5)?,
         mcp: r.get(6)?,
-        can_hire: r.get::<_, i64>(7)? != 0,
     })
 }
 
@@ -127,7 +124,7 @@ impl Store {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT name, backend, model, effort, system, skills, mcp, can_hire
+                "SELECT name, backend, model, effort, system, skills, mcp
                    FROM reg_agents
                   ORDER BY CASE name
                     WHEN 'kiro' THEN 0
@@ -151,7 +148,7 @@ impl Store {
     pub fn reg_get(&self, name: &str) -> Result<Option<RegAgent>, String> {
         self.conn
             .query_row(
-                "SELECT name, backend, model, effort, system, skills, mcp, can_hire FROM reg_agents WHERE name = ?1",
+                "SELECT name, backend, model, effort, system, skills, mcp FROM reg_agents WHERE name = ?1",
                 [name],
                 row_to_reg_agent,
             )
@@ -163,10 +160,10 @@ impl Store {
     pub fn reg_save(&self, a: &RegAgent, now: u64) -> Result<(), String> {
         self.conn
             .execute(
-                "INSERT INTO reg_agents (name, backend, model, effort, system, skills, mcp, can_hire, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
+                "INSERT INTO reg_agents (name, backend, model, effort, system, skills, mcp, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
                  ON CONFLICT(name) DO UPDATE SET
-                   backend=?2, model=?3, effort=?4, system=?5, skills=?6, mcp=?7, can_hire=?8, updated_at=?9",
+                   backend=?2, model=?3, effort=?4, system=?5, skills=?6, mcp=?7, updated_at=?8",
                 rusqlite::params![
                     a.name,
                     a.backend,
@@ -175,7 +172,6 @@ impl Store {
                     a.system,
                     a.skills,
                     a.mcp,
-                    a.can_hire as i64,
                     now as i64,
                 ],
             )
@@ -270,7 +266,6 @@ impl Store {
                 system: DEFAULT_KIRO_SYSTEM.into(),
                 skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
                 mcp: "[]".into(),
-                can_hire: true,
             },
             RegAgent {
                 name: "codex".into(),
@@ -280,7 +275,6 @@ impl Store {
                 system: "You are a powerful 10x developer running on Codex who can handle any task with decisive execution and minimal words.".into(),
                 skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
                 mcp: r#"[{"name":"kiro-web-search","command":"uvx","args":["kiro-web-search==0.1.3"]}]"#.into(),
-                can_hire: true,
             },
             RegAgent {
                 name: "claude".into(),
@@ -290,7 +284,6 @@ impl Store {
                 system: "You are a powerful 10x developer running on Claude Code who can handle any task with decisive execution and minimal words.".into(),
                 skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
                 mcp: r#"[{"name":"kiro-web-search","command":"uvx","args":["kiro-web-search==0.1.3"]}]"#.into(),
-                can_hire: true,
             },
             RegAgent {
                 name: "grok".into(),
@@ -300,7 +293,6 @@ impl Store {
                 system: "You are a powerful 10x developer running on Grok who can handle any task with decisive execution and minimal words.".into(),
                 skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
                 mcp: r#"[{"name":"kiro-web-search","command":"uvx","args":["kiro-web-search==0.1.3"]}]"#.into(),
-                can_hire: true,
             },
             RegAgent {
                 name: "omp".into(),
@@ -311,7 +303,6 @@ impl Store {
                 skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
                 // omp ships its own web_search tool — no MCP search shim needed.
                 mcp: "[]".into(),
-                can_hire: true,
             },
             RegAgent {
                 name: "kimi".into(),
@@ -323,7 +314,6 @@ impl Store {
                 // kimi's built-in search is the Moonshot service (a Kimi API
                 // key); on Bedrock it has none, so the MCP shim like codex.
                 mcp: r#"[{"name":"kiro-web-search","command":"uvx","args":["kiro-web-search==0.1.3"]}]"#.into(),
-                can_hire: true,
             },
         ];
         // backend-seeds:end
@@ -421,7 +411,6 @@ mod tests {
             ["kiro", "codex", "claude", "grok", "omp", "kimi"],
             "the six backend defaults are the fixed leading group"
         );
-        assert!(seeded.iter().all(|a| a.can_hire), "every default is a Manager");
         assert!(seeded.iter().all(|a| a.skills == r#"["tmm-cli","mem","mcp-cli"]"#));
         let expected_kiro_system = concat!(
             "You are a powerful 10x developer running on Kiro CLI who can handle any task with decisive execution and minimal words.",
@@ -450,7 +439,6 @@ mod tests {
             system: "custom".into(),
             skills: "[]".into(),
             mcp: "[]".into(),
-            can_hire: false,
         };
         store.reg_save(&custom, 250).unwrap();
         assert_eq!(
@@ -482,7 +470,6 @@ mod tests {
             system: legacy.into(),
             skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
             mcp: "[]".into(),
-            can_hire: true,
         };
         store.reg_save(&kiro, 100).unwrap();
 
@@ -496,7 +483,6 @@ mod tests {
         assert_eq!(upgraded.effort, "high", "a prompt upgrade preserves effort");
         assert_eq!(upgraded.skills, kiro.skills, "a prompt upgrade preserves skills");
         assert_eq!(upgraded.mcp, kiro.mcp, "a prompt upgrade preserves MCP");
-        assert!(upgraded.can_hire, "a prompt upgrade preserves Manager status");
 
         kiro.system = VERBOSE_DEFAULT_KIRO_SYSTEM.into();
         store.reg_save(&kiro, 300).unwrap();

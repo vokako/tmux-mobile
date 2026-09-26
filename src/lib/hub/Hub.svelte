@@ -335,7 +335,7 @@
     recipient = '';
     // The cached roster can seat the recipient immediately — same rule as
     // loadAgents, which will confirm or correct it when the fresh roster lands.
-    if (agents.length) recipient = pickLead(agents, registry, hubPrefs.lead(session));
+    if (agents.length) recipient = pickLead(agents, hubPrefs.lead(session));
     if (targetTeam(hubPrefs.lead(session) ?? '') && !recipient) hubPrefs.setLead(session, '');
     filterAgent = ''; // a filter is a reading choice, scoped to its room
     // The drawer follows the project (board #23, owner: "chat的右侧边栏打开
@@ -479,7 +479,7 @@
       if (emptyTeam) { recipient = ''; hubPrefs.setLead(selected, ''); }
       else if (recipient && recipient !== ALL_TARGET && !targetTeam(recipient)
         && !agents.some((a) => a.managed && a.name === recipient)) recipient = '';
-      if (!recipient && !emptyTeam) recipient = pickLead(agents, registry, hubPrefs.lead(selected));
+      if (!recipient && !emptyTeam) recipient = pickLead(agents, hubPrefs.lead(selected));
     } catch (e) {
       if (!alive || request !== rosterReadSequence || selected !== s) return;
       if (report) throw e;
@@ -1061,7 +1061,7 @@
       }
       await Promise.all([reload(), loadAgents(), loadFeed()]);
       if (mode === 'start' || !recipient) {
-        setRecipient(names.find((n) => registry.find((r) => r.name === n)?.can_hire) ?? names[0]);
+        setRecipient(names[0]);
       }
     } finally {
       starting = false;
@@ -1739,7 +1739,6 @@
                     {#if backendIcon(r.backend)}<img class="ava" src={backendIcon(r.backend)} alt={r.backend} />{:else}<span class="ava" style:background={backendColor(r.backend)}>{r.name.slice(0, 1).toUpperCase()}</span>{/if}
                     <span class="sr-name">{r.name}</span>
                     <span class="sr-backend">{r.backend}</span>
-                    {#if r.can_hire}<span class="m-badge" title={t('agentsManagerHint')} aria-label={t('agentsManagerHint')}>M</span>{/if}
                   </button>
                 {/each}
                 <!-- Configured TEAMS (board #74): one tap starts every member
@@ -2034,8 +2033,6 @@
   .start-row:disabled { opacity: 0.5; }
   .sr-name { font-family: var(--font-mono); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sr-backend { font-family: var(--font-mono); font-size: var(--fs-sub); color: var(--text3); margin-left: auto; }
-  /* The Manager atom (board #7) — same declaration as AgentsPage's, pinned. */
-  .m-badge { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border: 1px solid var(--accent); border-radius: 4px; color: var(--accent); font-size: var(--fs-micro); font-weight: 700; line-height: 1; }
 
   .dlg-backdrop { position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,0.45); animation: fade-in var(--t-move) ease-out; }
   .dlg {

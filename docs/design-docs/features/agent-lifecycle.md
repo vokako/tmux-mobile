@@ -25,7 +25,7 @@ never gets to assert anything about the agent.
 | Step | What it does | Why it is here |
 |---|---|---|
 | `registry_get(agent)` | loads the definition | an agent is a registry row, not a command line |
-| `can_hire` gate | an agent asking to spawn must be allowed to | a lead can hire; a worker fanning out is a bug |
+| per-project cap | any agent may spawn (the `can_hire` grant was retired 2026-09-26 — hiring is a `tmm` ability, not a registry right); the project's cap bounds fan-out | a worker fanning out is a bug the cap contains |
 | cap `SPAWN_CAP = 8` | counts agent windows in the session | each window burns real tokens |
 | window name | `dev`, `dev-2`, … | **the window name IS the agent identity** — telemetry, `tmm`, delivery and the managed gate all key on it |
 | `agent_home()` | `<ws>/.tmm/agents/<name>/` | the isolated home. `KIRO_HOME` / `CODEX_HOME` / `--settings` point here, so user-space config never leaks in — and this directory is also the *definition* of "an agent this app created" (`projects::managed_home`) |

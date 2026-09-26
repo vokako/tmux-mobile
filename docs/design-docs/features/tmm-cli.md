@@ -53,7 +53,7 @@ tmm project up|down|archive|delete|rename <session>
 
 # identity assets (central registry)
 tmm registry list|save|delete        agent definitions (--backend --system --model
-                                     --effort --skills --mcp --can-hire)
+                                     --effort --skills --mcp)
 tmm teams list|save|delete           named agent teams (members + roles)
 tmm prompt show|path|set|clear       the app-wide instructions (<config>/AGENTS.md)
 tmm skills list|save|delete|refresh|import   app-owned skill store
@@ -87,8 +87,9 @@ spawn prompt tells agents so. A lead can set up a whole project
 delegation, all inside one conversation. This adds no authority: an agent
 already holds a shell (it can run tmux or edit files directly), so first-class
 commands only replace ad-hoc power with a documented, observable interface.
-`can_hire` stays a resource gate on spawn — it is about fan-out control, not
-security. `project up/down/archive` accept the SESSION NAME (resolved to the
+The former `can_hire` spawn gate followed that logic out on 2026-09-26 (owner:
+"本身就是 agent 自己能够通过命令行获得的能力，不应该加到里边"): every agent may
+spawn; the per-project cap alone bounds fan-out. `project up/down/archive` accept the SESSION NAME (resolved to the
 project id via project_list), because the session is what agents and humans
 actually see.
 

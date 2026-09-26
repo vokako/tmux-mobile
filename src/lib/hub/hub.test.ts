@@ -483,25 +483,25 @@ test('a prompt typed at the agent keyboard becomes its own input row', () => {
 
 test('pickLead: a remembered choice wins while that agent is present', () => {
   const agents = [ag({ window: 1, name: 'dev' }), ag({ window: 2, name: 'qa' })];
-  assert.equal(pickLead(agents, [], 'qa'), 'qa');
-  assert.equal(pickLead(agents, [], 'gone'), 'dev', 'a departed agent falls back to the rule');
+  assert.equal(pickLead(agents, 'qa'), 'qa');
+  assert.equal(pickLead(agents, 'gone'), 'dev', 'a departed agent falls back to the rule');
 });
 
 test('pickLead: a remembered team remains only while at least one managed member survives (#239)', () => {
   const team = teamTarget('dev');
   const agents = [ag({ name: 'reviewer', team: 'dev/review' }), ag({ name: 'solo' })];
-  assert.equal(pickLead(agents, [], team), team);
-  assert.equal(pickLead(agents.slice(1), [], team), '', 'an empty team becomes an explicit room note, never another agent');
+  assert.equal(pickLead(agents, team), team);
+  assert.equal(pickLead(agents.slice(1), team), '', 'an empty team becomes an explicit room note, never another agent');
 });
 
 test('pickLead: an explicit ROOM choice is kept; only "nobody chose" seats a lead', () => {
   // Review C (2026-09-03): '' and unset used to be one value, so "send to the
   // room, no recipient" was undone by the next roster poll's pickLead.
   const agents = [ag({ name: 'dev', window: 1 }), ag({ name: 'qa', window: 2 })];
-  assert.equal(pickLead(agents, [], ''), '', 'the room stays the room');
-  assert.equal(pickLead(agents, [], null), 'dev', 'nobody chose → the rule seats a lead');
-  assert.equal(pickLead(agents, []), 'dev', 'absent is the same as null');
-  assert.equal(pickLead([ag({ name: 'solo' })], [], ''), '', 'even a one-agent room, once the user said so');
+  assert.equal(pickLead(agents, ''), '', 'the room stays the room');
+  assert.equal(pickLead(agents, null), 'dev', 'nobody chose → the rule seats a lead');
+  assert.equal(pickLead(agents), 'dev', 'absent is the same as null');
+  assert.equal(pickLead([ag({ name: 'solo' })], ''), '', 'even a one-agent room, once the user said so');
 });
 
 test('pickDrawerAgent: the recipient\'s pane when the recipient is a named managed agent, else the old default (#209)', () => {
@@ -525,23 +525,22 @@ test('pickDrawerAgent: the recipient\'s pane when the recipient is a named manag
 test('pickLead: a saved all choice survives roster changes, including an empty roster (#171)', () => {
   const agents = [ag({ name: 'dev', window: 1 }), ag({ name: 'qa', window: 2 })];
   for (const current of [agents, agents.slice(0, 1), [], [ag({ managed: false })]]) {
-    assert.equal(pickLead(current, [], ALL_TARGET), ALL_TARGET);
-    assert.equal(pickLead(current, [], ''), '');
+    assert.equal(pickLead(current, ALL_TARGET), ALL_TARGET);
+    assert.equal(pickLead(current, ''), '');
   }
-  assert.equal(pickLead(agents, [], null), 'dev');
-  assert.equal(pickLead([], [], null), '', 'no preference plus no recipient remains record-only');
+  assert.equal(pickLead(agents, null), 'dev');
+  assert.equal(pickLead([], null), '', 'no preference plus no recipient remains record-only');
 });
 
-test('pickLead: one agent needs no rule, several prefer the one that can hire', () => {
-  assert.equal(pickLead([ag({ name: 'solo' })], []), 'solo');
+test('pickLead: one agent needs no rule, several seat the lowest window', () => {
+  assert.equal(pickLead([ag({ name: 'solo' })]), 'solo');
   const agents = [ag({ window: 3, name: 'dev' }), ag({ window: 2, name: 'boss' })];
-  assert.equal(pickLead(agents, [{ name: 'boss', can_hire: true }]), 'boss', 'can_hire IS the lead role');
-  assert.equal(pickLead(agents, []), 'boss', 'no lead defined → lowest window, stable not arbitrary');
+  assert.equal(pickLead(agents), 'boss', 'no Manager role (2026-09-26) → lowest window, stable not arbitrary');
 });
 
 test('pickLead ignores direct windows and empty rooms', () => {
-  assert.equal(pickLead([ag({ name: 'byhand', managed: false })], []), '', 'direct windows are not participants');
-  assert.equal(pickLead([], []), '');
+  assert.equal(pickLead([ag({ name: 'byhand', managed: false })]), '', 'direct windows are not participants');
+  assert.equal(pickLead([]), '');
 });
 
 test('addressed always keeps the chip; body mentions ride along', () => {

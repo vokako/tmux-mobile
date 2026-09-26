@@ -172,7 +172,7 @@ server start (`source = "builtin"`; save/delete refuse their names).
 
 | Method | Params | Response |
 |--------|--------|----------|
-| `registry_list` | — | `{agents: [{name, backend, model, effort, system, skills, mcp, can_hire}]}` |
+| `registry_list` | — | `{agents: [{name, backend, model, effort, system, skills, mcp}]}` (the `can_hire` flag was retired 2026-09-26) |
 | `registry_save` | `def` | Validates backend, model id (against the backend's own CLI) and effort enum |
 | `registry_delete` | `name` | OK |
 | `global_prompt_get` | — | `{text, path, max_bytes}` — the app-wide agent instructions (`<config>/AGENTS.md`), prepended to every managed agent's system prompt at spawn |

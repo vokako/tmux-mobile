@@ -103,17 +103,10 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
     super::models::validate(&def.backend, &def.model)?;
     super::models::validate_effort(&def.backend, &def.effort)?;
 
-    // can_hire gate: when an AGENT asks, its own registry def must allow
-    // hiring. A human caller (empty `by`) is always allowed.
-    if !req.by.is_empty() {
-        if let Some(caller) = super::registry_get(req.by)? {
-            if !caller.can_hire {
-                return Err(format!("agent '{}' is not allowed to spawn (can_hire=false)", req.by));
-            }
-        }
-        // A caller not in the registry (adopted window) counts as the human
-        // driving that window — allowed.
-    }
+    // No hiring gate: spawning is an ability every agent already has through
+    // its shell and `tmm`, so a registry grant added no authority (owner,
+    // 2026-09-26: "本身就是 agent 自己能够通过命令行获得的能力"). Fan-out is
+    // bounded by the per-project cap below, for humans and agents alike.
 
     let project = super::project_for_session(req.session)?
         .ok_or_else(|| format!("no project for session '{}'", req.session))?;
@@ -907,7 +900,6 @@ mod tests {
             system: "Persona text.".into(),
             skills: "[]".into(),
             mcp: r#"[{"name":"files","command":"mcp-files","args":["--root","/tmp"]}]"#.into(),
-            can_hire: false,
         }
     }
 
@@ -1636,7 +1628,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         let save = |persona: &str| {
             super::super::registry_save(&json!({
                 "name": name, "backend": "kiro", "model": "", "effort": "",
-                "system": persona, "skills": "[]", "mcp": "[]", "can_hire": false
+                "system": persona, "skills": "[]", "mcp": "[]"
             }))
             .unwrap()
         };
@@ -1677,7 +1669,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         let save = |name: &str, persona: &str| {
             super::super::registry_save(&json!({
                 "name": name, "backend": "kiro", "model": "", "effort": "",
-                "system": persona, "skills": "[]", "mcp": "[]", "can_hire": false
+                "system": persona, "skills": "[]", "mcp": "[]"
             }))
             .unwrap()
         };

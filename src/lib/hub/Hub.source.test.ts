@@ -286,24 +286,15 @@ test('sidebar dots and roster cards drink from ONE state map (board #8)', () => 
     'the raw snapshot is never adopted bare — that is the rollback bug');
 });
 
-test('can_hire wears ONE atom — the boxed M, words in the title (board #7)', async () => {
+test('the Manager flag is gone from the UI (owner, 2026-09-26)', async () => {
+  // Hiring is an ability every agent has through `tmm`; a per-definition grant
+  // added no authority ("本身就是 agent 自己能够通过命令行获得的能力").
   const agentsPage = await readFile(new URL('./AgentsPage.svelte', import.meta.url), 'utf8');
   const i18n = await readFile(new URL('../core/i18n.svelte.ts', import.meta.url), 'utf8');
-  // The atom renders as a literal M with the explanation in title/aria.
-  assert.match(source, /class="m-badge" title=\{t\('agentsManagerHint'\)\}[^>]*>M</u, 'Hub preset rows wear the badge');
-  assert.match(agentsPage, /class="m-badge" title=\{t\('agentsManagerHint'\)\}[^>]*>M</u, 'the config list wears the badge');
-  // #156: the badge remains a list fact; editing the boolean uses the shared
-  // Switch, not a second membership-pill dialect.
-  assert.match(agentsPage, /<Switch checked=\{editing\.can_hire\} label=\{t\('agentsManager'\)\}/u);
-  // One declaration, twice: no app.css edits were allowed, so the two scoped
-  // copies must stay TEXT-IDENTICAL or the atom forks.
-  const decl = (src: string) => /\.m-badge \{([^}]*)\}/u.exec(src)?.[1]?.trim() ?? '';
-  assert.ok(decl(source).length > 0, 'Hub declares the atom');
-  assert.equal(decl(source), decl(agentsPage), 'the two m-badge declarations are the same text');
-  // The old vocabulary is gone from the UI strings (comments may cite history).
-  assert.ok(!i18n.includes("agentsCanHire"), 'the old i18n keys are retired');
-  assert.ok(!i18n.includes('可拉人'), 'the old zh wording is gone');
-  assert.match(i18n, /agentsManager: 'Manager'/u, 'the word is Manager in both languages');
+  for (const [name, src] of [['Hub', source], ['AgentsPage', agentsPage]] as const) {
+    assert.ok(!src.includes('can_hire') && !src.includes('m-badge'), `${name} carries neither the field nor the badge`);
+  }
+  assert.ok(!i18n.includes('agentsManager') && !i18n.includes('teamManager'), 'the Manager strings are retired');
 });
 
 test('history paging: anchored prepend, guarded rooms, parked cursors (board #9)', () => {

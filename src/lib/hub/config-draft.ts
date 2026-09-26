@@ -19,7 +19,6 @@ function agentPayload(value: AgentDraft): RegAgent {
     name: value.name.trim(), backend: value.backend, model: value.model.trim(),
     effort: value.effort ?? '', system: value.system,
     skills: JSON.stringify(value.skillSel), mcp: JSON.stringify([...value.mcpSel, ...value.mcpExtra]),
-    can_hire: value.can_hire,
   };
 }
 
@@ -33,7 +32,7 @@ export function configPayload(draft: ConfigDraft) {
         name: m.team ? '' : m.name.trim(), base: m.team ? '' : m.base, team: m.team ?? '', role: m.role.trim(),
         model: m.base && !m.team ? (m.model ?? '').trim() : '', effort: m.base && !m.team ? (m.effort ?? '') : '',
         agent: m.base || m.team || !m.agent ? null : {
-          ...agentPayload(m.agent), name: m.name.trim(), can_hire: false,
+          ...agentPayload(m.agent), name: m.name.trim(),
         },
       }))),
     };

@@ -8,7 +8,7 @@ function hostFixture() {
   return hosted ??= compileMount(new URL('./AgentsPage.test.svelte', import.meta.url), [new URL('../core/ws.ts', import.meta.url)]);
 }
 const alpha = { name: 'alpha', backend: 'codex', model: '', effort: '', system: 'Original',
-  skills: '["missing-skill"]', mcp: '["missing-server",{"name":"inline","expanded":true}]', can_hire: false };
+  skills: '["missing-skill"]', mcp: '["missing-server",{"name":"inline","expanded":true}]' };
 function rpc(extra: Record<string, (...args: any[]) => unknown> = {}) {
   return {
     registryList: async () => ({ agents: [alpha, { ...alpha, name: 'beta' }] }),

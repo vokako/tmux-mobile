@@ -87,7 +87,7 @@ USAGE (human or agent — self-management):
                                       members: [{"name","base","role"[,"model","effort"]} | {"name","role","agent":{…}} | {"team":"<other team>"[,"role"]}]
   tmm teams delete <name>
   tmm registry save --name <n> --backend <{backends}> [--system <text>]
-                    [--model m] [--effort low|medium|high|…] [--skills a,b] [--mcp <json>] [--can-hire]
+                    [--model m] [--effort low|medium|high|…] [--skills a,b] [--mcp <json>]
   tmm registry delete <name>
   tmm prompt show|path                the app-wide agent instructions (<config>/AGENTS.md),
   tmm prompt set <text> | --file <p>  prepended to EVERY managed agent's system prompt at spawn;
@@ -471,8 +471,7 @@ async fn main() {
                 let empty = Vec::new();
                 for a in r.get("agents").and_then(|v| v.as_array()).unwrap_or(&empty) {
                     let s = |k: &str| a.get(k).and_then(|v| v.as_str()).unwrap_or("");
-                    let hire = if a.get("can_hire").and_then(|v| v.as_bool()).unwrap_or(false) { " (can hire)" } else { "" };
-                    println!("{} [{}]{} — {}", s("name"), s("backend"), hire, s("system").chars().take(60).collect::<String>());
+                    println!("{} [{}] — {}", s("name"), s("backend"), s("system").chars().take(60).collect::<String>());
                 }
             }
         }
@@ -536,7 +535,7 @@ async fn main() {
         // its agents use. An agent already holds a shell (it can run tmux or
         // edit files directly), so these commands ADD no authority — they
         // turn abilities it already has into a first-class, documented
-        // interface. can_hire stays a resource gate on spawn only.
+        // interface.
         ("project", rest) if rest.first().map(String::as_str) == Some("create") => {
             let Some(path) = rest.get(1).cloned() else {
                 fail(EXIT_USAGE, &format!("project create needs a path: tmm project create /path/to/dir [--name n] [--session s] [--with-agent {}]", backends_help()));
@@ -589,7 +588,7 @@ async fn main() {
             // Self-evolution: an agent can define NEW agents (or refine
             // existing ones) and then spawn them.
             let Some(Some(name)) = flags.get("name").cloned() else {
-                fail(EXIT_USAGE, "registry save needs --name and --backend (and usually --system):\n  tmm registry save --name tester --backend kiro --system \"You run the test suite …\" [--skills a,b] [--mcp '<json array>'] [--can-hire]");
+                fail(EXIT_USAGE, "registry save needs --name and --backend (and usually --system):\n  tmm registry save --name tester --backend kiro --system \"You run the test suite …\" [--skills a,b] [--mcp '<json array>']");
             };
             let backend = flags.get("backend").cloned().flatten().unwrap_or_default();
             // --skills is a comma list of refs; --mcp is a raw JSON array
@@ -606,7 +605,6 @@ async fn main() {
                 "system": flags.get("system").cloned().flatten().unwrap_or_default(),
                 "skills": serde_json::to_string(&skills).unwrap(),
                 "mcp": flags.get("mcp").cloned().flatten().unwrap_or_else(|| "[]".into()),
-                "can_hire": flags.contains_key("can-hire"),
             });
             let r = rpc(&ctx, "registry_save", json!({ "def": def })).await;
             if ctx.json { println!("{r}"); } else { println!("✓ saved {name}"); }
