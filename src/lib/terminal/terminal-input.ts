@@ -14,7 +14,6 @@ interface QueueDeps {
    * whether the pane the user now looks at should hear it. */
   onSuccess: (pane: string) => void;
   onFailure: (pane: string) => void;
-  dbg?: (message: string) => void;
   /** Saturation cap (long-press repeat on a dead-slow link); default 64. */
   max?: number;
 }
@@ -46,7 +45,6 @@ export function createKeyQueue(deps: QueueDeps) {
         await deps.send(item.target, item.keys, item.literal);
         deps.onSuccess(item.target);
       } catch (e) {
-        deps.dbg?.(`input: sendKeys FAILED: ${(e as Error)?.message ?? e}`);
         deps.onFailure(item.target);
         if (item.gen === gen) items = [];
       }
@@ -62,7 +60,6 @@ export function createKeyQueue(deps: QueueDeps) {
       } else if (items.length >= max) {
         // Saturated. Drop the newest — dropping anything earlier would
         // reorder the user's input.
-        deps.dbg?.('input: key queue full — dropping key');
         return;
       } else {
         items.push({ target, keys, literal, gen });

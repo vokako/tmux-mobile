@@ -31,7 +31,6 @@
     uiZoom = 1,
     showUiZoom = false,
     showShortcuts = false,
-    debugMode = false,
     serverInfo = { hostname: '', machineId: '' },
     activeAddress = '',
     pendingAddress = '',
@@ -42,7 +41,6 @@
     onTheme = () => {},
     onUiZoom = () => {},
     onFontSize = () => {},
-    onDebug = () => {},
     onOptimize = () => {},
     onShare = () => {},
     onGoBack = null,
@@ -65,7 +63,6 @@
     uiZoom?: number;
     showUiZoom?: boolean;
     showShortcuts?: boolean;
-    debugMode?: boolean;
     serverInfo?: { hostname: string; machineId: string };
     activeAddress?: string;
     /** The address whose row was tapped and is still connecting — it wears the
@@ -78,7 +75,6 @@
     onTheme?: (theme: string) => void;
     onUiZoom?: (value: number) => void | Promise<void>;
     onFontSize?: (size: number) => void;
-    onDebug?: (on: boolean) => void;
     onOptimize?: () => void | Promise<void>;
     onShare?: () => void | Promise<void>;
     onGoBack?: ((fn: () => boolean) => void) | null;
@@ -741,12 +737,6 @@
             onclick={() => { shortcuts.reset(); recordingShortcut = ''; shortcutError = ''; }} />
         </div>
       {:else}
-        <div class="config-section">
-          <div class="preference-row">
-            <div class="pref-label"><strong class="config-field-label">{t('debug')}</strong></div>
-            <div class="pref-control"><Switch checked={debugMode} onchange={onDebug} label={t('debug')} hideLabel /></div>
-          </div>
-        </div>
         <div class="config-section">
           {#if connected}
             <div class="connection-title">

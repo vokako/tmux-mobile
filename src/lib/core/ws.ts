@@ -158,7 +158,6 @@ export function setOnDisconnect(cb: (() => void) | null) { onDisconnect = cb; }
 function notifyDisconnect(reason: string) {
   if (!recoveryEnabled || disconnectNotified) return;
   disconnectNotified = true;
-  window.__dbg?.(`ws: recovery requested (${reason})`);
   onDisconnect?.();
 }
 
@@ -384,7 +383,6 @@ export function connect(url: string, token: string, timeoutMs = CONNECT_TIMEOUT_
   disconnectNotified = false;
   rpcTimeouts = 0;
   wsUrl = url;
-  window.__dbg?.(`ws: connecting to ${url} (timeout=${timeoutMs}ms)`);
 
   return new Promise<string | null>((resolve, reject) => {
     let socket!: AppSocket;
@@ -401,13 +399,11 @@ export function connect(url: string, token: string, timeoutMs = CONNECT_TIMEOUT_
       socket._recvQueue = Promise.resolve();
       socket._cipher = null;
     } catch (e) {
-      window.__dbg?.(`ws: connect error: ${(e as Error).message}`);
       reject(e);
       return;
     }
 
     const timeout = setTimeout(() => {
-      window.__dbg?.('ws: connect timeout');
       try { socket?.close(); } catch {}
       reject(new Error('connection timeout'));
     }, timeoutMs);
@@ -424,7 +420,6 @@ export function connect(url: string, token: string, timeoutMs = CONNECT_TIMEOUT_
       socket._cipher = cipher;
       recoveryEnabled = true;
       disconnectNotified = false;
-      window.__dbg?.(`ws: authenticated (machine=${machineId})`);
       // Liveness is the server's job at the protocol layer: it sends WS
       // PING every 15 s and tears down TCP after a 45 s deadline. That
       // surfaces here as `ws.onclose`. We add an application-layer idle
@@ -480,7 +475,6 @@ export function connect(url: string, token: string, timeoutMs = CONNECT_TIMEOUT_
           const session = await buildSession(token, serverNonce, clientNonce, version);
           if (ws !== socket) return;
           cipher = session.cipher;
-          window.__dbg?.(`ws: e2e v${version} handshake`);
           socket.send(JSON.stringify({
             method: 'auth',
             params: { client_nonce: bytesToHex(clientNonce), proof: bytesToHex(session.proof), e2e: version }
@@ -575,7 +569,6 @@ export function connect(url: string, token: string, timeoutMs = CONNECT_TIMEOUT_
     socket.onclose = (ev) => {
       clearTimeout(timeout);
       if (ws !== socket) {
-        window.__dbg?.('ws: ignored stale socket close');
         return;
       }
       stopIdleProbe();
@@ -593,14 +586,12 @@ export function connect(url: string, token: string, timeoutMs = CONNECT_TIMEOUT_
       //          on mobile networks)
       //   custom 4xxx codes = the server's `break`/`return` paths just
       //          drop the connection without a code, you'll see 1006.
-      window.__dbg?.(`ws: closed code=${ev?.code ?? '?'} reason=${ev?.reason ? JSON.stringify(ev.reason) : '""'} clean=${!!ev?.wasClean} wasAuthed=${wasAuthed} idleSinceMs=${lastInboundAt ? Date.now() - lastInboundAt : 'n/a'}`);
       if (wasAuthed) notifyDisconnect('socket closed');
       else reject(new Error('connection closed during auth'));
     };
 
     socket.onerror = () => {
       clearTimeout(timeout);
-      window.__dbg?.('ws: error');
       if (!authed) reject(new Error('connection failed'));
     };
   });
@@ -637,7 +628,6 @@ let rpcTimeouts = 0;
 
 function forceDisconnect(reason?: string) {
   if (!ws) return;
-  window.__dbg?.(`ws: forcing disconnect (${reason || 'unknown'})`);
   const socket = ws;
   ws = null;
   socket.onclose = null;
@@ -664,7 +654,6 @@ function call<T = any>(method: string, params: Record<string, unknown> = {}, tim
     const timer = setTimeout(() => {
       pending.delete(id);
       rpcTimeouts++;
-      window.__dbg?.(`ws: timeout method=${method} (${rpcTimeouts} consecutive)`);
       // Only tear down the connection when consecutive timeouts *and* there
       // is nothing else still in flight. If another RPC is still pending
       // (e.g. a big download), its single huge response frame is almost
@@ -675,17 +664,13 @@ function call<T = any>(method: string, params: Record<string, unknown> = {}, tim
       // the next idle window will re-check.
       const inboundSilenceMs = Date.now() - lastInboundAt;
       if (rpcTimeouts >= 3 && pending.size === 0 && inboundSilenceMs >= TIMEOUT_DISCONNECT_INBOUND_SILENCE_MS) {
-        window.__dbg?.('ws: 3 consecutive timeouts with no pending RPC and silent inbound → forcing disconnect');
         forceDisconnect('3 consecutive RPC timeouts');
       } else if (rpcTimeouts >= 3 && inboundSilenceMs < TIMEOUT_DISCONNECT_INBOUND_SILENCE_MS) {
         // Server pushes are still arriving — the link is alive but slow
         // (or our requests are being starved by a big inbound frame).
         // Reset the counter so we re-evaluate from scratch instead of
         // tripping the breaker the moment pushes pause.
-        window.__dbg?.(`ws: 3 consecutive timeouts but inbound is fresh (${inboundSilenceMs}ms ago) — staying connected`);
         rpcTimeouts = 0;
-      } else if (rpcTimeouts >= 3) {
-        window.__dbg?.(`ws: 3 consecutive timeouts but ${pending.size} RPC still pending — staying connected`);
       }
       reject(new Error('request timeout'));
     }, timeoutMs);
@@ -1164,9 +1149,6 @@ export async function findBestAddress(addresses: string[] | null | undefined): P
     return !failedAt || now - failedAt > PROBE_FAIL_COOLDOWN_MS;
   });
   if (candidates.length === 0) candidates = sorted;
-  else if (candidates.length < sorted.length) {
-    window.__dbg?.(`probe: skipping ${sorted.length - candidates.length} recently-failed address(es)`);
-  }
   const results = await Promise.all(candidates.map(url => probeAddress(url)));
   for (let i = 0; i < candidates.length; i++) {
     if (results[i]) return candidates[i]!;

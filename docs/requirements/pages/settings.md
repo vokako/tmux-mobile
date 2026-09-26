@@ -18,7 +18,7 @@ where Agents is a page of its own, reads as one plain list):
 - **Chat** — how much of the conversation the feed shows: chat detail and tool rows (moved out of Appearance 2026-09-25: they set what is said, not how it looks)
 - **Notifications** — message notifications On/Off, the level (Finished / Replies / Everything) and a test row (its own category, owner 2026-09-02)
 - **Shortcuts** — configurable desktop navigation and Terminal window bindings (desktop only)
-- **Connection** — current server/addresses, optimize/share/disconnect, debug
+- **Connection** — current server/addresses, optimize/share/disconnect (the global debug switch and its floating log panel were retired 2026-09-26)
 
 **Agent** (phone only, where Agents is not a page of its own)
 - **Agents / Teams / Skills / MCP servers** — four second-level pages, each the real AgentsPage narrowed to one section (owner, 2026-09-02)
@@ -54,7 +54,6 @@ where Agents is a page of its own, reads as one plain list):
 - Terminal font family (in Appearance with the other two font roles, followed by the terminal's size and line spacing; the list offers only families the DEVICE resolves — the suggestion pool is probed with the same registry check the validator uses, so nothing offered can fail on pick; another family may still be typed; only a valid local font is applied and persisted to localStorage `tmux_font`; empty = system default)
 - Terminal line spacing (0.40–1.60, persisted to localStorage `tmux_line_height`; applies live to every normal, split, and Team terminal)
 - Line spacing uses `ui/Slider`, with its native range semantics, visible numeric value and named reset command
-- Debug uses the same `ui/Switch` in Connection; the floating log panel retains its existing drag and position behavior
 - Desktop shortcuts default to Cmd+U / Cmd+I for previous/next page, Option+U / Option+I for previous/next Terminal window, Cmd+T for Terminal, and Cmd+F for Files
 - Shortcut bindings can be recorded, cleared with Delete/Backspace, reset to defaults, or disabled; duplicate bindings are rejected
 - Disconnect button

@@ -58,7 +58,6 @@ function harness({ storage, connectImpl, findBest = async (a: string[]) => a[0] 
     watchdogMs: 180000,
     setTimeoutFn: timers.setTimeoutFn,
     clearTimeoutFn: timers.clearTimeoutFn,
-    debug: () => {},
   });
   return { machine, timers, events, unreachable };
 }

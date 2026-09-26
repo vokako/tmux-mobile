@@ -9,7 +9,7 @@ function harness() {
   const events: string[] = [];
   const queue = createKeyQueue({
     send: (target, keys, literal) => { sends.push([target, keys, literal]); return new Promise<void>((resolve, reject) => pending.push({ resolve, reject })); },
-    onSuccess: (pane) => events.push('ok:' + pane), onFailure: (pane) => events.push('fail:' + pane), dbg: (m) => events.push(m),
+    onSuccess: (pane) => events.push('ok:' + pane), onFailure: (pane) => events.push('fail:' + pane),
   });
   return { queue, sends, pending, events };
 }
@@ -48,10 +48,9 @@ test('a failed send drops everything queued behind it; the cap drops the newest 
   pending[0]!.reject(new Error('link down')); await settle();
   assert.deepEqual(sends, [['A', 'a', true]], 'nothing replayed after the failure');
   assert.ok(events.includes('fail:A'));
-  const small = createKeyQueue({ send: () => new Promise(() => {}), onSuccess() {}, onFailure() {}, dbg: (m) => events.push(m), max: 2 });
+  const small = createKeyQueue({ send: () => new Promise(() => {}), onSuccess() {}, onFailure() {}, max: 2 });
   small.enqueue('A', 'Up', false); small.enqueue('A', 'Up', false); small.enqueue('A', 'Up', false); small.enqueue('A', 'Up', false);
   assert.equal(small.length, 2, 'one in flight, two queued (the cap counts what waits), the fourth dropped');
-  assert.ok(events.some(e => /queue full/u.test(e)));
 });
 
 test('the paste fallback types into the pane that was pasted into, even after a switch (board #190)', async () => {

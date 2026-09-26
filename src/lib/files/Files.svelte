@@ -1285,7 +1285,6 @@
         if (received > receivedBefore) retriesLeft = DL_MAX_RETRIES; // made progress
         if (retriesLeft <= 0) throw e;
         retriesLeft--;
-        window.__dbg?.(`dl: retry at byte ${received} (${retriesLeft} left): ${e.message}`);
         await new Promise(r => setTimeout(r, DL_RETRY_DELAY_MS));
         // Signed URL may have expired (60 s TTL) — get a fresh one.
         try { curUrl = await freshUrl(); } catch { /* keep old URL */ }
@@ -1316,10 +1315,8 @@
     };
     progress();
     try {
-      window.__dbg?.(`dl: start ${name}`);
       const t0 = Date.now();
       const dlInfo = await fsDownloadHttp(path);
-      window.__dbg?.(`dl: got ${dlInfo.url ? 'HTTP URL' : 'base64'} in ${Date.now()-t0}ms`);
 
       // Pull the bytes. Same shape regardless of platform; downstream code
       // either writes via Tauri fs/invoke or triggers a browser download.
@@ -1336,7 +1333,6 @@
           // URL over it) but plain HTTP to the same host doesn't — typical
           // when a reverse proxy only forwards WebSocket upgrades. Fall
           // back to the WS RPC download (base64, 50 MB server-side cap).
-          window.__dbg?.('dl: HTTP unreachable → falling back to WS RPC');
           const r = await fsDownload(path);
           bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
         }
@@ -1345,7 +1341,6 @@
         // report mid-decode.
         bytes = Uint8Array.from(atob(dlInfo.base64), c => c.charCodeAt(0));
       }
-      window.__dbg?.(`dl: fetched ${(bytes.length/1024|0)}KB in ${Date.now()-t0}ms`);
 
       // There is no measured write fraction. Only transfer bytes report a percentage.
       progress(null, t('saving'));
@@ -1359,7 +1354,6 @@
           // bytes in addition to the n raw bytes the response already used).
           const { invoke } = await import('@tauri-apps/api/core');
           const filePath = await invoke('save_to_downloads', { name, data: bytes });
-          window.__dbg?.(`dl: saved → ${filePath}`);
           completed(filePath);
           return;
         }
@@ -1367,7 +1361,6 @@
         const savePath = await tauriDialog.save({ defaultPath: name });
         if (!savePath) { dismissDownload(operation); return; }
         await tauriFs.writeFile(savePath, bytes);
-        window.__dbg?.(`dl: saved → ${savePath}`);
         completed(String(savePath));
         return;
       }
@@ -1382,7 +1375,6 @@
       if (operation.current()) downloadLifetime.update(token,
         { kind: 'success', message: t('downloadRequested'), detail: name });
     } catch (e) {
-      window.__dbg?.(`dl: FAILED ${e.message}`);
       if (operation.current()) downloadLifetime.update(token,
         { kind: 'error', message: String(e.message || e), detail: path });
     }

@@ -37,7 +37,6 @@ export interface ReconnectDeps {
   /** Injectable for tests; default to the real timers. */
   setTimeoutFn?: typeof setTimeout;
   clearTimeoutFn?: typeof clearTimeout;
-  debug?: (msg: string) => void;
 }
 
 const DEFAULT_MAX_ATTEMPTS = 10;
@@ -51,7 +50,6 @@ export function createReconnectMachine(deps: ReconnectDeps) {
     watchdogMs = DEFAULT_WATCHDOG_MS,
     setTimeoutFn = setTimeout,
     clearTimeoutFn = clearTimeout,
-    debug = (msg) => { if (typeof window !== 'undefined') window.__dbg?.(msg); },
   } = deps;
 
   let reconnecting = false;
@@ -88,7 +86,6 @@ export function createReconnectMachine(deps: ReconnectDeps) {
     const myGen = gen;
     watchdog = setTimeoutFn(() => {
       if (!reconnecting || gen !== myGen) return;
-      debug('reconnect: watchdog fired — force reset');
       reconnecting = false;
       if (retryTimer) clearTimeoutFn(retryTimer);
       retryTimer = null;
@@ -127,7 +124,6 @@ export function createReconnectMachine(deps: ReconnectDeps) {
     // reachable. Avoids burning 3s × N timeouts cycling through dead
     // addresses serially.
     if (n === 0 && allAddrs.length > 1) {
-      debug(`reconnect: probing ${allAddrs.length} addresses in parallel`);
       try {
         const best = await findBestAddress(allAddrs);
         if (!live()) return; // cancelled (or restarted) mid-probe
@@ -146,7 +142,6 @@ export function createReconnectMachine(deps: ReconnectDeps) {
       useAddr = pool[n % pool.length]!;
     }
 
-    debug(`reconnect: attempt ${n + 1}/${maxAttempts} → ${useAddr}`);
     attempt = n + 1;
     label = addressLabels[classifyAddress(useAddr)] || '';
     emit();
@@ -162,11 +157,9 @@ export function createReconnectMachine(deps: ReconnectDeps) {
       reconnecting = false;
       clearTimers();
       emit();
-      debug('reconnect: success');
       onSuccess(useAddr, primary);
     }).catch((e: Error) => {
       if (!live()) return;
-      debug(`reconnect: failed (${e.message})`);
       // Reachability failures (timeout / refused, NOT auth errors) feed the
       // same cooldown memory the prober uses, so the next attempts skip
       // this address instead of re-burning its timeout.
@@ -177,7 +170,6 @@ export function createReconnectMachine(deps: ReconnectDeps) {
         const delay = Math.min(500 * (n + 1), 3000); // tighter backoff since timeouts are short
         retryTimer = setTimeoutFn(() => { void tryAttempt(n + 1, myGen); }, delay);
       } else {
-        debug('reconnect: gave up');
         reconnecting = false;
         clearTimers();
         emit();
@@ -197,7 +189,6 @@ export function createReconnectMachine(deps: ReconnectDeps) {
      */
     start(): boolean {
       if (reconnecting) {
-        debug('reconnect: start ignored — a loop is already running');
         return false;
       }
       gen++;

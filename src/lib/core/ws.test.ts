@@ -45,7 +45,6 @@ class MockWebSocket {
 }
 
 (globalThis as any).window = {
-  __dbg: () => {},
   addEventListener: () => {},
   removeEventListener: () => {},
 };

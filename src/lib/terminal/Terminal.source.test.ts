@@ -292,7 +292,7 @@ test('kbLocked has exactly two writers: unlockKeyboard() and lockKeyboard()', ()
 test('double-tap is the ONE terminal-area gesture that opens the keyboard (review 2026-09-03)', () => {
   // #148 moves pairing/preventDefault into the executed controller tests.
   // Root still owns the synchronous keyboard command and listener options.
-  assert.match(source, /openFromDoubleTap\(\) \{\s*window\.__dbg\?\.\([^;]+;\s*unlockKeyboard\(\); \/\/ double-tap/u);
+  assert.match(source, /openFromDoubleTap\(\) \{\s*unlockKeyboard\(\); \/\/ double-tap/u);
   assert.doesNotMatch(source, /createDoubleTapDetector|doubleTap\.tap/u);
   assert.match(source, /addEventListener\('touchend', onTouchEnd, \{ passive: false \}\)/u, 'preventDefault needs a non-passive touchend');
   // unlockKeyboard() has exactly two callers, each labelled.

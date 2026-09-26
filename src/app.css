@@ -1003,7 +1003,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
   /* Terminal + app shell */
   .input-bar, .sel-toolbar, .sel-toolbar-btn, .toast,
   .rail-btn, .rail-brand, .gear-btn,
-  .split-menu, .split-opt, .split-toggle, .reconnect-cancel, .debug-overlay,
+  .split-menu, .split-opt, .split-toggle, .reconnect-cancel,
   /* Files / Git */
   .act-btn, .back-btn, .bm-del, .copy-toast, .toast-open, .new-item button,
   .new-item input, .git-tabs button, .git-stage-btn, .git-commit-btn,

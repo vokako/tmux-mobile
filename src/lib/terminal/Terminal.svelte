@@ -200,7 +200,6 @@
       if (document.activeElement === kbTa) kbTa.blur();
       kbTa.focus();
     }
-    window.__dbg?.('kb: unlock + focus');
   }
 
   let theme = $state(document.documentElement.getAttribute('data-theme') || 'dark');
@@ -745,7 +744,6 @@
           // compositionend still get the auto-pair clear once they commit
           // via a plain insertText.
           lastInputComposing = !!(e.isComposing || (e.inputType || '').startsWith('insertComposition'));
-          window.__dbg?.(`input: ta.input type=${e.inputType} composing=${lastInputComposing} val=${JSON.stringify(ta.value).slice(0,30)} focused=${document.activeElement === ta} locked=${kbLocked}`);
         });
         // Forward plain text insertions ourselves: printable keydowns are
         // handed back to the browser (see attachCustomKeyEventHandler) so
@@ -773,7 +771,6 @@
           if (e.inputType === 'insertText' && e.data && !composing && !isComposing) {
             e.stopImmediatePropagation();
             lastInputComposing = false;
-            window.__dbg?.(`input: forward insertText ${JSON.stringify(e.data).slice(0,20)}`);
             ta.value = '';
             enqueueKeys(ctrlOneShot.apply(e.data), true);
           }
@@ -785,7 +782,6 @@
     term.onData(data => {
       data = responseFilter.push(data, isPasting);
       if (!data) return;
-      window.__dbg?.(`input: onData len=${data.length} paste=${isPasting} data=${JSON.stringify(data).slice(0,40)}`);
       // Force-clear xterm's hidden textarea after keyboard input to prevent
       // accumulation from auto-paired quotes/brackets. Applies to desktop
       // too: printable keys are routed through the textarea input pipeline
@@ -874,7 +870,6 @@
       if (!data) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      window.__dbg?.(`kb(hardware): passthrough ${event.code || event.key} → ${JSON.stringify(data)}`);
       enqueueKeys(data, true);
     };
     termEl.addEventListener('keydown', onHardwareKeydown, { capture: true });
@@ -973,7 +968,6 @@
       },
       scrollLines: (lines) => term.scrollLines(lines),
       openFromDoubleTap() {
-        window.__dbg?.('kb: double-tap → unlock');
         unlockKeyboard(); // double-tap
       },
     };
@@ -1274,27 +1268,22 @@
         kbBlurTimer = setTimeout(() => {
           if (Date.now() < unlockUntil && unlockRetries < UNLOCK_RETRY_MAX) {
             unlockRetries++;
-            window.__dbg?.(`kb: blur timer skipped (grace retry ${unlockRetries}/${UNLOCK_RETRY_MAX})`);
             // Retry focus within grace window — the blur was likely system-initiated
             // (e.g., Android pad where IME didn't come up yet).
             if (kbTa && !kbLocked && document.activeElement !== kbTa) kbTa.focus();
             return;
           }
           lockKeyboard(); // blur timer
-          window.__dbg?.('kb: blur timer → lock');
         }, 150);
-        window.__dbg?.('kb: textarea blur (timer scheduled)');
       };
       kbTa.addEventListener('blur', onTaBlur);
 
       onTaFocus = () => {
         clearTimeout(kbBlurTimer);
         if (kbLocked) {
-          window.__dbg?.('kb: textarea focus while LOCKED → blur!');
           kbTa.blur();
           return;
         }
-        window.__dbg?.('kb: textarea focus (allowed)');
       };
       kbTa.addEventListener('focus', onTaFocus);
     }
@@ -1354,7 +1343,6 @@
       }
       const fit = calcFit();
       if (!fit) return;
-      window.__dbg?.(`resize: fit=${fit.cols}x${fit.rows} cur=${term.cols}x${term.rows} elH=${termEl.clientHeight}`);
       if (fit.cols === term.cols && fit.rows === term.rows) {
         if (assert) queuePaneResize(fit.cols, fit.rows);
         // Same dims but cell metrics may have changed (font size); refresh
@@ -1434,7 +1422,6 @@
       if (kbTa && kbH === 0 && lastKbHeight > 0 && Date.now() >= unlockUntil) {
         lockKeyboard(); // keyboard-shift: open → close transition
         if (document.activeElement === kbTa) kbTa.blur();
-        window.__dbg?.('kb: keyboard-shift kbH=0 (was ' + lastKbHeight + ') → lock + blur');
       }
       lastKbHeight = kbH;
       // Keep the cursor area visible when the keyboard just appeared.
@@ -1593,7 +1580,6 @@
   let sendFailCount = 0;
   function noteSendFailure(label) {
     sendFailCount++;
-    window.__dbg?.(`send fail (${label}) #${sendFailCount}`);
     if (sendFailCount === 2 && visible && document.visibilityState === 'visible') {
       connectionFeedbackLifetime.update(connectionFeedbackLifetime.begin(), {
         kind: 'error', message: t('connectionUnstable'),
@@ -1625,7 +1611,6 @@
     send: sendKeys,
     onSuccess: (pane) => forThisPane(pane, noteSendSuccess),
     onFailure: (pane) => forThisPane(pane, () => noteSendFailure('key')),
-    dbg: (message) => window.__dbg?.(message),
   });
 
   function enqueueKeys(keys, literal, pane = target) {
@@ -1651,7 +1636,6 @@
   function startRepeat(key) {
     ctrlOneShot.disarm(); // a shortcut key is not "the next letter"
     const ta = termEl?.querySelector('.xterm-helper-textarea');
-    window.__dbg?.(`kb: shortcut "${key}" locked=${kbLocked} inputmode=${ta?.getAttribute('inputmode')} focused=${document.activeElement === ta}`);
     navigator.vibrate?.(8); // haptic tick on press; silent during repeat interval
     sendSpecial(key);
     repeatTimer = setTimeout(() => {
@@ -1935,10 +1919,8 @@
               //     re-open. visualViewport is the source of truth.
               const kbOpen = document.documentElement.classList.contains('keyboard-open');
               if (!kbOpen) {
-                window.__dbg?.('kb: toggle → open');
                 unlockKeyboard(); // toggle: open half
               } else {
-                window.__dbg?.('kb: toggle → close');
                 // Cancel any pending unlock-grace retries so the blur
                 // timer doesn't bounce focus back. See 73957f5.
                 unlockUntil = 0;

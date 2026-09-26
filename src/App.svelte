@@ -259,7 +259,6 @@
           uiZoom = UI_ZOOM_DEFAULT;
           localStorage.setItem('tmux_ui_zoom', String(UI_ZOOM_DEFAULT));
         }
-        window.__dbg?.('zoom: failed ' + error);
       }
     });
     await zoomApplyQueue;
@@ -303,78 +302,6 @@
       return [];
     }
   });
-  let debugMode = $state(!!localStorage.getItem('tmux_debug'));
-  let debugEl = $state(null);
-  const DEBUG_POSITION_KEY = 'tmux_debug_position';
-  let debugPosition = $state((() => {
-    try {
-      const value = JSON.parse(localStorage.getItem(DEBUG_POSITION_KEY) || 'null');
-      return Number.isFinite(value?.left) && Number.isFinite(value?.top) ? value : null;
-    } catch { return null; }
-  })());
-
-  function clampDebugPosition(element, left, top) {
-    const rect = element.getBoundingClientRect();
-    const margin = 4;
-    return {
-      left: Math.max(margin, Math.min(left, window.innerWidth - rect.width - margin)),
-      top: Math.max(margin, Math.min(top, window.innerHeight - 28 - margin)),
-    };
-  }
-
-  function keepDebugPanelVisible(element) {
-    const clamp = () => {
-      if (!debugPosition) return;
-      const next = clampDebugPosition(element, debugPosition.left, debugPosition.top);
-      if (next.left === debugPosition.left && next.top === debugPosition.top) return;
-      debugPosition = next;
-      localStorage.setItem(DEBUG_POSITION_KEY, JSON.stringify(next));
-    };
-    requestAnimationFrame(clamp);
-    window.addEventListener('resize', clamp);
-    window.addEventListener('app-zoom-change', clamp);
-    return {
-      destroy() {
-        window.removeEventListener('resize', clamp);
-        window.removeEventListener('app-zoom-change', clamp);
-      },
-    };
-  }
-
-  function startDebugPointerDrag(event) {
-    if (event.pointerType === 'touch' || event.button !== 0 || event.target.closest('button')) return;
-    const element = event.currentTarget.parentElement;
-    const rect = element.getBoundingClientRect();
-    const offsetX = event.clientX - rect.left;
-    const offsetY = event.clientY - rect.top;
-    const onMove = (moveEvent) => {
-      if (moveEvent.buttons === 0) { onEnd(); return; }
-      debugPosition = clampDebugPosition(element, moveEvent.clientX - offsetX, moveEvent.clientY - offsetY);
-    };
-    const onEnd = () => {
-      document.removeEventListener('pointermove', onMove);
-      document.removeEventListener('pointerup', onEnd);
-      document.removeEventListener('pointercancel', onEnd);
-      if (debugPosition) localStorage.setItem(DEBUG_POSITION_KEY, JSON.stringify(debugPosition));
-    };
-    event.preventDefault();
-    document.addEventListener('pointermove', onMove);
-    document.addEventListener('pointerup', onEnd);
-    document.addEventListener('pointercancel', onEnd);
-  }
-
-  // Global debug log — writes directly to DOM to avoid reactivity issues
-  window.__dbg = (msg) => {
-    if (!debugEl) return;
-    const ts = new Date().toLocaleTimeString('en', { hour12: false, fractionalSecondDigits: 2 });
-    const div = document.createElement('div');
-    div.textContent = `${ts} ${msg}`;
-    debugEl.appendChild(div);
-    // Keep max 40 lines
-    while (debugEl.children.length > 40) debugEl.removeChild(debugEl.firstChild);
-    debugEl.scrollTop = debugEl.scrollHeight;
-  };
-
   // Remove the legacy CSS zoom. Desktop UI scaling now uses WKWebView's
   // native pageZoom through Tauri, so viewport geometry and visual scale stay
   // in the same coordinate system.
@@ -409,7 +336,6 @@
         window.dispatchEvent(new CustomEvent('keyboard-shift', { detail: { kbHeight: kbh > 0 ? kbh : 0 } }));
         const main = document.querySelector('main');
         const termWrap = document.querySelector('.term-wrap');
-        window.__dbg?.(`androidKb: kbh=${kbh} appH=${h} mainH=${main?.clientHeight} termH=${termWrap?.clientHeight} bodyH=${document.body.clientHeight}`);
       });
       // No explicit refit needed — updating --app-height changes the terminal
       // container size, which Terminal.svelte's ResizeObserver picks up.
@@ -429,7 +355,6 @@
           if (pendingNativeKb === kbh && hasFocusedTextInput()) applyNativeKeyboardHeight(kbh);
           else if (pendingNativeKb === kbh) pendingNativeKb = 0;
         }, 500);
-        window.__dbg?.(`androidKb: DEFER kbh=${kbh} (activeEl=${document.activeElement?.tagName})`);
         return;
       }
       applyNativeKeyboardHeight(kbh);
@@ -461,7 +386,6 @@
       if (h > fullHeight) fullHeight = h;
       const kbOpen = h < fullHeight - KB_OPEN_THRESHOLD;
       const wasKbOpen = document.documentElement.classList.contains('keyboard-open');
-      window.__dbg?.(`vpResize: vv.h=${h.toFixed(0)} fullH=${fullHeight} kbOpen=${kbOpen}${kbOpen !== wasKbOpen ? (kbOpen ? ' ⌨️OPEN' : ' ⌨️CLOSE') : ''}`);
       document.documentElement.style.setProperty('--app-height', h + 'px');
       document.documentElement.classList.toggle('keyboard-open', kbOpen);
       // After layout, shift terminal so cursor stays visible
@@ -480,24 +404,19 @@
       vv.addEventListener('scroll', vpHandler);
     }
 
-    // Log focus/blur on inputs (keyboard open/close trigger)
+    // A deferred native keyboard height applies once an input takes focus.
     const onFocusIn = (e) => {
-      window.__dbg?.(`focusIn: ${e.target?.tagName}[${e.target?.className?.slice(0,20)}] activeEl=${document.activeElement?.tagName}`);
       if (pendingNativeKb > 0 && hasFocusedTextInput()) {
         const kbh = pendingNativeKb;
-        window.__dbg?.(`androidKb: applying deferred kbh=${kbh} on focusin`);
         applyNativeKeyboardHeight(kbh);
       }
     };
-    const onFocusOut = (e) => window.__dbg?.(`focusOut: ${e.target?.tagName}[${e.target?.className?.slice(0,20)}]`);
     document.addEventListener('focusin', onFocusIn);
-    document.addEventListener('focusout', onFocusOut);
 
     return () => {
       clearTimeout(pendingNativeTimer);
       window.removeEventListener('androidKeyboardHeight', nativeHandler);
       document.removeEventListener('focusin', onFocusIn);
-      document.removeEventListener('focusout', onFocusOut);
       if (vv) {
         vv.removeEventListener('resize', vpHandler);
         vv.removeEventListener('scroll', vpHandler);
@@ -1016,7 +935,6 @@
       if (!best || best === current) return;
       // Only switch if the new address is higher priority (lower class number)
       if (classifyAddress(best) >= curClass) return;
-      window.__dbg?.(`optimize: switching ${ADDRESS_LABELS[classifyAddress(current)]} → ${ADDRESS_LABELS[classifyAddress(best)]}`);
       localStorage.setItem('tmux_address', best);
       activeAddress = best;
       disconnect();
@@ -1134,7 +1052,6 @@
         // server treats subscribe as idempotent and resets its change detector,
         // guaranteeing a fresh pane_output without perturbing local refcounts.
         resubscribeAll();
-        window.__dbg?.('resume: re-subscribed active panes');
         if (Date.now() - lastProbeTime > OPTIMIZE_INTERVAL_MS) optimizeConnection();
       }
     };
@@ -1830,14 +1747,13 @@
     {/if}
     {#if page === 'prefs'}
     <div class="page-layer">
-    <Preferences {connected} {theme} {fontSize} {debugMode} {serverInfo} {activeAddress} {pendingAddress} addresses={prefAddresses}
+    <Preferences {connected} {theme} {fontSize} {serverInfo} {activeAddress} {pendingAddress} addresses={prefAddresses}
       {serverName} onServers={connected && layout.isTouchDevice ? toggleServerMenu : null} serversOpen={serverMenuOpen} serversControls={serverPickerId}
       {optimizing} {linkCopied}
       onClose={togglePrefs}
       onTheme={setTheme}
       {uiZoom} showUiZoom={true} showShortcuts={isTauriDesktop} onUiZoom={setUiZoom}
       onFontSize={setFontSize}
-      onDebug={(value) => { debugMode = value; localStorage.setItem('tmux_debug', value ? '1' : ''); }}
       onOptimize={optimizeConnection}
       onShare={shareConnectionLink}
       onGoBack={(fn) => prefsGoBack = fn}
@@ -1942,40 +1858,6 @@
     </div>
   </div>
 
-  {#if debugMode}
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="debug-overlay" use:keepDebugPanelVisible
-      style:left={debugPosition ? debugPosition.left + 'px' : undefined}
-      style:top={debugPosition ? debugPosition.top + 'px' : undefined}
-      ontouchstart={(e) => {
-        const el = e.currentTarget;
-        // Only drag from the header area (top 24px)
-        const rect = el.getBoundingClientRect();
-        const ty = e.touches[0].clientY - rect.top;
-        if (ty > 24) return; // let content scroll/select normally
-        e.preventDefault();
-        const startX = e.touches[0].clientX - el.offsetLeft;
-        const startY = e.touches[0].clientY - el.offsetTop;
-        const onMove = (ev) => {
-          ev.preventDefault();
-          debugPosition = clampDebugPosition(el, ev.touches[0].clientX - startX, ev.touches[0].clientY - startY);
-        };
-        const onEnd = () => {
-          document.removeEventListener('touchmove', onMove);
-          document.removeEventListener('touchend', onEnd);
-          document.removeEventListener('touchcancel', onEnd);
-          if (debugPosition) localStorage.setItem(DEBUG_POSITION_KEY, JSON.stringify(debugPosition));
-        };
-        document.addEventListener('touchmove', onMove, { passive: false });
-        document.addEventListener('touchend', onEnd);
-        document.addEventListener('touchcancel', onEnd);
-      }}
-    >
-      <div class="debug-header" onpointerdown={startDebugPointerDrag}>DEBUG <button onclick={() => { if (debugEl) copyText(debugEl.innerText); }}>copy</button> <button onclick={() => { if (debugEl) debugEl.innerHTML = ''; }}>clear</button> <button onclick={() => { debugMode = false; localStorage.removeItem('tmux_debug'); }}>✕</button></div>
-      <div class="debug-content" bind:this={debugEl}></div>
-    </div>
-  {/if}
-
   <InstallPrompt />
   <HoverCard />
   {#if connected && layout.isTouchDevice}
@@ -2013,60 +1895,6 @@
 </main>
 
 <style>
-  .debug-overlay {
-    position: fixed;
-    top: 50px;
-    left: 4px;
-    width: 65vw;
-    max-height: 40vh;
-    display: flex;
-    flex-direction: column;
-    background: rgba(0, 0, 0, 0.85);
-    color: #0f0;
-    font-family: var(--font-mono);
-    font-size: var(--fs-micro);
-    line-height: 1.3;
-    border-radius: var(--ui-radius-control);
-    z-index: 9999;
-    border: 1px solid rgba(0, 255, 0, 0.2);
-    user-select: text;
-    -webkit-user-select: text;
-  }
-  .debug-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 4px 8px;
-    font-weight: bold;
-    font-size: var(--fs-meta);
-    color: #0f0;
-    cursor: grab;
-    -webkit-app-region: no-drag;
-    border-bottom: 1px solid rgba(0, 255, 0, 0.15);
-    flex-shrink: 0;
-    touch-action: none;
-    user-select: none;
-    -webkit-user-select: none;
-  }
-  .debug-header button {
-    background: none;
-    border: 1px solid rgba(0, 255, 0, 0.3);
-    color: #0f0;
-    font-size: var(--fs-micro);
-    padding: 1px 6px;
-    border-radius: 3px;
-    cursor: pointer;
-    user-select: none;
-    -webkit-user-select: none;
-  }
-  .debug-content {
-    padding: 4px 6px;
-    overflow-y: auto;
-    word-break: break-all;
-    flex: 1;
-    min-height: 0;
-    -webkit-overflow-scrolling: touch;
-  }
   main, nav { transition: background-color 0.3s ease, color 0.3s ease; }
 
   main {

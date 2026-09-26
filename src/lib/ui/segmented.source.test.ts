@@ -52,6 +52,5 @@ test('Preferences spells every segmented row through the component', async () =>
   // segmented implementation. Only the five multi-choice preferences remain.
   assert.ok(uses.length >= 5, `theme, language, layout, feed level, notify level — got ${uses.length}`);
   assert.match(markup, /<Switch checked=\{notifyOn\}/u);
-  assert.match(markup, /<Switch checked=\{debugMode\}/u);
   assert.doesNotMatch(prefs, /\.segmented/u, 'the dialect’s CSS moved with it');
 });
