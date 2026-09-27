@@ -380,7 +380,7 @@ pub fn current_turn_prompt(session: &str, window: &str) -> Option<String> {
         if event.kind == "prompt" {
             return Some(event.text.clone());
         }
-        if event.kind == "notif" && matches!(event.text.as_str(), "completed" | "failed") {
+        if event.kind == "notif" && matches!(event.text.as_str(), "completed" | "failed" | "interrupted") {
             return None;
         }
     }
@@ -465,8 +465,8 @@ fn recovery_mark(session: &str) -> (i64, u64) {
 /// for, as the fact it was: a prompt or a tool call opens the turn, an ask
 /// suspends it (`waiting`) — the same three `derive_from` reads.
 /// Its stop, if it fired while we were down, is in the hook inbox and closes
-/// the turn when it is read. Known gap: an interrupt is not logged, so a turn
-/// interrupted just before a restart reopens until that agent's next hook.
+/// the turn when it is read; an interrupt writes its own `interrupted` end row
+/// (`record_interrupt`).
 fn recover_open_turns(session: &str) {
     for (window, kind, text, tool, ts_ms, row_id) in queue(|s| s.open_turns(session)).unwrap_or_default() {
         with_rec(session, &window, |r| {
@@ -531,7 +531,13 @@ pub fn record_notification(session: &str, window: &str, kind: &str, ts: u64) {
 /// the gap, and a real turn that starts afterwards is a fact of its own.
 ///
 /// Same shape as a `completed` stop, with `ask` cleared because a cancelled
-/// turn is not still asking.
+/// turn is not still asking. The end is also WRITTEN to the activity log as a
+/// `notif` `interrupted` row (board #249, validator): turn recovery after a
+/// restart reads the log, and without this row an interrupted turn came back
+/// `running` and its queued lines' clock never started. It is only a turn
+/// edge: the stop auto-post is driven by hook payloads, not by this log, and
+/// the feed draws nothing for it because the room already carries
+/// `[tmm] interrupted <name>`.
 pub fn record_interrupt(session: &str, window: &str) {
     let ts = now();
     with_rec(session, window, |r| {
@@ -539,6 +545,7 @@ pub fn record_interrupt(session: &str, window: &str) {
         r.end_seq = arrival();
         r.ask = None;
     });
+    push_event(session, window, "notif", "interrupted".to_string());
 }
 
 /// A hook tool event (isolated-home agents only, Phase B+): `("Edit",
@@ -1838,6 +1845,32 @@ mod tests {
         assert!(record_prompt(&session, "w1", notice), "and its own late echo settles it too");
         let last = recent_events(&session, 0).into_iter().filter(|e| e.kind == "prompt").last().unwrap();
         assert_eq!(last.deliveries[0].id, warns[1]);
+    }
+
+    /// Validator 14:54: an interrupt is an external end with no stop hook. It
+    /// is written to the log, so after a restart the cancelled turn stays
+    /// closed and a held line's clock runs.
+    #[test]
+    fn an_interrupted_turn_stays_closed_across_a_restart() {
+        crate::projects::tests::use_test_store();
+        let session = format!("intr-{}", uuid::Uuid::new_v4());
+        let opened = (now() - 600) * 1000;
+        crate::projects::with_store(|s| s.insert_activity(&session, "w1", opened, "prompt", "long turn", "", "app", "", "")).unwrap();
+        // The live path: record_interrupt writes its end row (persist() is
+        // off in unit tests, so the row it pushes is written here as persist
+        // would write it).
+        record_interrupt(&session, "w1");
+        let end = recent_events(&session, 0).into_iter().last().unwrap();
+        assert_eq!((end.kind.as_str(), end.text.as_str()), ("notif", "interrupted"));
+        crate::projects::with_store(|s| s.insert_activity(&session, "w1", end.ts, &end.kind, &end.text, "", "", "", "")).unwrap();
+        record_delivery(&session, "w1", "[tmm chat 12:00] human: @dev queued", "");
+        simulate_restart(&session);
+        recovery_mark(&session);
+        assert_eq!(derive(&session, "w1", 0).state, "idle", "the cancelled turn is not recovered as running");
+        backdate(&session);
+        sweep_deliveries(&session);
+        assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 1, "the held line's clock ran");
+        assert_eq!(current_turn_prompt(&session, "w1"), None, "no reply edge recovered for a cancelled turn");
     }
 
     /// Validator 14:53: `derive_from` opens a turn on a tool call without a

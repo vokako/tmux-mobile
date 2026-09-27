@@ -498,6 +498,11 @@ test('an echo that names its messages is a receipt even when they are not loaded
   assert.deepEqual(feedBlocks([], orphan, 'status').map((b) => b.type), ['prompt']);
 });
 
+test('an interrupt end row is a turn edge, not a feed row (#249)', () => {
+  const rows = feedBlocks([], [ev({ ts: 1, kind: 'notif', text: 'interrupted' })], 'tools');
+  assert.deepEqual(rows, [], 'the room already carries [tmm] interrupted');
+});
+
 test('a late echo retracts exactly the warn about the row it settled (#249)', () => {
   // Two identical notices, no message, both reported unconfirmed; one late echo
   // settles row 11. Retraction is by row id — text would match both.

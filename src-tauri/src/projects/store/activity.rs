@@ -91,7 +91,7 @@ impl Store {
                    AND id > COALESCE((
                      SELECT MAX(id) FROM activity
                      WHERE session = ?1 AND COALESCE(NULLIF(win, ''), CAST(window AS TEXT)) = ?2 AND kind = 'notif'
-                       AND text IN ('completed', 'failed')
+                       AND text IN ('completed', 'failed', 'interrupted')
                    ), 0)
                  ORDER BY id DESC LIMIT 1",
                 rusqlite::params![session, window],
@@ -104,7 +104,7 @@ impl Store {
     /// Turns that were open when an earlier process last heard of them
     /// (board #249): per window, the NEWEST turn fact — a `prompt`, a `tool`
     /// call, or a `permission_required` / `input_required` ask — when no
-    /// `completed` / `failed` stop came after it. `derive_from` opens a turn on
+    /// `completed` / `failed` / `interrupted` end came after it. `derive_from` opens a turn on
     /// any of the three (a backend may send tools without a prompt hook, and an
     /// ask suspends a turn), so recovery must too. One grouped scan of the
     /// session's prompt/tool/notif rows. Returns (window, kind, text, tool, ts ms,
@@ -118,7 +118,7 @@ impl Store {
                           MAX(CASE WHEN kind IN ('prompt', 'tool')
                                      OR (kind = 'notif' AND text IN ('permission_required', 'input_required'))
                                    THEN id END) AS o,
-                          MAX(CASE WHEN kind = 'notif' AND text IN ('completed', 'failed') THEN id END) AS e
+                          MAX(CASE WHEN kind = 'notif' AND text IN ('completed', 'failed', 'interrupted') THEN id END) AS e
                    FROM activity WHERE session = ?1 AND kind IN ('prompt', 'tool', 'notif')
                    GROUP BY w
                  ) t JOIN activity a ON a.id = t.o

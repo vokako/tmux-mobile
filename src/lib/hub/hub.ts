@@ -1713,6 +1713,10 @@ export function feedBlocks(
     // every answer was just noise in the transcript (owner call, 2026-08-16).
     // The other lifecycle events all mean something is WAITING on a human.
     if (e.kind === 'notif' && e.text === 'completed') continue;
+    // An interrupt's end row is a turn edge for the server's restart
+    // recovery (board #249); the room already says `[tmm] interrupted`, so
+    // it draws nothing here either.
+    if (e.kind === 'notif' && e.text === 'interrupted') continue;
     stream.push({ type: 'note', ts: e.ts, window: e.window, event: e });
   }
   // Chronological, and when two things share a timestamp the OBSERVATION comes
