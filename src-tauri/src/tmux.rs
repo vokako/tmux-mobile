@@ -808,6 +808,13 @@ pub fn file_picker_open(screen: &str) -> bool {
         .any(|l| l.contains("esc to cancel") && l.contains("to select"))
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Test-only: a pause between load-buffer and paste-buffer, so two
+    /// concurrent pastes really interleave (board #250).
+    pub(crate) static PASTE_GAP: std::cell::Cell<std::time::Duration> = const { std::cell::Cell::new(std::time::Duration::ZERO) };
+}
+
 /// Paste text into a pane the way a real terminal does.
 ///
 /// send_keys treats every byte as keystrokes, so newlines in a multi-line
@@ -826,8 +833,13 @@ pub fn paste_text(target: &str, text: &str) -> Result<(), String> {
     if let Some(socket) = get_socket() {
         cmd.args(["-S", &socket]);
     }
+    // One buffer per CALL (board #250): tmux buffers are server-global, and
+    // the send lock is per pane, so two panes pasting at once through one
+    // shared name swapped each other's text or found it already deleted
+    // (measured: 20 concurrent pairs, 38 pastes in the wrong pane, 20 lost).
+    let buffer = format!("tmm-paste-{}", uuid::Uuid::new_v4());
     let mut child = cmd
-        .args(["load-buffer", "-b", "tmm-paste", "-"])
+        .args(["load-buffer", "-b", &buffer, "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -848,7 +860,13 @@ pub fn paste_text(target: &str, text: &str) -> Result<(), String> {
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-    run_tmux(&["paste-buffer", "-p", "-d", "-b", "tmm-paste", "-t", target])?;
+    #[cfg(test)]
+    PASTE_GAP.with(|gap| std::thread::sleep(gap.get()));
+    if let Err(e) = run_tmux(&["paste-buffer", "-p", "-d", "-b", &buffer, "-t", target]) {
+        // -d deletes only on success; leave no named buffer behind.
+        let _ = run_tmux(&["delete-buffer", "-b", &buffer]);
+        return Err(e);
+    }
     Ok(())
 }
 
@@ -1239,6 +1257,56 @@ mod tests {
     /// one. The per-target lock serializes the pair; this test races four
     /// threads at a `cat` pane and requires every line to arrive whole, alone
     /// on its own row.
+    #[test]
+    fn concurrent_multiline_sends_to_two_panes_keep_their_own_text() {
+        let session = format!("tmm-paste2-{}", std::process::id());
+        let _ = kill_session(&session);
+        if new_session(&session, None, Some("cat")).is_err() {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        let _ = run_tmux(&["new-window", "-d", "-t", &format!("={session}:"), "cat"]);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let targets: Vec<String> = String::from_utf8(
+            std::process::Command::new("tmux")
+                .args(["list-panes", "-s", "-t", &format!("={session}"), "-F", "#{session_name}:#{window_index}.#{pane_index}"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect();
+        assert_eq!(targets.len(), 2);
+        // Multi-line bodies take the paste path; each thread holds its load
+        // and its paste 150 ms apart, so the two calls really overlap.
+        let handles: Vec<_> = targets
+            .iter()
+            .enumerate()
+            .map(|(n, t)| {
+                let t = t.clone();
+                std::thread::spawn(move || {
+                    PASTE_GAP.with(|g| g.set(std::time::Duration::from_millis(150)));
+                    send_command(&t, &format!("pane-{n}-first\npane-{n}-second"))
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap().expect("both pastes succeed");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let panes: Vec<String> = targets.iter().map(|t| capture_pane_plain(t, Some(40)).unwrap_or_default()).collect();
+        let leftover = run_tmux(&["list-buffers", "-F", "#{buffer_name}"]).unwrap_or_default();
+        let _ = kill_session(&session);
+        for (n, text) in panes.iter().enumerate() {
+            let other = 1 - n;
+            assert!(text.contains(&format!("pane-{n}-first")) && text.contains(&format!("pane-{n}-second")), "pane {n} got its own text:\n{text}");
+            assert!(!text.contains(&format!("pane-{other}-")), "pane {n} got none of pane {other}'s:\n{text}");
+        }
+        assert!(!leftover.lines().any(|b| b.starts_with("tmm-paste")), "no buffer left behind: {leftover}");
+    }
+
     #[test]
     fn concurrent_sends_to_one_pane_never_interleave() {
         let session = format!("tmm-burst-{}", std::process::id());

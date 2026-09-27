@@ -1691,6 +1691,70 @@ mod tests {
         assert!(!delivered_chat_line("human", "@solo decide", None).contains("[tmm team context"));
     }
 
+    /// Board #250 (validator 16:31), on the real delivery path: two
+    /// multi-line messages to two DIFFERENT managed panes, posted at the same
+    /// moment, each held between its paste buffer's load and paste. Each pane
+    /// gets its own text and only its own; with the old shared buffer name one
+    /// paste failed or landed in the other pane.
+    #[test]
+    fn concurrent_multiline_mentions_to_two_panes_each_arrive_whole() {
+        crate::projects::tests::use_test_store();
+        let session = format!("tmm-paste-hub-{}", uuid::Uuid::new_v4());
+        let ws = std::env::temp_dir().join(format!("tmm-paste-hub-ws-{}", uuid::Uuid::new_v4()));
+        for name in ["lead", "solo"] {
+            let home = ws.join(".tmm/agents").join(name);
+            std::fs::create_dir_all(&home).unwrap();
+            std::fs::write(
+                home.join("launch.json"),
+                serde_json::json!({ "backend": "kiro", "cmd": format!("kiro-cli chat --agent {name}"), "team": "" }).to_string(),
+            )
+            .unwrap();
+        }
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "-n", "lead", "-c", &ws.to_string_lossy(), "cat"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            let _ = std::fs::remove_dir_all(&ws);
+            return;
+        }
+        std::process::Command::new("tmux")
+            .args(["new-window", "-d", "-t", &session, "-n", "solo", "-c", &ws.to_string_lossy(), "cat"])
+            .status()
+            .unwrap();
+        crate::projects::adopt(&session, Some("paste-hub-test")).expect("adopt project");
+        let posts: Vec<_> = ["lead", "solo"]
+            .into_iter()
+            .map(|name| {
+                let session = session.clone();
+                std::thread::spawn(move || {
+                    crate::tmux::PASTE_GAP.with(|g| g.set(std::time::Duration::from_millis(150)));
+                    handle_hub_request(
+                        &req("hub_post", serde_json::json!({
+                            "session": session, "from": "human",
+                            "body": format!("@{name} first line for {name}\nsecond line for {name}"),
+                        })),
+                        None,
+                    )
+                })
+            })
+            .collect();
+        for p in posts {
+            let r = p.join().unwrap();
+            assert!(r.error.is_none(), "{:?}", r.error.map(|e| e.message));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        let lead = crate::tmux::capture_pane_plain(&format!("{session}:lead"), Some(0)).unwrap_or_default();
+        let solo = crate::tmux::capture_pane_plain(&format!("{session}:solo"), Some(0)).unwrap_or_default();
+        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
+        let _ = std::fs::remove_dir_all(&ws);
+        assert!(lead.contains("first line for lead") && lead.contains("second line for lead"), "lead: {lead:?}");
+        assert!(solo.contains("first line for solo") && solo.contains("second line for solo"), "solo: {solo:?}");
+        assert!(!lead.contains("for solo") && !solo.contains("for lead"), "no cross-pane text: {lead:?} / {solo:?}");
+    }
+
     #[test]
     fn mention_delivery_adds_context_only_to_the_team_member() {
         crate::projects::tests::use_test_store();

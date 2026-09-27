@@ -17,10 +17,15 @@ Rust wrapper around tmux CLI commands. File: `src-tauri/src/tmux.rs`
   re-encoded by tmux to match the pane's key mode, so they reach both legacy
   and extended panes. `\t` `\n` `\r` and standalone ESC stay literal.
 - `send_command(target, command)` — send text + Enter
-- `paste_text(target, text)` — paste via tmux `load-buffer -b tmm-paste -` +
+- `paste_text(target, text)` — paste via tmux `load-buffer -b tmm-paste-<uuid> -` +
   `paste-buffer -p -d`: tmux wraps the block in bracketed-paste markers
   exactly when the pane app enabled mode `?2004`, so multi-line pastes are
-  one paste, not one command per line; legacy apps get the raw text.
+  one paste, not one command per line; legacy apps get the raw text. The
+  buffer name is unique per call because tmux buffers are server-global
+  and the send lock is per pane: with one shared name, two panes pasting at
+  once swapped or lost each other's text (board #250; measured 20
+  concurrent pairs: 38 misdelivered, 20 lost). A failed paste deletes its
+  buffer.
 - `pane_command(target)` — get current running command
 - `pane_cwd(target)` — get pane working directory
 - `new_session(name, path?, command?)` — create session (checks for name conflicts)
