@@ -83,6 +83,42 @@ test('saved all restores through a fresh mount and room revisit without deliveri
   }
 });
 
+test('a saved team target survives a cold mount until the fresh roster judges it (#241)', { timeout: 60000 }, async (context) => {
+  const fixture = await compiledHub();
+  const { rpc } = roomFixture();
+  const agents = [
+    { name: 'alice', window: 0, managed: true, agent: 'kiro', state: 'idle', since: 10 },
+    { name: 'bob', window: 1, managed: true, agent: 'codex', state: 'idle', since: 20, team: 'review' },
+    { name: 'charlie', window: 2, managed: true, agent: 'codex', state: 'idle', since: 5, team: 'review' },
+  ];
+  let answered = false;
+  const app = await fixture.mount(context, {
+    props: { visible: true },
+    setup(window) {
+      window.Element.prototype.getAnimations = () => [];
+      window.localStorage.setItem('tmux_hub_project', 'fixture');
+      window.localStorage.setItem('tmux_hub_lead', JSON.stringify({ fixture: 'team:review' }));
+    },
+    modules: [{
+      ...rpc,
+      projectList: async () => ({ projects: [{
+        project: { id: 'fixture', name: 'fixture', session: 'fixture', path: '/fixture' }, live: true, slots: [],
+      }] }),
+      hubAgents: async () => { answered = true; return { agents }; },
+    }],
+  });
+  const lead = () => JSON.parse(app.window.localStorage.getItem('tmux_hub_lead') ?? '{}').fixture;
+  try {
+    for (let i = 0; i < 20 && !app.document.querySelector('.roster-cluster.team-lit'); i++) await app.flush();
+    assert.ok(answered, 'the fresh roster answered');
+    assert.equal(lead(), 'team:review', 'a cold entry does not overwrite the stored team before the roster answers');
+    assert.ok(app.document.querySelector('.roster-cluster[data-team="review"].team-lit'), 'the refreshed client restores the team');
+    agents.splice(1);
+    await app.advance(5000);
+    assert.equal(lead(), '', 'an answered roster with no members forgets the team');
+  } finally { await app.close(); }
+});
+
 const selectedCard = (document: Document) =>
   document.querySelector('.all-choice [aria-pressed="true"]') ? 'all'
     : document.querySelector('.agent-select[aria-pressed="true"]')?.closest<HTMLElement>('.acard')?.dataset.agent ?? '';

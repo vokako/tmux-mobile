@@ -826,6 +826,10 @@ explicit body mentions remain additive and `@all` is never synthesized.
 If the team empties in the gap before the next roster poll, implicit
 delivery keeps the draft and clears the stale team target; an explicit
 valid `@name` in the text still wins and goes through unchanged.
+A stored team target is judged only by an ANSWERED roster: `loadAgents`
+forgets it once the fresh roster has no members. Entering a cold room
+knows no roster yet, and clearing it there wiped the team on every
+refresh (#241, validator, 2026-09-27).
 There is no new server route. A leading CLI `/command` under team
 selection is typed verbatim through one existing `hub_command` per current
 member, like All's existing broadcast route; a leading explicit `@name`

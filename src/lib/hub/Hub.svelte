@@ -336,7 +336,9 @@
     // The cached roster can seat the recipient immediately — same rule as
     // loadAgents, which will confirm or correct it when the fresh roster lands.
     if (agents.length) recipient = pickLead(agents, hubPrefs.lead(session));
-    if (targetTeam(hubPrefs.lead(session) ?? '') && !recipient) hubPrefs.setLead(session, '');
+    // A stored team is NOT judged here: a cold room has no roster yet, and
+    // "no members known" is not "no members". loadAgents drops a stale team
+    // once the fresh roster answers (#241, validator: a refresh wiped it).
     filterAgent = ''; // a filter is a reading choice, scoped to its room
     // The drawer follows the project (board #23, owner: "chat的右侧边栏打开
     // 哪个的状态前端帮我记住，这样我切换不同的 project 回来原来的视图还在"):
@@ -480,6 +482,10 @@
       else if (recipient && recipient !== ALL_TARGET && !targetTeam(recipient)
         && !agents.some((a) => a.managed && a.name === recipient)) recipient = '';
       if (!recipient && !emptyTeam) recipient = pickLead(agents, hubPrefs.lead(selected));
+      // The answered roster is the one judge of a stored team: kept while it
+      // has members, forgotten once it has none.
+      const storedLead = hubPrefs.lead(selected) ?? '';
+      if (targetTeam(storedLead) && !targetMembers(storedLead, agents).length) hubPrefs.setLead(selected, '');
     } catch (e) {
       if (!alive || request !== rosterReadSequence || selected !== s) return;
       if (report) throw e;
