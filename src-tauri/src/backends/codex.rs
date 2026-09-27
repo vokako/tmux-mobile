@@ -13,14 +13,19 @@
 /// still submits at once, slash commands included.
 pub(crate) const SWITCHES_INPUT_MODE: bool = true;
 
-/// The keymap overrides that make codex queue (see `SWITCHES_INPUT_MODE`).
-/// Launch-line `-c` like every other codex key: `config.toml` in the
-/// isolated home is a symlink into the user's own and is never written.
+/// The keymap overrides that carry the definition's input mode (see
+/// `SWITCHES_INPUT_MODE`). Launch-line `-c` like every other codex key:
+/// `config.toml` in the isolated home is a symlink into the user's own and is
+/// never written. BOTH modes pin BOTH bindings (validator, #245): steer is
+/// codex's defaults (`submit = "enter"`, `queue = "tab"`), written out because
+/// the user's own config.toml may remap them, and an agent set to steer must
+/// not queue because of a key in a file the definition does not own.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn queue_keymap_overrides() -> [String; 2] {
+fn input_mode_keymap_overrides(steer: bool) -> [String; 2] {
+    let (submit, queue) = if steer { ("enter", "tab") } else { ("tab", "enter") };
     [
-        shared::codex_config_override("tui.keymap.composer.queue", Value::String("enter".into())),
-        shared::codex_config_override("tui.keymap.composer.submit", Value::String("tab".into())),
+        shared::codex_config_override("tui.keymap.composer.queue", Value::String(queue.into())),
+        shared::codex_config_override("tui.keymap.composer.submit", Value::String(submit.into())),
     ]
 }
 
@@ -330,11 +335,8 @@ pub(crate) fn render_codex(
     // quoted segment is not honoured (`-c` keys are split on dots and quotes
     // stay literal) — so a path containing a dot cannot be expressed here and
     // keeps the pane watcher below (StartupConfirmation) as its answer.
-    // The definition's input mode (board #245): queue unless it says steer,
-    // which is codex's own Enter.
-    if def.input_mode != "steer" {
-        config_args.extend(queue_keymap_overrides());
-    }
+    // The definition's input mode (board #245): queue unless it says steer.
+    config_args.extend(input_mode_keymap_overrides(def.input_mode == "steer"));
     config_args.push(shared::codex_config_override("check_for_update_on_startup", Value::Bool(false)));
     if let Some(key) = codex_trust_key(workspace) {
         config_args.push(shared::codex_config_override(&key, Value::String("trusted".into())));

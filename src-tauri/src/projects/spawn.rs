@@ -1433,7 +1433,8 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
     /// Board #245: the definition's input mode, rendered by each switching
     /// backend into its own config — kiro's `settings/cli.json` key, codex's
     /// keymap overrides (measured doors; see the backend files). Queue is the
-    /// default; steer is the CLI's own behaviour, so codex carries no keymap.
+    /// default; codex pins both keymap bindings for either mode, because the
+    /// user's own config.toml (symlinked into the home) may remap them.
     #[test]
     fn the_input_mode_renders_into_each_switching_backend() {
         let dir = std::env::temp_dir().join(format!("tmm-spawn-mode-{}", uuid::Uuid::new_v4()));
@@ -1464,7 +1465,10 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         assert!(queue.contains(r#"-c 'tui.keymap.composer.submit="tab"'"#), "{queue}");
         c.input_mode = "steer".into();
         let steer = render_codex(&c, "tester", &dir, &dir, &prompt, &[]).unwrap().cmd;
-        assert!(!steer.contains("tui.keymap"), "steer is codex's own Enter: {steer}");
+        // Steer pins codex's own defaults, so a queue keymap in the user's
+        // config.toml (symlinked into the home) cannot make it queue.
+        assert!(steer.contains(r#"-c 'tui.keymap.composer.submit="enter"'"#), "{steer}");
+        assert!(steer.contains(r#"-c 'tui.keymap.composer.queue="tab"'"#), "{steer}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
