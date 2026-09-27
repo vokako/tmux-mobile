@@ -1379,7 +1379,7 @@ export function mentionsAgent(body: string, name: string): boolean {
 }
 
 /** The `@` tokens of a body, exactly as the server reads them
- * (`hub_rpc::mention_names`, board #248 — the same case table pins both
+ * (`address::mention_names`, board #248 — the same case table pins both
  * sides). The `@` must start a word: at the start, or after anything but an
  * email/host character (ASCII letter or digit, `_ . -`), so `a@bob` and
  * `me@bob.dev` name nobody while `(@bob)` and `请@bob` do. The address is the

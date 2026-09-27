@@ -5,6 +5,7 @@ pub mod pptx;
 pub mod server;
 pub mod backends;
 pub mod shell;
+pub mod address;
 pub mod mcp_cli;
 pub mod tasks;
 pub mod tmux;

@@ -1098,7 +1098,7 @@ fn need_project(ctx: &Ctx) -> String {
 /// The server's own reading of an address (board #248): a send the server
 /// would deliver to nobody is refused here, before it reaches the room.
 fn has_address(body: &str) -> bool {
-    !tmux_mobile::server::mention_names(body).is_empty()
+    !tmux_mobile::address::mention_names(body).is_empty()
 }
 
 /// `--flag value` / `--flag` / `-f` → map; the rest are positionals.

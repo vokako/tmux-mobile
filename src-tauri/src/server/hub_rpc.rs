@@ -159,7 +159,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
             // for setting this when the origin is a hook.
             let record_only =
                 is_status || p.get("record_only").and_then(|v| v.as_bool()).unwrap_or(false);
-            let recipients = mention_names(&body);
+            let recipients = crate::address::mention_names(&body);
             let msg = rooms::post_routed(&room, from, &body, &recipients).map_err(RpcError::Internal)?;
             // DELIVERY: an idle agent sits at its prompt and reads
             // nothing — @mentions are typed into the mentioned agents'
@@ -862,52 +862,6 @@ struct RoutedChat {
     hidden: bool,
 }
 
-/// The `@` addresses in a chat body — the ONE server reading of who a message
-/// names (board #248). `deliver_mentions`, the room's stored `to`, and the
-/// `tmm send` "has a recipient" check all use it (pure, so it is not
-/// desktop-gated: the phone's server reads addresses too); the client's
-/// `mentionTokens` (hub.ts) mirrors it case for case.
-///
-/// Two edges, both derived from what an agent name can be (`projects::agents::valid_name`:
-/// letters and digits of any script, `-`, `_`):
-///
-/// * The `@` must START a word: at the start of the body, or after anything
-///   that is not an email/host character (ASCII letter or digit, `_`, `.`,
-///   `-`). So `me@bob.dev`, `a@bob` and `pkg@2.4.0` name nobody, while
-///   `(@bob)`, `"@bob"`, `/@bob` and a CJK character right before it
-///   (`请@bob`, which the owner writes) still address bob.
-/// * The address is the run of name characters after it, so trailing
-///   punctuation of any kind ends it: `(@bob)`, `@bob，`, `@bob。` and
-///   `**@bob**` name bob. A run followed by `.` plus a name character, or by
-///   another `@`, is a host or an address, not a name (`@bob.dev`, `@a@b`).
-///
-/// Before #248 every `@` split and the address ran to the next whitespace, so
-/// `mail a@bob` typed into bob's pane while `(@bob)` and `@bob，` reached
-/// nobody.
-pub fn mention_names(body: &str) -> Vec<String> {
-    let in_word = |c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-');
-    let name_char = |c: char| c.is_alphanumeric() || matches!(c, '_' | '-');
-    let mut out = Vec::new();
-    for (i, _) in body.match_indices('@') {
-        if body[..i].chars().next_back().is_some_and(in_word) {
-            continue;
-        }
-        let rest = &body[i + 1..];
-        let end = rest.find(|c: char| !name_char(c)).unwrap_or(rest.len());
-        let mut after = rest[end..].chars();
-        let host = match after.next() {
-            Some('@') => true,
-            Some('.') => after.next().is_some_and(name_char),
-            _ => false,
-        };
-        if end > 0 && !host {
-            out.push(rest[..end].to_string());
-        }
-    }
-    out
-}
-
-
 fn context_noise(body: &str) -> bool {
     let body = body.trim_start();
     body.starts_with("[tmm] ")
@@ -956,7 +910,7 @@ fn route_chat_history_hiding(
             })
             .unwrap_or_default();
         let has_stored_to = stored_to_field.is_some();
-        let mentions = if has_stored_to { stored_to } else { mention_names(body) };
+        let mentions = if has_stored_to { stored_to } else { crate::address::mention_names(body) };
         let to = if mentions.is_empty() {
             if from == "human" {
                 vec!["room".to_string()]
@@ -1101,7 +1055,7 @@ fn deliver_mentions(
 ) {
     use crate::projects::agents;
 
-    let mentions = mention_names(body);
+    let mentions = crate::address::mention_names(body);
     if mentions.is_empty() {
         return;
     }
@@ -2011,31 +1965,6 @@ mod tests {
         assert_eq!(email.get("to"), Some(&serde_json::json!([])), "and is stored with no recipient: {email}");
         assert!(after_bracket.contains("(@bob) please look"), "a bracketed address reaches bob: {after_bracket:?}");
         assert_eq!(bracket.get("to"), Some(&serde_json::json!(["bob"])), "{bracket}");
-    }
-
-    /// Board #248: one table, the same as `hub.test.ts`'s — the client and
-    /// the server read an address by one rule.
-    #[test]
-    fn an_address_must_start_a_word() {
-        for (body, tokens) in [
-            ("@bob look", vec!["bob"]),
-            ("look @bob", vec!["bob"]),
-            ("@bob: now, @alice.", vec!["bob", "alice"]),
-            ("(@bob) and \"@alice\" and **@carol**", vec!["bob", "alice", "carol"]),
-            ("mail me at a@bob.dev", vec![]),
-            ("a@bob", vec![]),
-            ("x.y@bob and first-last@bob", vec![]),
-            ("npm i pkg@2.4.0", vec![]),
-            ("see @bob.dev", vec![]),
-            ("请@bob 看看，@alice，不急。@builder-2。", vec!["bob", "alice", "builder-2"]),
-            ("@kiro/@claude", vec!["kiro", "claude"]),
-            ("@a@b", vec![]),
-            ("@ alone, @, @!", vec![]),
-            ("line one\n@bob line two", vec!["bob"]),
-            ("@all standup", vec!["all"]),
-        ] {
-            assert_eq!(mention_names(body), tokens, "{body:?}");
-        }
     }
 
     #[test]

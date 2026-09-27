@@ -92,7 +92,9 @@ pub fn valid_name(name: &str) -> Result<(), String> {
             "agent name '{name}' must start with a letter or digit — it is a window name, a directory and an @address"
         ));
     }
-    if let Some(bad) = name.chars().find(|c| !(c.is_alphanumeric() || matches!(c, '-' | '_'))) {
+    // One definition of a name character, shared with the address parser
+    // (`address::name_char`, board #248).
+    if let Some(bad) = name.chars().find(|c| !crate::address::name_char(*c)) {
         return Err(format!(
             "agent name '{name}' cannot contain '{bad}' — only letters, digits, '-' and '_' survive tmux targets, paths and @addresses unchanged"
         ));
@@ -227,6 +229,22 @@ pub fn launch_for(backend: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Board #248 (orchestrator): the name rule and the address parser are ONE
+    /// definition. Every valid name reads back whole from `@name` followed by
+    /// any punctuation, and a character `valid_name` refuses ends an address.
+    #[test]
+    fn every_valid_name_is_addressable_whole() {
+        for name in ["bob", "builder-2", "dev_squad", "翻译", "kiro-v3_1", "a1"] {
+            assert!(valid_name(name).is_ok(), "{name}");
+            for tail in ["", " hi", ",", "。", ")", "**", ": x", "!"] {
+                assert_eq!(crate::address::mention_names(&format!("(@{name}{tail}")), vec![name.to_string()], "{name}{tail}");
+            }
+        }
+        for bad in ['.', ':', '/', '@', '*', ' '] {
+            assert!(valid_name(&format!("bob{bad}x")).is_err(), "{bad:?} is not a name character");
+        }
+    }
 
     #[test]
     fn detects_the_shallowest_agent_not_the_first_listed() {

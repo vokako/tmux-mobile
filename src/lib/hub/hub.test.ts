@@ -1355,7 +1355,7 @@ test('pastedFiles pulls the files out of a paste, or [] for plain text (board #2
 });
 
 test('mentionTokens reads an address by the server\'s one rule (#248)', () => {
-  // The same table as hub_rpc.rs `an_address_must_start_a_word`.
+  // The same table as address.rs `an_address_must_start_a_word`.
   const cases: [string, string[]][] = [
     ['@bob look', ['bob']],
     ['look @bob', ['bob']],
