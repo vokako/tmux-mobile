@@ -101,26 +101,42 @@ impl Store {
             .map_err(|e| format!("query current turn prompt: {e}"))
     }
 
-    /// Windows whose newest recorded turn edge is a `prompt` (no `completed` /
-    /// `failed` after it), with that prompt's ts in ms (board #249): the turns
-    /// that were open when an earlier process last heard of them. One grouped
-    /// scan of the session's prompt/notif rows. Returns (window, ts, row id).
-    pub fn open_turns(&self, session: &str) -> Result<Vec<(String, u64, i64)>, String> {
+    /// Turns that were open when an earlier process last heard of them
+    /// (board #249): per window, the NEWEST turn fact — a `prompt`, a `tool`
+    /// call, or a `permission_required` / `input_required` ask — when no
+    /// `completed` / `failed` stop came after it. `derive_from` opens a turn on
+    /// any of the three (a backend may send tools without a prompt hook, and an
+    /// ask suspends a turn), so recovery must too. One grouped scan of the
+    /// session's prompt/tool/notif rows. Returns (window, kind, text, tool, ts ms,
+    /// row id); `kind` is `prompt`, `tool` or `ask`.
+    pub fn open_turns(&self, session: &str) -> Result<Vec<(String, String, String, String, u64, i64)>, String> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT t.w, a.ts, a.id FROM (
+                "SELECT t.w, a.kind, a.text, a.tool, a.ts, a.id FROM (
                    SELECT COALESCE(NULLIF(win, ''), CAST(window AS TEXT)) AS w,
-                          MAX(CASE WHEN kind = 'prompt' THEN id END) AS p,
+                          MAX(CASE WHEN kind IN ('prompt', 'tool')
+                                     OR (kind = 'notif' AND text IN ('permission_required', 'input_required'))
+                                   THEN id END) AS o,
                           MAX(CASE WHEN kind = 'notif' AND text IN ('completed', 'failed') THEN id END) AS e
-                   FROM activity WHERE session = ?1 AND kind IN ('prompt', 'notif')
+                   FROM activity WHERE session = ?1 AND kind IN ('prompt', 'tool', 'notif')
                    GROUP BY w
-                 ) t JOIN activity a ON a.id = t.p
-                 WHERE t.p > COALESCE(t.e, 0)",
+                 ) t JOIN activity a ON a.id = t.o
+                 WHERE t.o > COALESCE(t.e, 0)",
             )
             .map_err(|e| format!("prepare open turns: {e}"))?;
         let rows = stmt
-            .query_map(rusqlite::params![session], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64, r.get::<_, i64>(2)?)))
+            .query_map(rusqlite::params![session], |r| {
+                let kind: String = r.get(1)?;
+                Ok((
+                    r.get::<_, String>(0)?,
+                    if kind == "notif" { "ask".to_string() } else { kind },
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, i64>(4)? as u64,
+                    r.get::<_, i64>(5)?,
+                ))
+            })
             .map_err(|e| format!("query open turns: {e}"))?;
         Ok(rows.filter_map(Result::ok).collect())
     }

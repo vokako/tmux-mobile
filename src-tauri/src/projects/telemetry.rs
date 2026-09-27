@@ -460,17 +460,35 @@ fn recovery_mark(session: &str) -> (i64, u64) {
 /// open (board #249, validator): a server restart in the middle of a 20-minute
 /// turn left the window with no facts, it derived idle, and 45 s later the
 /// sweep reported every line the running CLI was still holding. The durable
-/// activity log holds the turn edges, so the open prompt is restored from it
-/// (never from pane activity) into a window this process has no facts for.
+/// activity log holds the turn facts, so the newest open one is restored from
+/// it (never from pane activity) into a window this process has no facts
+/// for, as the fact it was: a prompt or a tool call opens the turn, an ask
+/// suspends it (`waiting`) — the same three `derive_from` reads.
 /// Its stop, if it fired while we were down, is in the hook inbox and closes
 /// the turn when it is read. Known gap: an interrupt is not logged, so a turn
 /// interrupted just before a restart reopens until that agent's next hook.
 fn recover_open_turns(session: &str) {
-    for (window, ts_ms, row_id) in queue(|s| s.open_turns(session)).unwrap_or_default() {
+    for (window, kind, text, tool, ts_ms, row_id) in queue(|s| s.open_turns(session)).unwrap_or_default() {
         with_rec(session, &window, |r| {
-            if r.prompt.is_none() && r.end.is_none() && r.tool.is_none() && r.ask.is_none() {
-                r.prompt = Some(ts_ms / 1000);
-                r.prompt_seq = recovered_arrival(row_id);
+            if r.prompt.is_some() || r.end.is_some() || r.tool.is_some() || r.ask.is_some() {
+                return;
+            }
+            let ts = ts_ms / 1000;
+            let order = recovered_arrival(row_id);
+            match kind.as_str() {
+                "tool" => {
+                    let line = if text.is_empty() { tool } else { format!("{tool} {text}") };
+                    r.tool = Some((line, ts));
+                    r.tool_seq = order;
+                }
+                "ask" => {
+                    r.ask = Some((text, ts));
+                    r.ask_seq = order;
+                }
+                _ => {
+                    r.prompt = Some(ts);
+                    r.prompt_seq = order;
+                }
             }
         });
     }
@@ -1822,6 +1840,48 @@ mod tests {
         assert_eq!(last.deliveries[0].id, warns[1]);
     }
 
+    /// Validator 14:53: `derive_from` opens a turn on a tool call without a
+    /// prompt hook and suspends one on an ask, so recovery reads those too. A
+    /// restart whose newest fact was a tool call (no prompt hook at all) or a
+    /// permission ask, with no stop after it, keeps the held lines unswept past
+    /// the ack window; a tool after a stop is not an open turn.
+    #[test]
+    fn a_restart_recovers_a_tool_only_or_asking_turn() {
+        crate::projects::tests::use_test_store();
+        let opened = (now() - 600) * 1000;
+        for (label, facts, want) in [
+            ("tool-only", vec![("tool", "src/lib.rs", "Edit")], "running"),
+            ("ask", vec![("prompt", "do it", ""), ("notif", "permission_required", "")], "waiting"),
+            ("tool-after-ask", vec![("notif", "permission_required", ""), ("tool", "npm test", "Bash")], "running"),
+        ] {
+            let session = format!("rec-{label}-{}", uuid::Uuid::new_v4());
+            crate::projects::with_store(|s| {
+                for (n, (kind, text, tool)) in facts.iter().enumerate() {
+                    s.insert_activity(&session, "w1", opened + n as u64, kind, text, tool, "", "", "")?;
+                }
+                Ok(())
+            })
+            .unwrap();
+            record_delivery(&session, "w1", "[tmm chat 12:00] human: @dev held", "");
+            simulate_restart(&session);
+            recovery_mark(&session);
+            backdate(&session);
+            sweep_deliveries(&session);
+            assert_eq!(derive(&session, "w1", 0).state, want, "{label}");
+            assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 0, "{label}: held line not swept");
+        }
+        // A tool call AFTER the stop is not an open turn (and kiro v3's
+        // post-stop housekeeping is never written as a tool row, #227).
+        let closed = format!("rec-closed-{}", uuid::Uuid::new_v4());
+        crate::projects::with_store(|s| {
+            s.insert_activity(&closed, "w1", opened, "tool", "a.rs", "Edit", "", "", "")?;
+            s.insert_activity(&closed, "w1", opened + 1, "notif", "completed", "", "", "", "")
+        })
+        .unwrap();
+        recovery_mark(&closed);
+        assert_eq!(derive(&closed, "w1", 0).state, "idle");
+    }
+
     /// Validator's restart tie (#249): a turn edge recovered from the log keeps
     /// the log's order, and a stop observed AFTER the restart in the same
     /// second still sorts after it — even when the recovered row id is larger
@@ -1832,7 +1892,7 @@ mod tests {
         let session = format!("rtie-{}", uuid::Uuid::new_v4());
         let t = now();
         crate::projects::with_store(|s| s.insert_activity(&session, "w1", t * 1000, "prompt", "long turn", "", "app", "", "")).unwrap();
-        let (_, _, row_id) = crate::projects::with_store(|s| s.open_turns(&session)).unwrap().remove(0);
+        let (_, _, _, _, _, row_id) = crate::projects::with_store(|s| s.open_turns(&session)).unwrap().remove(0);
         // Simulate a log far ahead of this process's counter: the recovered
         // order must still move the counter past it.
         let far = row_id + 1_000_000_000;
