@@ -456,39 +456,41 @@ fn recovery_mark(session: &str) -> (i64, u64) {
     mark
 }
 
-/// A turn that was OPEN when an earlier process last heard of it is still
-/// open (board #249, validator): a server restart in the middle of a 20-minute
-/// turn left the window with no facts, it derived idle, and 45 s later the
-/// sweep reported every line the running CLI was still holding. The durable
-/// activity log holds the turn facts, so the newest open one is restored from
-/// it (never from pane activity) into a window this process has no facts
-/// for, as the fact it was: a prompt or a tool call opens the turn, an ask
-/// suspends it (`waiting`) — the same three `derive_from` reads.
-/// Its stop, if it fired while we were down, is in the hook inbox and closes
-/// the turn when it is read; an interrupt writes its own `interrupted` end row
-/// (`record_interrupt`).
+/// A window's turn state survives OUR restart (board #249, validator): a
+/// restart in the middle of a 20-minute turn left the window with no facts,
+/// it derived idle, and 45 s later the sweep reported every line the running
+/// CLI was still holding. The durable log holds the turn facts, so the newest
+/// prompt, tool call, ask and end of each window are REPLAYED into a record
+/// this process has no facts for, each keeping its row id as its order, and
+/// `derive_from` — the one turn rule (tenet 8) — decides: open, waiting,
+/// failed or idle. Never pane activity. An interrupt is an end
+/// (`record_interrupt` logs it); a stop that fired while we were down is in
+/// the hook inbox and ends the turn when it is read.
 fn recover_open_turns(session: &str) {
-    for (window, kind, text, tool, ts_ms, row_id) in queue(|s| s.open_turns(session)).unwrap_or_default() {
-        with_rec(session, &window, |r| {
+    for facts in queue(|s| s.turn_facts(session)).unwrap_or_default() {
+        with_rec(session, &facts.window, |r| {
             if r.prompt.is_some() || r.end.is_some() || r.tool.is_some() || r.ask.is_some() {
-                return;
+                return; // this process already observed the window
             }
-            let ts = ts_ms / 1000;
-            let order = recovered_arrival(row_id);
-            match kind.as_str() {
-                "tool" => {
-                    let line = if text.is_empty() { tool } else { format!("{tool} {text}") };
-                    r.tool = Some((line, ts));
-                    r.tool_seq = order;
-                }
-                "ask" => {
-                    r.ask = Some((text, ts));
-                    r.ask_seq = order;
-                }
-                _ => {
-                    r.prompt = Some(ts);
-                    r.prompt_seq = order;
-                }
+            if let Some(f) = &facts.prompt {
+                r.prompt = Some(f.ts / 1000);
+                r.prompt_seq = recovered_arrival(f.id);
+            }
+            if let Some(f) = &facts.tool {
+                let line = if f.text.is_empty() { f.tool.clone() } else { format!("{} {}", f.tool, f.text) };
+                r.tool = Some((line, f.ts / 1000));
+                r.tool_seq = recovered_arrival(f.id);
+            }
+            if let Some(f) = &facts.ask {
+                r.ask = Some((f.text.clone(), f.ts / 1000));
+                r.ask_seq = recovered_arrival(f.id);
+            }
+            if let Some(f) = &facts.end {
+                // The same shape the live path stores: an interrupt ends a turn
+                // as `completed` does (`record_interrupt`).
+                let kind = if f.text == "failed" { "failed" } else { "completed" };
+                r.end = Some((kind.to_string(), f.ts / 1000));
+                r.end_seq = recovered_arrival(f.id);
             }
         });
     }
@@ -1862,7 +1864,9 @@ mod tests {
         record_interrupt(&session, "w1");
         let end = recent_events(&session, 0).into_iter().last().unwrap();
         assert_eq!((end.kind.as_str(), end.text.as_str()), ("notif", "interrupted"));
-        crate::projects::with_store(|s| s.insert_activity(&session, "w1", end.ts, &end.kind, &end.text, "", "", "", "")).unwrap();
+        // Written as persist would write it, dated as an interrupt made long
+        // enough ago that a held line's clock has had its window since.
+        crate::projects::with_store(|s| s.insert_activity(&session, "w1", opened + 1000, &end.kind, &end.text, "", "", "", "")).unwrap();
         record_delivery(&session, "w1", "[tmm chat 12:00] human: @dev queued", "");
         simulate_restart(&session);
         recovery_mark(&session);
@@ -1873,8 +1877,8 @@ mod tests {
         assert_eq!(current_turn_prompt(&session, "w1"), None, "no reply edge recovered for a cancelled turn");
     }
 
-    /// Validator 14:53: `derive_from` opens a turn on a tool call without a
-    /// prompt hook and suspends one on an ask, so recovery reads those too. A
+    /// Validator 14:53 / orchestrator 14:55: the replayed facts go through the
+    /// one turn rule, so every shape `derive_from` knows survives a restart. A
     /// restart whose newest fact was a tool call (no prompt hook at all) or a
     /// permission ask, with no stop after it, keeps the held lines unswept past
     /// the ack window; a tool after a stop is not an open turn.
@@ -1882,10 +1886,12 @@ mod tests {
     fn a_restart_recovers_a_tool_only_or_asking_turn() {
         crate::projects::tests::use_test_store();
         let opened = (now() - 600) * 1000;
-        for (label, facts, want) in [
-            ("tool-only", vec![("tool", "src/lib.rs", "Edit")], "running"),
-            ("ask", vec![("prompt", "do it", ""), ("notif", "permission_required", "")], "waiting"),
-            ("tool-after-ask", vec![("notif", "permission_required", ""), ("tool", "npm test", "Bash")], "running"),
+        for (label, facts, want, warns) in [
+            ("tool-only", vec![("tool", "src/lib.rs", "Edit")], "running", 0),
+            ("ask", vec![("prompt", "do it", ""), ("notif", "permission_required", "")], "waiting", 0),
+            ("tool-after-ask", vec![("notif", "permission_required", ""), ("tool", "npm test", "Bash")], "running", 0),
+            // An ended turn is ended: the held line's clock ran from its end.
+            ("failed", vec![("prompt", "do it", ""), ("notif", "failed", "")], "failed", 1),
         ] {
             let session = format!("rec-{label}-{}", uuid::Uuid::new_v4());
             crate::projects::with_store(|s| {
@@ -1901,7 +1907,7 @@ mod tests {
             backdate(&session);
             sweep_deliveries(&session);
             assert_eq!(derive(&session, "w1", 0).state, want, "{label}");
-            assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 0, "{label}: held line not swept");
+            assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), warns, "{label}: held line swept only when the turn ended");
         }
         // A tool call AFTER the stop is not an open turn (and kiro v3's
         // post-stop housekeeping is never written as a tool row, #227).
@@ -1925,7 +1931,7 @@ mod tests {
         let session = format!("rtie-{}", uuid::Uuid::new_v4());
         let t = now();
         crate::projects::with_store(|s| s.insert_activity(&session, "w1", t * 1000, "prompt", "long turn", "", "app", "", "")).unwrap();
-        let (_, _, _, _, _, row_id) = crate::projects::with_store(|s| s.open_turns(&session)).unwrap().remove(0);
+        let row_id = crate::projects::with_store(|s| s.turn_facts(&session)).unwrap().remove(0).prompt.unwrap().id;
         // Simulate a log far ahead of this process's counter: the recovered
         // order must still move the counter past it.
         let far = row_id + 1_000_000_000;

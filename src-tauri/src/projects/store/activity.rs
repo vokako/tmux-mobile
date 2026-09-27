@@ -26,6 +26,26 @@ pub struct ActivityRow {
     pub deliveries: String,
 }
 
+/// One persisted turn fact: its row id (the order across restarts), when it
+/// was written (ms), and its text/tool columns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnFact {
+    pub id: i64,
+    pub ts: u64,
+    pub text: String,
+    pub tool: String,
+}
+
+/// A window's newest turn facts of each kind (board #249, `turn_facts`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnFacts {
+    pub window: String,
+    pub prompt: Option<TurnFact>,
+    pub tool: Option<TurnFact>,
+    pub ask: Option<TurnFact>,
+    pub end: Option<TurnFact>,
+}
+
 /// One outstanding delivery (board #249): the row id is its identity, so two
 /// deliveries of the same body are two rows and each settles on its own.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,44 +121,44 @@ impl Store {
             .map_err(|e| format!("query current turn prompt: {e}"))
     }
 
-    /// Turns that were open when an earlier process last heard of them
-    /// (board #249): per window, the NEWEST turn fact — a `prompt`, a `tool`
-    /// call, or a `permission_required` / `input_required` ask — when no
-    /// `completed` / `failed` / `interrupted` end came after it. `derive_from` opens a turn on
-    /// any of the three (a backend may send tools without a prompt hook, and an
-    /// ask suspends a turn), so recovery must too. One grouped scan of the
-    /// session's prompt/tool/notif rows. Returns (window, kind, text, tool, ts ms,
-    /// row id); `kind` is `prompt`, `tool` or `ask`.
-    pub fn open_turns(&self, session: &str) -> Result<Vec<(String, String, String, String, u64, i64)>, String> {
+    /// The newest persisted TURN FACT of each kind, per window (board #249):
+    /// the latest `prompt`, `tool` call, `permission_required`/`input_required`
+    /// ask and turn end (`completed`/`failed`/`interrupted`). Deciding whether
+    /// the turn is open is NOT done here: a restart replays these into the
+    /// window's record and `derive_from`, the one turn rule, decides (tenet 8).
+    pub fn turn_facts(&self, session: &str) -> Result<Vec<TurnFacts>, String> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT t.w, a.kind, a.text, a.tool, a.ts, a.id FROM (
-                   SELECT COALESCE(NULLIF(win, ''), CAST(window AS TEXT)) AS w,
-                          MAX(CASE WHEN kind IN ('prompt', 'tool')
-                                     OR (kind = 'notif' AND text IN ('permission_required', 'input_required'))
-                                   THEN id END) AS o,
-                          MAX(CASE WHEN kind = 'notif' AND text IN ('completed', 'failed', 'interrupted') THEN id END) AS e
-                   FROM activity WHERE session = ?1 AND kind IN ('prompt', 'tool', 'notif')
-                   GROUP BY w
-                 ) t JOIN activity a ON a.id = t.o
-                 WHERE t.o > COALESCE(t.e, 0)",
+                "SELECT COALESCE(NULLIF(win, ''), CAST(window AS TEXT)) AS w,
+                        MAX(CASE WHEN kind = 'prompt' THEN id END),
+                        MAX(CASE WHEN kind = 'tool' THEN id END),
+                        MAX(CASE WHEN kind = 'notif' AND text IN ('permission_required', 'input_required') THEN id END),
+                        MAX(CASE WHEN kind = 'notif' AND text IN ('completed', 'failed', 'interrupted') THEN id END)
+                 FROM activity WHERE session = ?1 AND kind IN ('prompt', 'tool', 'notif')
+                 GROUP BY w",
             )
-            .map_err(|e| format!("prepare open turns: {e}"))?;
-        let rows = stmt
-            .query_map(rusqlite::params![session], |r| {
-                let kind: String = r.get(1)?;
-                Ok((
-                    r.get::<_, String>(0)?,
-                    if kind == "notif" { "ask".to_string() } else { kind },
-                    r.get::<_, String>(2)?,
-                    r.get::<_, String>(3)?,
-                    r.get::<_, i64>(4)? as u64,
-                    r.get::<_, i64>(5)?,
-                ))
+            .map_err(|e| format!("prepare turn facts: {e}"))?;
+        let heads: Vec<(String, [Option<i64>; 4])> = stmt
+            .query_map(rusqlite::params![session], |r| Ok((r.get(0)?, [r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?])))
+            .map_err(|e| format!("query turn facts: {e}"))?
+            .filter_map(Result::ok)
+            .collect();
+        let fact = |id: Option<i64>| -> Result<Option<TurnFact>, String> {
+            let Some(id) = id else { return Ok(None) };
+            self.conn
+                .query_row("SELECT id, ts, text, tool FROM activity WHERE id = ?1", rusqlite::params![id], |r| {
+                    Ok(TurnFact { id: r.get(0)?, ts: r.get::<_, i64>(1)? as u64, text: r.get(2)?, tool: r.get(3)? })
+                })
+                .optional()
+                .map_err(|e| format!("read turn fact: {e}"))
+        };
+        heads
+            .into_iter()
+            .map(|(window, [p, t, a, e])| {
+                Ok(TurnFacts { window, prompt: fact(p)?, tool: fact(t)?, ask: fact(a)?, end: fact(e)? })
             })
-            .map_err(|e| format!("query open turns: {e}"))?;
-        Ok(rows.filter_map(Result::ok).collect())
+            .collect()
     }
 
     /// One page of the activity log, always returned OLDEST FIRST so a caller can
