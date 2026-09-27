@@ -410,7 +410,29 @@ fn recovery_mark(session: &str) -> (i64, u64) {
         let _ = queue(|s| s.prune_deliveries(cutoff));
     });
     let top = queue(|s| s.max_delivery_id(session)).unwrap_or(0);
-    *recovery_marks().lock().unwrap().entry(session.to_string()).or_insert((top, now()))
+    let mark = *recovery_marks().lock().unwrap().entry(session.to_string()).or_insert((top, now()));
+    recover_open_turns(session);
+    mark
+}
+
+/// A turn that was OPEN when an earlier process last heard of it is still
+/// open (board #249, validator): a server restart in the middle of a 20-minute
+/// turn left the window with no facts, it derived idle, and 45 s later the
+/// sweep reported every line the running CLI was still holding. The durable
+/// activity log holds the turn edges, so the open prompt is restored from it
+/// (never from pane activity) into a window this process has no facts for.
+/// Its stop, if it fired while we were down, is in the hook inbox and closes
+/// the turn when it is read. Known gap: an interrupt is not logged, so a turn
+/// interrupted just before a restart reopens until that agent's next hook.
+fn recover_open_turns(session: &str) {
+    for (window, ts_ms) in queue(|s| s.open_turns(session)).unwrap_or_default() {
+        with_rec(session, &window, |r| {
+            if r.prompt.is_none() && r.end.is_none() && r.tool.is_none() && r.ask.is_none() {
+                r.prompt = Some(ts_ms / 1000);
+                r.prompt_seq = arrival();
+            }
+        });
+    }
 }
 
 fn forget_window_deliveries(session: &str, window: &str) {
@@ -1545,6 +1567,48 @@ mod tests {
     }
 
     // ── Board #249: the table is the ONE queue ────────────────────────────
+
+    /// Validator's case: the server restarts in the middle of a long turn and
+    /// no hook arrives for more than the ack window. The open turn is restored
+    /// from the durable activity log, so the 30 lines the CLI still holds are
+    /// not swept, and their echoes settle as ours.
+    #[test]
+    fn a_restart_mid_turn_keeps_the_turn_open_past_the_ack_window() {
+        crate::projects::tests::use_test_store();
+        let session = format!("midturn-{}", uuid::Uuid::new_v4());
+        let opened = (now() - 600) * 1000;
+        // The durable edges an earlier process wrote (persist() is off in tests).
+        crate::projects::with_store(|s| {
+            s.insert_activity(&session, "w1", opened - 5000, "notif", "completed", "", "", "", "")?;
+            s.insert_activity(&session, "w1", opened, "prompt", "the 20-minute turn", "", "app", "", "")
+        })
+        .unwrap();
+        let lines: Vec<String> = (0..30).map(|n| format!("[tmm chat 12:{n:02}] validator: @builder q{n}")).collect();
+        for l in &lines {
+            record_delivery(&session, "w1", l, "");
+        }
+        simulate_restart(&session);
+        // The first touch after the restart recovers; then 46 s pass with no
+        // hook from that window (lines and mark aged past the ack window).
+        recovery_mark(&session);
+        backdate(&session);
+        recovery_marks().lock().unwrap().insert(session.clone(), (i64::MAX, now() - DELIVERY_ACK_SECS - 1));
+        sweep_deliveries(&session);
+        assert_eq!(derive(&session, "w1", 0).state, "running", "the open turn came back from the log");
+        assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 0, "held lines are not swept");
+        for l in &lines {
+            assert!(record_prompt(&session, "w1", l), "{l} is still ours");
+        }
+        // A window whose last edge was a stop is NOT reopened.
+        let closed = format!("closed-{}", uuid::Uuid::new_v4());
+        crate::projects::with_store(|s| {
+            s.insert_activity(&closed, "w1", opened, "prompt", "done turn", "", "app", "", "")?;
+            s.insert_activity(&closed, "w1", opened + 1000, "notif", "completed", "", "", "", "")
+        })
+        .unwrap();
+        recovery_mark(&closed);
+        assert_eq!(derive(&closed, "w1", 0).state, "idle");
+    }
 
     /// The echo names the messages it settled (board #249), so a client marks
     /// them delivered without holding them. A line without a message (a board

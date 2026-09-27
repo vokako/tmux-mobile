@@ -97,6 +97,30 @@ impl Store {
             .map_err(|e| format!("query current turn prompt: {e}"))
     }
 
+    /// Windows whose newest recorded turn edge is a `prompt` (no `completed` /
+    /// `failed` after it), with that prompt's ts in ms (board #249): the turns
+    /// that were open when an earlier process last heard of them. One grouped
+    /// scan of the session's prompt/notif rows.
+    pub fn open_turns(&self, session: &str) -> Result<Vec<(String, u64)>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT t.w, a.ts FROM (
+                   SELECT COALESCE(NULLIF(win, ''), CAST(window AS TEXT)) AS w,
+                          MAX(CASE WHEN kind = 'prompt' THEN id END) AS p,
+                          MAX(CASE WHEN kind = 'notif' AND text IN ('completed', 'failed') THEN id END) AS e
+                   FROM activity WHERE session = ?1 AND kind IN ('prompt', 'notif')
+                   GROUP BY w
+                 ) t JOIN activity a ON a.id = t.p
+                 WHERE t.p > COALESCE(t.e, 0)",
+            )
+            .map_err(|e| format!("prepare open turns: {e}"))?;
+        let rows = stmt
+            .query_map(rusqlite::params![session], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64)))
+            .map_err(|e| format!("query open turns: {e}"))?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
     /// One page of the activity log, always returned OLDEST FIRST so a caller can
     /// append it to a feed without re-sorting.
     ///
