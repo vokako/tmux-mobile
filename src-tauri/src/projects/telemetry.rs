@@ -80,11 +80,6 @@ struct Rec {
 
 static NEXT_ARRIVAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
-#[cfg(test)]
-thread_local! {
-    /// Test-only: the next turn fact's activity write fails (fail-soft path).
-    static FAIL_NEXT_PERSIST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
 
 /// The next arrival number, in the persisted activity log's id order (board
 /// #249, validator): the counter starts above the newest activity row id this
@@ -295,8 +290,20 @@ fn push(session: &str, ev: ActivityEvent) -> Option<i64> {
 /// directly in `store.rs`. Keeping the two apart is what stops `cargo test` from
 /// writing rows for invented sessions into the developer's real state.db.
 #[cfg(test)]
-fn persist(_session: &str, _ev: &ActivityEvent) -> Option<i64> {
-    None
+fn persist(session: &str, ev: &ActivityEvent) -> Option<i64> {
+    // Off by default in tests; one test may opt in on its own thread after
+    // pointing the process at a throwaway database (board #249: the fail-soft
+    // order is tested against a REAL failed INSERT).
+    if PERSIST_IN_TEST.with(|p| p.get()) {
+        persist_now(session, ev)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static PERSIST_IN_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Write one event to the durable log. FAIL-SOFT, always: telemetry may never
@@ -305,6 +312,10 @@ fn persist(_session: &str, _ev: &ActivityEvent) -> Option<i64> {
 /// read-only disk).
 #[cfg(not(test))]
 fn persist(session: &str, ev: &ActivityEvent) -> Option<i64> {
+    persist_now(session, ev)
+}
+
+fn persist_now(session: &str, ev: &ActivityEvent) -> Option<i64> {
     let written = super::with_store(|s| {
         let refs = if ev.deliveries.is_empty() { String::new() } else { serde_json::to_string(&ev.deliveries).unwrap_or_default() };
         s.insert_activity(session, &ev.window, ev.ts, &ev.kind, &ev.text, &ev.tool, &ev.via, &ev.state, &refs)
@@ -575,11 +586,7 @@ fn turn_fact_unless(
     if same(&held) {
         return false;
     }
-    #[cfg(test)]
-    let lost = FAIL_NEXT_PERSIST.with(|f| f.replace(false));
-    #[cfg(not(test))]
-    let lost = false;
-    let row = event.filter(|_| !lost).and_then(|(kind, text, tool, via, deliveries)| {
+    let row = event.and_then(|(kind, text, tool, via, deliveries)| {
         push_full_at(session, window, ts * 1000 + now_ms() % 1000, kind, text, tool, via, deliveries)
     });
     // Tests widen the gap between the row and the order, so a lost lock
@@ -2043,22 +2050,33 @@ mod tests {
         assert!(orders.windows(2).all(|w| w[0] < w[1]), "{orders:?}");
     }
 
-    /// Validator 15:47 / orchestrator 15:48: a stop whose activity write
-    /// failed, then the database recovers and a real prompt arrives in the
-    /// same second. Driven through the live entry with the write failure
-    /// injected: the prompt sorts after the lost stop and the window reads
-    /// running; a replay of what WAS written (the prompt row only) agrees.
+    /// Validator 15:47/15:57, orchestrator 15:48/15:58: a REAL failed
+    /// INSERT. SQLite consumes no id for it, so after a lost stop the next
+    /// successful row gets exactly the id the stop would have had (max+1) —
+    /// the case where row-id ordering tied the prompt with the lost stop and
+    /// read idle. With one live counter the same-second prompt reads running.
     #[test]
-    fn a_prompt_after_a_lost_stop_write_reads_running() {
+    fn a_prompt_after_a_really_failed_stop_insert_reads_running() {
+        crate::projects::tests::use_test_store();
+        PERSIST_IN_TEST.with(|p| p.set(true));
         let session = format!("lost-{}", uuid::Uuid::new_v4());
         let t = now();
         record_prompt(&session, "w1", "turn one");
-        FAIL_NEXT_PERSIST.with(|f| f.set(true));
-        record_notification(&session, "w1", "completed", t); // its row is lost
-        record_prompt(&session, "w1", "turn two"); // same second, db back
+        let top = crate::projects::with_store(|s| s.max_activity_id()).unwrap();
+        // The next notif INSERT really fails inside SQLite (a temp trigger on
+        // this one connection), then the database "recovers".
+        crate::projects::with_store(|s| s.exec_test_sql(&format!(
+            "CREATE TEMP TRIGGER lost249 BEFORE INSERT ON activity WHEN NEW.session = '{session}' AND NEW.kind = 'notif'
+             BEGIN SELECT RAISE(ABORT, 'injected write failure'); END;"
+        ))).unwrap();
+        record_notification(&session, "w1", "completed", t);
+        crate::projects::with_store(|s| s.exec_test_sql("DROP TRIGGER lost249;")).unwrap();
+        record_prompt(&session, "w1", "turn two"); // same second
+        PERSIST_IN_TEST.with(|p| p.set(false));
+        let rows = crate::projects::with_store(|s| s.activity_since(&session, 0, 10)).unwrap();
+        assert_eq!(rows.iter().map(|r| r.kind.as_str()).collect::<Vec<_>>(), vec!["prompt", "prompt"], "the stop's row was lost");
+        assert_eq!(rows[1].id, top + 1, "the failed INSERT consumed no id: the prompt got the id the stop would have had");
         assert_eq!(derive(&session, "w1", 0).state, "running", "the real prompt is not pressed under the lost stop");
-        let written: Vec<String> = recent_events(&session, 0).into_iter().map(|e| e.kind).collect();
-        assert_eq!(written, vec!["prompt".to_string(), "prompt".to_string()], "only the failed insert skipped its row");
     }
 
     /// Validator 15:07: the live record and the log must order turn facts the

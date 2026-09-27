@@ -348,6 +348,13 @@ impl Store {
             .map_err(|e| format!("max delivery id: {e}"))
     }
 
+    /// Test-only: run SQL on the store's own connection (a temp trigger that
+    /// makes an INSERT really fail, board #249).
+    #[cfg(test)]
+    pub fn exec_test_sql(&self, sql: &str) -> Result<(), String> {
+        self.conn.execute_batch(sql).map_err(|e| e.to_string())
+    }
+
     /// Test-only: pretend every outstanding row of a session was typed at `ts`.
     #[cfg(test)]
     pub fn backdate_deliveries(&self, session: &str, ts: u64) -> Result<usize, String> {
