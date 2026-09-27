@@ -481,6 +481,20 @@ test('a prompt typed at the agent keyboard becomes its own input row', () => {
   assert.deepEqual(feedBlocks([], orphan, 'status').map((b) => b.type), ['prompt'], 'never silently dropped');
 });
 
+test('an echo that names its messages is a receipt even when they are not loaded (#249)', () => {
+  // 13:12 in the owner's screenshot: a 12:41 message 184 rows back, outside
+  // the loaded page, was echoed with via:'app' and still drew an INPUT row.
+  const echo = ev({ ts: 900, kind: 'prompt', via: 'app', text: '[tmm chat 12:41] validator: @builder 注意', acks: ['m-7754'] });
+  assert.deepEqual(feedBlocks([{ id: 'm-9000', ts: 950, from: 'human', body: '@dev later' }], [echo], 'tools').map((b) => b.type), ['msg'],
+    'no INPUT row for a named receipt whose message is outside the page');
+  // Loaded later (scrolled back), the same echo marks it by id.
+  const loaded = feedBlocks([{ id: 'm-7754', ts: 100, from: 'validator', body: 'a body the echo text does not contain' }], [echo], 'chat');
+  assert.equal(loaded[0]?.type === 'msg' && loaded[0].delivered, true, 'marked by id, not by content');
+  // Without acks (an old row, a board notice) the content rule stands.
+  const orphan = [ev({ ts: 100, kind: 'prompt', via: 'app', text: '[board #241 reply] notice' })];
+  assert.deepEqual(feedBlocks([], orphan, 'status').map((b) => b.type), ['prompt']);
+});
+
 test('pickLead: a remembered choice wins while that agent is present', () => {
   const agents = [ag({ window: 1, name: 'dev' }), ag({ window: 2, name: 'qa' })];
   assert.equal(pickLead(agents, 'qa'), 'qa');

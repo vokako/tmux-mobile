@@ -1570,6 +1570,11 @@ export function echoContains(canonEcho: string, body: string, truncated: boolean
  *    message that caused it as delivered rather than shown as a separate row —
  *    the text would otherwise appear twice. This runs at EVERY feed level,
  *    because "did what I just sent arrive" is not a detail the user opted into.
+ *    Since board #249 the echo also NAMES the messages it settled (`acks`):
+ *    those are marked by id, and the echo is consumed even when none of them
+ *    is in the loaded page — it is the receipt of a message that exists in
+ *    the room, never keyboard input. An echo without `acks` (an old row, a
+ *    board notice) keeps the content match.
  * 2. **A local prompt is the input half of the transcript.** Text typed at the
  *    agent's own keyboard exists in no other channel, so an unmatched `prompt`
  *    event renders as its own row.
@@ -1624,7 +1629,14 @@ export function feedBlocks(
     // rides tmux send-keys and the TUI's composer before it echoes back, and a
     // newline in the body does not survive that byte-for-byte (owner,
     // 2026-08-22: multi-line messages never confirmed).
-    let hit = false;
+    // Named receipts first: the server knows exactly which messages it settled.
+    const named = e.acks?.length ? new Set(e.acks) : null;
+    let hit = !!named;
+    if (named) {
+      for (const m of msgs) {
+        if (m.type === 'msg' && named.has(m.msg?.id)) m.delivered = true;
+      }
+    }
     const canonEcho = squashOf(e, e.text);
     const truncated = echoTruncated(e.text);
     for (const m of msgs) {

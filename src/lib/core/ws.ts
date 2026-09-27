@@ -906,6 +906,9 @@ export interface HubActivityEvent {
   /** `prompt` events only: 'app' when the text is the line this app typed into
    * the pane (the delivery receipt), 'local' when typed at the keyboard. */
   via?: 'app' | 'local';
+  /** `prompt` events only: the chat message ids this echo settled (board
+   * #249). Present only when it settled some; absent on old rows. */
+  acks?: string[];
   /** `status` events only: the state the agent declared. The `text` is its note
    * — what it says it is doing — which is the half a human reads. */
   state?: 'working' | 'waiting' | 'blocked';

@@ -947,7 +947,7 @@ mod tests {
         let hub = AgentNotificationHub::load_at(root.clone());
         // What deliver_mentions types into the pane.
         let line = "[tmm chat] human: @dev ship it";
-        crate::projects::telemetry::record_delivery(&session, &pane.window_name, line);
+        crate::projects::telemetry::record_delivery(&session, &pane.window_name, line, "");
 
         std::fs::create_dir_all(root.join("inbox")).unwrap();
         let envelope = json!({
@@ -1020,7 +1020,7 @@ mod tests {
         // Another agent opens the parent's turn with an addressed line (a human
         // sender carries no reply edge by design — the Hub shows the room).
         let line = "[tmm chat] claude: @codex review #164";
-        crate::projects::telemetry::record_delivery(&session, &pane.window_name, line);
+        crate::projects::telemetry::record_delivery(&session, &pane.window_name, line, "");
         write("1-parent.json", json!({
             "hook_event_name": "UserPromptSubmit", "session_id": "01a08e9b-root", "turn_id": "t1",
             "prompt": line,
@@ -1155,7 +1155,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("tmm-restart-hub-{}", uuid::Uuid::new_v4()));
         let hub = AgentNotificationHub::load_at(root.clone());
         let line = "[tmm chat] human: @dev restart proof";
-        crate::projects::telemetry::record_delivery(&session, &pane.window_name, line);
+        crate::projects::telemetry::record_delivery(&session, &pane.window_name, line, "");
         // ── the restart: a fresh process has no telemetry records at all.
         crate::projects::telemetry::forget_process_state(&session);
 

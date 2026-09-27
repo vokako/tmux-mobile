@@ -157,7 +157,8 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
             // reply loops (see record_only comment above).
             if !record_only {
                 let seq = msg.get("seq").and_then(|v| v.as_i64());
-                deliver_mentions(session, from, &body, &room, seq);
+                let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+                deliver_mentions(session, from, &body, &room, seq, id);
             }
             Ok(msg)
         }
@@ -1049,6 +1050,7 @@ fn deliver_mentions(
     body: &str,
     room: &str,
     before_seq: Option<i64>,
+    msg_id: &str,
 ) {
     use crate::projects::agents;
 
@@ -1119,7 +1121,7 @@ fn deliver_mentions(
             // confirmed when that agent's userPromptSubmit hook echoes the line
             // back; until then it is pending, and telemetry reports it if the
             // echo never comes.
-            crate::projects::telemetry::record_delivery(session, &p.window_name, &line);
+            crate::projects::telemetry::record_delivery(session, &p.window_name, &line, msg_id);
             // A line just landed in this pane: sniff its vitals once the TUI
             // has repainted (delayed + throttled inside).
             crate::projects::vitals::sniff_window_soon(session, &p.window_name);
@@ -1750,6 +1752,11 @@ mod tests {
         assert!(!lead.contains("@lead @solo decide\n\n[tmm team context]\n[tmm chat"), "the current message is not part of its own catch-up");
         assert!(solo.contains("@lead @solo decide"), "solo receives the current request: {solo:?}");
         assert!(!solo.contains("[tmm team context"), "solo stays one-line: {solo:?}");
+        // Each typed line names the message it carries (board #249), so its
+        // echo can mark that message delivered on any client.
+        let id = response.result.as_ref().and_then(|m| m.get("id")).and_then(|v| v.as_str()).unwrap().to_string();
+        let owed = crate::projects::telemetry::owed_message_ids(&session);
+        assert_eq!(owed, vec![id.clone(), id], "one row per typed pane, each naming the message");
 
         let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
         let _ = std::fs::remove_dir_all(&ws);

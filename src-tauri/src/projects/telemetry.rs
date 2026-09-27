@@ -170,6 +170,12 @@ pub struct ActivityEvent {
     /// halves differently, and a note is the half a human reads.
     #[serde(skip_serializing_if = "str::is_empty")]
     pub state: String,
+    /// `prompt` events only: the chat message ids this echo settled (board
+    /// #249). A client marks exactly these delivered, whether or not it has
+    /// them loaded, and draws no INPUT row for the echo. Empty for a local
+    /// prompt, for an echo of a line with no message, and for old rows.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub acks: Vec<String>,
 }
 
 fn is_zero(n: &i64) -> bool {
@@ -182,14 +188,10 @@ fn events() -> &'static Mutex<HashMap<String, std::collections::VecDeque<Activit
 }
 
 fn push_event(session: &str, window: &str, kind: &str, text: String) {
-    push_full(session, window, kind, text, String::new(), String::new());
+    push_full(session, window, kind, text, String::new(), String::new(), Vec::new());
 }
 
-fn push_event_via(session: &str, window: &str, kind: &str, text: String, via: String) {
-    push_full(session, window, kind, text, String::new(), via);
-}
-
-fn push_full(session: &str, window: &str, kind: &str, text: String, tool: String, via: String) {
+fn push_full(session: &str, window: &str, kind: &str, text: String, tool: String, via: String, acks: Vec<String>) {
     push(
         session,
         ActivityEvent {
@@ -201,6 +203,7 @@ fn push_full(session: &str, window: &str, kind: &str, text: String, tool: String
             tool,
             via,
             state: String::new(),
+            acks,
         },
     );
 }
@@ -231,7 +234,8 @@ fn persist(_session: &str, _ev: &ActivityEvent) {}
 #[cfg(not(test))]
 fn persist(session: &str, ev: &ActivityEvent) {
     let written = super::with_store(|s| {
-        s.insert_activity(session, &ev.window, ev.ts, &ev.kind, &ev.text, &ev.tool, &ev.via, &ev.state, "")
+        let acks = if ev.acks.is_empty() { String::new() } else { serde_json::to_string(&ev.acks).unwrap_or_default() };
+        s.insert_activity(session, &ev.window, ev.ts, &ev.kind, &ev.text, &ev.tool, &ev.via, &ev.state, &acks)
     });
     if let Err(e) = written {
         // Fail-soft, but not SILENT: a lost write is a hole in the trace, and the
@@ -291,6 +295,7 @@ pub fn events_page(
                     tool: r.tool,
                     via: r.via,
                     state: r.state,
+                    acks: serde_json::from_str(&r.acks).unwrap_or_default(),
                 })
                 .collect();
             return (events, has_more);
@@ -498,7 +503,7 @@ pub fn record_tool(session: &str, window: &str, tool: &str, detail: &str) {
     if dup {
         return;
     }
-    push_full(session, window, "tool", detail.to_string(), tool.to_string(), String::new());
+    push_full(session, window, "tool", detail.to_string(), tool.to_string(), String::new(), Vec::new());
 }
 
 /// A line this app typed into an agent's pane (`deliver_mentions`). Held as a
@@ -507,12 +512,15 @@ pub fn record_tool(session: &str, window: &str, tool: &str, detail: &str) {
 /// was typed into twice, and each echo settles one. FAIL-SOFT like all
 /// telemetry: without a database the line is simply untracked, and its echo
 /// files as keyboard input.
-pub fn record_delivery(session: &str, window: &str, line: &str) {
+/// `msg_id` is the chat message the line carries ('' for a line with none:
+/// a board notice, a reply, a typed first prompt) — the echo names it, so a
+/// client marks that message delivered without holding it (board #249).
+pub fn record_delivery(session: &str, window: &str, line: &str, msg_id: &str) {
     recovery_mark(session); // read BEFORE the insert: this row is ours
     // The window's record exists from its first delivery, so `retain_windows`
     // sees it and drops its queue when the window goes.
     with_rec(session, window, |_| {});
-    let _ = queue(|s| s.insert_delivery(session, window, line, now(), ""));
+    let _ = queue(|s| s.insert_delivery(session, window, line, now(), msg_id));
 }
 
 /// The `userPromptSubmit` hook: the agent accepted a prompt. This is BOTH the
@@ -531,11 +539,17 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
     let settled = settled_by(&rows, prompt);
     // A row counts only if THIS echo deleted it: two echoes racing for one
     // row cannot both call it theirs.
-    let acked = settled
-        .iter()
+    let won: Vec<&super::store::DeliveryRow> = settled
+        .into_iter()
         .filter(|row| queue(|s| s.delete_delivery_id(row.id)).unwrap_or(false))
-        .count()
-        > 0;
+        .collect();
+    let acked = !won.is_empty();
+    let mut acks: Vec<String> = Vec::new();
+    for row in &won {
+        if !row.msg_id.is_empty() && !acks.contains(&row.msg_id) {
+            acks.push(row.msg_id.clone());
+        }
+    }
     // A turn just opened. This is the ONE honest "it started working" signal:
     // pane activity cannot be it, because an agent TUI repaints its prompt
     // (spinner, status line, cursor) long after it finished.
@@ -543,12 +557,14 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
         r.prompt = Some(ts);
         r.prompt_seq = arrival();
     });
-    push_event_via(
+    push_full(
         session,
         window,
         "prompt",
         text,
+        String::new(),
         if acked { "app".into() } else { "local".into() },
+        acks,
     );
     acked
 }
@@ -733,6 +749,12 @@ pub fn retain_windows(session: &str, live: &[String]) {
     for w in &dead {
         forget_window_deliveries(session, w);
     }
+}
+
+/// Test-only: the message id each outstanding row carries, in typed order.
+#[cfg(test)]
+pub fn owed_message_ids(session: &str) -> Vec<String> {
+    queue(|s| s.pending_deliveries(session, None)).unwrap_or_default().into_iter().map(|r| r.msg_id).collect()
 }
 
 /// Drop everything this PROCESS holds for a session — exactly what a restart
@@ -978,8 +1000,8 @@ mod tests {
     fn two_lines_queued_at_a_busy_agent_are_both_still_outstanding() {
         let session = format!("queue-test-{}", std::process::id());
         record_prompt(&session, "w1", "start working");      // a turn is open
-        record_delivery(&session, "w1", "[tmm chat 00:05] human: first thing");
-        record_delivery(&session, "w1", "[tmm chat 00:06] human: second thing");
+        record_delivery(&session, "w1", "[tmm chat 00:05] human: first thing", "");
+        record_delivery(&session, "w1", "[tmm chat 00:06] human: second thing", "");
 
         // Both are held, oldest first — the second no longer erases the first.
         assert_eq!(held(&session, "w1").len(), 2);
@@ -1005,8 +1027,8 @@ mod tests {
         // messages keep their hollow ring for ever.
         let session = format!("queue-batch-{}", std::process::id());
         record_prompt(&session, "w2", "open the turn");
-        record_delivery(&session, "w2", "line one");
-        record_delivery(&session, "w2", "line two");
+        record_delivery(&session, "w2", "line one", "");
+        record_delivery(&session, "w2", "line two", "");
         assert!(record_prompt(&session, "w2", "line one\nline two\n"));
         assert!(held(&session, "w2").is_empty(), "both lines were in that prompt");
     }
@@ -1162,7 +1184,7 @@ mod tests {
     #[test]
     fn a_typed_line_is_acknowledged_by_the_prompt_hook_that_echoes_it() {
         let line = "[tmm chat] human: @dev ship it";
-        record_delivery("ack-test", "w3", line);
+        record_delivery("ack-test", "w3", line, "");
         // The CLI submits our line (possibly with the agent's own leading text
         // when it was mid-typing) — containment, not equality.
         assert!(
@@ -1188,25 +1210,25 @@ mod tests {
     #[test]
     fn a_multi_line_delivery_is_acknowledged_despite_whitespace_drift() {
         let line = "[tmm chat] human: @dev line one\nline two\n  line three";
-        record_delivery("ws-test", "w1", line);
+        record_delivery("ws-test", "w1", line, "");
         // The composer turned newlines into single spaces and doubled one.
         assert!(
             record_prompt("ws-test", "w1", "[tmm chat] human: @dev line one line two  line three"),
             "newline → space must still ack"
         );
         // CRLF and trailing whitespace on the echo side.
-        record_delivery("ws-test", "w2", "[tmm chat] human: do\nthe thing");
+        record_delivery("ws-test", "w2", "[tmm chat] human: do\nthe thing", "");
         assert!(record_prompt("ws-test", "w2", "[tmm chat] human: do\r\nthe thing \n"));
         // tmux dropped the newline byte: the echo comes back GLUED — the
         // 2026-08-24 shape, measured live in the translator project
         // ("AgenticAI\nAgentic…" echoed as "AgenticAIAgentic…").
-        record_delivery("ws-test", "w4", "[tmm chat] human: @dev AgenticAI\nAgentic AI 基础设施");
+        record_delivery("ws-test", "w4", "[tmm chat] human: @dev AgenticAI\nAgentic AI 基础设施", "");
         assert!(
             record_prompt("ws-test", "w4", "[tmm chat] human: @dev AgenticAIAgentic AI 基础设施"),
             "newline → NOTHING must still ack"
         );
         // Different WORDS still refuse — tolerance must not become fuzz.
-        record_delivery("ws-test", "w3", "[tmm chat] human: alpha beta");
+        record_delivery("ws-test", "w3", "[tmm chat] human: alpha beta", "");
         assert!(!record_prompt("ws-test", "w3", "[tmm chat] human: alpha gamma"));
     }
 
@@ -1231,7 +1253,7 @@ mod tests {
         crate::projects::tests::use_test_store();
         let session = format!("restart-ack-{}", uuid::Uuid::new_v4());
         let line = "[tmm chat 2026-08-29 16:00] human: @dev 部署一下\n第二行";
-        record_delivery(&session, "w1", line);
+        record_delivery(&session, "w1", line, "");
 
         simulate_restart(&session);
         assert_eq!(held(&session, "w1").len(), 1, "the table IS the queue: the restart took nothing");
@@ -1267,8 +1289,8 @@ mod tests {
         crate::projects::tests::use_test_store();
         let session = format!("restart-queue-{}", uuid::Uuid::new_v4());
         record_prompt(&session, "w2", "open the turn");
-        record_delivery(&session, "w2", "line one");
-        record_delivery(&session, "w2", "line two");
+        record_delivery(&session, "w2", "line one", "");
+        record_delivery(&session, "w2", "line two", "");
         // A line typed LONG before the restart — the durable row keeps its real
         // typing time, which is what would make the first sweep after a restart
         // report it as unconfirmed seconds before its echo arrives.
@@ -1301,7 +1323,7 @@ mod tests {
     fn a_reported_line_is_not_resurrected_and_a_dead_window_is_forgotten() {
         crate::projects::tests::use_test_store();
         let session = format!("restart-sweep-{}", uuid::Uuid::new_v4());
-        record_delivery(&session, "w3", "@dev hello");
+        record_delivery(&session, "w3", "@dev hello", "");
         // Past the ack window: the sweep reports it once and settles it.
         backdate(&session);
         sweep_deliveries(&session);
@@ -1319,7 +1341,7 @@ mod tests {
 
         // And a window that no longer exists can never echo, so its queue goes
         // with the record instead of waiting for a recycled index to inherit it.
-        record_delivery(&session, "w4", "@gone hello");
+        record_delivery(&session, "w4", "@gone hello", "");
         retain_windows(&session, &[]);
         simulate_restart(&session);
         assert_eq!(
@@ -1401,7 +1423,7 @@ mod tests {
     #[test]
     fn an_unacknowledged_delivery_is_reported_once() {
         // Backdate the pending line past the ack window.
-        record_delivery("sweep-test", "w2", "[tmm chat] human: @dev hello");
+        record_delivery("sweep-test", "w2", "[tmm chat] human: @dev hello", "");
         backdate("sweep-test");
         sweep_deliveries("sweep-test");
         let warns: Vec<String> = recent_events("sweep-test", 0)
@@ -1502,8 +1524,8 @@ mod tests {
     fn identical_bodies_are_two_receipts_settled_one_per_echo() {
         let session = format!("dup-{}", uuid::Uuid::new_v4());
         let line = "[tmm chat 2026-09-09 06:30] human: @dev continue";
-        record_delivery(&session, "dev", line);
-        record_delivery(&session, "dev", line);
+        record_delivery(&session, "dev", line, "");
+        record_delivery(&session, "dev", line, "");
         let held = || held(&session, "dev").len();
         assert_eq!(held(), 2, "two deliveries of one body are two promises");
 
@@ -1515,14 +1537,34 @@ mod tests {
         assert_eq!(held(), 0);
 
         // And ONE submission carrying the line TWICE settles both at once.
-        record_delivery(&session, "dev", line);
-        record_delivery(&session, "dev", line);
+        record_delivery(&session, "dev", line, "");
+        record_delivery(&session, "dev", line, "");
         let both = format!("{line}\n{line}");
         assert!(record_prompt(&session, "dev", &both));
         assert_eq!(held(), 0, "a double-carrying echo settles both");
     }
 
     // ── Board #249: the table is the ONE queue ────────────────────────────
+
+    /// The echo names the messages it settled (board #249), so a client marks
+    /// them delivered without holding them. A line without a message (a board
+    /// notice) settles and names nothing; keyboard input names nothing.
+    #[test]
+    fn an_echo_names_the_messages_it_settled() {
+        let session = format!("acks-{}", uuid::Uuid::new_v4());
+        record_delivery(&session, "w1", "[tmm chat 12:41] validator: @builder one", "m-41");
+        record_delivery(&session, "w1", "[tmm chat 12:42] validator: @builder two", "m-42");
+        record_delivery(&session, "w1", "[board #241 reply] notice", "");
+        assert!(record_prompt(&session, "w1", "[tmm chat 12:41] validator: @builder one\n[tmm chat 12:42] validator: @builder two"));
+        assert!(record_prompt(&session, "w1", "[board #241 reply] notice"));
+        record_prompt(&session, "w1", "typed at the keyboard");
+        let acks: Vec<Vec<String>> = recent_events(&session, 0).into_iter().filter(|e| e.kind == "prompt").map(|e| e.acks).collect();
+        assert_eq!(acks, vec![vec!["m-41".to_string(), "m-42".to_string()], vec![], vec![]]);
+        let wire = serde_json::to_value(recent_events(&session, 0).remove(0)).unwrap();
+        assert_eq!(wire["acks"], serde_json::json!(["m-41", "m-42"]), "on the wire as a string array");
+        let local = serde_json::to_value(recent_events(&session, 0).pop().unwrap()).unwrap();
+        assert!(local.get("acks").is_none(), "absent, not [], when it settled none");
+    }
 
     /// 13:12:38 in the trace: a stop and the next queued prompt in the SAME
     /// second. `end >= start` on whole seconds read the new turn as idle, the
@@ -1536,7 +1578,7 @@ mod tests {
         record_notification(&session, "w1", "completed", t);
         record_prompt(&session, "w1", "turn two, queued"); // same second
         assert_eq!(derive(&session, "w1", 0).state, "running", "the later arrival wins the tie");
-        record_delivery(&session, "w1", "@builder still queued");
+        record_delivery(&session, "w1", "@builder still queued", "");
         backdate(&session);
         sweep_deliveries(&session);
         assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 0, "a running turn is not swept");
@@ -1554,7 +1596,7 @@ mod tests {
         record_prompt(&session, "w1", "a long turn opens");
         let lines: Vec<String> = (0..20).map(|n| format!("[tmm chat 12:{n:02}] validator: @builder line {n}")).collect();
         for l in &lines {
-            record_delivery(&session, "w1", l);
+            record_delivery(&session, "w1", l, "");
         }
         assert_eq!(held(&session, "w1").len(), 20, "no silent cap");
         for l in &lines {
@@ -1574,7 +1616,7 @@ mod tests {
         record_prompt(&session, "w1", "a long turn opens");
         let lines: Vec<String> = (0..30).map(|n| format!("[tmm chat 12:{n:02}] orchestrator: @builder item {n}")).collect();
         for l in &lines {
-            record_delivery(&session, "w1", l);
+            record_delivery(&session, "w1", l, "");
         }
         simulate_restart(&session);
         sweep_deliveries(&session);
@@ -1594,7 +1636,7 @@ mod tests {
         let session = format!("qdup-{}", uuid::Uuid::new_v4());
         let line = "[tmm chat 12:00] human: @dev again";
         for _ in 0..3 {
-            record_delivery(&session, "dev", line);
+            record_delivery(&session, "dev", line, "");
         }
         assert!(record_prompt(&session, "dev", line));
         assert_eq!(held(&session, "dev").len(), 2);
