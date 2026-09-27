@@ -543,8 +543,26 @@ fn turn_fact(
     event: Option<(&str, String, String, String, Vec<DeliveryRef>)>,
     apply: impl FnOnce(&mut Rec, u64, u64),
 ) {
+    turn_fact_unless(session, window, ts, |_| false, event, apply);
+}
+
+/// `turn_fact`, skipped when `same` says the record already holds exactly
+/// this fact as its newest one (read under the same lock). Returns whether it
+/// was recorded.
+fn turn_fact_unless(
+    session: &str,
+    window: &str,
+    ts: u64,
+    same: impl FnOnce(&Rec) -> bool,
+    event: Option<(&str, String, String, String, Vec<DeliveryRef>)>,
+    apply: impl FnOnce(&mut Rec, u64, u64),
+) -> bool {
     static ORDER: Mutex<()> = Mutex::new(());
     let _order = ORDER.lock().unwrap_or_else(|e| e.into_inner());
+    let held = store().lock().unwrap().get(&(session.to_string(), window.to_string())).cloned().unwrap_or_default();
+    if same(&held) {
+        return false;
+    }
     let row = event.and_then(|(kind, text, tool, via, deliveries)| {
         push_full_at(session, window, ts * 1000 + now_ms() % 1000, kind, text, tool, via, deliveries)
     });
@@ -557,6 +575,7 @@ fn turn_fact(
     // the counter stands in, and it always runs past every id seen.
     let seq = order_of(row);
     with_rec(session, window, |r| apply(r, ts, seq));
+    true
 }
 
 /// A hook notification consumed by the AgentNotificationHub. Two different
@@ -633,27 +652,28 @@ pub fn record_tool(session: &str, window: &str, tool: &str, detail: &str) {
     super::recovery::note_tool_activity(session, window);
     let line = if detail.is_empty() { tool.to_string() } else { format!("{tool} {detail}") };
     let ts = now();
-    // ONE row per call. We subscribe to both `preToolUse` and `postToolUse` (a
-    // backend may only send one of them), and they carry the same tool and the
-    // same argument — so a lane showed every call twice, milliseconds apart. The
-    // pair is collapsed here rather than in the hook config, because an
-    // already-spawned agent keeps the config it was started with: fixing it at
-    // the source would only help agents spawned later.
-    // The Post half of a call is the SAME fact: it writes no row and leaves
-    // the record's fact (time and order) as the Pre half set it, so the live
-    // record and the log agree.
-    let dup = store()
-        .lock()
-        .unwrap()
-        .get(&(session.to_string(), window.to_string()))
-        .and_then(|r| r.tool.as_ref())
-        .is_some_and(|(prev, at)| prev == &line && ts.saturating_sub(*at) <= TOOL_DEDUPE_SECS);
-    if dup {
-        return;
-    }
+    // Pre and Post of one call are ONE fact (we subscribe to both because a
+    // backend may send only one; an already-spawned agent keeps its old hook
+    // config). Deduplication is a DISPLAY concern and must never drop a turn
+    // fact (orchestrator 15:44): the Post half is skipped only when the Pre
+    // half is still the window's NEWEST turn fact — same call, within
+    // TOOL_DEDUPE_SECS, nothing (prompt, stop, ask) after it — because then
+    // it adds nothing to the state, live or replayed. Any fact in between
+    // makes it a fact of its own: a tool right after a stop reopens a
+    // tool-only turn, a Post after an approved ask resumes the turn. Its row
+    // is written too (the log must replay it); the feed collapses the
+    // consecutive identical row (`feedBlocks`), so the lane still shows one.
     let event = ("tool", detail.to_string(), tool.to_string(), String::new(), Vec::new());
-    turn_fact(session, window, ts, Some(event), |r, ts, seq| {
-        r.tool = Some((line, ts));
+    let same_call = |r: &Rec| {
+        let tool_k = r.tool.as_ref().map(|(_, t)| (*t, r.tool_seq));
+        r.tool.as_ref().is_some_and(|(prev, at)| prev == &line && ts.saturating_sub(*at) <= TOOL_DEDUPE_SECS)
+            && tool_k >= r.prompt.map(|t| (t, r.prompt_seq))
+            && tool_k >= r.end.as_ref().map(|(_, t)| (*t, r.end_seq))
+            && tool_k >= r.ask.as_ref().map(|(_, t)| (*t, r.ask_seq))
+    };
+    let line_for_rec = line.clone();
+    turn_fact_unless(session, window, ts, same_call, Some(event), |r, ts, seq| {
+        r.tool = Some((line_for_rec, ts));
         r.tool_seq = seq;
     });
 }
@@ -1929,6 +1949,75 @@ mod tests {
         sweep_deliveries(&session);
         assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 1, "the held line's clock ran");
         assert_eq!(current_turn_prompt(&session, "w1"), None, "no reply edge recovered for a cancelled turn");
+    }
+
+    /// Orchestrator 15:44 (validator 15:42-15:43): tool dedupe may collapse a
+    /// feed row, never drop a turn fact.
+    /// (1) tool -> Stop -> the same tool within the dedupe window is a NEW
+    /// tool-only turn: running, live and replayed.
+    /// (2) Pre -> ask -> quick approval -> Post of the same call resumes the
+    /// turn: running, live and replayed, and the feed lane shows ONE row.
+    /// (3) A plain Pre/Post pair is still one row in the log.
+    #[test]
+    fn tool_dedupe_never_drops_a_turn_fact() {
+        let replay_state = |session: &str| {
+            let evs = events().lock().unwrap().get(session).cloned().unwrap_or_default();
+            let fact = |pred: &dyn Fn(&ActivityEvent) -> bool| {
+                evs.iter().enumerate().filter(|(_, e)| pred(e)).last().map(|(i, e)| crate::projects::store::TurnFact {
+                    id: i as i64 + 1, ts: e.ts, text: e.text.clone(), tool: e.tool.clone(),
+                })
+            };
+            let facts = crate::projects::store::TurnFacts {
+                window: "w1".into(),
+                prompt: fact(&|e| e.kind == "prompt"),
+                tool: fact(&|e| e.kind == "tool"),
+                ask: fact(&|e| e.kind == "notif" && matches!(e.text.as_str(), "permission_required" | "input_required")),
+                end: fact(&|e| e.kind == "notif" && matches!(e.text.as_str(), "completed" | "failed" | "interrupted")),
+            };
+            let mut r = Rec::default();
+            replay_turn_facts(&mut r, &facts);
+            derive_from(&r, 0, now()).state
+        };
+        let tool_rows = |session: &str| recent_events(session, 0).into_iter().filter(|e| e.kind == "tool").count();
+
+        let a = format!("dd-stop-{}", uuid::Uuid::new_v4());
+        record_tool(&a, "w1", "Edit", "a.rs");
+        record_notification(&a, "w1", "completed", now());
+        assert_eq!(derive(&a, "w1", 0).state, "idle");
+        record_tool(&a, "w1", "Edit", "a.rs"); // same call, < 3 s, after the stop
+        assert_eq!(derive(&a, "w1", 0).state, "running", "a new tool-only turn");
+        assert_eq!(replay_state(&a), "running", "and the log replays it");
+        assert_eq!(tool_rows(&a), 2, "the fact is written");
+
+        let b = format!("dd-ask-{}", uuid::Uuid::new_v4());
+        record_prompt(&b, "w1", "run the tests");
+        record_tool(&b, "w1", "Bash", "npm test"); // Pre
+        record_notification(&b, "w1", "permission_required", now());
+        assert_eq!(derive(&b, "w1", 0).state, "waiting");
+        record_tool(&b, "w1", "Bash", "npm test"); // Post, right after approval
+        assert_eq!(derive(&b, "w1", 0).state, "running", "the Post is the resume edge");
+        assert_eq!(replay_state(&b), "running");
+        let lane = feed_tool_rows(&b);
+        assert_eq!(lane, 1, "the feed collapses the repeated call into one row");
+
+        let c = format!("dd-pair-{}", uuid::Uuid::new_v4());
+        record_tool(&c, "w1", "Read", "b.rs");
+        record_tool(&c, "w1", "Read", "b.rs");
+        assert_eq!(tool_rows(&c), 1, "a plain Pre/Post pair is still one row");
+    }
+
+    /// How many tool rows the client's feed would draw for a session: the
+    /// same consecutive-per-window collapse `feedBlocks` applies (hub.ts).
+    fn feed_tool_rows(session: &str) -> usize {
+        let mut last: HashMap<String, String> = HashMap::new();
+        recent_events(session, 0)
+            .into_iter()
+            .filter(|e| e.kind == "tool")
+            .filter(|e| {
+                let sig = format!("{}\u{0}{}", e.tool, e.text);
+                last.insert(e.window.clone(), sig.clone()).as_deref() != Some(sig.as_str())
+            })
+            .count()
     }
 
     /// Validator 15:08: a written turn fact's order IS its row id, the number

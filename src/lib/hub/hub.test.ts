@@ -498,6 +498,21 @@ test('an echo that names its messages is a receipt even when they are not loaded
   assert.deepEqual(feedBlocks([], orphan, 'status').map((b) => b.type), ['prompt']);
 });
 
+test('a Pre, an ask and the Post of one tool call are one lane row (#249)', () => {
+  // The server now writes the Post half as its own row when an ask came
+  // between (it is the turn's resume edge); the lane still shows one call.
+  const tool = { kind: 'tool' as const, window: 'w1', tool: 'Bash', text: 'npm test' };
+  const activity = [
+    ev({ ts: 1, kind: 'prompt', via: 'local', text: 'run the tests' }),
+    ev({ ts: 2, ...tool }),
+    ev({ ts: 3, kind: 'notif', text: 'permission_required' }),
+    ev({ ts: 4, ...tool }),
+  ];
+  const steps = feedBlocks([], activity, 'tools').filter((b) => b.type === 'steps');
+  assert.equal(steps.length, 1);
+  assert.equal(steps[0]?.type === 'steps' && steps[0].events.filter((e) => e.kind === 'tool').length, 1);
+});
+
 test('an interrupt end row is a turn edge, not a feed row (#249)', () => {
   const rows = feedBlocks([], [ev({ ts: 1, kind: 'notif', text: 'interrupted' })], 'tools');
   assert.deepEqual(rows, [], 'the room already carries [tmm] interrupted');
