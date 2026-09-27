@@ -1383,23 +1383,26 @@ export function mentionsAgent(body: string, name: string): boolean {
  * sides). The `@` must start a word: at the start, or after anything but an
  * email/host character (ASCII letter or digit, `_ . -`), so `a@bob` and
  * `me@bob.dev` name nobody while `(@bob)` and `请@bob` do. The address is the
- * run of name characters (letters and digits of any script, `-`, `_`) after
- * it; a run followed by `.`+name character or another `@` is a host, not a
+ * run of name characters (`address::name_char`: Alphabetic or numeric code
+ * points of any script, `-`, `_`) after it; a run followed by `.`+name character or another `@` is a host, not a
  * name. ONE tokenizer for every client-side reading of an address — the
  * filter, the room-note verdict and the composer chip cannot disagree about
  * what `@bob:` means. */
 export function mentionTokens(body: string): string[] {
+  // Code points, not UTF-16 units, and Rust's own classes (validator, #248):
+  // `char::is_alphanumeric` is `\p{Alphabetic}` or `\p{N}` — wider than
+  // `\p{L}` (a Devanagari vowel sign is Alphabetic, not a Letter) — and a
+  // non-BMP letter after a `.` is two units a fixed-width slice would split.
   const inWord = /[A-Za-z0-9_.-]/u;
-  const nameRun = /^[\p{L}\p{N}_-]*/u;
-  const nameChar = /[\p{L}\p{N}_-]/u;
+  const nameRun = /^[\p{Alphabetic}\p{N}_-]*/u;
+  const hostTail = /^(?:@|\.[\p{Alphabetic}\p{N}_-])/u;
   const out: string[] = [];
   for (let i = body.indexOf('@'); i >= 0; i = body.indexOf('@', i + 1)) {
     const before = [...body.slice(0, i)].pop();
     if (before && inWord.test(before)) continue;
-    const run = nameRun.exec(body.slice(i + 1))![0];
-    const after = [...body.slice(i + 1 + run.length, i + 3 + run.length)];
-    const host = after[0] === '@' || (after[0] === '.' && !!after[1] && nameChar.test(after[1]));
-    if (run && !host) out.push(run);
+    const rest = body.slice(i + 1);
+    const run = nameRun.exec(rest)![0];
+    if (run && !hostTail.test(rest.slice(run.length))) out.push(run);
   }
   return out;
 }

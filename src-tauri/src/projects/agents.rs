@@ -235,7 +235,7 @@ mod tests {
     /// any punctuation, and a character `valid_name` refuses ends an address.
     #[test]
     fn every_valid_name_is_addressable_whole() {
-        for name in ["bob", "builder-2", "dev_squad", "翻译", "kiro-v3_1", "a1"] {
+        for name in ["bob", "builder-2", "dev_squad", "翻译", "राम", "kiro-v3_1", "a1"] {
             assert!(valid_name(name).is_ok(), "{name}");
             for tail in ["", " hi", ",", "。", ")", "**", ": x", "!"] {
                 assert_eq!(crate::address::mention_names(&format!("(@{name}{tail}")), vec![name.to_string()], "{name}{tail}");

@@ -60,8 +60,9 @@ pub fn mention_names(body: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
-    /// Board #248: one table, the same as `hub.test.ts`'s — the client and
-    /// the server read an address by one rule.
+    /// Board #248: the ONE case table for both sides — `hub.test.ts` reads
+    /// these rows out of this file and runs the client's `mentionTokens` over
+    /// them, so keep each row on one line, `("<body>", vec![…]),`.
     #[test]
     fn an_address_must_start_a_word() {
         for (body, tokens) in [
@@ -80,6 +81,10 @@ mod tests {
             ("@ alone, @, @!", vec![]),
             ("line one\n@bob line two", vec!["bob"]),
             ("@all standup", vec!["all"]),
+            // Unicode parity with the client (validator, #248): a non-BMP
+            // letter after `.` is a host; a combining vowel sign is Alphabetic.
+            ("see @bob.𐐀 and @राम, ok", vec!["राम"]),
+            ("@𐐀𐐁 hi", vec!["𐐀𐐁"]),
         ] {
             assert_eq!(mention_names(body), tokens, "{body:?}");
         }

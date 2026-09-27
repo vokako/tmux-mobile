@@ -1355,25 +1355,18 @@ test('pastedFiles pulls the files out of a paste, or [] for plain text (board #2
 });
 
 test('mentionTokens reads an address by the server\'s one rule (#248)', () => {
-  // The same table as address.rs `an_address_must_start_a_word`.
-  const cases: [string, string[]][] = [
-    ['@bob look', ['bob']],
-    ['look @bob', ['bob']],
-    ['@bob: now, @alice.', ['bob', 'alice']],
-    ['(@bob) and "@alice" and **@carol**', ['bob', 'alice', 'carol']],
-    ['mail me at a@bob.dev', []],
-    ['a@bob', []],
-    ['x.y@bob and first-last@bob', []],
-    ['npm i pkg@2.4.0', []],
-    ['see @bob.dev', []],
-    ['请@bob 看看，@alice，不急。@builder-2。', ['bob', 'alice', 'builder-2']],
-    ['@kiro/@claude', ['kiro', 'claude']],
-    ['@a@b', []],
-    ['@ alone, @, @!', []],
-    ['line one\n@bob line two', ['bob']],
-    ['@all standup', ['all']],
-  ];
-  for (const [body, tokens] of cases) assert.deepEqual(mentionTokens(body), tokens, body);
+  // ONE table: the Rust test's own cases, read out of address.rs, so the two
+  // sides cannot drift (validator found a Unicode split between them). Each
+  // row is `("<body>", vec![<tokens>])`; Rust's `\"` and `\n` escapes are
+  // JSON's.
+  const rust = readFileSync(new URL('../../../src-tauri/src/address.rs', import.meta.url), 'utf8');
+  const table = rust.slice(rust.indexOf('fn an_address_must_start_a_word'));
+  const rows = [...table.matchAll(/^\s*\(("(?:[^"\\]|\\.)*"), vec!\[(.*)\]\),$/gmu)];
+  assert.ok(rows.length >= 17, `the shared table was found: ${rows.length} rows`);
+  for (const [, body, tokens] of rows) {
+    const text = JSON.parse(body!) as string;
+    assert.deepEqual(mentionTokens(text), JSON.parse(`[${tokens}]`), text);
+  }
 });
 
 test('mentionsAgent parses addresses the way deliver_mentions does', () => {
