@@ -189,6 +189,12 @@ pub(crate) mod tests {
     pub(crate) fn use_test_store() {
         static TEST_DB: OnceLock<()> = OnceLock::new();
         TEST_DB.get_or_init(|| {
+            // A child test process (a fresh-process test, board #249) is
+            // handed its parent's scratch database and must not wipe it.
+            if let Some(child) = std::env::var_os("TMM_TEST_CHILD_DB").filter(|p| !p.is_empty()) {
+                std::env::set_var("TMM_STATE_DB", child);
+                return;
+            }
             let dir = std::env::temp_dir().join("tmm-projects-test");
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();

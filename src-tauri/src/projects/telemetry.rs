@@ -1884,6 +1884,69 @@ mod tests {
         assert!(held(&session, "w1").is_empty());
     }
 
+    /// Validator 14:40: the same-second restart order in a REAL fresh process.
+    /// The parent writes an earlier process's turn edges into a scratch
+    /// database, then runs this test binary again as a child (a new process,
+    /// so a new counter) against it. Two cases, one second each:
+    /// (1) stop, restart, new prompt -> running;
+    /// (2) open prompt, restart (recovered from the log), stop -> idle, then
+    ///     prompt -> running.
+    #[test]
+    fn same_second_order_survives_a_real_process_restart() {
+        let dir = std::env::temp_dir().join(format!("tmm-fresh-proc-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("state.db");
+        let t = now();
+        {
+            let store = crate::projects::store::Store::open(&db).unwrap();
+            // Enough earlier rows that recovered ids are well above a fresh
+            // process's first counter values.
+            for n in 0..50 {
+                store.insert_activity("filler", "w9", n, "tool", "x", "Edit", "", "", "").unwrap();
+            }
+            store.insert_activity("fp-stop", "w1", t * 1000, "prompt", "turn", "", "app", "", "").unwrap();
+            store.insert_activity("fp-stop", "w1", t * 1000, "notif", "completed", "", "", "", "").unwrap();
+            store.insert_activity("fp-open", "w1", t * 1000, "prompt", "long turn", "", "app", "", "").unwrap();
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "projects::telemetry::tests::fresh_process_child", "--ignored", "--test-threads=1", "--nocapture"])
+            .env("TMM_TEST_CHILD_DB", &db)
+            .env("TMM_FRESH_T", t.to_string())
+            .output()
+            .unwrap();
+        let log = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(out.status.success(), "child failed:\n{log}");
+        assert!(log.contains("1 passed"), "the child really ran:\n{log}");
+    }
+
+    /// The child half of `same_second_order_survives_a_real_process_restart`.
+    /// Ignored on its own: it needs the parent's scratch database.
+    #[test]
+    #[ignore]
+    fn fresh_process_child() {
+        let t: u64 = std::env::var("TMM_FRESH_T").expect("run by the parent").parse().unwrap();
+        // (1) stop -> restart -> prompt, one second: nothing is recovered as open.
+        recovery_mark("fp-stop");
+        assert_eq!(derive("fp-stop", "w1", 0).state, "idle", "a stopped turn is not reopened");
+        with_rec("fp-stop", "w1", |r| {
+            r.prompt = Some(t);
+            r.prompt_seq = arrival();
+        });
+        assert_eq!(derive("fp-stop", "w1", 0).state, "running", "the new prompt opens the turn");
+        // (2) the open prompt is recovered with its row id; a stop observed by
+        // this new process in the same second must sort after it.
+        recovery_mark("fp-open");
+        assert_eq!(derive("fp-open", "w1", 0).state, "running", "recovered from the log");
+        record_notification("fp-open", "w1", "completed", t);
+        assert_eq!(derive("fp-open", "w1", 0).state, "idle", "the later stop wins the same-second tie");
+        with_rec("fp-open", "w1", |r| {
+            r.prompt = Some(t);
+            r.prompt_seq = arrival();
+        });
+        assert_eq!(derive("fp-open", "w1", 0).state, "running");
+    }
+
     /// The matcher over rows, pure: order, duplicates and truncation.
     #[test]
     fn settled_by_spends_one_receipt_per_occurrence() {
