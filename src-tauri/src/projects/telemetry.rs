@@ -66,21 +66,45 @@ struct Rec {
     ask: Option<(String, u64)>,
     /// Last hook tool event: (activity line, ts). Work observed inside a turn.
     tool: Option<(String, u64)>,
-    /// When each fact above ARRIVED, as a process-wide sequence number (board
-    /// #249). Hook timestamps are whole seconds, so a stop and the next prompt
-    /// often share one; the old `end >= start` tie read that turn as idle, and
-    /// the sweep reported its queued lines mid-turn. The sequence breaks only
-    /// that tie; seconds stay the ordering authority. 0 = never set.
+    /// When each fact above ARRIVED, in the order of the durable activity log
+    /// (board #249; see `arrival`). Hook timestamps are whole seconds, so a
+    /// stop and the next prompt often share one; the old `end >= start` tie
+    /// read that turn as idle, and the sweep reported its queued lines
+    /// mid-turn. The order breaks only that tie; seconds stay the ordering
+    /// authority. 0 = never set.
     prompt_seq: u64,
     end_seq: u64,
     ask_seq: u64,
     tool_seq: u64,
 }
 
-/// The next arrival number. Starts at 1, so 0 means "no fact".
+static NEXT_ARRIVAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// The next arrival number, in the persisted activity log's id order (board
+/// #249, validator): the counter starts above the newest activity row id this
+/// process finds, so a fact observed now always sorts after every fact an
+/// earlier process wrote — a process-local counter restarting at 1 would sort
+/// a new stop BEFORE a turn edge recovered from the log. 0 means "no fact".
 fn arrival() -> u64 {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    seed_arrival();
+    NEXT_ARRIVAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// A fact recovered from the durable log keeps its own row id as its order,
+/// and the counter moves past it, so anything observed later sorts after it.
+fn recovered_arrival(row_id: i64) -> u64 {
+    seed_arrival();
+    let id = row_id.max(1) as u64;
+    NEXT_ARRIVAL.fetch_max(id + 1, std::sync::atomic::Ordering::Relaxed);
+    id
+}
+
+fn seed_arrival() {
+    static SEEDED: OnceLock<()> = OnceLock::new();
+    SEEDED.get_or_init(|| {
+        let top = queue(|s| s.max_activity_id()).unwrap_or(0).max(0) as u64;
+        NEXT_ARRIVAL.fetch_max(top + 1, std::sync::atomic::Ordering::Relaxed);
+    });
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -446,8 +470,7 @@ fn recover_open_turns(session: &str) {
         with_rec(session, &window, |r| {
             if r.prompt.is_none() && r.end.is_none() && r.tool.is_none() && r.ask.is_none() {
                 r.prompt = Some(ts_ms / 1000);
-                let _ = row_id;
-                r.prompt_seq = arrival();
+                r.prompt_seq = recovered_arrival(row_id);
             }
         });
     }
@@ -1797,6 +1820,44 @@ mod tests {
         assert!(record_prompt(&session, "w1", notice), "and its own late echo settles it too");
         let last = recent_events(&session, 0).into_iter().filter(|e| e.kind == "prompt").last().unwrap();
         assert_eq!(last.deliveries[0].id, warns[1]);
+    }
+
+    /// Validator's restart tie (#249): a turn edge recovered from the log keeps
+    /// the log's order, and a stop observed AFTER the restart in the same
+    /// second still sorts after it — even when the recovered row id is larger
+    /// than any number this process has handed out.
+    #[test]
+    fn a_stop_after_a_restart_sorts_after_a_recovered_prompt_in_the_same_second() {
+        crate::projects::tests::use_test_store();
+        let session = format!("rtie-{}", uuid::Uuid::new_v4());
+        let t = now();
+        crate::projects::with_store(|s| s.insert_activity(&session, "w1", t * 1000, "prompt", "long turn", "", "app", "", "")).unwrap();
+        let (_, _, row_id) = crate::projects::with_store(|s| s.open_turns(&session)).unwrap().remove(0);
+        // Simulate a log far ahead of this process's counter: the recovered
+        // order must still move the counter past it.
+        let far = row_id + 1_000_000_000;
+        simulate_restart(&session);
+        with_rec(&session, "w1", |r| {
+            r.prompt = Some(t);
+            r.prompt_seq = recovered_arrival(far);
+        });
+        assert_eq!(derive(&session, "w1", 0).state, "running", "the recovered turn is open");
+        record_notification(&session, "w1", "completed", t); // same second, after the restart
+        assert_eq!(derive(&session, "w1", 0).state, "idle", "the later stop wins the tie");
+        record_prompt(&session, "w1", "next queued line"); // and the next prompt, same second
+        assert_eq!(derive(&session, "w1", 0).state, "running");
+        // A stop then a restart in the same second then a new prompt: the stop
+        // is not recovered as open, and the new prompt opens the turn.
+        let closed = format!("rtie2-{}", uuid::Uuid::new_v4());
+        crate::projects::with_store(|s| {
+            s.insert_activity(&closed, "w1", t * 1000, "prompt", "turn", "", "app", "", "")?;
+            s.insert_activity(&closed, "w1", t * 1000, "notif", "completed", "", "", "", "")
+        })
+        .unwrap();
+        recovery_mark(&closed);
+        assert_eq!(derive(&closed, "w1", 0).state, "idle");
+        record_prompt(&closed, "w1", "new prompt, same second");
+        assert_eq!(derive(&closed, "w1", 0).state, "running");
     }
 
     /// The matcher over rows, pure: order, duplicates and truncation.
