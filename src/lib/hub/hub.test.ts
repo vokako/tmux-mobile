@@ -1354,6 +1354,28 @@ test('pastedFiles pulls the files out of a paste, or [] for plain text (board #2
   assert.deepEqual(pastedFiles(null), [], 'clipboardData can be null');
 });
 
+test('mentionTokens reads an address by the server\'s one rule (#248)', () => {
+  // The same table as hub_rpc.rs `an_address_must_start_a_word`.
+  const cases: [string, string[]][] = [
+    ['@bob look', ['bob']],
+    ['look @bob', ['bob']],
+    ['@bob: now, @alice.', ['bob', 'alice']],
+    ['(@bob) and "@alice" and **@carol**', ['bob', 'alice', 'carol']],
+    ['mail me at a@bob.dev', []],
+    ['a@bob', []],
+    ['x.y@bob and first-last@bob', []],
+    ['npm i pkg@2.4.0', []],
+    ['see @bob.dev', []],
+    ['请@bob 看看，@alice，不急。@builder-2。', ['bob', 'alice', 'builder-2']],
+    ['@kiro/@claude', ['kiro', 'claude']],
+    ['@a@b', []],
+    ['@ alone, @, @!', []],
+    ['line one\n@bob line two', ['bob']],
+    ['@all standup', ['all']],
+  ];
+  for (const [body, tokens] of cases) assert.deepEqual(mentionTokens(body), tokens, body);
+});
+
 test('mentionsAgent parses addresses the way deliver_mentions does', () => {
   assert.ok(mentionsAgent('@builder fix it', 'builder'));
   assert.ok(mentionsAgent('please @builder: now', 'builder'), 'trailing punctuation trimmed');
@@ -1376,7 +1398,7 @@ test('mentionedAgents is the delivery verdict: who a body is typed into, in rost
   assert.deepEqual(mentionedAgents('@ghost gone, mail x@builder.com', roster), [], 'a removed agent or an email address reaches nobody');
   assert.deepEqual(mentionedAgents('@all nobody home', []), [], '@all over an empty roster types into nobody');
   // Same tokenizer as mentionsAgent — the two readings cannot drift.
-  assert.deepEqual(mentionTokens('hi @a, @b: and x@c.d'), ['a', 'b', 'c.d']);
+  assert.deepEqual(mentionTokens('hi @a, @b: and x@c.d'), ['a', 'b'], 'an in-word @ is not an address (#248)');
   assert.equal(mentionsAgent('please @builder: now', 'builder'), mentionedAgents('please @builder: now', roster).includes('builder'));
 });
 

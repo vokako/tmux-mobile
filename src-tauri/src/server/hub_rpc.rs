@@ -862,16 +862,51 @@ struct RoutedChat {
     hidden: bool,
 }
 
-fn mention_names(body: &str) -> Vec<String> {
-    body
-        .split('@')
-        .skip(1)
-        .filter_map(|rest| rest.split_whitespace().next())
-        .map(|name| name.trim_end_matches([',', ':', ';', '.', '!', '?']))
-        .filter(|name| !name.is_empty())
-        .map(str::to_string)
-        .collect()
+/// The `@` addresses in a chat body — the ONE server reading of who a message
+/// names (board #248). `deliver_mentions`, the room's stored `to`, and the
+/// `tmm send` "has a recipient" check all use it (pure, so it is not
+/// desktop-gated: the phone's server reads addresses too); the client's
+/// `mentionTokens` (hub.ts) mirrors it case for case.
+///
+/// Two edges, both derived from what an agent name can be (`projects::agents::valid_name`:
+/// letters and digits of any script, `-`, `_`):
+///
+/// * The `@` must START a word: at the start of the body, or after anything
+///   that is not an email/host character (ASCII letter or digit, `_`, `.`,
+///   `-`). So `me@bob.dev`, `a@bob` and `pkg@2.4.0` name nobody, while
+///   `(@bob)`, `"@bob"`, `/@bob` and a CJK character right before it
+///   (`请@bob`, which the owner writes) still address bob.
+/// * The address is the run of name characters after it, so trailing
+///   punctuation of any kind ends it: `(@bob)`, `@bob，`, `@bob。` and
+///   `**@bob**` name bob. A run followed by `.` plus a name character, or by
+///   another `@`, is a host or an address, not a name (`@bob.dev`, `@a@b`).
+///
+/// Before #248 every `@` split and the address ran to the next whitespace, so
+/// `mail a@bob` typed into bob's pane while `(@bob)` and `@bob，` reached
+/// nobody.
+pub fn mention_names(body: &str) -> Vec<String> {
+    let in_word = |c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-');
+    let name_char = |c: char| c.is_alphanumeric() || matches!(c, '_' | '-');
+    let mut out = Vec::new();
+    for (i, _) in body.match_indices('@') {
+        if body[..i].chars().next_back().is_some_and(in_word) {
+            continue;
+        }
+        let rest = &body[i + 1..];
+        let end = rest.find(|c: char| !name_char(c)).unwrap_or(rest.len());
+        let mut after = rest[end..].chars();
+        let host = match after.next() {
+            Some('@') => true,
+            Some('.') => after.next().is_some_and(name_char),
+            _ => false,
+        };
+        if end > 0 && !host {
+            out.push(rest[..end].to_string());
+        }
+    }
+    out
 }
+
 
 fn context_noise(body: &str) -> bool {
     let body = body.trim_start();
@@ -1932,6 +1967,75 @@ mod tests {
             vec![("lead", "undelivered (pane is in copy mode): /compact now"), ("lead", "undelivered (pane is in copy mode): /clear")],
         );
         assert!(warns.iter().all(|w| w.deliveries.is_empty()), "no delivery reference");
+    }
+
+    /// Board #248, on the real delivery path: an in-word `@` (an email, `a@bob`)
+    /// types into nobody and is stored with no recipient, while `(@bob)` —
+    /// punctuation around a real address — reaches bob.
+    #[test]
+    fn an_in_word_at_delivers_to_nobody_but_a_bracketed_address_does() {
+        crate::projects::tests::use_test_store();
+        let session = format!("tmm-inword-{}", uuid::Uuid::new_v4());
+        let ws = std::env::temp_dir().join(format!("tmm-inword-ws-{}", uuid::Uuid::new_v4()));
+        let home = ws.join(".tmm/agents/bob");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(
+            home.join("launch.json"),
+            serde_json::json!({ "backend": "kiro", "cmd": "kiro-cli chat --agent bob", "team": "" }).to_string(),
+        )
+        .unwrap();
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "-n", "bob", "-c", &ws.to_string_lossy(), "cat"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            let _ = std::fs::remove_dir_all(&ws);
+            return;
+        }
+        let _cleanup = KillOnDrop(session.clone(), ws.clone());
+        crate::projects::adopt(&session, Some("inword-test")).expect("adopt project");
+        let post = |body: &str| {
+            let r = handle_hub_request(&req("hub_post", serde_json::json!({ "session": session, "from": "human", "body": body })), None);
+            assert!(r.error.is_none(), "{:?}", r.error.map(|e| e.message));
+            r.result.unwrap()
+        };
+        let email = post("mail me at a@bob.dev or ping a@bob");
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let after_email = crate::tmux::capture_pane_plain(&format!("{session}:bob"), Some(0)).unwrap_or_default();
+        let bracket = post("(@bob) please look");
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let after_bracket = crate::tmux::capture_pane_plain(&format!("{session}:bob"), Some(0)).unwrap_or_default();
+        assert!(!after_email.contains("mail me"), "an in-word @ types into nobody: {after_email:?}");
+        assert_eq!(email.get("to"), Some(&serde_json::json!([])), "and is stored with no recipient: {email}");
+        assert!(after_bracket.contains("(@bob) please look"), "a bracketed address reaches bob: {after_bracket:?}");
+        assert_eq!(bracket.get("to"), Some(&serde_json::json!(["bob"])), "{bracket}");
+    }
+
+    /// Board #248: one table, the same as `hub.test.ts`'s — the client and
+    /// the server read an address by one rule.
+    #[test]
+    fn an_address_must_start_a_word() {
+        for (body, tokens) in [
+            ("@bob look", vec!["bob"]),
+            ("look @bob", vec!["bob"]),
+            ("@bob: now, @alice.", vec!["bob", "alice"]),
+            ("(@bob) and \"@alice\" and **@carol**", vec!["bob", "alice", "carol"]),
+            ("mail me at a@bob.dev", vec![]),
+            ("a@bob", vec![]),
+            ("x.y@bob and first-last@bob", vec![]),
+            ("npm i pkg@2.4.0", vec![]),
+            ("see @bob.dev", vec![]),
+            ("请@bob 看看，@alice，不急。@builder-2。", vec!["bob", "alice", "builder-2"]),
+            ("@kiro/@claude", vec!["kiro", "claude"]),
+            ("@a@b", vec![]),
+            ("@ alone, @, @!", vec![]),
+            ("line one\n@bob line two", vec!["bob"]),
+            ("@all standup", vec!["all"]),
+        ] {
+            assert_eq!(mention_names(body), tokens, "{body:?}");
+        }
     }
 
     #[test]

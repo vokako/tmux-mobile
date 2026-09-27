@@ -14,6 +14,8 @@ mod hub_rpc;
 mod rpc;
 mod connection;
 pub use connection::{handle_connection, ConnContext};
+/// The one reading of who a chat body addresses (board #248), for `tmm send`.
+pub use hub_rpc::mention_names;
 use connection::{enable_tcp_keepalive, handle_connection_ws, ws_config};
 
 pub type NotificationHub = Arc<AgentNotificationHub>;

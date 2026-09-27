@@ -1378,17 +1378,30 @@ export function mentionsAgent(body: string, name: string): boolean {
   return mentionTokens(body).some((token) => token === name || token === 'all');
 }
 
-/** The `@` tokens of a body, exactly as `deliver_mentions` reads them: the
- * run after each `@` up to whitespace, trailing punctuation trimmed. ONE
- * tokenizer for every client-side reading of an address — the filter, the
- * room-note verdict and the composer chip cannot disagree about what `@bob:`
- * means. */
+/** The `@` tokens of a body, exactly as the server reads them
+ * (`hub_rpc::mention_names`, board #248 — the same case table pins both
+ * sides). The `@` must start a word: at the start, or after anything but an
+ * email/host character (ASCII letter or digit, `_ . -`), so `a@bob` and
+ * `me@bob.dev` name nobody while `(@bob)` and `请@bob` do. The address is the
+ * run of name characters (letters and digits of any script, `-`, `_`) after
+ * it; a run followed by `.`+name character or another `@` is a host, not a
+ * name. ONE tokenizer for every client-side reading of an address — the
+ * filter, the room-note verdict and the composer chip cannot disagree about
+ * what `@bob:` means. */
 export function mentionTokens(body: string): string[] {
-  return body
-    .split('@')
-    .slice(1)
-    .map((rest) => rest.split(/\s/, 1)[0]?.replace(/[,:;.!?]+$/u, '') ?? '')
-    .filter(Boolean);
+  const inWord = /[A-Za-z0-9_.-]/u;
+  const nameRun = /^[\p{L}\p{N}_-]*/u;
+  const nameChar = /[\p{L}\p{N}_-]/u;
+  const out: string[] = [];
+  for (let i = body.indexOf('@'); i >= 0; i = body.indexOf('@', i + 1)) {
+    const before = [...body.slice(0, i)].pop();
+    if (before && inWord.test(before)) continue;
+    const run = nameRun.exec(body.slice(i + 1))![0];
+    const after = [...body.slice(i + 1 + run.length, i + 3 + run.length)];
+    const host = after[0] === '@' || (after[0] === '.' && !!after[1] && nameChar.test(after[1]));
+    if (run && !host) out.push(run);
+  }
+  return out;
 }
 
 /** Which of `names` this body is TYPED INTO — the server's `deliver_mentions`

@@ -1095,12 +1095,10 @@ fn need_project(ctx: &Ctx) -> String {
     })
 }
 
+/// The server's own reading of an address (board #248): a send the server
+/// would deliver to nobody is refused here, before it reaches the room.
 fn has_address(body: &str) -> bool {
-    body.split('@')
-        .skip(1)
-        .filter_map(|rest| rest.split_whitespace().next())
-        .map(|name| name.trim_end_matches([',', ':', ';', '.', '!', '?']))
-        .any(|name| !name.is_empty())
+    !tmux_mobile::server::mention_names(body).is_empty()
 }
 
 /// `--flag value` / `--flag` / `-f` → map; the rest are positionals.

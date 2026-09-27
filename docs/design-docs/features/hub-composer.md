@@ -941,6 +941,17 @@ a name (the default lead) types into ONE agent's input; `@all` types into EVERY 
 
 `/model`, `/clear`, `/compact` are interpreted by the agent's TUI and only as a whole line, so `hub_command` types them VERBATIM into the pane — no `[tmm chat …] human:` stamp, no @address (owner, 2026-08-19). `slashCommand()` (pure + tested) requires the first token to be `/word` with NO second slash, so `/tmp/foo` and `/usr/bin/env node` stay messages; it needs a target (explicit `@name`, else the composer's recipient, `@all` = every managed agent) and falls back to an ordinary message when there is none; managed windows only (a `/clear` typed into a SHELL would run as a path); and the room records it as a `[tmm] ` lifecycle line, never a message, so the mention scanner cannot feed it back.
 
+### An address starts a word (board #248, 2026-09-27)
+
+Validator found during #242 that the server split a body on every `@`, so `mail me at a@bob` typed into bob's pane, and `a@bob.dev` addressed a window named `bob.dev`. The other edge was broken too: the address ran to the next whitespace, so `(@bob)`, `@bob，` and `@bob。` named nobody. The room holds real cases of both: 85 `@` right after an ASCII letter or digit (emails, `pkg@2.4.0`), and about 20 names followed by full-width punctuation or markdown.
+
+`hub_rpc::mention_names` (re-exported as `server::mention_names`; pure, so not desktop-gated) is now the one server reading, used by `deliver_mentions`, the stored `to` and `tmm send`'s recipient check. The client's `mentionTokens` mirrors it, and one case table pins both sides (`an_address_must_start_a_word`, `hub.test.ts` "mentionTokens reads an address…"). Both edges derive from what an agent name can be (`valid_name`):
+
+- The `@` must start a word: at the start of the body, or after anything that is not an email/host character (ASCII letter or digit, `_ . -`). `(@bob)`, `"@bob"`, `/@bob` and a CJK character right before it (`请@bob`, which the owner writes) are all addresses.
+- The address is the run of name characters after it (letters and digits of any script, `-`, `_`), so any trailing punctuation ends it. A run followed by `.` plus a name character, or by another `@`, is a host or an address, not a name (`@bob.dev`, `@a@b`).
+
+A CJK word glued to the name (`@bob看看`) still reads as one run, because CJK characters are letters; that stays as before. Pinned on the delivery path by `an_in_word_at_delivers_to_nobody_but_a_bracketed_address_does` (real tmux, `hub_post`). Negative control: without the word-start check both Rust tests and the client table fail.
+
 ### `@` completion rides the `/` palette (board #242, 2026-09-27)
 
 Owner: "输入“@”，可以提示我 @ 某一个 Agent 的候选项". `mentionPalette`
@@ -949,8 +960,8 @@ Owner: "输入“@”，可以提示我 @ 某一个 Agent 的候选项". `mentio
 the back layer are the existing ones; there is no second list. It
 completes only the LAST token, and only an `@` at the start or after
 whitespace: an `@` inside a word (`me@b`, an email address) does not open
-the list. That is a completion rule only; the server's `mention_names`
-still splits on every `@`, which is older behaviour outside #242. The
+the list. Since #248 delivery reads an address by the same word-start
+rule (see "An address starts a word" below). The
 candidates are exactly what delivery reaches: the room's
 managed agents (hint: backend) and `all`. Team names are not offered: a
 body `@team` names no window and reaches nobody; a team is addressed by
