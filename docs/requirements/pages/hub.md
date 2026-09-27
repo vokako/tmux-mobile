@@ -12,10 +12,13 @@ See `docs/design-docs/features/tmm-cli.md` (architecture & rationale) and
 completion).
 
 ## Availability
-- **Desktop only** (`hubEligible`): the hub tab never renders on the phone;
-  compact (≤760px) windows get the drill-down layout (project list ⇄
-  conversation).
-- Requires the desktop server (hub RPCs are method-not-found elsewhere).
+- **Every form factor the server allows** (`hubEligible` = the server answers
+  `hub_rooms`, probed on every connect): Chat and Board are tabs on the phone
+  too (the phone's chat tab is this page since 2026-08-01); the three-column
+  workbench is the desktop form, compact (≤760px) gets the drill-down layout
+  (project list ⇄ conversation) and keeps Agents inside Settings.
+- Requires a server new enough to answer the hub RPCs (method-not-found
+  elsewhere; a probed-unavailable server falls back to the terminal).
 
 ## The model (business summary)
 - **A project is a directory + a tmux session**; every session is a project
