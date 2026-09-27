@@ -207,6 +207,9 @@ completion).
   from each CLI, view-commands filtered out; fuzzy 3-tier matching); a
   command-shaped draft styles as a command and goes verbatim into the pane
   (`hub_command`).
+- `@` at the start of a word opens the same palette with the room's managed
+  agents and `@all` (fuzzy-matched; Enter/Tab/tap inserts `@name `, Escape
+  dismisses); `a@b` does not open it.
 - Readline editing (Ctrl-A/E/U/K/W/Y/D/H/T/F/B, one kill buffer).
 - **Interrupt**: empty-composer send button arms (amber) then fires Escape
   into the recipient's pane; double Ctrl-C same; while the recipient is

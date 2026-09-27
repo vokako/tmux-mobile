@@ -935,6 +935,33 @@ test('the reading filter ends when its agent leaves the room, not when it stops 
   } finally { await app.close(); }
 });
 
+test('typing @ offers the room\'s agents in the slash palette; Enter inserts, Escape dismisses (#242)', { timeout: 60000 }, async (context) => {
+  const posts: string[] = [];
+  const app = await composerFixture(context, { hubPost: async (_s: string, body: string) => { posts.push(body); return {}; } });
+  const options = () => [...app.document.querySelectorAll('.cmd-menu .cmd-opt .cmd-name')].map((n) => n.textContent);
+  try {
+    await app.text('ask @');
+    assert.deepEqual(options(), ['@alice', '@bob', '@all'], 'managed agents, then everyone');
+    await app.text('ask @b');
+    assert.deepEqual(options(), ['@bob']);
+    assert.equal(await app.key('Enter'), true, 'Enter accepts the candidate, it does not send');
+    assert.equal(app.input.value, 'ask @bob ');
+    assert.deepEqual(posts, []);
+    assert.equal(app.document.querySelector('.cmd-menu'), null, 'a finished mention closes the list');
+    await app.text('ask @bob and @');
+    assert.ok(app.document.querySelector('.cmd-menu'));
+    assert.equal(await app.key('Escape'), true);
+    assert.equal(app.document.querySelector('.cmd-menu'), null, 'Escape dismisses without touching the text');
+    assert.equal(app.input.value, 'ask @bob and @');
+    await app.text('mail me@b');
+    assert.equal(app.document.querySelector('.cmd-menu'), null, 'an address never opens it');
+    await app.text('@a');
+    app.document.querySelector<HTMLButtonElement>('.cmd-opt:last-child')!.click();
+    await app.flush();
+    assert.equal(app.input.value, '@all ', 'a tap accepts too');
+  } finally { await app.close(); }
+});
+
 test('stopped-card double-click only filters and closes its click menu (#173)', { timeout: 60000 }, async (context) => {
   const app = await composerFixture(context, {
     projectList: async () => ({ projects: [{

@@ -3,7 +3,7 @@
   import Icon from '../ui/Icon.svelte';
   import CommandButton from '../ui/CommandButton.svelte';
   import { t } from '../core/i18n.svelte.ts';
-  import { slashCommand, commandPalette, readlineEdit, pastedFiles, textIsThePaste } from './hub.ts';
+  import { slashCommand, commandPalette, mentionPalette, readlineEdit, pastedFiles, textIsThePaste } from './hub.ts';
   import { ALL_TARGET, paletteBackendFor, signatureLayout, targetTeam } from './hub-composer.ts';
   import { fonts, uiFont } from '../app/fonts.svelte.ts';
 
@@ -198,12 +198,19 @@
   let paletteIdx = $state(0);
   let paletteOff = $state(false);
   const paletteBackend = $derived(paletteBackendFor(composerText, recipient, agents));
-  const palette = $derived(paletteOff ? null : commandPalette(composerText, cmdModels[paletteBackend] ?? [], paletteBackend));
+  /* `@` completion rides the same palette (#242): the names delivery reaches,
+     the managed agents of this room and `all`. */
+  const mentionCandidates = $derived([
+    ...agents.filter((a) => a.managed).map((a) => ({ value: a.name, hint: a.agent ?? '' })),
+    { value: ALL_TARGET, hint: t('hubEveryone') },
+  ]);
+  const palette = $derived(paletteOff ? null
+    : commandPalette(composerText, cmdModels[paletteBackend] ?? [], paletteBackend) ?? mentionPalette(composerText, mentionCandidates));
   $effect(() => { void composerText; paletteOff = false; });
   $effect(() => { void palette; paletteIdx = 0; });
   $effect(() => {
     const backend = paletteBackend;
-    if (!palette || cmdModels[backend]) return;
+    if (!palette || palette.stage === 'mention' || cmdModels[backend]) return;
     modelsList(backend || 'kiro').then((r) => { cmdModels = { ...cmdModels, [backend]: r.models ?? [] }; }).catch(() => {});
   });
 

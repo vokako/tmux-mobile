@@ -941,6 +941,22 @@ a name (the default lead) types into ONE agent's input; `@all` types into EVERY 
 
 `/model`, `/clear`, `/compact` are interpreted by the agent's TUI and only as a whole line, so `hub_command` types them VERBATIM into the pane — no `[tmm chat …] human:` stamp, no @address (owner, 2026-08-19). `slashCommand()` (pure + tested) requires the first token to be `/word` with NO second slash, so `/tmp/foo` and `/usr/bin/env node` stay messages; it needs a target (explicit `@name`, else the composer's recipient, `@all` = every managed agent) and falls back to an ordinary message when there is none; managed windows only (a `/clear` typed into a SHELL would run as a path); and the room records it as a `[tmm] ` lifecycle line, never a message, so the mention scanner cannot feed it back.
 
+### `@` completion rides the `/` palette (board #242, 2026-09-27)
+
+Owner: "输入“@”，可以提示我 @ 某一个 Agent 的候选项". `mentionPalette`
+(`hub.ts`, pure and tested) returns the same `Palette` shape as
+`commandPalette`, so the popover, the arrow/Tab/Enter/tap keys, Escape and
+the back layer are the existing ones; there is no second list. It
+completes only the LAST token, and only an `@` at the start or after
+whitespace, because `deliver_mentions` reads `a@b` as an address, not a
+mention. The candidates are exactly what delivery reaches: the room's
+managed agents (hint: backend) and `all`. Team names are not offered: a
+body `@team` names no window and reaches nobody; a team is addressed by
+its tab (orchestrator, #242). A query that already equals the only
+remaining candidate offers nothing, so Enter after a finished `@bob`
+sends instead of re-completing. The slash palette is asked first, so a
+`/command` line never shows names.
+
 ### The `/` palette is transcribed, not invented
 
 `KIRO_COMMANDS` (`hub.ts`) carries kiro-cli's own names/descriptions/sub-commands copied from its TUI table — a made-up command looks authoritative in the list and then does nothing in the pane — minus cloud-only/hidden entries, with `/quit` last.

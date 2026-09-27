@@ -837,8 +837,9 @@ export function offeredCommands(backend?: string | null): readonly SlashCmd[] {
 
 export interface PaletteItem { value: string; hint: string }
 export interface Palette {
-  /** 'command' completes `/mo` → `/model`; 'arg' completes what follows it. */
-  stage: 'command' | 'arg';
+  /** 'command' completes `/mo` → `/model`; 'arg' completes what follows it;
+   * 'mention' completes `@bo` → `@bob`. */
+  stage: 'command' | 'arg' | 'mention';
   items: PaletteItem[];
   /** Replace `text.slice(from)` with the chosen value. */
   from: number;
@@ -922,6 +923,27 @@ export function commandPalette(text: string, models: readonly string[] = [], bac
   const items = fuzzyPick(typed, values, (v) => v)
     .map((v) => ({ value: v, hint: cmd.dynamic === 'models' && !cmd.args?.includes(v) ? 'model' : 'option' }));
   return items.length ? { stage: 'arg', items, from, more: false } : null;
+}
+
+/**
+ * The `@` completion (board #242, owner 2026-09-27: "输入“@”，可以提示我 @ 某
+ * 一个 Agent 的候选项"). It rides the slash palette: same `Palette` shape, same
+ * popover, same keys. Only the LAST token of the text is completed, and only
+ * when it is an `@` at the start or after whitespace — `a@b` is an address,
+ * never a mention. The query is the run `mentionTokens` would read (no second
+ * `@`, no whitespace). `candidates` are the names `deliver_mentions` delivers
+ * to: the room's managed agents plus `all`, with the caller's hint text.
+ * A query that already IS the one remaining candidate offers nothing, so
+ * Enter after a finished `@bob` sends instead of completing it again.
+ */
+export function mentionPalette(text: string, candidates: readonly PaletteItem[]): Palette | null {
+  const m = /(^|\s)@([\w.-]*)$/u.exec(text ?? '');
+  if (!m || !candidates.length) return null;
+  const query = m[2]!;
+  const items = fuzzyPick(query, candidates, (c) => c.value).map((c) => ({ value: `@${c.value}`, hint: c.hint }));
+  if (!items.length || (items.length === 1 && items[0]!.value === `@${query}`)) return null;
+  // `more`: the accepted mention takes its separating space, like a command.
+  return { stage: 'mention', items, from: (text ?? '').length - query.length - 1, more: true };
 }
 
 export type FeedLevel = 'chat' | 'status' | 'tools';

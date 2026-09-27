@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
-import { rosterGroups, rosterMarker, sortAgentsForRoster } from './hub.ts';
+import { mentionPalette, rosterGroups, rosterMarker, sortAgentsForRoster } from './hub.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
   ts: 0, window: 'w1', kind: 'tool', text: '', ...e,
@@ -1616,4 +1616,20 @@ test('rosterMarker: a lit team down to one live member marks that member\'s card
   assert.equal(rosterMarker({ all: false, team: 'review', groups: [], addressed: false }), '', 'an empty team is the room');
   assert.equal(rosterMarker({ all: false, team: null, groups: one, addressed: true }), '.acard.sel[data-agent]');
   assert.equal(rosterMarker({ all: false, team: null, groups: one, addressed: false }), '');
+});
+
+test('mentionPalette: @ at a word start offers the room\'s addressable names (#242)', () => {
+  const names = [{ value: 'alice', hint: 'kiro' }, { value: 'bob', hint: 'codex' }, { value: 'all', hint: 'Everyone' }];
+  assert.deepEqual(mentionPalette('@', names)?.items.map((i) => i.value), ['@alice', '@bob', '@all']);
+  const mid = mentionPalette('ship it @b', names)!;
+  assert.deepEqual(mid.items, [{ value: '@bob', hint: 'codex' }]);
+  assert.equal(mid.stage, 'mention');
+  assert.equal(mid.from, 'ship it '.length, 'accepting replaces the @ token itself');
+  assert.equal(mid.more, true, 'the accepted name takes its separating space');
+  assert.deepEqual(mentionPalette('@al', names)?.items.map((i) => i.value), ['@alice', '@all'], 'prefix tier keeps table order');
+  assert.equal(mentionPalette('mail a@b', names), null, 'an address is not a mention');
+  assert.equal(mentionPalette('@bob', names), null, 'a finished name offers nothing, so Enter sends');
+  assert.equal(mentionPalette('@bob ', names), null, 'only the last token is completed');
+  assert.equal(mentionPalette('@zz', names), null);
+  assert.equal(mentionPalette('@', []), null, 'no managed agents: nothing to offer');
 });
