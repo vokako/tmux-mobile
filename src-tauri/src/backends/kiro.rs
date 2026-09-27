@@ -229,8 +229,11 @@ pub(crate) fn patch_profile(path: &Path, hooks: Value) -> bool {
 /// steer 模式"): a line typed at a BUSY agent waits for the turn to end instead
 /// of steering the turn mid-flight — the agent reads it whole, as its own
 /// prompt. That is also the contract the delivery pipeline already assumes:
-/// `delivery_overdue` pauses the ack clock while a turn is open precisely
-/// because kiro "Type to queue"s what we send.
+/// `overdue_rows` pauses the ack clock while a turn is open precisely
+/// because kiro "Type to queue"s what we send. The setting is only the
+/// START mode: kiro 2.22.1 v3 toggles it per session on Ctrl+S or from its
+/// settings menu, and a STEERED line fires no `userPromptSubmit`, so it can
+/// never be acknowledged (board #249, measured 2026-09-27).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn kiro_cli_settings() -> Vec<(&'static str, Value)> {
     vec![
