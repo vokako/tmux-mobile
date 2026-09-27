@@ -5,7 +5,7 @@
   import { untrack } from 'svelte';
   import { ALL_TARGET, targetMembers, targetTeam, teamTarget } from './hub-composer.ts';
   import { backendIcon } from '../core/agents.ts';
-  import { backendColor, stateDotColor, stateIsLive, chipExtras, ctxColor, fmtElapsed, modelLabel, rosterGroups, sortAgentsForRoster } from './hub.ts';
+  import { backendColor, stateDotColor, stateIsLive, chipExtras, ctxColor, fmtElapsed, modelLabel, namedGroup, rosterGroups, rosterMarker, sortAgentsForRoster } from './hub.ts';
   import { hoverInfo } from '../ui/hover.ts';
   import { longpress } from '../ui/longpress.ts';
   import { anchorOf } from '../ui/placement.ts';
@@ -101,8 +101,10 @@
      All (and while All previews), the lit team, or the lit card. Empty when
      nothing in the strip is the recipient (the room itself). */
   const litTeam = $derived(targetTeam(recipient));
-  const litInGroup = $derived(!allLit && !litTeam && groups.some((g) => !!g.team && g.members.length > 1 && g.members.some((m) => m.name === recipient)));
-  const markerTarget = $derived(allLit ? ':scope > .tabs-extent' : litTeam ? '.roster-cluster.team-lit' : managedAgents.some((a) => a.name === recipient) ? '.acard.sel[data-agent]' : '');
+  const litInGroup = $derived(!allLit && !litTeam && groups.some((g) => namedGroup(g) && g.members.some((m) => m.name === recipient)));
+  /* A lit team down to one live member is drawn as that member's card, so
+     the marker lands on the card like any single recipient (#241). */
+  const markerTarget = $derived(rosterMarker({ all: allLit, team: litTeam, groups, addressed: managedAgents.some((a) => addressedMembers.has(a.name)) }));
   const markerKey = $derived([recipient, allLit, expanded, orderedAgents.map((a) => a.name).join(',')].join('|'));
   $effect(() => {
     void selected; void expanded;
@@ -249,7 +251,7 @@
           disabled={!selected || !roomReady} onclick={onall} />
       </span>
       {#each groups as group (group.key)}
-      {@const named = !!group.team && group.members.length > 1}
+      {@const named = namedGroup(group)}
       <div class="roster-cluster" class:team={named} class:team-lit={named && recipient === teamTarget(group.team)} data-team={named ? group.team : undefined}
         role={named ? 'group' : undefined} aria-label={named ? `${t('teamsTitle')} ${group.team}` : undefined}
         animate:flip={{ duration: moveMs() }}>

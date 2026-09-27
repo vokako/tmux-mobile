@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
-import { rosterGroups, sortAgentsForRoster } from './hub.ts';
+import { rosterGroups, rosterMarker, sortAgentsForRoster } from './hub.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
   ts: 0, window: 'w1', kind: 'tool', text: '', ...e,
@@ -1604,4 +1604,16 @@ test('a long message confirms against its TRUNCATED echo (board #78)', () => {
   // The client's cut point mirrors the server's constant — pin them together.
   const telemetry = readFileSync(new URL('../../../src-tauri/src/projects/telemetry.rs', import.meta.url), 'utf8');
   assert.match(telemetry, new RegExp(`const MAX_PROMPT_CHARS: usize = ${PROMPT_ECHO_MAX};`, 'u'));
+});
+
+test('rosterMarker: a lit team down to one live member marks that member\'s card (#241)', () => {
+  const pair = rosterGroups([ag({ name: 'bob', team: 'review' }), ag({ name: 'charlie', team: 'review/backend', window: 2 })]);
+  const one = rosterGroups([ag({ name: 'bob', team: 'review' })]);
+  assert.equal(rosterMarker({ all: true, team: null, groups: pair, addressed: false }), ':scope > .tabs-extent');
+  assert.equal(rosterMarker({ all: false, team: 'review', groups: pair, addressed: true }), '.roster-cluster.team-lit');
+  assert.equal(rosterMarker({ all: false, team: 'review', groups: one, addressed: true }), '.acard.sel[data-agent]',
+    'one member is drawn as a plain card, so the enclosure selector would match nothing and nothing would be lit');
+  assert.equal(rosterMarker({ all: false, team: 'review', groups: [], addressed: false }), '', 'an empty team is the room');
+  assert.equal(rosterMarker({ all: false, team: null, groups: one, addressed: true }), '.acard.sel[data-agent]');
+  assert.equal(rosterMarker({ all: false, team: null, groups: one, addressed: false }), '');
 });

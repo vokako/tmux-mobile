@@ -227,6 +227,30 @@ export function rosterGroups(agents: readonly HubAgent[]): { key: string; team: 
   return groups;
 }
 
+/** Does the strip draw this group AS a team (label, baseline, one lit
+ * enclosure)? A team with one live member is drawn as that member's plain
+ * card. The ONE definition: the markup and the selection marker both read it,
+ * so a team that shrinks to one member can never leave the marker aimed at an
+ * enclosure that is no longer drawn (#241). */
+export const namedGroup = (group: { team: string | null; members: readonly unknown[] }): boolean =>
+  !!group.team && group.members.length > 1;
+
+/** The selector the strip's ONE marker glides to (motion principle 14): the
+ * whole group under All, the lit team's enclosure while it is drawn as a
+ * team, else the lit card(s); `''` when the recipient is the room itself.
+ * `team` is the lit team's root, `addressed` whether any strip card is a
+ * current recipient. */
+export function rosterMarker({ all, team, groups, addressed }: {
+  all: boolean;
+  team: string | null;
+  groups: readonly { team: string | null; members: readonly unknown[] }[];
+  addressed: boolean;
+}): string {
+  if (all) return ':scope > .tabs-extent';
+  if (team && groups.some((g) => g.team === team && namedGroup(g))) return '.roster-cluster.team-lit';
+  return addressed ? '.acard.sel[data-agent]' : '';
+}
+
 /** The body to post for `text` addressed at `to`. `''` means everyone (the
  * room's broadcast), and an explicit `@` anywhere means the user is addressing
  * people by hand — never rewrite that. */

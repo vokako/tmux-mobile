@@ -970,6 +970,8 @@ test('team label selects only current members for chat, CLI commands and interru
     agents.pop();
     await app.advance(5000);
     assert.equal(stripCard(app.document, 'bob').classList.contains('sel'), true, 'one member still belongs to the team target');
+    assert.equal(app.document.querySelector('.roster-cluster.team-lit'), null, 'one live member is not drawn as a team enclosure');
+    assert.ok(app.document.querySelector('.tabs > .slide-pill.tab'), 'the marker stays shown, on bob\'s card (rosterMarker, #241)');
     await app.text('Only one left');
     app.send.click(); await app.flush();
     assert.equal(posts.at(-1), '@bob Only one left');

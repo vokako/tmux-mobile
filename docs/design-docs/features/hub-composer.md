@@ -730,6 +730,12 @@ Its target is the lit card (`.acard.sel[data-agent]`), the lit team group
 group's own extent (an inert `.tabs-extent` box), so a card, a team and All
 are the same marker at a different width; a lit member of a group wears the
 raised `--text2` contour through `.raised`, and only that colour crossfades.
+The rule is `rosterMarker` (`hub.ts`), and it reads the same `namedGroup`
+the markup does: a lit team down to one live member is drawn as that
+member's plain card, so the marker goes to the card. Aiming it at the
+team enclosure when no enclosure was drawn left the selection with no
+highlight at all, because a lit card paints nothing of its own here
+(#241, validator, 2026-09-27).
 In the strip a lit card, team or All paints nothing of its own any more (the
 hover wash stays on unlit cards, as in Chrome); the wrapped list keeps its
 closed boxes per element, and the marker is unmounted there. The marker is

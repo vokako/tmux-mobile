@@ -304,8 +304,8 @@ test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosur
   assert.match(source, /\{#if !expanded && markerTarget\}[\s\S]{0,700}?<span class="slide-pill tab" class:raised=\{litInGroup\} aria-hidden="true">\s*<span class="tab-shape" use:tabShape><svg><path class="tab-fill" \/><path class="tab-edge" \/><\/svg><\/span>\s*<\/span>\s*\{\/if\}/u,
     'the marker is ONE outline: feet, sides and top corners are one filled, once-stroked path (owner, 2026-09-27)');
   assert.doesNotMatch(source, /class="tab-foot|\.tab-foot\b|background: radial-gradient/u, 'no pieced feet: separate rasterisations are what failed to meet');
-  assert.match(source, /const markerTarget = \$derived\(allLit \? ':scope > \.tabs-extent' : litTeam \? '\.roster-cluster\.team-lit' : managedAgents\.some\(\(a\) => a\.name === recipient\) \? '\.acard\.sel\[data-agent\]' : ''\);/u,
-    'All, a team and a card are the same marker at a different width; the room itself has no marker');
+  assert.match(source, /const markerTarget = \$derived\(rosterMarker\(\{ all: allLit, team: litTeam, groups, addressed: managedAgents\.some\(\(a\) => addressedMembers\.has\(a\.name\)\) \}\)\);/u,
+    'All, a team and a card are the same marker at a different width; the rule itself is rosterMarker (hub.test.ts)');
   assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel \{ --card-paint: transparent; --card-line: transparent; \}/u,
     'no card lights in place in the strip — that crossfade beside popping feet was the flash');
   assert.doesNotMatch(source, /\n\s*\.cards:not\(\.expanded\) \.acard\.sel::before/u, 'no second enclosure paint on the card');
@@ -352,7 +352,7 @@ test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosur
 });
 
 test('team tabs use the reference pill, broken baseline and raised member contour (#238)', () => {
-  assert.match(source, /\{@const named = !!group\.team && group\.members\.length > 1\}/u);
+  assert.match(source, /\{@const named = namedGroup\(group\)\}/u, 'the markup and the marker read ONE definition of a drawn team (#241)');
   assert.match(source, /class:team=\{named\} class:team-lit=\{named && recipient === teamTarget\(group\.team\)\} data-team=\{named \? group\.team : undefined\}/u);
   assert.match(source, /role=\{named \? 'group' : undefined\} aria-label=\{named \? `\$\{t\('teamsTitle'\)\} \$\{group\.team\}` : undefined\}/u);
   assert.match(rule('.roster-cluster'), /display: flex; align-items: center; gap: var\(--roster-gap\); flex: none/u,
@@ -374,7 +374,7 @@ test('team tabs use the reference pill, broken baseline and raised member contou
   assert.match(rule('.team-name'), /text-overflow: ellipsis/u, 'long names cannot bury all member tabs on the phone');
   assert.match(rule('.slide-pill.tab.raised'), /--card-line: var\(--text2\)/u,
     'only a lit grouped tab has a raised neutral contour; solos and All keep their original paint');
-  assert.match(source, /const litInGroup = \$derived\(!allLit && !litTeam && groups\.some\(\(g\) => !!g\.team && g\.members\.length > 1 && g\.members\.some\(\(m\) => m\.name === recipient\)\)\);/u);
+  assert.match(source, /const litInGroup = \$derived\(!allLit && !litTeam && groups\.some\(\(g\) => namedGroup\(g\) && g\.members\.some\(\(m\) => m\.name === recipient\)\)\);/u);
   assert.match(rule('.cards:not(.expanded) .roster-cluster.team::before'), /z-index: -1/u, 'the baseline sinks under the marker, in the group\'s stacking context');
   assert.match(rule('.tabs.all-lit .roster-cluster.team::before'), /display: none/u, 'All owns the only visible enclosure');
   assert.match(rule('.cards.expanded .roster-cluster.team'), /flex: 0 1 100%; min-width: 0; flex-wrap: wrap/u,
