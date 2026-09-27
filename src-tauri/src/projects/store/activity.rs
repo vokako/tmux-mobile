@@ -254,6 +254,26 @@ impl Store {
 
     /// A line is settled — acknowledged by its echo, or reported as
     /// unconfirmed. By ROW, so a duplicate body's sibling stays outstanding.
+    /// The newest delivery row of a session, 0 for none (board #249: the
+    /// recovery mark between rows an earlier process typed and ours).
+    pub fn max_delivery_id(&self, session: &str) -> Result<i64, String> {
+        self.conn
+            .query_row(
+                "SELECT COALESCE(MAX(id), 0) FROM deliveries WHERE session = ?1",
+                rusqlite::params![session],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("max delivery id: {e}"))
+    }
+
+    /// Test-only: pretend every outstanding row of a session was typed at `ts`.
+    #[cfg(test)]
+    pub fn backdate_deliveries(&self, session: &str, ts: u64) -> Result<usize, String> {
+        self.conn
+            .execute("UPDATE deliveries SET ts = ?1 WHERE session = ?2", rusqlite::params![ts as i64, session])
+            .map_err(|e| e.to_string())
+    }
+
     pub fn delete_one_delivery(&self, session: &str, window: &str, line: &str) -> Result<bool, String> {
         self.conn
             .execute(

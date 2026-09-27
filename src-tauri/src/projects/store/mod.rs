@@ -26,7 +26,7 @@ mod projects;
 mod registry;
 mod rooms;
 mod schema;
-pub use activity::ActivityRow;
+pub use activity::{ActivityRow, DeliveryRow};
 pub use projects::{Project, Slot, SlotKind};
 pub use registry::{RegAgent, RegMcp, RegSkill, RegTeam};
 pub use rooms::HubMsg;

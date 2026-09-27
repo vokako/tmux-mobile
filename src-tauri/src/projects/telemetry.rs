@@ -21,9 +21,9 @@
 //! small and bounded by the number of live windows; entries for windows that
 //! no longer exist are dropped opportunistically on write. Observations are
 //! process-local on purpose (the next hook re-establishes them), with ONE
-//! exception: the queue of lines we typed into a pane is mirrored into state.db,
+//! exception: the queue of lines we typed into a pane lives ONLY in state.db,
 //! because the agent that will echo them is a separate process that outlives our
-//! restarts — see the durable-delivery block below.
+//! restarts — see the delivery block below (board #249).
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -38,14 +38,11 @@ const ACTIVE_SECS: u64 = 30;
 /// swallows it). The hook echo is the only end-to-end proof, so an unacked line
 /// is reported rather than assumed. The clock does NOT run while a turn is open:
 /// a busy agent QUEUES what we typed by design, so it is measured from the turn's
-/// end (see `delivery_overdue`).
+/// end (see `overdue_rows`).
 const DELIVERY_ACK_SECS: u64 = 45;
 /// Prompt text kept per event. Long enough for a real instruction, short
 /// enough that 120 of them stay a cheap in-memory ring.
 const MAX_PROMPT_CHARS: usize = 1024;
-/// Most outstanding typed lines kept per window. A busy agent's queue is short in
-/// practice; this only stops an unbounded queue if nothing ever acks.
-const MAX_PENDING: usize = 16;
 /// How long an outstanding line stays worth recovering across a restart. Beyond
 /// this the agent that would have echoed it is long gone, so resurrecting the
 /// record would only produce a stale warning.
@@ -69,16 +66,6 @@ struct Rec {
     ask: Option<(String, u64)>,
     /// Last hook tool event: (activity line, ts). Work observed inside a turn.
     tool: Option<(String, u64)>,
-    /// Lines this app typed into the pane that no `userPromptSubmit` hook has
-    /// echoed back yet: (line, ts), oldest first. A QUEUE, not a slot: a busy
-    /// agent holds everything we type and submits it later, so two messages sent
-    /// during one turn are both outstanding at once. With a single slot the second
-    /// erased the first's record, and when the agent finally submitted the first
-    /// line nothing matched it — so it was reported as a prompt the user had typed
-    /// locally, and the message it belonged to never got its delivered mark (owner,
-    /// 2026-08-20: "在对列里后续隔很久才响应的消息 … 显示到 input 上了，但是没有当成
-    /// 已读的消息，给跳过了"). Entries leave on their echo or on the sweep.
-    pending: Vec<(String, u64)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -358,140 +345,56 @@ fn with_rec(session: &str, window: &str, f: impl FnOnce(&mut Rec)) {
     f(map.entry((session.to_string(), window.to_string())).or_default());
 }
 
-// ── Outstanding deliveries survive OUR restart ────────────────────────────
+// ── Outstanding deliveries: ONE queue, in state.db (board #249) ─────────
 //
-// Everything else in this record is an OBSERVATION, and an observation we lost
-// is simply one we no longer have — the next hook re-establishes the state. A
-// pending delivery is different: it is a PROMISE made to a client ("this message
-// was typed into the agent's pane; its receipt is coming"), and the thing that
-// will keep it is a SEPARATE process that our restart does not touch. The agent
-// holds our line in its own input queue and submits it minutes later; if the
-// queue of what we typed died with the server, that echo arrives with nothing to
-// match, so it is filed as a prompt the human typed at the keyboard (`via:
-// local`, rendered as its own input row) and the message keeps its hollow ring
-// for ever — the owner's report on board #5. So the queue is mirrored into
-// state.db and folded back in lazily, once per window per process.
+// A pending delivery is a PROMISE made to a client ("this line was typed into
+// the agent's pane; its receipt is coming"), kept by a SEPARATE process that
+// our restart does not touch: the agent holds the line in its own input queue
+// and submits it minutes later. The `deliveries` table is the only copy. It
+// used to be mirrored in memory with a 16-line cap and folded back after a
+// restart through an unordered map; the two copies disagreed — the memory
+// evicted lines the table kept, the fold kept a random 16 — and every line
+// memory had lost echoed back as keyboard input (`via: local`, an INPUT row,
+// a hollow ring for ever; board #5, #249).
 
-/// Is the durable half in play? In tests it is only once a test has pointed the
-/// process at a throwaway database (`projects::tests::use_test_store`) — the same
-/// rule the activity ring follows, so a unit test about in-memory behaviour can
-/// never write rows into the developer's real state.db.
-#[cfg(test)]
-fn durable() -> bool {
-    std::env::var_os("TMM_STATE_DB").is_some_and(|p| !p.is_empty())
+/// The delivery table, through the store. Tests point the process at a
+/// throwaway database first, so a unit test never writes into the
+/// developer's real state.db.
+fn queue<T>(f: impl FnOnce(&mut super::store::Store) -> Result<T, String>) -> Result<T, String> {
+    #[cfg(test)]
+    crate::projects::tests::use_test_store();
+    super::with_store(f)
 }
 
-#[cfg(not(test))]
-fn durable() -> bool {
-    true
+/// Per session: the newest delivery row that existed when this process first
+/// touched the session's queue, and when that was. Rows at or below it were
+/// typed by an earlier process, and nothing was listening for their echoes
+/// while it was down, so their ack clock starts at that moment rather than at
+/// their typing time — or the first sweep after a restart reports them
+/// unconfirmed seconds before the echo arrives. Rows above it were typed by
+/// this process and keep their own clock.
+fn recovery_marks() -> &'static Mutex<HashMap<String, (i64, u64)>> {
+    static MARKS: OnceLock<Mutex<HashMap<String, (i64, u64)>>> = OnceLock::new();
+    MARKS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Every write here is FAIL-SOFT: telemetry may never block or break the thing
-/// it observes, and without a database the queue is exactly what it was before —
-/// in-memory, good for this process's lifetime.
-fn remember_delivery(session: &str, window: &str, line: &str, ts: u64) {
-    if !durable() {
-        return;
+fn recovery_mark(session: &str) -> (i64, u64) {
+    if let Some(m) = recovery_marks().lock().unwrap().get(session) {
+        return *m;
     }
-    let _ = super::with_store(|s| s.insert_delivery(session, window, line, ts, ""));
-}
-
-/// A line is settled — acked by its echo, or reported by the sweep. One ROW
-/// per call (board #122): duplicates are separate promises, and settling one
-/// must not erase its sibling.
-fn forget_delivery(session: &str, window: &str, line: &str) {
-    if !durable() {
-        return;
-    }
-    let _ = super::with_store(|s| s.delete_one_delivery(session, window, line));
-}
-
-fn forget_window_deliveries(session: &str, window: &str) {
-    if !durable() {
-        return;
-    }
-    let _ = super::with_store(|s| s.clear_deliveries(session, Some(window)));
-}
-
-/// (session, window) keys whose durable queue this process has already folded
-/// into memory. Once folded, memory is the working copy again — the hydration is
-/// a recovery step, not a second source of truth.
-fn hydrated() -> &'static Mutex<std::collections::HashSet<(String, String)>> {
-    static HYDRATED: OnceLock<Mutex<std::collections::HashSet<(String, String)>>> = OnceLock::new();
-    HYDRATED.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
-}
-
-/// Fold the durable queue back into memory. `window` narrows it to one window
-/// (the echo path, which must not pay for a query on every prompt once it has
-/// recovered); `None` is the whole session (the sweep, which has to see queues
-/// belonging to windows this process has not heard from at all).
-///
-/// A recovered line's ack clock starts NOW, not when it was typed: nothing was
-/// listening for its echo while the server was down, and the alternative is to
-/// sweep every recovered line as unconfirmed on the first feed read after a
-/// restart — seconds before the echo we are trying to catch arrives. Same reason
-/// the clock does not run while a turn is open (see `overdue_lines`): a delivery
-/// is only overdue once it has had a real chance to come back.
-fn hydrate(session: &str, window: Option<&str>) {
-    if !durable() {
-        return;
-    }
-    if let Some(w) = window {
-        if hydrated().lock().unwrap().contains(&(session.to_string(), w.to_string())) {
-            return;
-        }
-    }
-    // Lines older than the recovery horizon are dropped once per process:
-    // stale rows can only accumulate ACROSS restarts, since within one process
-    // the sweep settles every line within its ack window.
+    // Lines older than the recovery horizon are dropped once per process: an
+    // echo that never came in a day is not coming.
     static PRUNED: OnceLock<()> = OnceLock::new();
     PRUNED.get_or_init(|| {
         let cutoff = now().saturating_sub(PENDING_MAX_AGE_SECS);
-        let _ = super::with_store(|s| s.prune_deliveries(cutoff));
+        let _ = queue(|s| s.prune_deliveries(cutoff));
     });
+    let top = queue(|s| s.max_delivery_id(session)).unwrap_or(0);
+    *recovery_marks().lock().unwrap().entry(session.to_string()).or_insert((top, now()))
+}
 
-    let rows = super::with_store(|s| s.pending_deliveries(session, window)).unwrap_or_default();
-    let mut by_window: HashMap<String, Vec<String>> = HashMap::new();
-    for row in rows {
-        by_window.entry(row.window).or_default().push(row.line);
-    }
-    // A queried window with no rows still counts as recovered, so the echo path
-    // asks the database once and then stays in memory.
-    if let Some(w) = window {
-        by_window.entry(w.to_string()).or_default();
-    }
-    let ts = now();
-    for (w, lines) in by_window {
-        let key = (session.to_string(), w.clone());
-        if !hydrated().lock().unwrap().insert(key) {
-            continue; // another caller already folded this window in
-        }
-        if lines.is_empty() {
-            continue;
-        }
-        with_rec(session, &w, |r| {
-            // Memory wins COUNT-WISE (board #122): a line typed by THIS
-            // process keeps its own clock, and duplicates are distinct
-            // promises — recover only the rows beyond what memory holds.
-            let mut have: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-            for (l, _) in &r.pending {
-                *have.entry(l.clone()).or_insert(0) += 1;
-            }
-            let mut owed: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-            for line in lines {
-                *owed.entry(line).or_insert(0) += 1;
-            }
-            for (line, n) in owed {
-                let already = have.get(&line).copied().unwrap_or(0);
-                for _ in already..n {
-                    r.pending.push((line.clone(), ts));
-                }
-            }
-            while r.pending.len() > MAX_PENDING {
-                r.pending.remove(0);
-            }
-        });
-    }
+fn forget_window_deliveries(session: &str, window: &str) {
+    let _ = queue(|s| s.clear_deliveries(session, Some(window)));
 }
 
 /// A hook notification consumed by the AgentNotificationHub. Two different
@@ -578,25 +481,17 @@ pub fn record_tool(session: &str, window: &str, tool: &str, detail: &str) {
 }
 
 /// A line this app typed into an agent's pane (`deliver_mentions`). Held as a
-/// pending delivery until the agent's `userPromptSubmit` hook echoes it back —
-/// in memory and in state.db, because the agent's own queue outlives our process
-/// (see the durable-delivery block above).
+/// pending delivery until the agent's `userPromptSubmit` hook echoes it back.
+/// Two deliveries of the SAME body are two rows (board #122): the pane really
+/// was typed into twice, and each echo settles one. FAIL-SOFT like all
+/// telemetry: without a database the line is simply untracked, and its echo
+/// files as keyboard input.
 pub fn record_delivery(session: &str, window: &str, line: &str) {
-    let (line, ts) = (line.to_string(), now());
-    with_rec(session, window, |r| {
-        // Two deliveries of the SAME body are two promises (board #122): the
-        // pane really was typed into twice, the CLI will submit twice, and
-        // each echo settles exactly one entry. The old replace-on-retype
-        // collapsed them, so the second echo found nothing and was filed as
-        // local keyboard input.
-        r.pending.push((line.clone(), ts));
-        // A queue that only grows is a leak; nobody types this many lines at one
-        // agent without the sweep having something to say about it.
-        while r.pending.len() > MAX_PENDING {
-            r.pending.remove(0);
-        }
-    });
-    remember_delivery(session, window, &line, ts);
+    recovery_mark(session); // read BEFORE the insert: this row is ours
+    // The window's record exists from its first delivery, so `retain_windows`
+    // sees it and drops its queue when the window goes.
+    with_rec(session, window, |_| {});
+    let _ = queue(|s| s.insert_delivery(session, window, line, now(), ""));
 }
 
 /// The `userPromptSubmit` hook: the agent accepted a prompt. This is BOTH the
@@ -609,76 +504,21 @@ pub fn record_delivery(session: &str, window: &str, line: &str) {
 /// whatever it was already typing.
 pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
     let text = truncate_chars(prompt, MAX_PROMPT_CHARS);
-    let mut acked = false;
     let ts = now();
-    // An echo may be the receipt for a line typed BEFORE this process started —
-    // the agent is a separate process and held it in its own queue across our
-    // restart. Recover that window's outstanding lines before matching, or the
-    // receipt is lost and the prompt is filed as local keyboard input.
-    hydrate(session, Some(window));
-    // Whitespace-BLIND matching: a delivered line travels through tmux
-    // send-keys and an agent TUI's composer before it comes back in the
-    // userPromptSubmit echo, and that round trip does not preserve whitespace.
-    // A composer may render a newline as a space or its own wrap — and worse,
-    // tmux in extended-keys mode DROPPED the raw \n byte outright, so the echo
-    // came back with the lines GLUED ("AgenticAI\nAgentic" → "AgenticAIAgentic")
-    // and a squash-to-one-space canon could never contain it (owner,
-    // 2026-08-22 "发送内容有换行 好像就不会被confirm", again 2026-08-24 "多行内容
-    // …没办法正确已读，匹配有问题"). Stripping ALL whitespace on BOTH sides
-    // forgives every rendering of a break — space, wrap, or nothing at all.
-    // The characters still have to match in order, so this cannot ack the
-    // wrong line.
-    let canon_prompt = strip_ws(prompt);
-    let mut settled: Vec<String> = Vec::new();
-    with_rec(session, window, |r| {
-        // Any outstanding line may be the one this prompt carries — a queue is
-        // submitted in order, but an agent can also be steered, so match on
-        // CONTENT. One submitted prompt can carry several queued lines at
-        // once, so this keeps going — but a line the prompt carries ONCE
-        // settles only ONE of its duplicates (board #122): each occurrence in
-        // the echo is one receipt, spent oldest-first, so the next echo can
-        // still settle the sibling promise.
-        let before = r.pending.len();
-        let mut spent: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        let mut reverse_spent = false;
-        r.pending.retain(|(line, _)| {
-            let canon_line = strip_ws(line);
-            if canon_line.is_empty() {
-                // An all-whitespace line has no shape to match; settle it as
-                // containment always did rather than pin it forever.
-                settled.push(line.clone());
-                return false;
-            }
-            let budget = canon_prompt.matches(canon_line.as_str()).count();
-            let used = spent.entry(canon_line.clone()).or_insert(0);
-            if *used < budget {
-                *used += 1;
-                settled.push(line.clone());
-                return false;
-            }
-            // The truncation-aware side: the stored echo may be cut while the
-            // full line is longer (canon_line strictly longer, containing the
-            // whole prompt). One such settle per echo — it is one submission.
-            // Equal-length lines already spent the forward budget above.
-            if !reverse_spent
-                && canon_line.len() > canon_prompt.len()
-                && canon_line.contains(&canon_prompt)
-            {
-                reverse_spent = true;
-                settled.push(line.clone());
-                return false;
-            }
-            true
-        });
-        acked = r.pending.len() < before;
-        // A turn just opened. This is the ONE honest "it started working"
-        // signal: pane activity cannot be it, because an agent TUI repaints its
-        // prompt (spinner, status line, cursor) long after it finished.
-        r.prompt = Some(ts);
-    });
-    for line in &settled {
-        forget_delivery(session, window, line);
-    }
+    recovery_mark(session);
+    let rows = queue(|s| s.pending_deliveries(session, Some(window))).unwrap_or_default();
+    let settled = settled_by(&rows, prompt);
+    // A row counts only if THIS echo deleted it: two echoes racing for one
+    // row cannot both call it theirs.
+    let acked = settled
+        .iter()
+        .filter(|row| queue(|s| s.delete_delivery_id(row.id)).unwrap_or(false))
+        .count()
+        > 0;
+    // A turn just opened. This is the ONE honest "it started working" signal:
+    // pane activity cannot be it, because an agent TUI repaints its prompt
+    // (spinner, status line, cursor) long after it finished.
+    with_rec(session, window, |r| r.prompt = Some(ts));
     push_event_via(
         session,
         window,
@@ -687,6 +527,56 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
         if acked { "app".into() } else { "local".into() },
     );
     acked
+}
+
+/// Which outstanding rows this echo carries, in typed order. Pure.
+///
+/// Whitespace-BLIND matching: a delivered line travels through tmux
+/// send-keys and an agent TUI's composer before it comes back in the
+/// userPromptSubmit echo, and that round trip does not preserve whitespace.
+/// A composer may render a newline as a space or its own wrap — and worse,
+/// tmux in extended-keys mode DROPPED the raw \n byte outright, so the echo
+/// came back with the lines GLUED ("AgenticAI\nAgentic" → "AgenticAIAgentic")
+/// and a squash-to-one-space canon could never contain it (owner,
+/// 2026-08-22 "发送内容有换行 好像就不会被confirm", again 2026-08-24 "多行内容
+/// …没办法正确已读，匹配有问题"). Stripping ALL whitespace on BOTH sides
+/// forgives every rendering of a break. The characters still have to match
+/// in order, so this cannot ack the wrong line.
+///
+/// Any outstanding line may be the one this prompt carries — a queue is
+/// submitted in order, but an agent can also be steered, so match on CONTENT.
+/// One submitted prompt can carry several queued lines at once; a line the
+/// prompt carries ONCE settles only ONE of its duplicates (board #122): each
+/// occurrence in the echo is one receipt, spent oldest-first.
+fn settled_by<'a>(rows: &'a [super::store::DeliveryRow], prompt: &str) -> Vec<&'a super::store::DeliveryRow> {
+    let canon_prompt = strip_ws(prompt);
+    let mut spent: HashMap<String, usize> = HashMap::new();
+    let mut reverse_spent = false;
+    let mut out = Vec::new();
+    for row in rows {
+        let canon_line = strip_ws(&row.line);
+        if canon_line.is_empty() {
+            // An all-whitespace line has no shape to match; settle it as
+            // containment always did rather than pin it forever.
+            out.push(row);
+            continue;
+        }
+        let budget = canon_prompt.matches(canon_line.as_str()).count();
+        let used = spent.entry(canon_line.clone()).or_insert(0);
+        if *used < budget {
+            *used += 1;
+            out.push(row);
+            continue;
+        }
+        // The truncation-aware side: the stored echo may be cut while the full
+        // line is longer (canon_line strictly longer, containing the whole
+        // prompt). One such settle per echo — it is one submission.
+        if !reverse_spent && canon_line.len() > canon_prompt.len() && canon_line.contains(&canon_prompt) {
+            reverse_spent = true;
+            out.push(row);
+        }
+    }
+    out
 }
 
 /// ALL whitespace removed (space, tab, CR, LF). The delivery-receipt
@@ -711,10 +601,12 @@ fn strip_ws(s: &str) -> String {
 /// It starts at the turn's END, giving the CLI the same 45 s from the moment it
 /// could actually submit the line. A line typed into an idle agent is unchanged:
 /// its clock starts when we typed it.
-/// Which outstanding lines are overdue, oldest first. Per LINE, because the queue
-/// holds several and they were typed at different times.
-fn overdue_lines(rec: &Rec, now: u64) -> Vec<String> {
-    if rec.pending.is_empty() {
+/// Which outstanding rows are overdue, oldest first. Per ROW, because the
+/// queue holds several typed at different times, and two identical bodies are
+/// two promises. `mark` is the session's recovery mark (see
+/// `recovery_mark`): a row at or below it has been waited for only since then.
+fn overdue_rows(rec: &Rec, rows: &[super::store::DeliveryRow], mark: (i64, u64), now: u64) -> Vec<i64> {
+    if rows.is_empty() {
         return Vec::new();
     }
     // activity_ts 0 on purpose: pane repaints must not keep a line pending
@@ -723,49 +615,44 @@ fn overdue_lines(rec: &Rec, now: u64) -> Vec<String> {
         return Vec::new();
     }
     let turn_end = rec.end.as_ref().map(|(_, t)| *t).unwrap_or(0);
-    rec.pending
-        .iter()
-        .filter(|(_, typed_ts)| {
-            let reference = (*typed_ts).max(turn_end.min(now));
+    rows.iter()
+        .filter(|row| {
+            let listened = if row.id <= mark.0 { mark.1 } else { 0 };
+            let reference = row.ts.max(listened).max(turn_end.min(now));
             now.saturating_sub(reference) >= DELIVERY_ACK_SECS
         })
-        .map(|(line, _)| line.clone())
+        .map(|row| row.id)
         .collect()
 }
 
-/// Is anything overdue? Kept as its own predicate because the rule — not the list
-/// — is what the tests are about.
-#[cfg(test)]
-fn delivery_overdue(rec: &Rec, now: u64) -> bool {
-    !overdue_lines(rec, now).is_empty()
-}
-
 /// Report deliveries that never came back as a prompt. Called before a client
-/// reads the feed, which is exactly when the answer is wanted; a swept line is
-/// cleared so the warning is emitted once.
+/// reads the feed, which is exactly when the answer is wanted; a reported row
+/// is settled, so the warning is emitted once — across restarts too.
 pub fn sweep_deliveries(session: &str) {
-    // The queues this process never saw typed belong here too: after a restart
-    // they are exactly the lines whose fate nobody is tracking any more.
-    hydrate(session, None);
+    let mark = recovery_mark(session);
+    let rows = queue(|s| s.pending_deliveries(session, None)).unwrap_or_default();
+    if rows.is_empty() {
+        return;
+    }
     let now = now();
-    let stale: Vec<(String, String)> = {
-        let mut map = store().lock().unwrap();
-        map.iter_mut()
-            .filter(|((s, _), _)| s == session)
-            .flat_map(|((_, w), r)| {
-                let due = overdue_lines(r, now);
-                // Each line is reported once, so it leaves the queue with its
-                // warning. The ones still in time stay outstanding.
-                r.pending.retain(|(line, _)| !due.contains(line));
-                due.into_iter().map(|line| (w.clone(), line)).collect::<Vec<_>>()
-            })
-            .collect()
-    };
-    for (window, line) in stale {
-        // Reported means settled: the durable copy goes too, so the next restart
-        // does not warn about it a second time.
-        forget_delivery(session, &window, &line);
-        push_event(session, &window, "warn", format!("unconfirmed: {}", truncate_chars(&line, 160)));
+    let mut by_window: std::collections::BTreeMap<String, Vec<super::store::DeliveryRow>> = Default::default();
+    for row in rows {
+        by_window.entry(row.window.clone()).or_default().push(row);
+    }
+    for (window, rows) in by_window {
+        let rec = store()
+            .lock()
+            .unwrap()
+            .get(&(session.to_string(), window.clone()))
+            .cloned()
+            .unwrap_or_default();
+        for id in overdue_rows(&rec, &rows, mark, now) {
+            if !queue(|s| s.delete_delivery_id(id)).unwrap_or(false) {
+                continue; // settled by an echo in the meantime
+            }
+            let line = rows.iter().find(|r| r.id == id).map(|r| r.line.as_str()).unwrap_or_default();
+            push_event(session, &window, "warn", format!("unconfirmed: {}", truncate_chars(line, 160)));
+        }
     }
 }
 
@@ -815,25 +702,23 @@ pub fn retain_windows(session: &str, live: &[String]) {
     if dead.is_empty() {
         return;
     }
-    // A window that is gone can never echo, so its durable queue is dead weight
-    // that hydration would otherwise resurrect into a recycled window index.
-    // Windows this process never held a record for are left to hydrate + sweep,
+    // A window that is gone can never echo, so its queue is dead weight.
+    // Windows this process never held a record for are left to the sweep,
     // which reports them once and settles them — this path costs nothing on the
     // roster poll that calls it several times a minute.
     for w in &dead {
         forget_window_deliveries(session, w);
-        hydrated().lock().unwrap().remove(&(session.to_string(), w.clone()));
     }
 }
 
 /// Drop everything this PROCESS holds for a session — exactly what a restart
-/// does to the derived records and the hydration marks, and nothing more: the
-/// durable delivery queue in state.db is deliberately untouched, because that is
-/// the half whose survival board #5 is about. Test-only.
+/// does to the derived records and the recovery mark, and nothing more: the
+/// delivery queue in state.db is deliberately untouched, because its survival
+/// is what board #5 is about. Test-only.
 #[cfg(test)]
 pub fn forget_process_state(session: &str) {
     store().lock().unwrap().retain(|(s, _), _| s != session);
-    hydrated().lock().unwrap().retain(|(s, _)| s != session);
+    recovery_marks().lock().unwrap().remove(session);
 }
 
 /// Derive the current status for (session, window). `activity_ts` is tmux's
@@ -937,6 +822,34 @@ mod tests {
         Rec::default()
     }
 
+    /// An outstanding row as the store returns it: typed at `ts`, by this
+    /// process unless `id` is at or below the recovery mark.
+    fn row(id: i64, line: &str, ts: u64) -> crate::projects::store::DeliveryRow {
+        crate::projects::store::DeliveryRow { id, window: "w".into(), line: line.into(), ts, msg_id: String::new() }
+    }
+    const MARK: (i64, u64) = (0, 0);
+
+    /// The window's outstanding lines, in typed order — the table IS the queue.
+    fn held(session: &str, window: &str) -> Vec<String> {
+        crate::projects::tests::use_test_store();
+        crate::projects::with_store(|s| s.pending_deliveries(session, Some(window)))
+            .unwrap()
+            .into_iter()
+            .map(|r| r.line)
+            .collect()
+    }
+
+    /// Age every outstanding row of a session past the ack window.
+    fn backdate(session: &str) {
+        crate::projects::tests::use_test_store();
+        let past = (now() - DELIVERY_ACK_SECS - 1) as i64;
+        crate::projects::with_store(|s| {
+            s.backdate_deliveries(session, past as u64)
+        })
+        .unwrap();
+        recovery_marks().lock().unwrap().insert(session.to_string(), (0, 0));
+    }
+
     /// The sidebar's one cheap read: every window with hook facts, derived.
     /// Sessions are isolated keys, and a window nobody hooked is absent —
     /// which the client reads as idle.
@@ -990,15 +903,15 @@ mod tests {
     fn a_queued_line_is_not_an_unconfirmed_line() {
         let mut r = rec();
         r.prompt = Some(1000); // a turn is open — the agent is working
-        r.pending = vec![("@builder-2 do the thing".into(), 1010)];
+        let rows = [row(1, "@builder-2 do the thing", 1010)];
         // Ten minutes later the turn is STILL running. Nothing is overdue: the
         // line is sitting in the agent's input queue where we put it.
-        assert!(!delivery_overdue(&r, 1010 + 600));
+        assert!(overdue_rows(&r, &rows, MARK, 1010 + 600).is_empty());
         // Blocked on a permission answer is the same situation: the queue holds
         // the line until the human answers.
         let mut asking = r.clone();
         asking.ask = Some(("permission_required".into(), 1100));
-        assert!(!delivery_overdue(&asking, 1100 + 600));
+        assert!(overdue_rows(&asking, &rows, MARK, 1100 + 600).is_empty());
     }
 
     /// The bug: `pending` was ONE slot, so a second message typed at a busy agent
@@ -1038,20 +951,17 @@ mod tests {
         record_delivery(&session, "w1", "[tmm chat 00:06] human: second thing");
 
         // Both are held, oldest first — the second no longer erases the first.
-        let held = |s: &str| {
-            store().lock().unwrap().get(&(s.to_string(), "w1".to_string())).map(|r| r.pending.clone()).unwrap_or_default()
-        };
-        assert_eq!(held(&session).len(), 2);
-        assert!(held(&session)[0].0.contains("first thing"));
+        assert_eq!(held(&session, "w1").len(), 2);
+        assert!(held(&session, "w1")[0].contains("first thing"));
 
         // The agent works through the queue in order. Each echo acknowledges its
         // OWN line and leaves the other outstanding.
         assert!(record_prompt(&session, "w1", "[tmm chat 00:05] human: first thing"),
             "the first queued line is acknowledged, however late it arrives");
-        assert_eq!(held(&session).len(), 1);
-        assert!(held(&session)[0].0.contains("second thing"));
+        assert_eq!(held(&session, "w1").len(), 1);
+        assert!(held(&session, "w1")[0].contains("second thing"));
         assert!(record_prompt(&session, "w1", "[tmm chat 00:06] human: second thing"));
-        assert!(held(&session).is_empty());
+        assert!(held(&session, "w1").is_empty());
 
         // A prompt nobody typed for us is still local input.
         assert!(!record_prompt(&session, "w1", "something the user typed at the keyboard"));
@@ -1067,33 +977,30 @@ mod tests {
         record_delivery(&session, "w2", "line one");
         record_delivery(&session, "w2", "line two");
         assert!(record_prompt(&session, "w2", "line one\nline two\n"));
-        let left = store().lock().unwrap().get(&(session, "w2".to_string())).map(|r| r.pending.clone()).unwrap_or_default();
-        assert!(left.is_empty(), "both lines were in that prompt");
+        assert!(held(&session, "w2").is_empty(), "both lines were in that prompt");
     }
 
     #[test]
     fn every_overdue_line_is_reported_not_just_the_first() {
         let mut r = rec();
         r.end = Some(("completed".into(), 1000));         // idle since 1000
-        r.pending = vec![("older".into(), 900), ("newer".into(), 1000)];
+        let rows = [row(1, "older", 900), row(2, "newer", 1000)];
         // Both past the window.
-        let due = overdue_lines(&r, 1000 + DELIVERY_ACK_SECS);
-        assert_eq!(due, vec!["older".to_string(), "newer".to_string()]);
+        assert_eq!(overdue_rows(&r, &rows, MARK, 1000 + DELIVERY_ACK_SECS), vec![1, 2]);
         // Only the older one is past it: the fresh line keeps its own clock.
-        let one = overdue_lines(&r, 900 + DELIVERY_ACK_SECS);
-        assert_eq!(one, Vec::<String>::new(), "the clock runs from the turn end (1000)");
+        assert!(overdue_rows(&r, &rows, MARK, 900 + DELIVERY_ACK_SECS).is_empty(), "the clock runs from the turn end (1000)");
     }
 
     #[test]
     fn the_clock_starts_when_the_turn_ends() {
         let mut r = rec();
         r.prompt = Some(1000);
-        r.pending = vec![("@builder-2 do the thing".into(), 1010)];
+        let rows = [row(1, "@builder-2 do the thing", 1010)];
         r.end = Some(("completed".into(), 2000)); // the turn ended much later
         // The CLI gets the full window from the moment it could submit, not from
         // the moment we typed — 990 s after typing is still not overdue.
-        assert!(!delivery_overdue(&r, 2000 + DELIVERY_ACK_SECS - 1));
-        assert!(delivery_overdue(&r, 2000 + DELIVERY_ACK_SECS));
+        assert!(overdue_rows(&r, &rows, MARK, 2000 + DELIVERY_ACK_SECS - 1).is_empty());
+        assert_eq!(overdue_rows(&r, &rows, MARK, 2000 + DELIVERY_ACK_SECS), vec![1]);
     }
 
     #[test]
@@ -1101,9 +1008,9 @@ mod tests {
         let mut r = rec();
         r.prompt = Some(500);
         r.end = Some(("completed".into(), 600)); // idle since 600
-        r.pending = vec![("@builder-2 hello".into(), 1000)]; // typed later
-        assert!(!delivery_overdue(&r, 1000 + DELIVERY_ACK_SECS - 1));
-        assert!(delivery_overdue(&r, 1000 + DELIVERY_ACK_SECS), "an idle agent had its chance");
+        let rows = [row(1, "@builder-2 hello", 1000)]; // typed later
+        assert!(overdue_rows(&r, &rows, MARK, 1000 + DELIVERY_ACK_SECS - 1).is_empty());
+        assert_eq!(overdue_rows(&r, &rows, MARK, 1000 + DELIVERY_ACK_SECS), vec![1], "an idle agent had its chance");
     }
 
     #[test]
@@ -1111,15 +1018,14 @@ mod tests {
         // No hook facts at all (a hand-started codex, a backend without hooks):
         // it can never ack, and pane repaints must not keep the line pending
         // forever — the warning is the only signal the owner would get.
-        let mut r = rec();
-        r.pending = vec![("@codex hello".into(), 1000)];
-        assert!(!delivery_overdue(&r, 1000 + 10));
-        assert!(delivery_overdue(&r, 1000 + DELIVERY_ACK_SECS));
+        let rows = [row(1, "@codex hello", 1000)];
+        assert!(overdue_rows(&rec(), &rows, MARK, 1000 + 10).is_empty());
+        assert_eq!(overdue_rows(&rec(), &rows, MARK, 1000 + DELIVERY_ACK_SECS), vec![1]);
     }
 
     #[test]
     fn nothing_pending_is_never_overdue() {
-        assert!(!delivery_overdue(&rec(), 9999));
+        assert!(overdue_rows(&rec(), &[], MARK, 9999).is_empty());
     }
 
     /// The bug this machine replaced: an agent that had just answered kept
@@ -1289,15 +1195,6 @@ mod tests {
         forget_process_state(session);
     }
 
-    fn held(session: &str, window: &str) -> Vec<String> {
-        store()
-            .lock()
-            .unwrap()
-            .get(&(session.to_string(), window.to_string()))
-            .map(|r| r.pending.iter().map(|(l, _)| l.clone()).collect())
-            .unwrap_or_default()
-    }
-
     #[test]
     fn a_pending_delivery_is_still_acknowledged_after_a_server_restart() {
         crate::projects::tests::use_test_store();
@@ -1306,7 +1203,7 @@ mod tests {
         record_delivery(&session, "w1", line);
 
         simulate_restart(&session);
-        assert!(held(&session, "w1").is_empty(), "the in-process record really is gone");
+        assert_eq!(held(&session, "w1").len(), 1, "the table IS the queue: the restart took nothing");
 
         // The agent submits what it queued. Glued newlines (the tmux
         // extended-keys shape), so the whitespace-blind match is exercised on
@@ -1345,7 +1242,7 @@ mod tests {
         // typing time, which is what would make the first sweep after a restart
         // report it as unconfirmed seconds before its echo arrives.
         let long_ago = now().saturating_sub(DELIVERY_ACK_SECS * 20);
-        let _ = crate::projects::with_store(|s| s.insert_delivery(&session, "w2", "stale line", long_ago, ""));
+        crate::projects::with_store(|s| s.insert_delivery(&session, "w2", "stale line", long_ago, "")).unwrap();
 
         simulate_restart(&session);
 
@@ -1375,10 +1272,7 @@ mod tests {
         let session = format!("restart-sweep-{}", uuid::Uuid::new_v4());
         record_delivery(&session, "w3", "@dev hello");
         // Past the ack window: the sweep reports it once and settles it.
-        with_rec(&session, "w3", |r| {
-            let (line, ts) = r.pending[0].clone();
-            r.pending = vec![(line, ts - DELIVERY_ACK_SECS - 1)];
-        });
+        backdate(&session);
         sweep_deliveries(&session);
         assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 1);
 
@@ -1477,10 +1371,7 @@ mod tests {
     fn an_unacknowledged_delivery_is_reported_once() {
         // Backdate the pending line past the ack window.
         record_delivery("sweep-test", "w2", "[tmm chat] human: @dev hello");
-        with_rec("sweep-test", "w2", |r| {
-            let (line, ts) = r.pending[0].clone();
-            r.pending = vec![(line, ts - DELIVERY_ACK_SECS - 1)];
-        });
+        backdate("sweep-test");
         sweep_deliveries("sweep-test");
         let warns: Vec<String> = recent_events("sweep-test", 0)
             .iter()
@@ -1582,10 +1473,7 @@ mod tests {
         let line = "[tmm chat 2026-09-09 06:30] human: @dev continue";
         record_delivery(&session, "dev", line);
         record_delivery(&session, "dev", line);
-        let held = || {
-            store().lock().unwrap().get(&(session.clone(), "dev".to_string()))
-                .map(|r| r.pending.len()).unwrap_or(0)
-        };
+        let held = || held(&session, "dev").len();
         assert_eq!(held(), 2, "two deliveries of one body are two promises");
 
         // The CLI submits the queued lines one prompt at a time: each echo
@@ -1603,4 +1491,98 @@ mod tests {
         assert_eq!(held(), 0, "a double-carrying echo settles both");
     }
 
+    // ── Board #249: the table is the ONE queue ────────────────────────────
+
+    /// 20 lines typed at a busy window and echoed in order are all OUR
+    /// deliveries. With the 16-line memory cap the oldest four echoed as
+    /// keyboard input (INPUT rows) while their rows stayed in the table.
+    #[test]
+    fn twenty_lines_at_a_busy_window_all_echo_as_ours() {
+        let session = format!("q20-{}", uuid::Uuid::new_v4());
+        record_prompt(&session, "w1", "a long turn opens");
+        let lines: Vec<String> = (0..20).map(|n| format!("[tmm chat 12:{n:02}] validator: @builder line {n}")).collect();
+        for l in &lines {
+            record_delivery(&session, "w1", l);
+        }
+        assert_eq!(held(&session, "w1").len(), 20, "no silent cap");
+        for l in &lines {
+            assert!(record_prompt(&session, "w1", l), "{l} is ours");
+        }
+        let vias: Vec<String> = recent_events(&session, 0).into_iter().filter(|e| e.kind == "prompt").map(|e| e.via).skip(1).collect();
+        assert_eq!(vias, vec!["app".to_string(); 20]);
+        assert!(held(&session, "w1").is_empty());
+    }
+
+    /// 30 lines outstanding across a restart keep their typed order, and none
+    /// is swept inside the grace the recovery gives them. The old fold kept a
+    /// random 16 of them through an unordered map.
+    #[test]
+    fn thirty_pending_lines_survive_a_restart_in_order() {
+        let session = format!("q30-{}", uuid::Uuid::new_v4());
+        record_prompt(&session, "w1", "a long turn opens");
+        let lines: Vec<String> = (0..30).map(|n| format!("[tmm chat 12:{n:02}] orchestrator: @builder item {n}")).collect();
+        for l in &lines {
+            record_delivery(&session, "w1", l);
+        }
+        simulate_restart(&session);
+        sweep_deliveries(&session);
+        assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 0, "the recovery grace holds");
+        assert_eq!(held(&session, "w1"), lines, "typed order, all thirty");
+        for l in &lines {
+            assert!(record_prompt(&session, "w1", l));
+        }
+        let vias: Vec<String> = recent_events(&session, 0).into_iter().filter(|e| e.kind == "prompt").map(|e| e.via).skip(1).collect();
+        assert_eq!(vias, vec!["app".to_string(); 30], "not one of them reads as keyboard input");
+    }
+
+    /// Three identical bodies settle one per echo, and the sweep reports only
+    /// the ones still owed — each promise once.
+    #[test]
+    fn duplicate_bodies_settle_one_by_one_and_sweep_by_row() {
+        let session = format!("qdup-{}", uuid::Uuid::new_v4());
+        let line = "[tmm chat 12:00] human: @dev again";
+        for _ in 0..3 {
+            record_delivery(&session, "dev", line);
+        }
+        assert!(record_prompt(&session, "dev", line));
+        assert_eq!(held(&session, "dev").len(), 2);
+        // That echo opened a turn, and a running agent is still holding the
+        // other two; the sweep only speaks once the turn has ended.
+        backdate(&session);
+        sweep_deliveries(&session);
+        assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 0, "queued, not lost");
+        let ended = now() - DELIVERY_ACK_SECS - 1;
+        with_rec(&session, "dev", |r| {
+            r.prompt = Some(ended);
+            r.end = Some(("completed".into(), ended));
+        });
+        sweep_deliveries(&session);
+        assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 2, "each owed promise reported once");
+        assert!(held(&session, "dev").is_empty());
+        sweep_deliveries(&session);
+        assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 2);
+    }
+
+    /// A row typed by an earlier process waits from the recovery mark, a row
+    /// typed by this one from its own typing time. Pure.
+    #[test]
+    fn a_recovered_row_waits_from_the_recovery_mark() {
+        let r = rec();
+        let rows = [row(5, "before the restart", 100), row(6, "after it", 1000)];
+        let mark = (5, 1000); // rows <= 5 were typed before a restart at 1000
+        assert_eq!(overdue_rows(&r, &rows, mark, 1000 + DELIVERY_ACK_SECS - 1), Vec::<i64>::new());
+        assert_eq!(overdue_rows(&r, &rows, mark, 1000 + DELIVERY_ACK_SECS), vec![5, 6]);
+        assert_eq!(overdue_rows(&r, &rows, MARK, 100 + DELIVERY_ACK_SECS), vec![5], "without a mark it keeps its typing time");
+    }
+
+    /// The matcher over rows, pure: order, duplicates and truncation.
+    #[test]
+    fn settled_by_spends_one_receipt_per_occurrence() {
+        let rows = [row(1, "a b", 0), row(2, "a b", 0), row(3, "other", 0), row(4, "a very long line cut short", 0)];
+        let ids = |p: &str| settled_by(&rows, p).into_iter().map(|r| r.id).collect::<Vec<_>>();
+        assert_eq!(ids("a\nb"), vec![1], "one occurrence settles the oldest duplicate");
+        assert_eq!(ids("a b\na b"), vec![1, 2]);
+        assert_eq!(ids("a very long line cut"), vec![4], "a truncated echo settles the longer line");
+        assert_eq!(ids("nothing of ours"), Vec::<i64>::new());
+    }
 }
