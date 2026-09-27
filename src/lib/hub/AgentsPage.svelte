@@ -316,8 +316,8 @@
   /** An explicit backend pick in the editor: a steer draft moving to a backend
    * the server says cannot switch becomes queue. With no list yet nothing is
    * judged — the field stays visible and registry_save decides. */
-  function pickBackend(backend) {
-    if (editing?.input_mode === 'steer' && servedBackendsKnown() && !backendSwitchesInputMode(backend)) editing.input_mode = 'queue';
+  function pickBackend(draft, backend) {
+    if (draft?.input_mode === 'steer' && servedBackendsKnown() && !backendSwitchesInputMode(backend)) draft.input_mode = 'queue';
   }
   let models = $state([]);
   $effect(() => {
@@ -618,6 +618,24 @@
 </script>
 
 <svelte:window onkeydown={editorKey} />
+{#snippet inputModeField(draft)}
+  <!-- Board #245: one field for every complete agent definition — the
+       registry editor and a team's bare member. Shown only where the switch
+       was measured (the server's backends_list says which); elsewhere the CLI
+       decides and the field would promise a behaviour no config carries. A
+       saved steer is always shown, so it is never hidden while the list is
+       missing and can always be changed back. -->
+  {#if switchesInputMode(draft.backend) || draft.input_mode === 'steer'}
+    <label class="config-field"><span class="config-field-label">{t('agentsInputMode')}</span>
+      <Select bind:value={draft.input_mode} disabled={saving || removing}
+        options={[{ value: 'queue', label: t('agentsInputQueue') }, { value: 'steer', label: t('agentsInputSteer') }]}
+        ariaLabel={t('agentsInputMode')} />
+    </label>
+  {/if}
+{/snippet}
+{#snippet inputModeHint(draft)}
+  {#if draft.input_mode === 'steer'}<p class="hint">{t('agentsInputSteerHint')}</p>{/if}
+{/snippet}
 {#snippet rows(kind)}
   <!-- One kind's definitions as rows — the phone's sidebar list (narrowed by
        `section`) and the desktop's main list (the chosen category) render the
@@ -946,6 +964,7 @@
                       <div class="config-row">
                         <label class="config-field"><span class="config-field-label">{t('agentsBackend')}</span>
                           <Select bind:value={m.agent.backend} disabled={saving || removing} ariaLabel={t('agentsBackend')}
+                            onchange={(b) => pickBackend(m.agent, b)}
                             options={backends.map((b) => ({ value: b, icon: backendIcon(b) ?? undefined }))} />
                         </label>
                         <label class="config-field"><span class="config-field-label">{t('agentsModel')}</span>
@@ -957,7 +976,9 @@
                             options={[{ value: '', label: t('agentsModelDefault') }, ...backendEfforts(m.agent.backend)]}
                             ariaLabel={t('agentsEffort')} />
                         </label>
+                        {@render inputModeField(m.agent)}
                       </div>
+                      {@render inputModeHint(m.agent)}
                       <label class="config-field"><span class="config-field-label">{t('agentsSystem')}</span>
                         <textarea class="config-input" rows="12" bind:value={m.agent.system}
                           placeholder={t('agentsSystemPh')} use:autoGrow></textarea>
@@ -1010,7 +1031,7 @@
         <div class="config-row">
           <label class="config-field"><span class="config-field-label">{t('agentsBackend')}</span>
             <Select bind:value={editing.backend} disabled={saving || removing} ariaLabel={t('agentsBackend')}
-              onchange={pickBackend}
+              onchange={(b) => pickBackend(editing, b)}
               options={backends.map((b) => ({ value: b, icon: backendIcon(b) ?? undefined }))} />
           </label>
           <label class="config-field"><span class="config-field-label">{t('agentsModel')}</span>
@@ -1031,22 +1052,9 @@
               options={[{ value: '', label: t('agentsModelDefault') }, ...backendEfforts(editing.backend)]}
               ariaLabel={t('agentsEffort')} />
           </label>
-          {#if switchesInputMode(editing.backend) || editing.input_mode === 'steer'}
-            <!-- Board #245: only where the switch was measured (the server's
-                 backends_list says which); elsewhere the CLI decides and the
-                 field would promise a behaviour no config carries. A saved
-                 steer is always shown, so it is never hidden while the list
-                 is missing and can always be changed back. -->
-            <label class="config-field"><span class="config-field-label">{t('agentsInputMode')}</span>
-              <Select bind:value={editing.input_mode} disabled={saving || removing}
-                options={[{ value: 'queue', label: t('agentsInputQueue') }, { value: 'steer', label: t('agentsInputSteer') }]}
-                ariaLabel={t('agentsInputMode')} />
-            </label>
-          {/if}
+          {@render inputModeField(editing)}
         </div>
-        {#if editing.input_mode === 'steer'}
-          <p class="hint">{t('agentsInputSteerHint')}</p>
-        {/if}
+        {@render inputModeHint(editing)}
         <label class="config-field"><span class="config-field-label">{t('agentsSystem')}</span>
           <textarea class="config-input" rows="6" bind:value={editing.system} placeholder={t('agentsSystemPh')}></textarea>
         </label>

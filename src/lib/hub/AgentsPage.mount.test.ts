@@ -332,6 +332,37 @@ test('Team disclosure is not an edit; its actual role uses the guarded Save (#15
   } finally { await app.close(); }
 });
 
+test('a team\'s bare member takes the same input-mode field; a registry-based member inherits (#245)', async context => {
+  const fixture = await hostFixture();
+  const served = (name: string, input_modes: boolean) => ({ name, icon: `/assets/${name}.svg`, color: `--backend-${name}`, efforts: [], input_modes });
+  const writes: any[] = [];
+  const team = { name: 'squad', description: '', members: JSON.stringify([
+    { name: 'dev', base: 'alpha', role: 'Implement' },
+    { name: 'raw', base: '', role: 'Raw', agent: { name: 'raw', backend: 'kiro', model: '', effort: '', input_mode: 'queue', system: 'Bare.', skills: '[]', mcp: '[]' } },
+  ]) };
+  let controls!: { section: (value: string) => void };
+  const app = await fixture.mount(context, {
+    props: { ready: (value: typeof controls) => controls = value, backends: [served('kiro', true), served('claude', false)] },
+    modules: [rpc({ teamsList: async () => ({ teams: [team] }), teamsSave: async (value: any) => { writes.push(value); return {}; } })],
+  });
+  try {
+    controls.section('teams'); await app.flush();
+    await openAgent(app, 'squad');
+    const fields = () => [...app.document.querySelectorAll<HTMLButtonElement>('[aria-label="While busy"]')];
+    app.document.querySelectorAll<HTMLButtonElement>('.member-summary')[1]!.click(); await app.flush();
+    assert.equal(fields().length, 1, 'only the bare member has the field; the registry-based member inherits its base');
+    fields()[0]!.click(); await app.flush();
+    [...app.document.querySelectorAll<HTMLButtonElement>('[role=option]')].find(o => o.textContent?.trim() === 'Steer')!.click();
+    await app.flush();
+    assert.ok([...app.document.querySelectorAll('.editor .hint')].some(h => /wrong sender/u.test(h.textContent ?? '')), 'the same cost hint');
+    command(app, 'Save').click();
+    for (let i = 0; i < 5 && !writes.length; i++) await app.flush();
+    const members = JSON.parse(writes[0].members);
+    assert.equal(members[1].agent.input_mode, 'steer', 'the bare member saves steer');
+    assert.equal(members[0].agent, null, 'the derived member carries no definition of its own');
+  } finally { await app.close(); }
+});
+
 test('Escape enters the same dirty-exit guard after the Select has dismissed itself (#156)', async context => {
   const app = await (await compiled).mount(context, { props: { visible: true, section: 'agents' }, modules: [rpc()] });
   try {
