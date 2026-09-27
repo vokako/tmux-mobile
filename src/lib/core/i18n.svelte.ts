@@ -117,7 +117,6 @@ const msgs: Record<string, Record<string, string>> = {
     // The prompt hook echoed our line back, so the CLI accepted it as input.
     hubDeliveredHint: 'Delivered',
     hubPendingHint: 'Queued',
-    hubWarnedHint: 'Not delivered to every agent — see the warning in the feed',
     hubNoteHint: 'Room note',
     hubPromptIn: 'input',
     hubSidebarCollapse: 'Collapse sidebar',
@@ -709,7 +708,6 @@ const msgs: Record<string, Record<string, string>> = {
     hubStepsRows: '工具行数',
     hubDeliveredHint: '已送达',
     hubPendingHint: '已排队',
-    hubWarnedHint: '未能送达所有 agent，见对话中的提示',
     hubNoteHint: '房间留言',
     hubPromptIn: '输入',
     hubSidebarCollapse: '收起侧栏',

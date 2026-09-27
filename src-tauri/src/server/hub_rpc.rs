@@ -1137,7 +1137,7 @@ fn deliver_mentions(
             // ever speak for this line: say so now (board #250 — the pane was
             // in copy-mode, the refusal a person reading scrollback earns).
             Err(e) => {
-                crate::projects::telemetry::record_undelivered(session, &p.window_name, &line, msg_id, e.trim());
+                crate::projects::telemetry::record_undelivered(session, &p.window_name, &line, e.trim());
             }
         }
     }
@@ -1769,10 +1769,10 @@ mod tests {
         assert!(!lead.contains("for solo") && !solo.contains("for lead"), "no cross-pane text: {lead:?} / {solo:?}");
     }
 
-    /// Board #250 (orchestrator 17:00), through hub_post: a message to an
-    /// agent whose pane is in copy-mode is refused, not typed — the mode stays,
-    /// no pending row is written, and ONE warn names the window, the message
-    /// id and the reason at once. The other recipient of the same message is
+    /// Board #250 (orchestrator 17:00/17:21), through hub_post: a message to
+    /// an agent whose pane is in copy-mode is refused, not typed — the mode
+    /// stays, no pending row is written, and ONE plain warn names the window,
+    /// the reason and the line at once, with no delivery reference. The other recipient of the same message is
     /// delivered as usual.
     #[test]
     fn a_mention_to_a_pane_in_copy_mode_warns_at_once_and_owes_nothing() {
@@ -1828,9 +1828,11 @@ mod tests {
         assert_eq!(warns.len(), 1, "{warns:?}");
         assert_eq!(warns[0].window, "lead");
         assert!(warns[0].text.starts_with("undelivered (pane is in copy mode): "), "{}", warns[0].text);
-        assert_eq!(warns[0].deliveries, vec![crate::projects::telemetry::DeliveryRef { id: None, msg: msg_id }]);
-        // The wire form names the message and no row.
-        assert_eq!(serde_json::to_value(&warns[0].deliveries).unwrap(), serde_json::json!([{ "msg": warns[0].deliveries[0].msg }]));
+        assert!(warns[0].text.contains("@lead @solo read this"), "the note carries the line: {}", warns[0].text);
+        // No row, so no reference: `deliveries` names real rows only (#249),
+        // and the wire form has no `deliveries` key at all.
+        assert!(warns[0].deliveries.is_empty(), "{:?}", warns[0].deliveries);
+        assert!(serde_json::to_value(&warns[0]).unwrap().get("deliveries").is_none());
     }
 
     #[test]

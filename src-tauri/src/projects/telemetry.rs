@@ -225,18 +225,14 @@ pub struct ActivityEvent {
 /// One delivery row named by an event: its id, and the message it carries.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DeliveryRef {
-    /// The `deliveries` row, and only ever a real one. `None` for a line that
-    /// never became a row — one `send_command` refused (board #250) — so no
-    /// echo can settle it and no receipt can retract its warn.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub id: Option<i64>,
+    pub id: i64,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub msg: String,
 }
 
 impl DeliveryRef {
     fn of(row: &super::store::DeliveryRow) -> Self {
-        DeliveryRef { id: Some(row.id), msg: row.msg_id.clone() }
+        DeliveryRef { id: row.id, msg: row.msg_id.clone() }
     }
 }
 
@@ -723,20 +719,12 @@ pub fn record_delivery(session: &str, window: &str, line: &str, msg_id: &str) {
 
 /// A line `send_command` refused to type (board #250: the pane was in
 /// copy-mode). It was never typed, so it is not a pending delivery and no echo
-/// will come; the same `warn` the sweep uses says so at once, naming the
-/// message it carried. Nothing retries it: the person reading scrollback
-/// leaves the mode, and the sender decides whether to say it again.
-pub fn record_undelivered(session: &str, window: &str, line: &str, msg_id: &str, reason: &str) {
-    let refs = if msg_id.is_empty() { Vec::new() } else { vec![DeliveryRef { id: None, msg: msg_id.to_string() }] };
-    push_full(
-        session,
-        window,
-        "warn",
-        format!("undelivered ({reason}): {}", truncate_chars(line, 160)),
-        String::new(),
-        String::new(),
-        refs,
-    );
+/// can ever settle it: no row, and so no `deliveries` reference — that field
+/// names real rows only (#249). The sweep's own `warn` kind says so at once,
+/// on the target window, with the reason and the line. Nothing retries it:
+/// the person reading scrollback leaves the mode, and the sender resends.
+pub fn record_undelivered(session: &str, window: &str, line: &str, reason: &str) {
+    push_event(session, window, "warn", format!("undelivered ({reason}): {}", truncate_chars(line, 160)));
 }
 
 /// The `userPromptSubmit` hook: the agent accepted a prompt. This is BOTH the
@@ -1955,7 +1943,7 @@ mod tests {
         record_delivery(&session, "w1", notice, "");
         backdate(&session);
         sweep_deliveries(&session);
-        let warns: Vec<Option<i64>> = recent_events(&session, 0).into_iter().filter(|e| e.kind == "warn").map(|e| e.deliveries[0].id).collect();
+        let warns: Vec<i64> = recent_events(&session, 0).into_iter().filter(|e| e.kind == "warn").map(|e| e.deliveries[0].id).collect();
         assert_eq!(warns.len(), 2);
         assert_ne!(warns[0], warns[1], "each warn names its own row");
         assert!(record_prompt(&session, "w1", notice));
@@ -2246,14 +2234,14 @@ mod tests {
         backdate(&session); // only this row is past the window
         record_delivery(&session, "w1", notice, "");
         sweep_deliveries(&session);
-        let warns: Vec<Option<i64>> = recent_events(&session, 0).into_iter().filter(|e| e.kind == "warn").map(|e| e.deliveries[0].id).collect();
+        let warns: Vec<i64> = recent_events(&session, 0).into_iter().filter(|e| e.kind == "warn").map(|e| e.deliveries[0].id).collect();
         let rows: Vec<i64> = crate::projects::with_store(|s| s.pending_deliveries(&session, Some("w1"))).unwrap().iter().map(|r| r.id).collect();
-        assert_eq!(warns, vec![Some(rows[0])], "only the first is reported");
+        assert_eq!(warns, vec![rows[0]], "only the first is reported");
         assert!(record_prompt(&session, "w1", notice));
         assert!(record_prompt(&session, "w1", notice));
-        let echoes: Vec<(String, Option<i64>)> = recent_events(&session, 0).into_iter().filter(|e| e.kind == "prompt")
+        let echoes: Vec<(String, i64)> = recent_events(&session, 0).into_iter().filter(|e| e.kind == "prompt")
             .map(|e| (e.via, e.deliveries[0].id)).collect();
-        assert_eq!(echoes, vec![("app".to_string(), Some(rows[0])), ("app".to_string(), Some(rows[1]))],
+        assert_eq!(echoes, vec![("app".to_string(), rows[0]), ("app".to_string(), rows[1])],
             "the first echo retracts the first warn; the second settles the unwarned twin");
         assert!(held(&session, "w1").is_empty());
     }

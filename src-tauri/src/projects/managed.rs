@@ -163,7 +163,7 @@ pub fn deliver_chat_line(session: &str, target_name: &str, line: &str) -> bool {
             }
             // Same as deliver_mentions (board #250): an untyped line is said.
             Err(e) => {
-                crate::projects::telemetry::record_undelivered(session, &p.window_name, line, "", e.trim());
+                crate::projects::telemetry::record_undelivered(session, &p.window_name, line, e.trim());
                 false
             }
         };

@@ -909,11 +909,8 @@ export interface HubActivityEvent {
   /** The delivery rows this event is about (board #249): the rows a `prompt`
    * echo settled, or the one row a `warn` reported. `id` is the row (the one
    * correlation key); `msg` the chat message it carries, where one exists.
-   * A `warn` about a line that was never typed (board #250: the pane was in
-   * copy-mode) names only its `msg`: `id` exists only for a real row, so
-   * nothing retracts that warn. A standing warn marks its message by `msg`.
    * Absent when there are none and on rows before v24. */
-  deliveries?: { id?: number; msg?: string }[];
+  deliveries?: { id: number; msg?: string }[];
   /** `status` events only: the state the agent declared. The `text` is its note
    * — what it says it is doing — which is the half a human reads. */
   state?: 'working' | 'waiting' | 'blocked';

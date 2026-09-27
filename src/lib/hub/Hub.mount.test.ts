@@ -966,7 +966,7 @@ test('typing @ offers the room\'s agents in the slash palette; Enter inserts, Es
   } finally { await app.close(); }
 });
 
-test('a line refused in copy-mode marks ITS message and leaves a warn note naming the agent (#250)', { timeout: 60000 }, async (context) => {
+test('a line refused in copy-mode shows one warn note naming the agent and the reason; its bubble stays hollow (#250)', { timeout: 60000 }, async (context) => {
   const fixture = await compiledHub();
   const { rpc } = roomFixture();
   const app = await fixture.mount(context, {
@@ -980,25 +980,25 @@ test('a line refused in copy-mode marks ITS message and leaves a warn note namin
     modules: [{
       ...rpc,
       hubLog: async () => ({ messages: [
-        { id: 'm-1', seq: 1, ts: 100, from: 'human', body: '@bob other line' },
         { id: 'm-2', seq: 2, ts: 200, from: 'human', body: '@alice read this' },
       ], has_more: false }),
+      // The server's warn for a refused line: plain, no delivery reference.
       hubActivity: async () => ({ events: [
-        { id: 1, ts: 250, window: 'alice', kind: 'warn', text: 'undelivered (pane is in copy mode): [tmm chat] human: @alice read this', deliveries: [{ msg: 'm-2' }] },
+        { id: 1, ts: 250, window: 'alice', kind: 'warn', text: 'undelivered (pane is in copy mode): [tmm chat] human: @alice read this' },
       ], has_more: false }),
     }],
   });
   try {
-    const msgs = () => [...app.document.querySelectorAll<HTMLElement>('.msg')];
-    for (let i = 0; i < 20 && msgs().length < 2; i++) await app.flush();
-    for (let i = 0; i < 20 && !app.document.querySelector('.note.warn'); i++) await app.flush();
-    const [other, refused] = msgs();
-    assert.ok(refused?.querySelector('.m-state.warn'), 'the refused message wears the warn mark');
-    assert.equal(refused?.querySelector('.m-state.warn')?.getAttribute('title'), 'Not delivered to every agent — see the warning in the feed');
-    assert.equal(other?.querySelector('.m-state.warn'), null, 'the other message does not');
-    const note = app.document.querySelector<HTMLElement>('.note.warn')!;
-    assert.match(note.querySelector('.n-text')!.textContent!, /^undelivered \(pane is in copy mode\): /u);
-    assert.ok(note.querySelector('.n-who')!.textContent!.includes('alice'), 'the note names the target');
+    for (let i = 0; i < 20 && !(app.document.querySelector('.msg') && app.document.querySelector('.note.warn')); i++) await app.flush();
+    const notes = [...app.document.querySelectorAll<HTMLElement>('.note.warn')];
+    assert.equal(notes.length, 1, 'exactly one warn note');
+    assert.ok(notes[0]!.querySelector('.n-who')!.textContent!.includes('alice'), 'the note names the target');
+    assert.match(notes[0]!.querySelector('.n-text')!.textContent!, /^undelivered \(pane is in copy mode\): .*@alice read this/u);
+    const state = app.document.querySelector<HTMLElement>('.msg .m-state')!;
+    assert.ok(state, 'the bubble has its delivery mark');
+    assert.equal(state.classList.contains('ok'), false, 'not delivered');
+    assert.equal(state.classList.contains('note'), false, 'still a delivery to an agent, not a room note');
+    assert.equal(state.getAttribute('title'), 'Queued', 'the hollow ring');
   } finally { await app.close(); }
 });
 
