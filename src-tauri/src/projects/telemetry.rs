@@ -1860,6 +1860,30 @@ mod tests {
         assert_eq!(derive(&closed, "w1", 0).state, "running");
     }
 
+    /// Validator's variant (#249): of two identical msg-less deliveries only
+    /// the FIRST is warned (the second was typed later and is still in its
+    /// ack window). The first late echo settles and names the warned row; the
+    /// second echo settles the unwarned sibling. Both read as ours.
+    #[test]
+    fn only_the_warned_twin_is_named_by_its_late_echo() {
+        let session = format!("wone-{}", uuid::Uuid::new_v4());
+        let notice = "[board #242 reply] status review → doing";
+        record_delivery(&session, "w1", notice, "");
+        backdate(&session); // only this row is past the window
+        record_delivery(&session, "w1", notice, "");
+        sweep_deliveries(&session);
+        let warns: Vec<i64> = recent_events(&session, 0).into_iter().filter(|e| e.kind == "warn").map(|e| e.deliveries[0].id).collect();
+        let rows: Vec<i64> = crate::projects::with_store(|s| s.pending_deliveries(&session, Some("w1"))).unwrap().iter().map(|r| r.id).collect();
+        assert_eq!(warns, vec![rows[0]], "only the first is reported");
+        assert!(record_prompt(&session, "w1", notice));
+        assert!(record_prompt(&session, "w1", notice));
+        let echoes: Vec<(String, i64)> = recent_events(&session, 0).into_iter().filter(|e| e.kind == "prompt")
+            .map(|e| (e.via, e.deliveries[0].id)).collect();
+        assert_eq!(echoes, vec![("app".to_string(), rows[0]), ("app".to_string(), rows[1])],
+            "the first echo retracts the first warn; the second settles the unwarned twin");
+        assert!(held(&session, "w1").is_empty());
+    }
+
     /// The matcher over rows, pure: order, duplicates and truncation.
     #[test]
     fn settled_by_spends_one_receipt_per_occurrence() {
