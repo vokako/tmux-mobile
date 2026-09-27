@@ -226,7 +226,7 @@ impl Store {
             .map_err(|e| e.to_string())
     }
 
-    /// Seed the five backend-native Manager defaults once (empty table only).
+    /// Seed the six backend-native defaults once (empty table only).
     /// `docs` / `reviewer` and `*-default` aliases are deliberately retired:
     /// one obvious entry per backend, with the defaults pinned to the top of
     /// every registry consumer by `reg_list`.

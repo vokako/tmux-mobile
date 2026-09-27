@@ -553,9 +553,9 @@ impl Store {
             // `reg_seed` only plants on an empty table (so a deliberately
             // deleted default never resurrects at restart) — which also
             // meant every already-seeded install would never see the new
-            // `omp` Manager. A one-shot migration is the mechanism that
+            // `omp` default. A one-shot migration is the mechanism that
             // threads that needle: rows > 0 gates out fresh databases
-            // (reg_seed will plant all five right after open), NOT EXISTS
+            // (reg_seed will plant every default right after open), NOT EXISTS
             // respects a user's own `omp` definition, and once stamped v18
             // the insert never runs again, so deleting it sticks.
             self.conn
