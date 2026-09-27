@@ -1711,6 +1711,17 @@ mod tests {
         assert!(!delivered_chat_line("human", "@solo decide", None).contains("[tmm team context"));
     }
 
+    /// Kills the test session and removes its workspace when dropped, so a
+    /// test that fails part-way leaves no live session for the server on the
+    /// same tmux to adopt as a project (2026-09-27, the #250 negative controls).
+    struct KillOnDrop(String, std::path::PathBuf);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &format!("={}", self.0)]).stderr(std::process::Stdio::null()).status();
+            let _ = std::fs::remove_dir_all(&self.1);
+        }
+    }
+
     /// Board #250 (validator 16:31), on the real delivery path: two
     /// multi-line messages to two DIFFERENT managed panes, posted at the same
     /// moment, each held between its paste buffer's load and paste. Each pane
@@ -1744,6 +1755,7 @@ mod tests {
             .args(["new-window", "-d", "-t", &session, "-n", "solo", "-c", &ws.to_string_lossy(), "cat"])
             .status()
             .unwrap();
+        let _cleanup = KillOnDrop(session.clone(), ws.clone());
         crate::projects::adopt(&session, Some("paste-hub-test")).expect("adopt project");
         let posts: Vec<_> = ["lead", "solo"]
             .into_iter()
@@ -1808,6 +1820,7 @@ mod tests {
             .args(["new-window", "-d", "-t", &session, "-n", "solo", "-c", &ws.to_string_lossy(), "cat"])
             .status()
             .unwrap();
+        let _cleanup = KillOnDrop(session.clone(), ws.clone());
         crate::projects::adopt(&session, Some("copymode-hub-test")).expect("adopt project");
         let lead = format!("{session}:lead");
         crate::tmux::run_tmux(&["copy-mode", "-t", &lead]).unwrap();
@@ -1875,6 +1888,7 @@ mod tests {
             .args(["new-window", "-d", "-t", &session, "-n", "solo", "-c", &ws.to_string_lossy(), "cat"])
             .status()
             .unwrap();
+        let _cleanup = KillOnDrop(session.clone(), ws.clone());
         crate::projects::adopt(&session, Some("copymode-cmd-test")).expect("adopt project");
         let lead = format!("{session}:lead");
         crate::tmux::run_tmux(&["copy-mode", "-t", &lead]).unwrap();

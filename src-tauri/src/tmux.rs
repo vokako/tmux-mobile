@@ -1268,8 +1268,19 @@ mod tests {
         let wrap = "\x1b[31m中文宽字\x1b[0m\n\x1b[31m符\x1b[0m";
         assert_eq!(join_unflagged_wraps(wrap, 9), "\x1b[31m中文宽字\x1b[0m\x1b[31m符\x1b[0m");
     }
+    /// Kills its session when dropped, so a test that fails part-way leaves no
+    /// live session behind: a leaked one is adopted as a project by the
+    /// server running on the same tmux (2026-09-27: four `cat` sessions from
+    /// the #250 negative controls became live projects rooted at $HOME).
+    struct KillOnDrop(String);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = kill_session(&self.0);
+        }
+    }
+
     /// A session with two `cat` panes; the targets, or None without tmux.
-    fn two_cat_panes(session: &str) -> Option<Vec<String>> {
+    fn two_cat_panes(session: &str) -> Option<(KillOnDrop, Vec<String>)> {
         let _ = kill_session(session);
         if new_session(session, None, Some("cat")).is_err() {
             eprintln!("no tmux server — skipping");
@@ -1282,8 +1293,9 @@ mod tests {
             .lines()
             .map(str::to_string)
             .collect();
+        let guard = KillOnDrop(session.to_string());
         assert_eq!(targets.len(), 2);
-        Some(targets)
+        Some((guard, targets))
     }
 
     /// Board #250 (orchestrator 17:00): 20 concurrent two-pane multi-line
@@ -1293,7 +1305,13 @@ mod tests {
     #[test]
     fn concurrent_multiline_sends_to_two_panes_keep_their_own_text() {
         let session = format!("tmm-paste2-{}", std::process::id());
-        let Some(targets) = two_cat_panes(&session) else { return };
+        let Some((_session, targets)) = two_cat_panes(&session) else { return };
+        // Buffers are server-global and this tmux is shared (the live server,
+        // a negative-control run): only buffers this test added count.
+        let buffers = || -> std::collections::HashSet<String> {
+            run_tmux(&["list-buffers", "-F", "#{buffer_name}"]).unwrap_or_default().lines().map(str::to_string).collect()
+        };
+        let before = buffers();
         const PAIRS: usize = 20;
         let handles: Vec<_> = (0..PAIRS)
             .flat_map(|i| targets.iter().enumerate().map(move |(n, t)| (i, n, t.clone())))
@@ -1309,7 +1327,7 @@ mod tests {
         }
         std::thread::sleep(std::time::Duration::from_millis(400));
         let panes: Vec<String> = targets.iter().map(|t| capture_pane_plain(t, Some(400)).unwrap_or_default()).collect();
-        let leftover = run_tmux(&["list-buffers", "-F", "#{buffer_name}"]).unwrap_or_default();
+        let leftover: Vec<String> = buffers().difference(&before).filter(|b| b.starts_with("tmm-paste")).cloned().collect();
         let _ = kill_session(&session);
         for (n, text) in panes.iter().enumerate() {
             let lost: Vec<usize> = (0..PAIRS)
@@ -1318,7 +1336,7 @@ mod tests {
             assert!(lost.is_empty(), "pane {n} lost {lost:?}:\n{text}");
             assert!(!text.contains(&format!("p{}-", 1 - n)), "pane {n} got the other pane's text:\n{text}");
         }
-        assert!(!leftover.lines().any(|b| b.starts_with("tmm-paste")), "no buffer left behind: {leftover}");
+        assert!(leftover.is_empty(), "no buffer left behind: {leftover:?}");
     }
 
     /// Board #250: a pane in copy-mode swallows both send-keys and
@@ -1328,7 +1346,7 @@ mod tests {
     #[test]
     fn send_command_refuses_a_pane_in_copy_mode_and_leaves_the_mode() {
         let session = format!("tmm-copymode-{}", std::process::id());
-        let Some(targets) = two_cat_panes(&session) else { return };
+        let Some((_session, targets)) = two_cat_panes(&session) else { return };
         let (reading, free) = (&targets[0], &targets[1]);
         run_tmux(&["copy-mode", "-t", reading]).unwrap();
         assert!(pane_in_mode(reading).unwrap());
