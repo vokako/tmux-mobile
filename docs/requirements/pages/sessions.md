@@ -29,29 +29,17 @@ glance without requiring interaction.
   the right closes / clears). Escape also closes.
 - **MRU chips** (shown in the default row state). Up to 5 most-recently-
   opened **AI sessions** — sessions where at least one pane is running a
-  known coding-agent CLI (Kiro/Claude/OpenClaw), excluding the currently-
-  open one. The filter is deliberate: plain zsh/node/vim sessions clutter
-  a "fast switch" surface and are still reachable via search or the full
-  list. Horizontally scrollable. One tap on a chip opens that session at
-  its primary AI pane.
+  known coding-agent CLI (the shared detection table in `core/agents.ts`,
+  not a list kept here), excluding the currently-open one. The filter is
+  deliberate: plain zsh/node/vim sessions clutter a "fast switch" surface
+  and are still reachable via search or the full list. Horizontally
+  scrollable. One tap on a chip opens that session at its primary AI pane.
 
-### Grouping: Teams vs Sessions
-When the server has the team bus (`teamState.available`) and at least one
-team session (`tmm-team-<room>`) exists, the list splits into two labelled
-groups — **Teams** first, then **Sessions** — each with an icon + count
-header. Without team sessions (or on a busless server) the list stays flat
-and headerless, exactly as before.
-
-- Classification is by the `tmm-team-` name prefix, **gated on the shared
-  `teamState.available`** (`src/lib/core/team.svelte.ts`) so a busless server
-  shows these as ordinary sessions on every surface (Sessions, PanePicker).
-- A team row displays the workspace basename (the `-<6hex>` slug suffix is
-  stripped for display; the full room stays in the row `title`). Two
-  workspaces with the same basename therefore display alike — a known,
-  accepted trade-off (the title attribute disambiguates on desktop).
-- Tapping a team row opens the **Team chat** for that room (not a raw
-  terminal); the trailing affordance is a chat glyph instead of the kill
-  button, and team rows never expand a pane list.
+### Grouping
+The list is one flat, headerless group. (The Teams/Sessions split keyed on
+`tmm-team-<room>` sessions left with the team bus on 2026-09-09, board
+#100/#107; today's agent teams live in the Hub, not in tmux session names.
+Group headers carry no count pill since board #235 — the word alone.)
 
 ### Session row (single line, dense)
 Left-to-right:
