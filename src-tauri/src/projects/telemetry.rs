@@ -233,11 +233,16 @@ fn push_event(session: &str, window: &str, kind: &str, text: String) {
 }
 
 fn push_full(session: &str, window: &str, kind: &str, text: String, tool: String, via: String, deliveries: Vec<DeliveryRef>) {
+    push_full_at(session, window, now_ms(), kind, text, tool, via, deliveries);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_full_at(session: &str, window: &str, ts_ms: u64, kind: &str, text: String, tool: String, via: String, deliveries: Vec<DeliveryRef>) {
     push(
         session,
         ActivityEvent {
             id: 0,
-            ts: now_ms(),
+            ts: ts_ms,
             window: window.to_string(),
             kind: kind.into(),
             text,
@@ -472,27 +477,33 @@ fn recover_open_turns(session: &str) {
             if r.prompt.is_some() || r.end.is_some() || r.tool.is_some() || r.ask.is_some() {
                 return; // this process already observed the window
             }
-            if let Some(f) = &facts.prompt {
-                r.prompt = Some(f.ts / 1000);
-                r.prompt_seq = recovered_arrival(f.id);
-            }
-            if let Some(f) = &facts.tool {
-                let line = if f.text.is_empty() { f.tool.clone() } else { format!("{} {}", f.tool, f.text) };
-                r.tool = Some((line, f.ts / 1000));
-                r.tool_seq = recovered_arrival(f.id);
-            }
-            if let Some(f) = &facts.ask {
-                r.ask = Some((f.text.clone(), f.ts / 1000));
-                r.ask_seq = recovered_arrival(f.id);
-            }
-            if let Some(f) = &facts.end {
-                // The same shape the live path stores: an interrupt ends a turn
-                // as `completed` does (`record_interrupt`).
-                let kind = if f.text == "failed" { "failed" } else { "completed" };
-                r.end = Some((kind.to_string(), f.ts / 1000));
-                r.end_seq = recovered_arrival(f.id);
-            }
+            replay_turn_facts(r, &facts);
         });
+    }
+}
+
+/// Put a window's persisted turn facts into a record, each ordered by its
+/// log row id; `derive_from` then reads them as it reads live facts.
+fn replay_turn_facts(r: &mut Rec, facts: &super::store::TurnFacts) {
+    if let Some(f) = &facts.prompt {
+        r.prompt = Some(f.ts / 1000);
+        r.prompt_seq = recovered_arrival(f.id);
+    }
+    if let Some(f) = &facts.tool {
+        let line = if f.text.is_empty() { f.tool.clone() } else { format!("{} {}", f.tool, f.text) };
+        r.tool = Some((line, f.ts / 1000));
+        r.tool_seq = recovered_arrival(f.id);
+    }
+    if let Some(f) = &facts.ask {
+        r.ask = Some((f.text.clone(), f.ts / 1000));
+        r.ask_seq = recovered_arrival(f.id);
+    }
+    if let Some(f) = &facts.end {
+        // The same shape the live path stores: an interrupt ends a turn as
+        // `completed` does (`record_interrupt`).
+        let kind = if f.text == "failed" { "failed" } else { "completed" };
+        r.end = Some((kind.to_string(), f.ts / 1000));
+        r.end_seq = recovered_arrival(f.id);
     }
 }
 
@@ -500,21 +511,51 @@ fn forget_window_deliveries(session: &str, window: &str) {
     let _ = queue(|s| s.clear_deliveries(session, Some(window)));
 }
 
+/// The ONE entry for a turn fact (board #249, validator 15:07). A prompt,
+/// tool call, ask, stop or interrupt is written to the activity log and
+/// applied to the window's record under one lock, with one clock: the row's
+/// ts is the record's second (plus this moment's milliseconds), and the
+/// record's order is taken in the same critical section as the row's
+/// insertion. So the log orders turn facts exactly as the live record does,
+/// and a restart that replays the log (`replay_turn_facts`) derives the
+/// state the live record had. Two unserialized paths used to take their
+/// order and their row in opposite sequence (prompt: order then row; stop:
+/// row then order), and a concurrent pair could land reversed.
+fn turn_fact(
+    session: &str,
+    window: &str,
+    ts: u64,
+    event: Option<(&str, String, String, String, Vec<DeliveryRef>)>,
+    apply: impl FnOnce(&mut Rec, u64, u64),
+) {
+    static ORDER: Mutex<()> = Mutex::new(());
+    let _order = ORDER.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((kind, text, tool, via, deliveries)) = event {
+        push_full_at(session, window, ts * 1000 + now_ms() % 1000, kind, text, tool, via, deliveries);
+    }
+    // Tests widen the gap between the row and the order, so a lost lock
+    // shows up as a reordering instead of a lucky pass.
+    #[cfg(test)]
+    std::thread::sleep(std::time::Duration::from_micros(30));
+    let seq = arrival();
+    with_rec(session, window, |r| apply(r, ts, seq));
+}
+
 /// A hook notification consumed by the AgentNotificationHub. Two different
 /// facts arrive here and they are stored apart: a stop ENDS the turn, a
 /// permission/input prompt means the agent is blocked on the human while the
 /// turn stays open.
 pub fn record_notification(session: &str, window: &str, kind: &str, ts: u64) {
-    push_event(session, window, "notif", kind.to_string());
+    let event = ("notif", kind.to_string(), String::new(), String::new(), Vec::new());
     let kind = kind.to_string();
-    with_rec(session, window, |r| match kind.as_str() {
+    turn_fact(session, window, ts, Some(event), |r, ts, seq| match kind.as_str() {
         "permission_required" | "input_required" => {
             r.ask = Some((kind, ts));
-            r.ask_seq = arrival();
+            r.ask_seq = seq;
         }
         _ => {
             r.end = Some((kind, ts));
-            r.end_seq = arrival();
+            r.end_seq = seq;
             r.ask = None; // a finished turn cannot still be asking
         }
     });
@@ -541,13 +582,12 @@ pub fn record_notification(session: &str, window: &str, kind: &str, ts: u64) {
 /// the feed draws nothing for it because the room already carries
 /// `[tmm] interrupted <name>`.
 pub fn record_interrupt(session: &str, window: &str) {
-    let ts = now();
-    with_rec(session, window, |r| {
+    let event = ("notif", "interrupted".to_string(), String::new(), String::new(), Vec::new());
+    turn_fact(session, window, now(), Some(event), |r, ts, seq| {
         r.end = Some(("completed".to_string(), ts));
-        r.end_seq = arrival();
+        r.end_seq = seq;
         r.ask = None;
     });
-    push_event(session, window, "notif", "interrupted".to_string());
 }
 
 /// A hook tool event (isolated-home agents only, Phase B+): `("Edit",
@@ -581,19 +621,23 @@ pub fn record_tool(session: &str, window: &str, tool: &str, detail: &str) {
     // pair is collapsed here rather than in the hook config, because an
     // already-spawned agent keeps the config it was started with: fixing it at
     // the source would only help agents spawned later.
-    let mut dup = false;
-    with_rec(session, window, |r| {
-        dup = r
-            .tool
-            .as_ref()
-            .is_some_and(|(prev, at)| prev == &line && ts.saturating_sub(*at) <= TOOL_DEDUPE_SECS);
-        r.tool = Some((line.clone(), ts));
-        r.tool_seq = arrival();
-    });
+    // The Post half of a call is the SAME fact: it writes no row and leaves
+    // the record's fact (time and order) as the Pre half set it, so the live
+    // record and the log agree.
+    let dup = store()
+        .lock()
+        .unwrap()
+        .get(&(session.to_string(), window.to_string()))
+        .and_then(|r| r.tool.as_ref())
+        .is_some_and(|(prev, at)| prev == &line && ts.saturating_sub(*at) <= TOOL_DEDUPE_SECS);
     if dup {
         return;
     }
-    push_full(session, window, "tool", detail.to_string(), tool.to_string(), String::new(), Vec::new());
+    let event = ("tool", detail.to_string(), tool.to_string(), String::new(), Vec::new());
+    turn_fact(session, window, ts, Some(event), |r, ts, seq| {
+        r.tool = Some((line, ts));
+        r.tool_seq = seq;
+    });
 }
 
 /// A line this app typed into an agent's pane (`deliver_mentions`). Held as a
@@ -638,19 +682,11 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
     // A turn just opened. This is the ONE honest "it started working" signal:
     // pane activity cannot be it, because an agent TUI repaints its prompt
     // (spinner, status line, cursor) long after it finished.
-    with_rec(session, window, |r| {
+    let via = if acked { "app" } else { "local" };
+    turn_fact(session, window, ts, Some(("prompt", text, String::new(), via.to_string(), refs)), |r, ts, seq| {
         r.prompt = Some(ts);
-        r.prompt_seq = arrival();
+        r.prompt_seq = seq;
     });
-    push_full(
-        session,
-        window,
-        "prompt",
-        text,
-        String::new(),
-        if acked { "app".into() } else { "local".into() },
-        refs,
-    );
     acked
 }
 
@@ -1875,6 +1911,57 @@ mod tests {
         sweep_deliveries(&session);
         assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 1, "the held line's clock ran");
         assert_eq!(current_turn_prompt(&session, "w1"), None, "no reply edge recovered for a cancelled turn");
+    }
+
+    /// Validator 15:07: the live record and the log must order turn facts the
+    /// same way, or a restart derives a different state than the one the
+    /// window had. Many threads interleave prompts, stops and interrupts on
+    /// one window in the same second; afterwards the log (here the ring, in
+    /// push order, standing in for the row ids) is replayed through the same
+    /// replay + derive_from and must match the live record: same state, same
+    /// newest fact of each kind.
+    #[test]
+    fn the_log_replays_to_the_live_state_under_concurrent_turn_facts() {
+        for round in 0..60 {
+            let session = format!("order-{round}-{}", uuid::Uuid::new_v4());
+            let threads: Vec<_> = (0..4)
+                .map(|t| {
+                    let session = session.clone();
+                    std::thread::spawn(move || {
+                        for n in 0..25 {
+                            match (t + n) % 3 {
+                                0 => { record_prompt(&session, "w1", &format!("p{t}-{n}")); }
+                                1 => record_notification(&session, "w1", "completed", now()),
+                                _ => record_interrupt(&session, "w1"),
+                            }
+                        }
+                    })
+                })
+                .collect();
+            for th in threads {
+                th.join().unwrap();
+            }
+            let live = store().lock().unwrap().get(&(session.clone(), "w1".to_string())).cloned().unwrap();
+            let evs = events().lock().unwrap().get(&session).cloned().unwrap_or_default();
+            let fact = |pred: &dyn Fn(&ActivityEvent) -> bool| {
+                evs.iter().enumerate().filter(|(_, e)| pred(e)).last().map(|(i, e)| crate::projects::store::TurnFact {
+                    id: i as i64 + 1, ts: e.ts, text: e.text.clone(), tool: e.tool.clone(),
+                })
+            };
+            let facts = crate::projects::store::TurnFacts {
+                window: "w1".into(),
+                prompt: fact(&|e| e.kind == "prompt"),
+                tool: None,
+                ask: None,
+                end: fact(&|e| e.kind == "notif" && matches!(e.text.as_str(), "completed" | "failed" | "interrupted")),
+            };
+            let mut replayed = Rec::default();
+            replay_turn_facts(&mut replayed, &facts);
+            let (a, b) = (derive_from(&live, 0, now()), derive_from(&replayed, 0, now()));
+            assert_eq!((a.state.as_str(), a.since), (b.state.as_str(), b.since), "round {round}: log order = live order");
+            assert_eq!(live.prompt, replayed.prompt, "round {round}: one clock for the record and the row");
+            assert_eq!(live.end.as_ref().map(|e| e.1), replayed.end.as_ref().map(|e| e.1));
+        }
     }
 
     /// Validator 14:53 / orchestrator 14:55: the replayed facts go through the
