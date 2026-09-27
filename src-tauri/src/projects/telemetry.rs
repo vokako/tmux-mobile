@@ -2030,6 +2030,15 @@ mod tests {
         let next = order_of(None);
         assert!(next > far as u64, "an unwritten fact still sorts after it");
         assert!(order_of(Some(far - 10)) < next, "an older row keeps its older place");
+        // Fail-soft path (validator 15:35): written, lost, written, lost — a
+        // lost write (no row) still takes an order after every id seen, and
+        // the next written row, whose id the database hands out later, sorts
+        // after it again. Arrival order is kept through any mix.
+        let w1 = order_of(Some(far + 5));
+        let lost1 = order_of(None);
+        let w2 = order_of(Some(lost1 as i64 + 3));
+        let lost2 = order_of(None);
+        assert!(w1 < lost1 && lost1 < w2 && w2 < lost2, "{w1} {lost1} {w2} {lost2}");
     }
 
     /// Validator 15:07: the live record and the log must order turn facts the
