@@ -179,7 +179,7 @@ Queue is the only mode that keeps "one delivered line → one prompt hook → on
 | kimi (2.0.2) | none (`tui.toml` has no key) | always: own turn, hook ack, reply to B | — | no |
 | grok (1.0.13 and 1.0.41) | documented `[ui] follow_up_behavior` (default queue) | unmeasured: no managed grok turn completes here (Bedrock 400, board #252) | unmeasured | no |
 
-Codex's swap keeps a steer key for a person in the pane (Tab). The known limit is in `docs/todo.md`: a line sent to a busy claude or omp still joins the running turn, so its reply can go to the wrong sender.
+The setting is the PANE's behaviour, not only ours (orchestrator, #245): a person who takes over the pane gets the same Enter. On a queued codex, Enter while it works queues and Tab now steers (the swap keeps a steer key); on kiro, the mode is also the one its footer shows, and Ctrl+S still toggles it for the session. The known limit is in `docs/todo.md`: a line sent to a busy claude or omp still joins the running turn, so its reply can go to the wrong sender.
 
 ### A managed agent's MODEL lives in its config, never on the launch line
 
