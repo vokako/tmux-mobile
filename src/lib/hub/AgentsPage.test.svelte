@@ -6,6 +6,7 @@
     show: (value: boolean) => void;
     edit: (name: string) => void;
     section: (value: string) => void;
+    serve: (list: BackendInfo[] | null) => void;
   }) => void } = $props();
   // What App.svelte does on connect: the server's backends_list, before the
   // page reads it (board #245 — the input-mode switch is server truth). Read
@@ -19,6 +20,7 @@
     show: value => visible = value,
     edit: name => editRequest = { name, n: ++sequence },
     section: value => section = value,
+    serve: list => setServedBackends(list),
   }));
 </script>
 

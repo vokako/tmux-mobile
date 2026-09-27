@@ -1,5 +1,4 @@
 import type { RegAgent, RegSkill, TeamMember } from '../core/ws.ts';
-import { backendSwitchesInputMode } from '../core/agents.ts';
 
 export type AgentDraft = Omit<RegAgent, 'skills' | 'mcp'> & {
   skillSel: string[]; mcpSel: string[]; mcpExtra: unknown[];
@@ -19,9 +18,11 @@ function agentPayload(value: AgentDraft): RegAgent {
   return {
     name: value.name.trim(), backend: value.backend, model: value.model.trim(),
     effort: value.effort ?? '',
-    // A backend without the switch saves queue, so changing the backend of a
-    // steer agent cannot leave a value the server rejects (board #245).
-    input_mode: value.input_mode === 'steer' && backendSwitchesInputMode(value.backend) ? 'steer' : 'queue',
+    // Saved as the draft holds it (board #245, validator 19:33): a payload
+    // that consulted the capability list rewrote a saved steer to queue
+    // whenever that list had not arrived. Only an explicit backend change in
+    // the editor resets it; the server stays the authority.
+    input_mode: value.input_mode === 'steer' ? 'steer' : 'queue',
     system: value.system,
     skills: JSON.stringify(value.skillSel), mcp: JSON.stringify([...value.mcpSel, ...value.mcpExtra]),
   };

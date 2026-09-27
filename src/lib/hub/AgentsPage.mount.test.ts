@@ -265,6 +265,48 @@ test('the input mode is offered only where the server says the backend switches,
   } finally { await app.close(); }
 });
 
+test('a saved steer survives a missing capability list, and a late list reveals the field (#245, validator 19:33)', async context => {
+  const fixture = await hostFixture();
+  const served = (name: string, input_modes: boolean) => ({ name, icon: `/assets/${name}.svg`, color: `--backend-${name}`, efforts: [], input_modes });
+  const writes: any[] = [];
+  let controls!: { serve: (list: unknown) => void };
+  const app = await fixture.mount(context, {
+    // No backends_list yet (fetch pending, failed, or an older server).
+    props: { ready: (value: typeof controls) => controls = value, backends: null },
+    modules: [rpc({
+      registryList: async () => ({ agents: [{ ...alpha, backend: 'kiro', input_mode: 'steer' }, { ...alpha, name: 'q', backend: 'kiro', input_mode: 'queue' }] }),
+      registrySave: async (value: unknown) => { writes.push(value); },
+    })],
+  });
+  const field = () => app.document.querySelector<HTMLButtonElement>('[aria-label="While busy"]');
+  try {
+    await openAgent(app, 'alpha');
+    assert.equal(field()?.querySelector('.sel-value')?.textContent, 'Steer', 'a saved steer is shown even with no list');
+    await text(app, 'Edited while the list is missing');
+    command(app, 'Save').click();
+    for (let i = 0; i < 5 && !writes.length; i++) await app.flush();
+    assert.equal(writes[0]?.input_mode, 'steer', 'an unchanged backend keeps its steer');
+    for (let i = 0; i < 5; i++) await app.flush();
+    await openAgent(app, 'q');
+    assert.equal(field(), null, 'queue on an unknown capability: no field yet');
+    controls.serve([served('kiro', true), served('claude', false)]);
+    await app.flush();
+    assert.equal(field()?.querySelector('.sel-value')?.textContent, 'Queue', 'the late list reveals the field in the open editor');
+    // With the list known, an explicit move to a backend without the switch
+    // resets a steer draft (the one place the editor changes it).
+    field()!.click(); await app.flush();
+    [...app.document.querySelectorAll<HTMLButtonElement>('[role=option]')].find(o => o.textContent?.trim() === 'Steer')!.click();
+    await app.flush();
+    app.document.querySelector<HTMLButtonElement>('[aria-label="Backend"]')!.click(); await app.flush();
+    [...app.document.querySelectorAll<HTMLButtonElement>('[role=option]')].find(o => o.textContent?.trim() === 'claude')!.click();
+    await app.flush();
+    assert.equal(field(), null, 'claude: the field goes with the switch');
+    command(app, 'Save').click();
+    for (let i = 0; i < 5 && writes.length < 2; i++) await app.flush();
+    assert.deepEqual([writes[1]?.backend, writes[1]?.input_mode], ['claude', 'queue']);
+  } finally { await app.close(); }
+});
+
 test('Team disclosure is not an edit; its actual role uses the guarded Save (#156)', async context => {
   const writes: any[] = [];
   const team = { name: 'squad', description: 'Rules', members: JSON.stringify([

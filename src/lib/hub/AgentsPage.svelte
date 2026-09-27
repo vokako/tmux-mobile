@@ -12,7 +12,7 @@
   import { registryList, registrySave, registryDelete, modelsList, skillsList, skillsSave, skillsDelete, skillsRefresh, skillsImport, skillsFiles, skillsFile, mcpList, mcpSave, mcpDelete, teamsList, teamsSave, teamsDelete, globalPromptGet, globalPromptSet } from '../core/ws.ts';
   import { renderMarkdown } from '../core/markdown.ts';
   import { backendColor } from '../hub/hub.ts';
-  import { backendIcon, spawnableBackends, defaultBackend, backendEfforts, backendSwitchesInputMode } from '../core/agents.ts';
+  import { backendIcon, spawnableBackends, defaultBackend, backendEfforts, backendSwitchesInputMode, onServedBackends, servedBackendsKnown } from '../core/agents.ts';
   import { moveMs, revealMs } from '../ui/motion.ts';
   import { hoverInfo } from '../ui/hover.ts';
   import Select from '../ui/Select.svelte';
@@ -307,6 +307,18 @@
   // is the authority that rejects one the backend would silently ignore — a
   // dashed `claude-sonnet-4-5` ran happily on the DEFAULT model instead
   // (owner report, 2026-08-19).
+  // The served backend list can land after this page rendered (it is
+  // fetched on connect): re-read it then, so an open editor gains the
+  // input-mode field instead of waiting for the next visit (board #245).
+  let servedTick = $state(0);
+  $effect(() => onServedBackends(() => { servedTick++; backends = spawnableBackends(); }));
+  const switchesInputMode = (backend) => { void servedTick; return backendSwitchesInputMode(backend); };
+  /** An explicit backend pick in the editor: a steer draft moving to a backend
+   * the server says cannot switch becomes queue. With no list yet nothing is
+   * judged — the field stays visible and registry_save decides. */
+  function pickBackend(backend) {
+    if (editing?.input_mode === 'steer' && servedBackendsKnown() && !backendSwitchesInputMode(backend)) editing.input_mode = 'queue';
+  }
   let models = $state([]);
   $effect(() => {
     const backend = editing?.backend;
@@ -998,6 +1010,7 @@
         <div class="config-row">
           <label class="config-field"><span class="config-field-label">{t('agentsBackend')}</span>
             <Select bind:value={editing.backend} disabled={saving || removing} ariaLabel={t('agentsBackend')}
+              onchange={pickBackend}
               options={backends.map((b) => ({ value: b, icon: backendIcon(b) ?? undefined }))} />
           </label>
           <label class="config-field"><span class="config-field-label">{t('agentsModel')}</span>
@@ -1018,10 +1031,12 @@
               options={[{ value: '', label: t('agentsModelDefault') }, ...backendEfforts(editing.backend)]}
               ariaLabel={t('agentsEffort')} />
           </label>
-          {#if backendSwitchesInputMode(editing.backend)}
+          {#if switchesInputMode(editing.backend) || editing.input_mode === 'steer'}
             <!-- Board #245: only where the switch was measured (the server's
                  backends_list says which); elsewhere the CLI decides and the
-                 field would promise a behaviour no config carries. -->
+                 field would promise a behaviour no config carries. A saved
+                 steer is always shown, so it is never hidden while the list
+                 is missing and can always be changed back. -->
             <label class="config-field"><span class="config-field-label">{t('agentsInputMode')}</span>
               <Select bind:value={editing.input_mode} disabled={saving || removing}
                 options={[{ value: 'queue', label: t('agentsInputQueue') }, { value: 'steer', label: t('agentsInputSteer') }]}
@@ -1029,7 +1044,7 @@
             </label>
           {/if}
         </div>
-        {#if backendSwitchesInputMode(editing.backend) && editing.input_mode === 'steer'}
+        {#if editing.input_mode === 'steer'}
           <p class="hint">{t('agentsInputSteerHint')}</p>
         {/if}
         <label class="config-field"><span class="config-field-label">{t('agentsSystem')}</span>

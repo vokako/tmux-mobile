@@ -86,7 +86,7 @@ pub fn validate_input_mode(backend: &str, mode: &str) -> Result<(), String> {
     match mode {
         "queue" => Ok(()),
         "steer" if crate::backends::Backend::parse(backend).is_some_and(|b| b.switches_input_mode()) => Ok(()),
-        "steer" => Err(format!("{backend} has no queue/steer switch; its input mode is queue")),
+        "steer" => Err(format!("steer is not offered for {backend}: no queue/steer switch was measured for it, so its CLI's own behaviour applies; save it as queue")),
         other => Err(format!("input mode must be queue|steer, got '{other}'")),
     }
 }

@@ -80,8 +80,21 @@ export interface BackendInfo {
   input_modes?: boolean;
 }
 let served: BackendInfo[] | null = null;
+const servedListeners = new Set<() => void>();
 export function setServedBackends(list: BackendInfo[] | null): void {
   served = Array.isArray(list) && list.length > 0 ? list : null;
+  for (const fn of servedListeners) fn();
+}
+/** Called whenever the served list is (re)set, so a page that is already
+ * open can re-read it: the list arrives on connect, possibly after the page
+ * rendered (board #245). Returns the unsubscribe. */
+export function onServedBackends(fn: () => void): () => void {
+  servedListeners.add(fn);
+  return () => { servedListeners.delete(fn); };
+}
+/** Whether the server's list has arrived — "no switch" is only a verdict then. */
+export function servedBackendsKnown(): boolean {
+  return served !== null;
 }
 function servedBackend(backend: string | null | undefined): BackendInfo | null {
   const key = (backend ?? '').toLowerCase();
