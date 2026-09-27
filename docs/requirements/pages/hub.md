@@ -368,7 +368,8 @@ bare conversation lifts the project list (the floor).
 
 ## Related
 - Design: `tmm-cli.md` (the whole agents-v2 substrate), `projects.md`,
-  `agent-lifecycle.md`, `design-language.md` (visual contract), `team.md`
-  (the OTHER multi-agent surface — templated rosters, phone-first).
+  `agent-lifecycle.md`, `design-language.md` (visual contract). (The other
+  multi-agent surface, the agora-bus Team page, was deleted on 2026-09-09,
+  board #100/#107; its record is `docs/exec-plans/team.md`.)
 - API: `docs/requirements/api-contracts/websocket-rpc.md` (hub_*, board,
   registry/skills/MCP tables).
