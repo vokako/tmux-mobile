@@ -1002,6 +1002,38 @@ test('a line refused in copy-mode shows one warn note naming the agent and the r
   } finally { await app.close(); }
 });
 
+test('a /command to All that one pane refused in copy-mode succeeds for the rest and shows the refusal as a warn note (#250)', { timeout: 60000 }, async (context) => {
+  // The server's answer for `all` with alice in copy-mode (the Rust test
+  // a_command_to_all_with_one_pane_in_copy_mode…): success for bob, and one
+  // plain warn on alice's window that the next activity poll brings in.
+  const commands: string[] = [];
+  const events: object[] = [];
+  const app = await composerFixture(context, {
+    hubCommand: async (_s: string, name: string, command: string) => {
+      commands.push(`${name}:${command}`);
+      events.push({ id: 1, ts: Date.now(), window: 'alice', kind: 'warn', text: `undelivered (pane is in copy mode): ${command}` });
+      return { sent: ['bob'], command };
+    },
+    hubActivity: async () => ({ events: [...events], has_more: false }),
+  });
+  // jsdom has no canvas renderer; the feed measures glyphs once it has rows.
+  app.window.HTMLCanvasElement.prototype.getContext = () => null;
+  try {
+    await app.to('everyone');
+    await app.text('/compact');
+    app.send.click();
+    await app.wait(() => commands.length === 1);
+    assert.deepEqual(commands, ['all:/compact'], 'one RPC; the server fans out');
+    await app.advance(5000);
+    await app.wait(() => !!app.document.querySelector('.note.warn'));
+    const notes = [...app.document.querySelectorAll<HTMLElement>('.note.warn')];
+    assert.equal(notes.length, 1);
+    assert.ok(notes[0]!.querySelector('.n-who')!.textContent!.includes('alice'), 'the note names the refused agent');
+    assert.equal(notes[0]!.querySelector('.n-text')!.textContent, 'undelivered (pane is in copy mode): /compact');
+    assert.equal(app.input.value, '', 'a partial success is not a failed send to retry');
+  } finally { await app.close(); }
+});
+
 test('stopped-card double-click only filters and closes its click menu (#173)', { timeout: 60000 }, async (context) => {
   const app = await composerFixture(context, {
     projectList: async () => ({ projects: [{

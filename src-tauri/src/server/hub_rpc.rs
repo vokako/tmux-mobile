@@ -122,8 +122,14 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
                 let target = format!("{}:{}.{}", session, pane.window, pane.pane);
                 match crate::tmux::send_command(&target, text) {
                     Ok(()) => sent.push(pane.window_name.clone()),
-                    // Board #250: a pane in copy-mode refuses; say which and why.
-                    Err(e) => refused.push(format!("{}: {}", pane.window_name, e.trim())),
+                    // Board #250: a pane in copy-mode refuses. The same plain
+                    // warn as a refused chat line, on THAT window, whatever the
+                    // others did: an `all` where one pane took it answers
+                    // success, and the refused one must not vanish with it.
+                    Err(e) => {
+                        crate::projects::telemetry::record_undelivered(session, &pane.window_name, text, e.trim());
+                        refused.push(format!("{}: {}", pane.window_name, e.trim()));
+                    }
                 }
             }
             if sent.is_empty() && !refused.is_empty() {
@@ -1833,6 +1839,79 @@ mod tests {
         // and the wire form has no `deliveries` key at all.
         assert!(warns[0].deliveries.is_empty(), "{:?}", warns[0].deliveries);
         assert!(serde_json::to_value(&warns[0]).unwrap().get("deliveries").is_none());
+    }
+
+    /// Board #250 (validator 17:35): `hub_command` to `all` where one pane is
+    /// in copy-mode and the other is not. The one that took it is recorded
+    /// and answered as success; the refused one gets the same immediate plain
+    /// warn as a refused chat line (target, reason, command; no deliveries),
+    /// its mode kept, nothing typed. A single target that refuses stays an
+    /// RPC error — nothing ran, so there is no success to repeat — and warns.
+    #[test]
+    fn a_command_to_all_with_one_pane_in_copy_mode_warns_for_it_and_runs_the_rest() {
+        crate::projects::tests::use_test_store();
+        let session = format!("tmm-copymode-cmd-{}", uuid::Uuid::new_v4());
+        let ws = std::env::temp_dir().join(format!("tmm-copymode-cmd-ws-{}", uuid::Uuid::new_v4()));
+        for name in ["lead", "solo"] {
+            let home = ws.join(".tmm/agents").join(name);
+            std::fs::create_dir_all(&home).unwrap();
+            std::fs::write(
+                home.join("launch.json"),
+                serde_json::json!({ "backend": "kiro", "cmd": format!("kiro-cli chat --agent {name}"), "team": "" }).to_string(),
+            )
+            .unwrap();
+        }
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "-n", "lead", "-c", &ws.to_string_lossy(), "cat"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            let _ = std::fs::remove_dir_all(&ws);
+            return;
+        }
+        std::process::Command::new("tmux")
+            .args(["new-window", "-d", "-t", &session, "-n", "solo", "-c", &ws.to_string_lossy(), "cat"])
+            .status()
+            .unwrap();
+        crate::projects::adopt(&session, Some("copymode-cmd-test")).expect("adopt project");
+        let lead = format!("{session}:lead");
+        crate::tmux::run_tmux(&["copy-mode", "-t", &lead]).unwrap();
+        let all = handle_hub_request(&req("hub_command", serde_json::json!({ "session": session, "agent": "all", "text": "/compact now" })), None);
+        let one = handle_hub_request(&req("hub_command", serde_json::json!({ "session": session, "agent": "lead", "text": "/clear" })), None);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let still = crate::tmux::pane_in_mode(&lead).unwrap();
+        let warns: Vec<_> = crate::projects::telemetry::recent_events(&session, 0).into_iter().filter(|e| e.kind == "warn").collect();
+        let room: Vec<String> = handle_hub_request(&req("hub_log", serde_json::json!({ "session": session })), None)
+            .result
+            .and_then(|v| v.get("messages").and_then(|m| m.as_array()).cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|m| m.get("body").and_then(|b| b.as_str()).map(str::to_string))
+            .collect();
+        crate::tmux::run_tmux(&["send-keys", "-t", &lead, "-X", "cancel"]).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let lead_text = crate::tmux::capture_pane_plain(&lead, Some(0)).unwrap_or_default();
+        let solo_text = crate::tmux::capture_pane_plain(&format!("{session}:solo"), Some(0)).unwrap_or_default();
+        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
+        let _ = std::fs::remove_dir_all(&ws);
+        // all: the taker is the success, the refused one is a warn.
+        assert!(all.error.is_none(), "{:?}", all.error.map(|e| e.message));
+        assert_eq!(all.result.as_ref().and_then(|v| v.get("sent")).cloned(), Some(serde_json::json!(["solo"])));
+        assert!(solo_text.contains("/compact now"), "{solo_text:?}");
+        // single target, refused: an error, and a warn of its own.
+        let err = one.error.expect("a single refused target is an error").message;
+        assert!(err.contains("lead: pane is in copy mode"), "{err}");
+        assert!(still, "copy-mode is never cancelled for a command");
+        assert!(!lead_text.contains("/compact") && !lead_text.contains("/clear"), "nothing typed: {lead_text:?}");
+        assert_eq!(room, vec!["[tmm] /compact now → solo".to_string()], "the room records only what ran");
+        let texts: Vec<(&str, &str)> = warns.iter().map(|w| (w.window.as_str(), w.text.as_str())).collect();
+        assert_eq!(
+            texts,
+            vec![("lead", "undelivered (pane is in copy mode): /compact now"), ("lead", "undelivered (pane is in copy mode): /clear")],
+        );
+        assert!(warns.iter().all(|w| w.deliveries.is_empty()), "no delivery reference");
     }
 
     #[test]
