@@ -526,6 +526,10 @@ untouched, so dimming says "not in view" and the paint still says who you
 are talking to. The feed's sticky banner with its ✕ and the dashed card
 outline are deleted — one indicator, and the exit is where the entry was:
 double-click again, the card menu's Show everything, or the back gesture.
+Because the card is the only indicator, the filter lives only while the
+strip draws that card, live or stopped: an agent removed from the room
+clears it, or the feed stayed filtered with no mode shown and no exit
+(#241, validator, 2026-09-27).
 A heavier avatar ring was the owner's other option; it was not taken
 because that ring is the context meter. Dimming alone said that something
 changed, not what (owner, 14:50: "只是颜色变暗了，没有任何提示…这个 Filter 和

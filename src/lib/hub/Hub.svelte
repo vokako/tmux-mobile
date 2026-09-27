@@ -830,6 +830,13 @@
   function toggleFilter(name) {
     filterAgent = filterAgent === name ? '' : name;
   }
+  /* The mode is shown and exited only on its card (#238), so it lasts only
+     while the strip draws one: a live or a stopped identity. An agent removed
+     from the room takes the filter with it; otherwise the feed stayed filtered
+     with no visible mode and no way out (#241, validator). */
+  $effect(() => {
+    if (filterAgent && !managedAgents.some((a) => a.name === filterAgent) && !stopped.includes(filterAgent)) filterAgent = '';
+  });
   const filterItem = (name) => ({
     label: filterAgent === name ? t('hubFilterExit') : t('hubFilterItem'),
     icon: 'filter',

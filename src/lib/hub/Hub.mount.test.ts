@@ -870,6 +870,35 @@ test('desktop double-click focuses an agent and toggles its reading filter witho
   } finally { await app.close(); }
 });
 
+test('the reading filter ends when its agent leaves the room, not when it stops (#241)', { timeout: 60000 }, async (context) => {
+  const agents = [
+    { name: 'alice', window: 0, managed: true, agent: 'kiro', state: 'idle', since: 10 },
+    { name: 'bob', window: 1, managed: true, agent: 'codex', state: 'idle', since: 5 },
+  ];
+  let slots = [{ window_name: 'bob', kind: 'agent', command: 'codex' }];
+  const app = await composerFixture(context, {
+    hubAgents: async () => ({ agents }),
+    projectList: async () => ({ projects: [{
+      project: { id: 'fixture', name: 'fixture', session: 'fixture', path: '/fixture' }, live: true, slots,
+    }] }),
+  });
+  try {
+    const button = stripCard(app.document, 'bob').querySelector<HTMLButtonElement>('.agent-select')!;
+    for (const [type, detail] of [['click', 1], ['click', 2], ['dblclick', 2]] as const) {
+      button.dispatchEvent(new app.window.MouseEvent(type, { detail, bubbles: true, cancelable: true }));
+      await app.flush();
+    }
+    assert.ok(app.document.querySelector('.cards.filtering'));
+    agents.pop();
+    await app.advance(5000);
+    assert.ok(stripCard(app.document, 'bob').classList.contains('filtered'), 'a stopped identity is still in the room and keeps its filter');
+    slots = [];
+    await app.advance(25000);
+    assert.equal(app.document.querySelector('[data-agent="bob"]'), null, 'removed: no card left to carry the mode');
+    assert.equal(app.document.querySelector('.cards.filtering'), null, 'the feed returns to everyone instead of filtering by an invisible card');
+  } finally { await app.close(); }
+});
+
 test('stopped-card double-click only filters and closes its click menu (#173)', { timeout: 60000 }, async (context) => {
   const app = await composerFixture(context, {
     projectList: async () => ({ projects: [{
