@@ -1162,6 +1162,8 @@ mod tests {
             r.env.iter().any(|(k, v)| k == "PI_CODING_AGENT_DIR" && v.contains("tmm-spawn-omp")),
             "the agent dir must be the isolated home"
         );
+        assert!(r.env.iter().any(|(k, v)| k == "OMP_SKIP_SETUP" && v == "1"),
+            "a fresh home must not park the pane in omp's setup wizard (#243)");
         assert!(r.cmd.contains("--auto-approve"), "no interactive approval prompts: {}", r.cmd);
         assert!(r.cmd.contains("--append-system-prompt"), "prompt rides a file, APPENDED: {}", r.cmd);
         assert!(r.cmd.contains("--thinking high"), "effort is omp's own knob: {}", r.cmd);

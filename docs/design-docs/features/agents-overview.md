@@ -127,6 +127,11 @@ directory. Four decisions, each measured rather than guessed:
   edits, LSP, subagents); `--system-prompt` would lobotomize the tools.
   Model → `config.yml` `modelRoles.default` (identity in config, kiro's
   lesson); effort → `--thinking`; approvals → `--auto-approve`.
+  `OMP_SKIP_SETUP=1` rides the launch env: a fresh home has no
+  `setupVersion`, and omp 18.2.10 then opens its provider-setup wizard,
+  where every typed line and `/command` lands (#243, measured 2026-09-27:
+  a fresh home without it shows "Setup step 1 of 5", with it the prompt).
+  Auth already carries, so the wizard has nothing to add.
   `config.yml` and `mcp.json` are files the render OWNS
   (`shared::write_owned`): an unpinned model or an empty MCP set REMOVES
   the file on the next spawn. Skipping the write kept the previous render's

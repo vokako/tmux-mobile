@@ -198,7 +198,16 @@ pub(crate) fn render_omp(
         format!(" --thinking {}", crate::shell::quote(effort))
     };
     Ok(Rendered {
-        env: vec![("PI_CODING_AGENT_DIR".into(), home.to_string_lossy().to_string())],
+        // OMP_SKIP_SETUP: a fresh isolated home has no `setupVersion`, so omp
+        // 18.2.10 opens its provider-setup wizard ("Setup step 1 of 5") and
+        // the pane sits there; every typed line and /command lands in the
+        // wizard (measured 2026-09-27, #243). omp's own door: `selectSetupScenes`
+        // returns no scenes when OMP_SKIP_SETUP is truthy. Auth already
+        // carries (agent.db / env-keyed providers), so nothing is lost.
+        env: vec![
+            ("PI_CODING_AGENT_DIR".into(), home.to_string_lossy().to_string()),
+            ("OMP_SKIP_SETUP".into(), "1".into()),
+        ],
         cmd: format!(
             "command omp --auto-approve --append-system-prompt {}{}",
             crate::shell::quote(&prompt_path.to_string_lossy()),
