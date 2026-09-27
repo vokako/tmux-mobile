@@ -240,6 +240,7 @@ pub(crate) use crate::backends::grok::sniff_grok;
 #[cfg(test)]
 pub(crate) use crate::backends::grok::{grok_context_ratio, grok_tokens};
 pub(crate) use crate::backends::kiro::sniff_kiro;
+#[cfg(test)]
 pub(crate) use crate::backends::omp::sniff_omp;
 
 /// The effort words kiro accepts. A segment matching one of these IS the effort

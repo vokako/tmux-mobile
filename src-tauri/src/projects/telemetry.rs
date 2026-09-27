@@ -735,6 +735,7 @@ fn overdue_lines(rec: &Rec, now: u64) -> Vec<String> {
 
 /// Is anything overdue? Kept as its own predicate because the rule — not the list
 /// — is what the tests are about.
+#[cfg(test)]
 fn delivery_overdue(rec: &Rec, now: u64) -> bool {
     !overdue_lines(rec, now).is_empty()
 }

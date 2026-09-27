@@ -386,11 +386,6 @@ pub(crate) fn startup_prompt_visible(content: &str, confirmation: &StartupConfir
     prompt_markers_visible(content, &confirmation.markers)
 }
 
-pub(crate) fn folder_trust_prompt_visible(content: &str) -> bool {
-    prompt_markers_visible(content, CLAUDE_FOLDER_TRUST_MARKERS)
-        || prompt_markers_visible(content, CODEX_FOLDER_TRUST_MARKERS)
-}
-
 pub(crate) fn startup_already_ready(content: &str, confirmation: &StartupConfirmation) -> bool {
     confirmation
         .ready_markers

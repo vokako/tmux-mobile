@@ -381,7 +381,7 @@ async fn main() {
                 other => fail(EXIT_USAGE, &format!("unknown board command '{other}': tmm board [list|show|add|take|move|note|delete]")),
             }
         }
-        ("spawn", rest) if flags.get("team").cloned().flatten().is_some() => {
+        ("spawn", _) if flags.get("team").cloned().flatten().is_some() => {
             let session = need_project(&ctx);
             let team = flags.get("team").cloned().flatten().unwrap_or_default();
             let brief = flags.get("brief").cloned().flatten().unwrap_or_default();

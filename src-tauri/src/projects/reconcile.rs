@@ -141,6 +141,7 @@ fn start_in_existing(project: &Project, slot: &Slot, target: &str) -> SlotResult
 /// workspace must not re-execute whatever the user happened to be running last
 /// time (decision 5 in the exec plan). An agent goes back into the conversation
 /// it was in, not to a blank prompt — see `agents::launch_line`.
+#[cfg(test)]
 pub(super) fn slot_command(slot: &Slot) -> Option<String> {
     slot_command_in(slot, None)
 }

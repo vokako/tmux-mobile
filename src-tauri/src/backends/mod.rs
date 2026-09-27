@@ -218,7 +218,7 @@ impl Backend {
     /// own file; `workspace` is read by claude and codex (trust pre-seeding).
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     #[allow(clippy::too_many_arguments)]
-    pub fn render(
+    pub(crate) fn render(
         self,
         def: &crate::projects::store::RegAgent,
         window_name: &str,
