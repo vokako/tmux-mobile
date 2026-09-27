@@ -85,19 +85,34 @@ static NEXT_ARRIVAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64
 /// process finds, so a fact observed now always sorts after every fact an
 /// earlier process wrote — a process-local counter restarting at 1 would sort
 /// a new stop BEFORE a turn edge recovered from the log. 0 means "no fact".
+/// Live facts take their order through `order_of`; tests build records by
+/// hand with this.
+#[cfg(test)]
 fn arrival() -> u64 {
     seed_arrival();
     NEXT_ARRIVAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-/// A turn fact's order: its activity row id when it was written, else the
-/// counter (no database: fail-soft, and unit tests). Either way the counter
-/// ends past every id seen, so a later fact without a row still sorts last.
+/// A LIVE turn fact's order (called only inside the serialized `turn_fact`).
+/// Its activity row id when it was written, else the counter (a failed write:
+/// fail-soft, and unit tests). The result is always past every order already
+/// handed out: after a lost write took counter value N, the database's next
+/// id can also be N (validator 15:47), and a later fact must still sort after
+/// the lost one, or a real prompt sorts under the stop that preceded it. So a
+/// written fact takes max(row id, next counter). Written facts' ids grow in
+/// arrival order under the lock, so their live order is the log's order;
+/// only a gap left by a lost write can make the live number exceed the id,
+/// never reorder two written facts. A replay uses the ids themselves
+/// (`recovered_arrival`).
 fn order_of(row: Option<i64>) -> u64 {
-    match row {
-        Some(id) if id > 0 => recovered_arrival(id),
-        _ => arrival(),
-    }
+    seed_arrival();
+    let id = row.filter(|id| *id > 0).map(|id| id as u64).unwrap_or(0);
+    let prev = NEXT_ARRIVAL
+        .fetch_update(std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed, |next| {
+            Some(next.max(id) + 1)
+        })
+        .unwrap_or_else(|v| v);
+    prev.max(id)
 }
 
 /// A fact recovered from the durable log keeps its own row id as its order,
@@ -2029,7 +2044,6 @@ mod tests {
         assert_eq!(order_of(Some(far)), far as u64, "the row id itself");
         let next = order_of(None);
         assert!(next > far as u64, "an unwritten fact still sorts after it");
-        assert!(order_of(Some(far - 10)) < next, "an older row keeps its older place");
         // Fail-soft path (validator 15:35): written, lost, written, lost — a
         // lost write (no row) still takes an order after every id seen, and
         // the next written row, whose id the database hands out later, sorts
@@ -2039,6 +2053,32 @@ mod tests {
         let w2 = order_of(Some(lost1 as i64 + 3));
         let lost2 = order_of(None);
         assert!(w1 < lost1 && lost1 < w2 && w2 < lost2, "{w1} {lost1} {w2} {lost2}");
+    }
+
+    /// Validator 15:47: a lost write takes counter value N, and the database's
+    /// next row id can be N too (once or twice lost, even below it). The next
+    /// written fact must still sort AFTER the lost one: a stop whose write
+    /// failed, then a real prompt in the same second, reads running.
+    #[test]
+    fn a_fact_written_after_a_lost_write_still_sorts_after_it() {
+        let base = arrival() as i64 + 500;
+        let _ = order_of(Some(base)); // the db is at id `base`
+        // Once lost: the stop took the counter, the prompt's row got that same number.
+        let stop = order_of(None);
+        let prompt = order_of(Some(stop as i64));
+        assert!(prompt > stop, "equal id must not tie with the lost stop");
+        let t = now();
+        let r = Rec { end: Some(("completed".into(), t)), end_seq: stop, prompt: Some(t), prompt_seq: prompt, ..Rec::default() };
+        assert_eq!(derive_from(&r, 0, t).state, "running", "the real prompt is not pressed under the lost stop");
+        // Twice lost: the next row id is BELOW the counter.
+        let a = order_of(None);
+        let b = order_of(None);
+        let written = order_of(Some(a as i64));
+        assert!(a < b && b < written, "{a} {b} {written}");
+        // Written facts keep the log's relative order through the gap.
+        let w1 = order_of(Some(written as i64 + 1));
+        let w2 = order_of(Some(written as i64 + 2));
+        assert!(written < w1 && w1 < w2);
     }
 
     /// Validator 15:07: the live record and the log must order turn facts the
