@@ -39,20 +39,24 @@
   header to `hub-feed.md`; user vocabulary to `design-language.md`.
   Every existing command passed the tenet 6 audit; see `tmm-cli.md`,
   "What this is".
-- [ ] **English documentation:** translate the finalized `tenet.md`,
-  `guidance/*.md` and this document, as the owner selected English for
-  documentation. The #103 language-copy decision is to maintain English
-  without new `.zh.md` copies, retaining owner quotes in Chinese.
-- [ ] **Entry-point map:** CLAUDE.md's ownership boundaries and documentation
-  map point to `tenet.md` and `guidance/`; `<config>/AGENTS.md` references
-  the short Zen list, describing process only (tenet 11).
+- [x] **English documentation** (verified 2026-09-27, board #244): `tenet.md`
+  is the English edition, every `guidance/*.md` is English and this document
+  is English. The #103 decision stands: maintain English without new `.zh.md`
+  copies, retaining owner quotes in Chinese.
+- [x] **Entry-point map** (verified 2026-09-27, board #244): CLAUDE.md's
+  ownership boundaries and documentation map point to `tenet.md` and
+  `guidance/`; the app-wide `<config>/AGENTS.md` (projects/global_prompt.rs)
+  sends tmux-mobile work to the Zen section of `tenet.md`, describing process
+  only (tenet 11).
 - [x] **Consolidate `docs/unresolved.md` and this document** (board #104,
   2026-09-09): unresolved.md's surviving details are folded into the matching
   items here and the file is gone; resolved and deleted-feature entries were
   dropped (their record is the design docs' dated rules and git history).
-- [ ] **Review process:** define how agents review separate disciplines,
-  with one reviewer per dimension, the corresponding guidance checklist,
-  and conclusions recorded in board notes.
+- [x] **Review process** (board #105, 2026-09-10): defined in
+  `guidance/process.md` §5 — one reviewer per guidance lens (architecture,
+  agent bridge, code quality, UI/interaction, security, process), each
+  reading commits against that lens's checklist and posting findings as
+  board notes; the verdict goes on the issue.
 
 ## B. Correctness (P1)
 
@@ -128,12 +132,17 @@
   two first callers both opened and migrated the same file. The cold path is
   now serialised (`open_once`: init lock + re-read), one open per process, a
   failed open still not cached; red-then-green test with two racing threads.
-- [ ] The `@all` recipient is stored as `'all'` but not restored by `pickLead`;
-  `hubLog` drops `since_ts` when `before_seq` is present.
+- [x] The `@all` recipient is restored by `pickLead` (board #171, 2026-09-11,
+  `hub.test.ts` pins the saved broadcast choice surviving roster changes), and
+  `hub_log` composes `since_ts` with `before_seq` paging since the state.db
+  rooms rewrite (board #107, 2026-09-09) — the page is filtered to newer than
+  the cursor, never the cursor dropped.
 - [x] Vitals and pane inspection policy is **decided** (owner, 2026-09-09):
   observing screens that people can also read is permitted. `statusLine`
-  changes display, not agent behavior, and is allowed. Remaining work is
-  moving backend-specific inspection into backend files (section A).
+  changes display, not agent behavior, and is allowed. The remaining work —
+  moving backend-specific inspection into the backend files — closed with
+  section A's second item (`sniff_*` lives in `src-tauri/src/backends/`,
+  dispatched through `Backend::sniff`).
 
 ## C. Quality Debt (P2)
 
@@ -150,7 +159,7 @@
   and the vitals dialects moved into the backend files (board #128/#127).
   `projects/mod.rs` 2379 → a 200-line facade with seven family files (board
   #152, 2026-09-09; guard: only the store handle and id helpers may live in
-  mod.rs). Open: `bin/tmm.rs` 1312.
+  mod.rs). Open: `bin/tmm.rs` 1362 (2026-09-27).
 - [ ] The `hub_rpc.rs` match mixes dispatch, delivery and board notification
   policy. (The boilerplate half closed with board #146, 2026-09-09: both
   dispatchers are `?`-returning inner fns over `RpcError`, ~90 `match →
@@ -173,9 +182,12 @@
   #110 only moved existing styles, without cross-page unification.
 - [ ] `ws.ts` is a module-level singleton with ten top-level `let` variables,
   blocking two connections in split-screen mode.
-- [ ] Test gaps: all three `bin/tmm.rs` tests parse flags; `connection.rs`,
-  `fs.rs` and `server/mod.rs` lack tests, as do `AgentsPage`, `Projects`,
-  `Settings`, `GitPanel` and `ui/Select`. Some source tests pin implementation text.
+- [ ] Test gaps (refreshed 2026-09-27): the `bin/tmm.rs` tests still exercise
+  only flags and CLI-surface formatting; `server/connection.rs` has no tests,
+  as do `Projects`, `GitPanel` and `ui/Select`. (`fs.rs` moved to
+  `src-tauri/src/fs.rs` with a test, `server/mod.rs` has one, and
+  AgentsPage/Preferences/Settings gained source/mount tests.) Some source
+  tests pin implementation text.
 - [x] `list_panes` runs a full `ps -axo` every time (board #145, measured
   2026-09-09 on a 521-process host: `ps` 29 ms of `list_panes`' 41 ms; tmux
   itself 3 ms). The capture tick was the consumer that mattered — `observe`
@@ -195,12 +207,14 @@
   byte-identical (board #153; 5 → 4 — the rest are store row inserts). Open: `Outbound::InitCipher` is ~700 bytes vs
   24 for `Plain` (large_enum_variant) — boxing is trivial but touches the hot
   send funnel, so do it with a connection-path regression run, not blind.
-- [ ] Frontend backend lists: `AgentsPage.svelte` and `TeamTemplates.svelte`
-  each define `BACKENDS`, with five implicit `?? 'kiro'` defaults.
-  Source these from the server's `SPAWNABLE_BACKENDS` as part of section A.
-- [ ] Arbitrary absolute paths in `fs_*`/`/dl` and git push/commit in the
-  allowlist are deliberate (`token = shell access`). Clarify the documentation
-  or naming so the allowlist does not imply a stronger restriction.
+- [x] Frontend backend lists (board #130): the per-component `BACKENDS`
+  tables and the implicit `?? 'kiro'` defaults are gone; `core/agents.ts`
+  reads the server's `backends_list` once per connection and keeps only a
+  frozen fallback for pre-#130 servers.
+- [x] Arbitrary absolute paths in `fs_*`/`/dl` and git push/commit in the
+  allowlist are deliberate — documented as such in `guidance/security.md`
+  rule 5 ("document deliberately broad capabilities … the allowlist must not
+  imply restrictions it does not enforce").
 - [ ] npm is aliased to pnpm and `package-lock.json` is stale;
   inspect `npm_config_user_agent` during preflight.
 - [ ] Files Markdown escapes inline HTML, turning README badges into text.
@@ -255,22 +269,7 @@ closed; kept as the record of what the scattering looked like.
    detection. These measured, screen-triggered adaptations are acceptable,
    but they remain backend knowledge in a generic module.
 
-## E. Open Board Work
-
-Draft snapshot, 2026-09-09; all listed in review:
-
-#73 CLAUDE.md reduction and docs organization · #74 launch whole Agent Teams ·
-#75 discard false waiting from `idle_prompt` · #76 terminal button prefers the
-current recipient's window · #77 sidebar close/remove menu plus confirmation ·
-#78 long-message read acknowledgment · #79 complete dispatch delivery ·
-#80-#84 security review fixes (CSP still needs a real device) ·
-#88 optional header paths/double-click copy · #89 restart in the card menu ·
-#90 To all · #91 card selection follows through to the terminal drawer ·
-#92 sidebar shows agent windows only · #94 desktop Agents three-column layout ·
-#95 Board slider radii · #97 Chinese glyphs · #98 clickable confirmation style ·
-#99 path links open in the Files drawer.
-
-## F. Recorded Limitations (P3)
+## E. Recorded Limitations (P3)
 
 - Emoji width: tmux measures 2 cells, xterm's UnicodeV6 table 1 — a joined
   (`capture -J`) line with emoji can re-wrap differently and shear pane rows.
