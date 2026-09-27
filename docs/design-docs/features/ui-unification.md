@@ -289,9 +289,14 @@ Adoption:
 
 ## Settings as a page (added 2026-08-02, owner: "not a floating window")
 
-The category inventory below is historical. The decision to use a page rather
-than a floating modal remains; the exact Settings/editor form contract belongs
-in `design-language.md` with implementation, not in this category inventory.
+The category inventory below is historical — the live tree is
+[requirements/pages/settings.md](../../requirements/pages/settings.md). The
+tree was recut twice since: the one-row Terminal category folded into
+Appearance (2026-09-24) and Chat split out of it (2026-09-25), and the
+Connection debug toggle was retired (2026-09-26). The decision to use a page
+rather than a floating modal remains; the exact Settings/editor form contract
+belongs in `design-language.md` with implementation, not in this category
+inventory.
 
 The centered modal lasted one day: settings deserve the same skeleton as
 every other page. `Preferences` becomes the `prefs` page — shared sidebar
