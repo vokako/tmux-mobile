@@ -726,23 +726,31 @@ export const KIRO_COMMANDS: readonly SlashCmd[] = [
   { name: 'hooks', desc: 'View configured hooks', view: true },
   { name: 'code', desc: 'Code intelligence status, init, codebase overview', args: ['status', 'init', 'overview'], view: true },
   { name: 'knowledge', desc: 'Manage knowledge bases', view: true },
-  { name: 'memories', desc: 'Manage repo-scoped memories from previous sessions', view: true },
   { name: 'tangent', desc: 'Go back, switch to, or create a conversation tangent', args: ['ls', 'root'], view: true },
   { name: 'rewind', desc: 'Fork the session at an earlier turn', view: true },
-  { name: 'goal', desc: 'Work toward a goal in a loop until done', view: true },
-  { name: 'workflow', desc: 'Browse and manage workflows or run a recipe', args: ['run', 'list', 'new', 'retry'], view: true },
   { name: 'prompts', desc: 'Select or list available prompts', view: true },
   { name: 'feedback', desc: 'Submit feedback, request features, or report issues', view: true },
   { name: 'upgrade-agent', desc: 'Upgrade V2 agent configs to universal form', view: true },
   { name: 'reply', desc: 'Reply to the last assistant message in $EDITOR', view: true },
-  { name: 'voice', desc: 'Record voice input', view: true },
+  // Re-read on kiro-cli 2.22.1 (2026-09-27, #243): /memories, /goal,
+  // /workflow and /voice are gone; these arrived, and all of them park the
+  // pane (a scrolling panel, $EDITOR, $PAGER, a dashboard) or switch into a
+  // kiro-internal session the room cannot see.
+  { name: 'changelog', desc: 'Show recent release notes', view: true },
+  { name: 'config', desc: 'View configured agents, MCP servers, powers, steering, skills, hooks', view: true },
+  { name: 'sessions', desc: 'Browse sessions (dashboard)', view: true },
+  { name: 'settings', desc: 'Configure theme, terminal, keybindings', view: true },
+  { name: 'editor', desc: 'Open $EDITOR to compose a prompt', view: true },
+  { name: 'transcript', desc: 'Open the transcript in $PAGER', view: true },
+  { name: 'spawn', desc: 'Spawn a kiro-internal agent session; the room spawns with tmm spawn', view: true },
 ];
 
 /** The commands the palette offers: everything that is not an interactive view. */
 export const OFFERED_COMMANDS: readonly SlashCmd[] = KIRO_COMMANDS.filter((c) => !c.view);
 
 /** grok 1.0.5 — transcribed from its own docs (`~/.grok/docs/user-guide/
- * 04-slash-commands.md`), same contract as KIRO_COMMANDS: a made-up command
+ * 04-slash-commands.md`); re-read against grok 1.0.13's live `/` popup
+ * (2026-09-27, #243: /always-approve and /memory are gone). Same contract as KIRO_COMMANDS: a made-up command
  * looks authoritative in the list and then does nothing in the pane. `view`
  * entries open a modal/picker/pane nobody here can see or dismiss and are
  * filtered from the palette; they stay in the table WITH the reason. */
@@ -760,7 +768,6 @@ export const GROK_COMMANDS: readonly SlashCmd[] = [
   { name: 'workflow', desc: 'Launch or manage a saved workflow', args: ['pause', 'resume', 'stop', 'save'] },
   { name: 'loop', desc: 'Run a prompt on a recurring interval' },
   { name: 'imagine', desc: 'Generate an image from a description' },
-  { name: 'always-approve', desc: 'Toggle skip-all-permission-prompts mode' },
   { name: 'auto', desc: 'Toggle classifier-approved permission mode' },
   { name: 'quit', desc: 'Quit the application (alias /exit)' },
   // ── Interactive views / pickers / modals: kept for the record, filtered.
@@ -769,7 +776,6 @@ export const GROK_COMMANDS: readonly SlashCmd[] = [
   { name: 'context', desc: 'Show the context-window breakdown', view: true },
   { name: 'session-info', desc: 'Show session details (alias /status)', view: true },
   { name: 'rewind', desc: 'Roll back to an earlier turn (alias /undo)', view: true },
-  { name: 'memory', desc: 'Browse and manage saved memories', view: true },
   { name: 'hooks', desc: 'Extensions modal, Hooks tab', view: true },
   { name: 'plugins', desc: 'Extensions modal, Plugins tab', view: true },
   { name: 'skills', desc: 'Extensions modal, Skills tab', view: true },
@@ -779,11 +785,16 @@ export const GROK_COMMANDS: readonly SlashCmd[] = [
   { name: 'settings', desc: 'Configuration UI', view: true },
   { name: 'usage', desc: 'Account usage view', view: true },
   { name: 'delete', desc: 'Deletes the session — destructive, never offered', view: true },
+  // Never offered: it swaps Enter and Shift+Enter, and every delivery
+  // (tmux::send_command) submits with Enter.
+  { name: 'multiline', desc: 'Swaps Enter/Shift+Enter — would stop every typed delivery', view: true },
+  { name: 'minimal', desc: 'Switches to scrollback-native rendering the vitals sniffer does not read', view: true },
 ];
 
 /** codex-cli 0.148.0 — transcribed live from its own `/` popup (2026-08-22).
  * `/model` and friends are PICKERS in codex (they park the TUI at a selection
- * UI), so unlike kiro's they are views here. */
+ * UI), so unlike kiro's they are views here. Re-read on codex-cli 0.154.0
+ * (2026-09-27, #243): /agent became /agents; /pwd acts (verified). */
 export const CODEX_COMMANDS: readonly SlashCmd[] = [
   { name: 'new', desc: 'Start a new chat during a conversation' },
   { name: 'clear', desc: 'Clear the terminal and start a new chat' },
@@ -794,6 +805,7 @@ export const CODEX_COMMANDS: readonly SlashCmd[] = [
   { name: 'fork', desc: 'Fork the current chat' },
   { name: 'diff', desc: 'Show git diff (including untracked files)' },
   { name: 'status', desc: 'Show current session configuration and token usage' },
+  { name: 'pwd', desc: 'Show the current working directory' },
   { name: 'mcp', desc: 'List configured MCP tools' },
   { name: 'ps', desc: 'List background terminals' },
   { name: 'stop', desc: 'Stop all background terminals' },
@@ -805,7 +817,7 @@ export const CODEX_COMMANDS: readonly SlashCmd[] = [
   { name: 'permissions', desc: 'Approval-mode picker', view: true },
   { name: 'review', desc: 'Review-preset picker', view: true },
   { name: 'resume', desc: 'Saved-chat picker', view: true },
-  { name: 'agent', desc: 'Thread switcher', view: true },
+  { name: 'agents', desc: 'Agent-session switcher', view: true },
   { name: 'mention', desc: 'File picker', view: true },
   { name: 'skills', desc: 'Skills toggle view', view: true },
   { name: 'memories', desc: 'Memory settings view', view: true },
@@ -814,14 +826,102 @@ export const CODEX_COMMANDS: readonly SlashCmd[] = [
   { name: 'feedback', desc: 'Send logs to maintainers (report view)', view: true },
   { name: 'personality', desc: 'Communication-style picker', view: true },
   { name: 'delete', desc: 'Permanently deletes the session — destructive, never offered', view: true },
+  // Never offered: composer Vim mode eats typed text as keystrokes, and the
+  // status line is the footer the vitals sniffer reads.
+  { name: 'vim', desc: 'Composer Vim mode — typed delivery would become keystrokes', view: true },
+  { name: 'statusline', desc: 'Status-line picker', view: true },
+];
+
+/** Claude Code 2.1.283 — transcribed live from its own `/` popup
+ * (2026-09-27, #243; its bundled skills, which also list under `/`, are
+ * left out). Offered entries were each typed through `hub_command` into a
+ * real pane and acted inline: `/model <alias>` switches without the picker
+ * (default / opus / sonnet / haiku), `/effort <level>` sets it, `/plan`
+ * turns plan mode on. Bare `/model` and `/effort` open pickers. */
+export const CLAUDE_COMMANDS: readonly SlashCmd[] = [
+  { name: 'compact', desc: 'Free up context by summarizing the conversation so far' },
+  { name: 'clear', desc: 'Start a new session with empty context (the old one stays resumable)' },
+  { name: 'model', desc: 'Set the model (an alias; bare /model opens a picker)', args: ['default', 'opus', 'sonnet', 'haiku'] },
+  { name: 'effort', desc: 'Set the effort level', args: ['low', 'medium', 'high', 'xhigh', 'max'] },
+  { name: 'plan', desc: 'Enable plan mode' },
+  { name: 'rename', desc: 'Rename the current conversation' },
+  { name: 'exit', desc: 'Exit the CLI' },
+  // ── Pickers, panels and dialogs: kept for the record, filtered.
+  { name: 'config', desc: 'Settings', view: true },
+  { name: 'context', desc: 'Context-usage grid', view: true },
+  { name: 'help', desc: 'Help and commands', view: true },
+  { name: 'mcp', desc: 'MCP server manager', view: true },
+  { name: 'memory', desc: 'Edit CLAUDE.md files', view: true },
+  { name: 'permissions', desc: 'Tool permission rules', view: true },
+  { name: 'resume', desc: 'Conversation picker', view: true },
+  { name: 'rewind', desc: 'Restore code or conversation to an earlier point', view: true },
+  { name: 'status', desc: 'Status dialog', view: true },
+  { name: 'usage', desc: 'Cost and plan usage dialog', view: true },
+  { name: 'hooks', desc: 'Hook configurations', view: true },
+  { name: 'skills', desc: 'Skills list', view: true },
+  { name: 'tasks', desc: 'Background tasks', view: true },
+  { name: 'login', desc: 'Sign-in flow', view: true },
+  { name: 'statusline', desc: 'Status-line setup — the footer the vitals sniffer reads', view: true },
+];
+
+/** omp 18.2.10 — transcribed live from its own `/` popup (2026-09-27,
+ * #243). Offered entries were typed through `hub_command` into a real
+ * pane: /plan toggles plan mode, /new starts a session, /compact and
+ * /context and /usage answer inline. /model and /session are modals. */
+export const OMP_COMMANDS: readonly SlashCmd[] = [
+  { name: 'compact', desc: 'Compact the context' },
+  { name: 'new', desc: 'Start a new session' },
+  { name: 'clear', desc: 'Drop context, keep the session' },
+  { name: 'plan', desc: 'Toggle plan mode' },
+  { name: 'retry', desc: 'Retry the last failed agent turn' },
+  { name: 'context', desc: 'Show context usage' },
+  { name: 'usage', desc: 'Show provider usage and limits' },
+  { name: 'exit', desc: 'Exit the application' },
+  // ── Modals, pickers and dashboards: kept for the record, filtered.
+  { name: 'model', desc: 'Model picker (roles modal)', view: true },
+  { name: 'session', desc: 'Session info modal', view: true },
+  { name: 'settings', desc: 'Settings menu', view: true },
+  { name: 'setup', desc: 'Provider setup wizard', view: true },
+  { name: 'resume', desc: 'Session picker', view: true },
+  { name: 'tree', desc: 'Session tree navigator', view: true },
+  { name: 'git', desc: 'Git UI', view: true },
+  { name: 'hotkeys', desc: 'Keyboard shortcuts', view: true },
+  { name: 'restart', desc: 'Restarts omp outside the launch recipe', view: true },
+  { name: 'delete', desc: 'Deletes the session — destructive, never offered', view: true },
+];
+
+/** Kimi Code 2.0.2 — transcribed live from its own `/` popup (2026-09-27,
+ * #243). Offered entries were typed through `hub_command` into a real
+ * pane and answered inline. /model opens a picker even with an alias, and
+ * /effort's levels depend on the model (Kimi K3 on Bedrock accepts only
+ * "on"), so both are views here. */
+export const KIMI_COMMANDS: readonly SlashCmd[] = [
+  { name: 'compact', desc: 'Compact the conversation context' },
+  { name: 'new', desc: 'Start a fresh session in this workspace' },
+  { name: 'plan', desc: 'Toggle plan mode' },
+  { name: 'goal', desc: 'Manage the autonomous goal', args: ['status', 'pause', 'resume', 'cancel'] },
+  { name: 'title', desc: 'Set or show the session title' },
+  { name: 'status', desc: 'Session and runtime status' },
+  { name: 'usage', desc: 'Session tokens, context window and quotas' },
+  { name: 'version', desc: 'Version information' },
+  { name: 'exit', desc: 'Exit the application' },
+  // ── Pickers and panels: kept for the record, filtered.
+  { name: 'model', desc: 'Model picker, even with an alias', view: true },
+  { name: 'effort', desc: 'Effort picker; the levels depend on the model', view: true },
+  { name: 'permission', desc: 'Permission-mode picker', view: true },
+  { name: 'sessions', desc: 'Session browser', view: true },
+  { name: 'settings', desc: 'TUI settings', view: true },
+  { name: 'help', desc: 'Commands and shortcuts', view: true },
+  { name: 'login', desc: 'Provider sign-in', view: true },
+  { name: 'undo', desc: 'Withdraws the last prompt from the transcript — not offered', view: true },
 ];
 
 /** The palette's table for a recipient's backend. kiro is the default dialect
  * (and the empty string is "backend unknown", which historically meant kiro).
- * claude returns NOTHING on purpose: the CLI is not installed on this machine,
- * so its command table cannot be transcribed, and offering kiro's table to a
- * claude agent shows commands that do not exist there (owner, 2026-08-22 对齐).
- */
+ * Every backend has its own transcribed table since #243 (2026-09-27); a
+ * mixed @all roster or an unknown backend still gets none, because offering
+ * one CLI's table to another shows commands that do not exist there
+ * (owner, 2026-08-22 对齐). */
 export function offeredCommands(backend?: string | null): readonly SlashCmd[] {
   switch (backend ?? '') {
     case 'grok': return GROK_COMMANDS.filter((c) => !c.view);
@@ -829,8 +929,10 @@ export function offeredCommands(backend?: string | null): readonly SlashCmd[] {
     // kiro is the default dialect; the empty string is "backend unknown",
     // which historically meant kiro and keeps the old behavior.
     case 'kiro': case '': return OFFERED_COMMANDS;
-    // claude (not installed here — table untranscribable), a mixed @all
-    // roster, kimi, anything else: no palette beats a wrong one.
+    case 'claude': return CLAUDE_COMMANDS.filter((c) => !c.view);
+    case 'omp': return OMP_COMMANDS.filter((c) => !c.view);
+    case 'kimi': return KIMI_COMMANDS.filter((c) => !c.view);
+    // A mixed @all roster, anything else: no palette beats a wrong one.
     default: return [];
   }
 }

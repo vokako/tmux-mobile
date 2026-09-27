@@ -1017,10 +1017,23 @@ test('the palette speaks the addressee backend dialect', () => {
   assert.deepEqual(commandPalette('/', [], '')?.items.length, OFFERED_COMMANDS.length);
   assert.deepEqual(commandPalette('/', [], 'kiro')?.items.length, OFFERED_COMMANDS.length);
 
-  // claude has no transcribed table (CLI not installed — a made-up command
-  // looks authoritative and then does nothing), and a mixed @all roster has
-  // no single dialect: no palette beats a wrong one.
-  assert.equal(commandPalette('/', [], 'claude'), null);
+  // claude / omp / kimi (#243, transcribed live 2026-09-27): each offers only
+  // its own acting commands; pickers and destructive entries stay filtered.
+  const names = (b: string) => commandPalette('/', [], b)?.items.map((i) => i.value) ?? [];
+  assert.ok(names('claude').includes('/compact') && names('claude').includes('/plan'), `${names('claude')}`);
+  assert.deepEqual(commandPalette('/model ', [], 'claude')?.items.map((i) => i.value), ['default', 'opus', 'sonnet', 'haiku'],
+    'claude aliases complete inline; bare /model is a picker');
+  assert.ok(!names('claude').includes('/resume') && !names('claude').includes('/statusline'));
+  assert.ok(names('omp').includes('/new') && !names('omp').includes('/model') && !names('omp').includes('/delete'), `${names('omp')}`);
+  assert.ok(names('kimi').includes('/compact') && !names('kimi').includes('/model') && !names('kimi').includes('/undo'), `${names('kimi')}`);
+  assert.deepEqual(commandPalette('/goal ', [], 'kimi')?.items.map((i) => i.value), ['status', 'pause', 'resume', 'cancel']);
+  // Delivery-breaking modes are recorded but never offered.
+  assert.ok(!names('grok').includes('/multiline') && !names('codex').includes('/vim'));
+  assert.ok(names('codex').includes('/pwd'), 'codex 0.154.0 re-read');
+  for (const b of ['claude', 'omp', 'kimi', 'grok', 'codex', 'kiro']) {
+    assert.equal(new Set(names(b)).size, names(b).length, `${b}: no duplicate names`);
+  }
+  // A mixed @all roster has no single dialect: no palette beats a wrong one.
   assert.equal(commandPalette('/', [], 'mixed'), null);
 });
 
