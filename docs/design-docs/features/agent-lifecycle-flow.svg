@@ -60,7 +60,7 @@
   <text class="t ln" x="234.0" y="192" text-anchor="middle" fill="#2563eb">hub_spawn { agent, brief }</text>
   <text class="t sm mono" x="234.0" y="214" text-anchor="middle">tap an agent in the start panel</text>
   <path d="M 340,220 L 384,220 L 384,240 L 346,240" fill="none" stroke="#ea580c" stroke-width="1.8" marker-end="url(#a_orange)"/>
-  <text class="t ln" x="392" y="225" fill="#ea580c">registry_get · cap 4</text>
+  <text class="t ln" x="392" y="225" fill="#ea580c">registry_get · cap 8</text>
   <text class="t sm mono" x="392" y="241">projects/spawn.rs</text>
   <path d="M 340,262 L 384,262 L 384,282 L 346,282" fill="none" stroke="#7c3aed" stroke-width="1.8" marker-end="url(#a_purple)"/>
   <text class="t ln" x="392" y="267" fill="#7c3aed">materialize the isolated home</text>
