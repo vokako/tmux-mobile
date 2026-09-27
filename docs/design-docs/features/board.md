@@ -4,6 +4,10 @@ The `issues`/`issue_notes` board: fixed columns, per-project numbering, dispatch
 
 ## Rules and their reasons
 
+### A card's body preview is prose, in the content face (board #246, 2026-09-27)
+
+A card is a `<button>`, and `app.css` gives every button the display face (`--font-display`, the chrome role). The title keeps it, because an issue title is the card's name. The body preview `.c-body` is the issue's own text, so it names the content role, `font-family: var(--font-ui)`, like every other prose surface (design-language.md, three font roles). This closes the #154 audit's A3 leftover. Pinned by `Board.source.test.ts` "the card body preview is prose…", which fails when the declaration is removed.
+
 ### Note-copy outcomes use the shared model and clipboard (#167 batch 2, 2026-09-12)
 
 After the mechanical move, the same message-action model also accepts Feed

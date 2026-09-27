@@ -1102,8 +1102,12 @@
   .c-title { font-size: var(--fs-ui); color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
   /* The body PREVIEW (owner, 2026-08-29): short text shows whole, long text
      clamps — one mechanism, the clamp; the card is already the door to the
-     detail view, so a clamped preview needs no separate "more" control. */
+     detail view, so a clamped preview needs no separate "more" control.
+     The card is a <button>, which wears the display (chrome) face; its body
+     is the issue's own prose, so it takes the content role (design-language
+     three font roles; #154 audit A3, board #246). */
   .c-body {
+    font-family: var(--font-ui);
     font-size: var(--fs-meta);
     color: var(--text2);
     white-space: pre-line;

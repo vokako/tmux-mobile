@@ -668,6 +668,14 @@ test('titles are optional, and the WIRING honors it — not just the pure helper
     'issueRef comes from board.ts — no component-local copy');
 });
 
+test('the card body preview is prose, not chrome: the content font role (board #246)', () => {
+  // The card is a <button>, and app.css gives every button the display face;
+  // the body excerpt is the issue's text, so it must name the content role.
+  assert.match(appCss, /^button \{ font-family: var\(--font-display\); \}/mu, 'the inherited face this rule overrides');
+  const cBody = /\n  \.c-body \{([^}]*)\}/u.exec(source)?.[1] ?? '';
+  assert.match(cBody, /font-family: var\(--font-ui\);/u, '.c-body wears --font-ui');
+});
+
 test('locked issue text is static selectable prose; the workflow stays live (board #43)', () => {
   // Exactly TWO editable branches — the title and the body. editable comes
   // from the server (assignee empty AND no agent ever touched it, 842f970);
