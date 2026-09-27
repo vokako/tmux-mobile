@@ -64,7 +64,8 @@ pub struct DeliveryRow {
 
 impl Store {
     /// Append one observed event. Called on every hook, so it stays a single
-    /// INSERT and its failure is the caller's to ignore.
+    /// INSERT and its failure is the caller's to ignore. Returns the row id:
+    /// a turn fact takes it as its order (board #249).
     pub fn insert_activity(
         &self,
         session: &str,
@@ -76,7 +77,7 @@ impl Store {
         via: &str,
         state: &str,
         deliveries: &str,
-    ) -> Result<(), String> {
+    ) -> Result<i64, String> {
         // `window` (the INDEX column) is 0 for name-keyed rows; `win` carries
         // the identity (board #120). Old rows read back via the COALESCE below.
         self.conn
@@ -85,7 +86,7 @@ impl Store {
                  VALUES (?1, 0, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 rusqlite::params![session, window, ts as i64, kind, text, tool, via, state, deliveries],
             )
-            .map(|_| ())
+            .map(|_| self.conn.last_insert_rowid())
             .map_err(|e| format!("insert activity: {e}"))
     }
 
@@ -480,6 +481,9 @@ mod tests {
     #[test]
     fn the_activity_log_survives_and_stays_bounded() {
         let store = Store::open_memory().unwrap();
+        let first = store.insert_activity("s0", "w1", 1, "prompt", "p", "", "", "", "").unwrap();
+        let second = store.insert_activity("s0", "w1", 1, "notif", "completed", "", "", "", "").unwrap();
+        assert!(second > first, "the returned row id is the insertion order (board #249)");
         for n in 0..5u64 {
             store
                 .insert_activity("s1", "w3", 1000 + n, "tool", &format!("file{n}.rs"), "Edit", "", "", "")

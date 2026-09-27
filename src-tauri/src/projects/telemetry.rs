@@ -90,6 +90,16 @@ fn arrival() -> u64 {
     NEXT_ARRIVAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
+/// A turn fact's order: its activity row id when it was written, else the
+/// counter (no database: fail-soft, and unit tests). Either way the counter
+/// ends past every id seen, so a later fact without a row still sorts last.
+fn order_of(row: Option<i64>) -> u64 {
+    match row {
+        Some(id) if id > 0 => recovered_arrival(id),
+        _ => arrival(),
+    }
+}
+
 /// A fact recovered from the durable log keeps its own row id as its order,
 /// and the counter moves past it, so anything observed later sorts after it.
 fn recovered_arrival(row_id: i64) -> u64 {
@@ -233,11 +243,11 @@ fn push_event(session: &str, window: &str, kind: &str, text: String) {
 }
 
 fn push_full(session: &str, window: &str, kind: &str, text: String, tool: String, via: String, deliveries: Vec<DeliveryRef>) {
-    push_full_at(session, window, now_ms(), kind, text, tool, via, deliveries);
+    let _ = push_full_at(session, window, now_ms(), kind, text, tool, via, deliveries);
 }
 
 #[allow(clippy::too_many_arguments)]
-fn push_full_at(session: &str, window: &str, ts_ms: u64, kind: &str, text: String, tool: String, via: String, deliveries: Vec<DeliveryRef>) {
+fn push_full_at(session: &str, window: &str, ts_ms: u64, kind: &str, text: String, tool: String, via: String, deliveries: Vec<DeliveryRef>) -> Option<i64> {
     push(
         session,
         ActivityEvent {
@@ -251,39 +261,43 @@ fn push_full_at(session: &str, window: &str, ts_ms: u64, kind: &str, text: Strin
             state: String::new(),
             deliveries,
         },
-    );
+    )
 }
 
 /// The one place the ring is appended to and trimmed. The event also goes to
 /// state.db, because a restart used to erase the whole feed while the messages
 /// around it survived: a conversation with holes in it.
-fn push(session: &str, ev: ActivityEvent) {
-    persist(session, &ev);
+/// Returns the row id the event was written as, when it was written.
+fn push(session: &str, ev: ActivityEvent) -> Option<i64> {
+    let id = persist(session, &ev);
     let mut map = events().lock().unwrap();
     let q = map.entry(session.to_string()).or_default();
     q.push_back(ev);
     while q.len() > EVENTS_CAP {
         q.pop_front();
     }
+    id
 }
 
 /// Unit tests exercise the ring and the derive rules; the durable log is tested
 /// directly in `store.rs`. Keeping the two apart is what stops `cargo test` from
 /// writing rows for invented sessions into the developer's real state.db.
 #[cfg(test)]
-fn persist(_session: &str, _ev: &ActivityEvent) {}
+fn persist(_session: &str, _ev: &ActivityEvent) -> Option<i64> {
+    None
+}
 
 /// Write one event to the durable log. FAIL-SOFT, always: telemetry may never
 /// block or break the thing it observes, and the ring is still there for this
 /// process's lifetime if the database is unavailable (a mobile build, a
 /// read-only disk).
 #[cfg(not(test))]
-fn persist(session: &str, ev: &ActivityEvent) {
+fn persist(session: &str, ev: &ActivityEvent) -> Option<i64> {
     let written = super::with_store(|s| {
         let refs = if ev.deliveries.is_empty() { String::new() } else { serde_json::to_string(&ev.deliveries).unwrap_or_default() };
         s.insert_activity(session, &ev.window, ev.ts, &ev.kind, &ev.text, &ev.tool, &ev.via, &ev.state, &refs)
     });
-    if let Err(e) = written {
+    if let Err(e) = &written {
         // Fail-soft, but not SILENT: a lost write is a hole in the trace, and the
         // whole point of the log is that it is complete. Reported on the first
         // failure and every 100th after that, so a broken database is visible in
@@ -296,6 +310,7 @@ fn persist(session: &str, ev: &ActivityEvent) {
     }
     // And that is all: no prune. The trace is kept whole (see the note on
     // EVENTS_CAP / LOAD_EVENTS) and the READ is what is bounded.
+    written.ok()
 }
 
 /// One page of the activity feed, oldest first, plus whether older events exist.
@@ -515,8 +530,8 @@ fn forget_window_deliveries(session: &str, window: &str) {
 /// tool call, ask, stop or interrupt is written to the activity log and
 /// applied to the window's record under one lock, with one clock: the row's
 /// ts is the record's second (plus this moment's milliseconds), and the
-/// record's order is taken in the same critical section as the row's
-/// insertion. So the log orders turn facts exactly as the live record does,
+/// record's order is the row's own id, taken in the same critical section as
+/// its insertion. So the log orders turn facts exactly as the live record does,
 /// and a restart that replays the log (`replay_turn_facts`) derives the
 /// state the live record had. Two unserialized paths used to take their
 /// order and their row in opposite sequence (prompt: order then row; stop:
@@ -530,14 +545,17 @@ fn turn_fact(
 ) {
     static ORDER: Mutex<()> = Mutex::new(());
     let _order = ORDER.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((kind, text, tool, via, deliveries)) = event {
-        push_full_at(session, window, ts * 1000 + now_ms() % 1000, kind, text, tool, via, deliveries);
-    }
+    let row = event.and_then(|(kind, text, tool, via, deliveries)| {
+        push_full_at(session, window, ts * 1000 + now_ms() % 1000, kind, text, tool, via, deliveries)
+    });
     // Tests widen the gap between the row and the order, so a lost lock
     // shows up as a reordering instead of a lucky pass.
     #[cfg(test)]
     std::thread::sleep(std::time::Duration::from_micros(30));
-    let seq = arrival();
+    // The order IS the row id the fact was written as (validator 15:08), the
+    // same number a replay reads back. Without a database (fail-soft, tests)
+    // the counter stands in, and it always runs past every id seen.
+    let seq = order_of(row);
     with_rec(session, window, |r| apply(r, ts, seq));
 }
 
@@ -1911,6 +1929,18 @@ mod tests {
         sweep_deliveries(&session);
         assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 1, "the held line's clock ran");
         assert_eq!(current_turn_prompt(&session, "w1"), None, "no reply edge recovered for a cancelled turn");
+    }
+
+    /// Validator 15:08: a written turn fact's order IS its row id, the number
+    /// a replay reads back; a fact with no row takes the counter, which runs
+    /// past every id already used.
+    #[test]
+    fn a_written_fact_is_ordered_by_its_row_id() {
+        let far = (arrival() + 1_000_000) as i64;
+        assert_eq!(order_of(Some(far)), far as u64, "the row id itself");
+        let next = order_of(None);
+        assert!(next > far as u64, "an unwritten fact still sorts after it");
+        assert!(order_of(Some(far - 10)) < next, "an older row keeps its older place");
     }
 
     /// Validator 15:07: the live record and the log must order turn facts the
