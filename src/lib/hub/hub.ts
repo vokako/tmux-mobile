@@ -1320,7 +1320,7 @@ export function draftUpdate(
  * `note` is a single observed fact, `steps` is a collapsible run of tool calls
  * (the "what it did between two replies" pane). */
 export type FeedBlock =
-  | { type: 'msg'; ts: number; msg: any; delivered: boolean }
+  | { type: 'msg'; ts: number; msg: any; delivered: boolean; warned?: boolean }
   | { type: 'sys'; ts: number; key: string; items: string[] }
   | { type: 'prompt'; ts: number; window: string; text: string }
   | { type: 'progress'; ts: number; window: string; state: string; text: string }
@@ -1664,6 +1664,17 @@ export function feedBlocks(
       // Invisible, but still a turn boundary (rule 3).
       turns.push({ type: 'turn', ts: e.ts, window: e.window });
     }
+  }
+  // A standing warn (not retracted above) marks the message it names, by
+  // message id, so the failure shows ON the message the sender would resend
+  // (board #250) — and it outranks a receipt from another recipient: the
+  // sender must still act.
+  const warnedMsgs = new Set<string>();
+  for (const e of activity) {
+    if (e.kind === 'warn' && !consumed.has(e)) for (const d of e.deliveries ?? []) if (d.msg) warnedMsgs.add(d.msg);
+  }
+  for (const m of msgs) {
+    if (m.type === 'msg' && warnedMsgs.has(m.msg?.id)) m.warned = true;
   }
 
   const stream: (FeedBlock | ToolItem | TurnMark)[] = [...msgs, ...turns];

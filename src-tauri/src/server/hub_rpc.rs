@@ -1828,7 +1828,7 @@ mod tests {
         assert_eq!(warns.len(), 1, "{warns:?}");
         assert_eq!(warns[0].window, "lead");
         assert!(warns[0].text.starts_with("undelivered (pane is in copy mode): "), "{}", warns[0].text);
-        assert_eq!(warns[0].deliveries, vec![crate::projects::telemetry::DeliveryRef { id: 0, msg: msg_id }]);
+        assert_eq!(warns[0].deliveries, vec![crate::projects::telemetry::DeliveryRef { id: None, msg: msg_id }]);
         // The wire form names the message and no row.
         assert_eq!(serde_json::to_value(&warns[0].deliveries).unwrap(), serde_json::json!([{ "msg": warns[0].deliveries[0].msg }]));
     }

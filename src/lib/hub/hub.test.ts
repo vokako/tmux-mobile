@@ -548,6 +548,21 @@ test('a warn about a line never typed stays, and its message stays undelivered (
   const m = rows.find((b) => b.type === 'msg');
   assert.ok(m?.type === 'msg');
   assert.equal(m.delivered, false, 'never typed, never delivered');
+  assert.equal(m.warned, true, 'the warn marks its message by message id');
+  // Another recipient's receipt does not hide the failure.
+  const both = feedBlocks([msg], [...activity, ev({ ts: 300, kind: 'prompt', via: 'app', text: 'x', deliveries: [{ id: 4, msg: 'm-7735' }] })], 'chat');
+  const b = both.find((r) => r.type === 'msg');
+  assert.ok(b?.type === 'msg' && b.delivered && b.warned);
+});
+
+test('an unconfirmed warn marks its message until a late echo retracts it (#250)', () => {
+  const msg = { id: 'm-9', ts: 50, from: 'human', body: '@dev hi' };
+  const warn = ev({ ts: 100, kind: 'warn', text: 'unconfirmed: [tmm chat] human: @dev hi', deliveries: [{ id: 21, msg: 'm-9' }] });
+  const before = feedBlocks([msg], [warn], 'chat').find((b) => b.type === 'msg');
+  assert.ok(before?.type === 'msg' && before.warned === true);
+  const echo = ev({ ts: 200, kind: 'prompt', via: 'app', text: '[tmm chat] human: @dev hi', deliveries: [{ id: 21, msg: 'm-9' }] });
+  const after = feedBlocks([msg], [warn, echo], 'chat').find((b) => b.type === 'msg');
+  assert.ok(after?.type === 'msg' && after.delivered && !after.warned, 'retracted warn, filled ring');
 });
 
 test('pickLead: a remembered choice wins while that agent is present', () => {

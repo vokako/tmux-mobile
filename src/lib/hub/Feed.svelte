@@ -781,7 +781,13 @@
                        in would wait for ever: it wears the recipient
                        picker's own dashed note-dot instead, the glyph that
                        already means "recorded, nobody interrupted". -->
-                  {#if b.delivered}
+                  {#if b.warned}
+                    <!-- A standing warn names this message (board #250): the
+                         note below says which agent and why; the mark says
+                         WHICH message to resend. The warn note's own icon
+                         and token. -->
+                    <span class="m-state warn" title={t('hubWarnedHint')}><Icon name="info" size={11} /></span>
+                  {:else if b.delivered}
                     <span class="m-state ok" title={t('hubDeliveredHint')}><Icon name="circle-check" size={11} /></span>
                   {:else if !mentionedAgents(m.body ?? '', managedNames).length}
                     <span class="m-state note" title={t('hubNoteHint')}><i class="st note-dot"></i></span>
@@ -1088,6 +1094,7 @@
   .m-unfold :global(svg) { flex: none; }
   .m-state { display: inline-flex; opacity: 0.55; }
   .m-state.ok { color: var(--status-ok); opacity: 1; }
+  .m-state.warn { color: var(--status-warn); opacity: 1; }
   /* The room-note mark is the picker's .note-dot at the ring's size — one
      glyph for "reaches nobody live", wherever it shows. */
   .m-state.note .st { width: 9px; height: 9px; }

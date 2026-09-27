@@ -966,6 +966,42 @@ test('typing @ offers the room\'s agents in the slash palette; Enter inserts, Es
   } finally { await app.close(); }
 });
 
+test('a line refused in copy-mode marks ITS message and leaves a warn note naming the agent (#250)', { timeout: 60000 }, async (context) => {
+  const fixture = await compiledHub();
+  const { rpc } = roomFixture();
+  const app = await fixture.mount(context, {
+    props: { visible: true },
+    setup(window) {
+      window.Element.prototype.getAnimations = () => [];
+      // jsdom has no canvas renderer (same stub as the feed tests below).
+      window.HTMLCanvasElement.prototype.getContext = () => null;
+      window.localStorage.setItem('tmux_hub_project', 'fixture');
+    },
+    modules: [{
+      ...rpc,
+      hubLog: async () => ({ messages: [
+        { id: 'm-1', seq: 1, ts: 100, from: 'human', body: '@bob other line' },
+        { id: 'm-2', seq: 2, ts: 200, from: 'human', body: '@alice read this' },
+      ], has_more: false }),
+      hubActivity: async () => ({ events: [
+        { id: 1, ts: 250, window: 'alice', kind: 'warn', text: 'undelivered (pane is in copy mode): [tmm chat] human: @alice read this', deliveries: [{ msg: 'm-2' }] },
+      ], has_more: false }),
+    }],
+  });
+  try {
+    const msgs = () => [...app.document.querySelectorAll<HTMLElement>('.msg')];
+    for (let i = 0; i < 20 && msgs().length < 2; i++) await app.flush();
+    for (let i = 0; i < 20 && !app.document.querySelector('.note.warn'); i++) await app.flush();
+    const [other, refused] = msgs();
+    assert.ok(refused?.querySelector('.m-state.warn'), 'the refused message wears the warn mark');
+    assert.equal(refused?.querySelector('.m-state.warn')?.getAttribute('title'), 'Not delivered to every agent — see the warning in the feed');
+    assert.equal(other?.querySelector('.m-state.warn'), null, 'the other message does not');
+    const note = app.document.querySelector<HTMLElement>('.note.warn')!;
+    assert.match(note.querySelector('.n-text')!.textContent!, /^undelivered \(pane is in copy mode\): /u);
+    assert.ok(note.querySelector('.n-who')!.textContent!.includes('alice'), 'the note names the target');
+  } finally { await app.close(); }
+});
+
 test('stopped-card double-click only filters and closes its click menu (#173)', { timeout: 60000 }, async (context) => {
   const app = await composerFixture(context, {
     projectList: async () => ({ projects: [{
