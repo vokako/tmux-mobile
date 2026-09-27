@@ -3,6 +3,17 @@
 Runtime configuration of the WebSocket server and the Team feature. Build and dev-loop settings are in `../conventions/development.md`.
 
 File: `$XDG_CONFIG_HOME/tmux-mobile/config.toml` (fallback `~/.config/tmux-mobile/`) — token, host, port, tmux_socket, tls_cert, tls_key, scrollback, disconnect_grace_secs, kiro_engine.
+
+```toml
+token = "auto-generated-uuid"  # written on first launch
+host = "0.0.0.0"               # optional
+port = 9899                    # optional
+tmux_socket = ""               # optional, tmux -S path
+tls_cert = ""                  # optional, PEM cert for wss://
+tls_key = ""                   # optional, PEM private key for wss://
+disconnect_grace_secs = 600    # optional
+```
+
 Env vars `TOKEN`, `HOST`, `PORT`, `TMUX_SOCKET`, `TLS_CERT`, `TLS_KEY`, `SCROLLBACK`, `DISCONNECT_GRACE_SECS` override config. (The retired Team feature's `TEAM_*` keys are gone, board #100; `projects::rooms::import_legacy` still reads `TEAM_DB`/`team_db`/`crew_db`/`agora_db` once to locate a legacy team.db for the one-off chat-history import.)
 Default scrollback: 500 lines.
 `<config>/AGENTS.md` — optional app-wide agent instructions, prepended to every managed agent's system prompt at spawn (`tmm prompt`, Settings → Agents). Absent = none. See `docs/design-docs/features/tmm-cli.md` § The app-wide instructions.

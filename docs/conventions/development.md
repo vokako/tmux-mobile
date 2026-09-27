@@ -2,6 +2,32 @@
 
 Everything about RUNNING and BUILDING the project. Testing conventions are in `testing.md`; frontend coding rules in `frontend.md`; runtime configuration in `../reference/config.md`.
 
+## Prerequisites and first run
+
+- macOS or Linux with tmux; recommended `set-option -g history-limit 50000`.
+- Rust toolchain and Node (version below).
+- A WebKit webview for the desktop app (macOS has one; Linux needs
+  `webkit2gtk-4.1`), or skip it with the headless build below.
+
+```bash
+npm install
+npm run dev:all
+```
+
+The first launch generates a token in `~/.config/tmux-mobile/config.toml`.
+Open `http://<your-machine-ip>:5173`; the connection field is pre-filled with
+`ws://<your-machine-ip>:5173/ws`, because Vite proxies `/ws` and `/dl` to the
+loopback-only Rust server. Only port 5173 needs to be reachable.
+
+`tmm` is built next to the server binary and is on every managed agent's PATH.
+From any shell:
+
+```bash
+tmm project create ~/work/my-app --name "My app"
+tmm spawn claude --brief "Read docs/tenet.md, then fix the failing test in src/lib/core."
+tmm log -f
+```
+
 ## Node and Package Installation
 
 Development tests require Node `^22.22.2 || ^24.15.0 || >=26.0.0`
@@ -37,7 +63,7 @@ npm run check            # svelte-check: type-checks .ts/.svelte.ts/.svelte file
 npm run build:server     # server + tmm, no webview needed (release)
 npm run dev:server       # standalone WS server (pair with `npm run dev`)
 npm run test:rust        # Rust tests, sequential (needs tmux running)
-
+```
 
 Run Tauri through these project scripts. Do not use `pnpx tauri`: `pnpx` is
 `pnpm dlx` and downloads the unrelated `tauri` package instead of invoking the
@@ -114,6 +140,25 @@ green build silently serve that other tree's older APK. Healing only the
 dangling case, or picking the newest APK across all `android-*` dirs, is how you
 end up shipping the wrong tree.
 
+
+## Build targets
+
+- **macOS** — `npm run build:mac` → `src-tauri/target/release/bundle/dmg/`.
+- **Android** — `rustup target add aarch64-linux-android && npm run build:android`.
+  Needs the Android SDK, NDK 28+ and Java 17+; signing is below.
+- **Linux server only** — `npm run build:server` needs no WebKitGTK; it is all
+  the browser UI and the phone talk to.
+- **iOS** — not implemented; tracked in [docs/todo.md](../todo.md).
+
+## Remote access (Tailscale)
+
+```bash
+tailscale serve --bg 5173
+# UI:        https://your-machine.tailnet-name.ts.net/
+# WebSocket: wss://your-machine.tailnet-name.ts.net/ws
+```
+
+Port 9899 stays loopback-only and needs no serve rule.
 
 ## Android signing
 
