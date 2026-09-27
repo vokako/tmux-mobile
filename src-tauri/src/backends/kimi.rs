@@ -298,13 +298,9 @@ pub(crate) fn render_kimi(
             servers.insert(m.name.clone(), shared::kiro_mcp_value(m));
         }
     }
-    if !servers.is_empty() {
-        std::fs::write(
-            kimi_home.join("mcp.json"),
-            serde_json::to_string_pretty(&json!({ "mcpServers": servers })).unwrap(),
-        )
-        .map_err(|e| e.to_string())?;
-    }
+    // No servers removes the file: a revoked server must not stay loaded.
+    let mcp = (!servers.is_empty()).then(|| serde_json::to_string_pretty(&json!({ "mcpServers": servers })).unwrap());
+    shared::write_owned(&kimi_home.join("mcp.json"), mcp.as_deref())?;
 
     // Folder trust, PRESEEDED: the workspace is the user's own project,
     // spawned deliberately, and the trust screen would otherwise sit in a
@@ -728,6 +724,7 @@ pattern = "Bash(rm -rf*)"
         let cfg: toml::Table = std::fs::read_to_string(kimi.join("config.toml")).unwrap().parse().unwrap();
         assert!(cfg.get("thinking").is_none());
         assert_eq!(cfg["default_model"].as_str(), Some("bedrock-kimi-k3"));
+        assert!(!kimi.join("mcp.json").exists(), "an emptied MCP set re-renders to NO mcp.json, not the old servers (#241)");
         let _ = std::fs::remove_dir_all(&ws);
     }
 

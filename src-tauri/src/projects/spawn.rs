@@ -1200,6 +1200,24 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// Re-rendering the SAME home after the definition drops its model and
+    /// its MCP servers leaves neither behind: omp would otherwise keep the old
+    /// pinned model and keep loading a revoked server (#241, validator).
+    #[test]
+    fn omp_rerender_removes_an_unpinned_model_and_revoked_mcp() {
+        let dir = std::env::temp_dir().join(format!("tmm-spawn-omp-rr-{}", uuid::Uuid::new_v4()));
+        let mut d = def("omp");
+        d.model = "anthropic/claude-opus-4-6".into();
+        render_omp(&d, "t3", &dir, "prompt", &[]).unwrap();
+        assert!(dir.join("config.yml").is_file() && dir.join("mcp.json").is_file(), "first render declares both");
+        d.model = String::new();
+        d.mcp = "[]".into();
+        render_omp(&d, "t3", &dir, "prompt", &[]).unwrap();
+        assert!(!dir.join("config.yml").exists(), "an unpinned model falls back to omp's default");
+        assert!(!dir.join("mcp.json").exists(), "a revoked MCP server is gone");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     /// The model catalog is what makes an ISOLATED grok home able to answer at
     /// all: grok auth is home-scoped, and custom [model.*] entries carry the
     /// api key wiring (env_key). The first cut parsed the user config with

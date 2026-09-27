@@ -162,12 +162,11 @@ pub(crate) fn render_omp(
     }
 
     // config.yml: the model is identity, so it lives in the config the owner
-    // can read, not on the launch line (kiro's lesson). Empty = omp default.
+    // can read, not on the launch line (kiro's lesson). Empty = omp default,
+    // so an unpinned model removes the previous render's file.
     let model = def.model.trim();
-    if !model.is_empty() {
-        std::fs::write(home.join("config.yml"), format!("modelRoles:\n  default: {model}\n"))
-            .map_err(|e| e.to_string())?;
-    }
+    let config = (!model.is_empty()).then(|| format!("modelRoles:\n  default: {model}\n"));
+    shared::write_owned(&home.join("config.yml"), config.as_deref())?;
 
     // mcp.json in this home's user scope — claude's local-stdio/http shape
     // is omp's too (its mcp-config docs name `~/.omp/agent/mcp.json`).
@@ -177,13 +176,9 @@ pub(crate) fn render_omp(
             servers.insert(m.name.clone(), shared::claude_mcp_value(m));
         }
     }
-    if !servers.is_empty() {
-        std::fs::write(
-            home.join("mcp.json"),
-            serde_json::to_string_pretty(&json!({ "mcpServers": servers })).unwrap(),
-        )
-        .map_err(|e| e.to_string())?;
-    }
+    // No servers removes the file: a revoked server must not stay loaded.
+    let mcp = (!servers.is_empty()).then(|| serde_json::to_string_pretty(&json!({ "mcpServers": servers })).unwrap());
+    shared::write_owned(&home.join("mcp.json"), mcp.as_deref())?;
 
     // The prompt file --append-system-prompt reads. Skills have no isolated-
     // home mechanism we control, so the compact index rides the prompt, like

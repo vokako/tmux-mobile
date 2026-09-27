@@ -188,6 +188,20 @@ pub(crate) fn inherit_codex_system_files(home: &Path) -> Result<(), String> {
     inherit_codex_system_files_from(home, &super::codex::codex_user_home())
 }
 
+/// A config file the render OWNS: `Some` writes it, `None` removes it. A home
+/// is re-rendered on every spawn, so "nothing to declare" must leave nothing
+/// behind; skipping the write kept the previous render's file, and the CLI
+/// kept loading a revoked MCP server or an unpinned model (#241, validator).
+pub(crate) fn write_owned(path: &Path, content: Option<&str>) -> Result<(), String> {
+    match content {
+        Some(text) => std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display())),
+        None => match std::fs::remove_file(path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("{}: {e}", path.display())),
+            _ => Ok(()),
+        },
+    }
+}
+
 fn link_codex_system_file(
     home: &Path,
     system_home: &Path,
