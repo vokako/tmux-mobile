@@ -484,15 +484,35 @@ test('a prompt typed at the agent keyboard becomes its own input row', () => {
 test('an echo that names its messages is a receipt even when they are not loaded (#249)', () => {
   // 13:12 in the owner's screenshot: a 12:41 message 184 rows back, outside
   // the loaded page, was echoed with via:'app' and still drew an INPUT row.
-  const echo = ev({ ts: 900, kind: 'prompt', via: 'app', text: '[tmm chat 12:41] validator: @builder 注意', acks: ['m-7754'] });
+  const echo = ev({ ts: 900, kind: 'prompt', via: 'app', text: '[tmm chat 12:41] validator: @builder 注意', deliveries: [{ id: 1939, msg: 'm-7754' }] });
   assert.deepEqual(feedBlocks([{ id: 'm-9000', ts: 950, from: 'human', body: '@dev later' }], [echo], 'tools').map((b) => b.type), ['msg'],
     'no INPUT row for a named receipt whose message is outside the page');
   // Loaded later (scrolled back), the same echo marks it by id.
   const loaded = feedBlocks([{ id: 'm-7754', ts: 100, from: 'validator', body: 'a body the echo text does not contain' }], [echo], 'chat');
   assert.equal(loaded[0]?.type === 'msg' && loaded[0].delivered, true, 'marked by id, not by content');
-  // Without acks (an old row, a board notice) the content rule stands.
+  // A settled notice (a row with no message) is a receipt too: no INPUT row.
+  const notice = [ev({ ts: 100, kind: 'prompt', via: 'app', text: '[board #241 reply] notice', deliveries: [{ id: 7 }] })];
+  assert.deepEqual(feedBlocks([], notice, 'status').map((b) => b.type), []);
+  // Without deliveries (a row before v24) the content rule stands.
   const orphan = [ev({ ts: 100, kind: 'prompt', via: 'app', text: '[board #241 reply] notice' })];
   assert.deepEqual(feedBlocks([], orphan, 'status').map((b) => b.type), ['prompt']);
+});
+
+test('a late echo retracts exactly the warn about the row it settled (#249)', () => {
+  // Two identical notices, no message, both reported unconfirmed; one late echo
+  // settles row 11. Retraction is by row id — text would match both.
+  const text = 'unconfirmed: [board #241 reply] status review → doing';
+  const activity = [
+    ev({ ts: 100, kind: 'warn', text, deliveries: [{ id: 11 }] }),
+    ev({ ts: 101, kind: 'warn', text, deliveries: [{ id: 12 }] }),
+    ev({ ts: 200, kind: 'prompt', via: 'app', text: '[board #241 reply] status review → doing', deliveries: [{ id: 11 }] }),
+  ];
+  const notes = feedBlocks([], activity, 'chat').filter((b) => b.type === 'note');
+  assert.equal(notes.length, 1, 'the sibling warn stays');
+  assert.equal(notes[0]?.type === 'note' && notes[0].event.deliveries?.[0]?.id, 12);
+  // A warn with no deliveries (a row before v24) is never retracted.
+  const old = feedBlocks([], [ev({ ts: 1, kind: 'warn', text }), activity[2]!], 'chat').filter((b) => b.type === 'note');
+  assert.equal(old.length, 1);
 });
 
 test('pickLead: a remembered choice wins while that agent is present', () => {

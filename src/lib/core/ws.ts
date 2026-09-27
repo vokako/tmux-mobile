@@ -906,9 +906,11 @@ export interface HubActivityEvent {
   /** `prompt` events only: 'app' when the text is the line this app typed into
    * the pane (the delivery receipt), 'local' when typed at the keyboard. */
   via?: 'app' | 'local';
-  /** `prompt` events only: the chat message ids this echo settled (board
-   * #249). Present only when it settled some; absent on old rows. */
-  acks?: string[];
+  /** The delivery rows this event is about (board #249): the rows a `prompt`
+   * echo settled, or the one row a `warn` reported. `id` is the row (the one
+   * correlation key); `msg` the chat message it carries, where one exists.
+   * Absent when there are none and on rows before v24. */
+  deliveries?: { id: number; msg?: string }[];
   /** `status` events only: the state the agent declared. The `text` is its note
    * — what it says it is doing — which is the half a human reads. */
   state?: 'working' | 'waiting' | 'blocked';

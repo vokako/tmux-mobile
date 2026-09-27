@@ -659,21 +659,23 @@ impl Store {
         }
         if version < 24 {
             // v24 (board #249): a delivery row names the chat message it
-            // carries, and a prompt event names the messages it settled, so a
-            // client marks the original delivered without holding it in its
-            // loaded page. Additive, '' for every existing row — those keep
-            // the content match they always had.
+            // carries and whether it was already reported; an activity event
+            // names the delivery rows it is about (the echo that settled them,
+            // or the warn that reported one). Additive, empty for every
+            // existing row — those keep the content match they always had.
             self.ensure_delivery_msg_ids()?;
         }
         Ok(())
     }
 
-    /// The v24 shape (also a heal floor): `deliveries.msg_id` and
-    /// `activity.acks`, each added only when absent.
+    /// The v24 shape (also a heal floor): `deliveries.msg_id`,
+    /// `deliveries.warned` and `activity.deliveries`, each added only when
+    /// absent.
     pub(super) fn ensure_delivery_msg_ids(&self) -> Result<(), String> {
         for (table, column, ddl) in [
             ("deliveries", "msg_id", "ALTER TABLE deliveries ADD COLUMN msg_id TEXT NOT NULL DEFAULT '';"),
-            ("activity", "acks", "ALTER TABLE activity ADD COLUMN acks TEXT NOT NULL DEFAULT '';"),
+            ("deliveries", "warned", "ALTER TABLE deliveries ADD COLUMN warned INTEGER NOT NULL DEFAULT 0;"),
+            ("activity", "deliveries", "ALTER TABLE activity ADD COLUMN deliveries TEXT NOT NULL DEFAULT '';"),
         ] {
             let has: bool = self
                 .conn
@@ -790,7 +792,8 @@ mod tests {
             let store = Store::open(&path).unwrap();
             store.conn.execute_batch(
                 "ALTER TABLE deliveries DROP COLUMN msg_id;
-                 ALTER TABLE activity DROP COLUMN acks;
+                 ALTER TABLE deliveries DROP COLUMN warned;
+                 ALTER TABLE activity DROP COLUMN deliveries;
                  INSERT INTO deliveries (session, win, line, ts) VALUES ('s', 'w1', 'old line', 100);
                  INSERT INTO activity (session, window, win, ts, kind, text, tool, via, state)
                    VALUES ('s', 0, 'w1', 1000, 'prompt', 'old line', '', 'app', '');
@@ -799,9 +802,9 @@ mod tests {
         }
         let store = Store::open(&path).unwrap();
         let rows = store.pending_deliveries("s", None).unwrap();
-        assert_eq!((rows.len(), rows[0].line.as_str(), rows[0].msg_id.as_str()), (1, "old line", ""));
+        assert_eq!((rows.len(), rows[0].line.as_str(), rows[0].msg_id.as_str(), rows[0].warned), (1, "old line", "", false));
         let evs = store.activity_since("s", 0, 10).unwrap();
-        assert_eq!((evs.len(), evs[0].acks.as_str()), (1, ""));
+        assert_eq!((evs.len(), evs[0].deliveries.as_str()), (1, ""));
         store.insert_delivery("s", "w1", "new line", 200, "m9").unwrap();
         assert_eq!(store.pending_deliveries("s", None).unwrap()[1].msg_id, "m9");
         // Re-running the step is harmless (the heal floor calls it on every open).

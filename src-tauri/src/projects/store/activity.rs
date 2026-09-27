@@ -20,9 +20,10 @@ pub struct ActivityRow {
     pub tool: String,
     pub via: String,
     pub state: String,
-    /// `prompt` events only: the chat message ids this echo settled (board
-    /// #249), a JSON array; '' when it settled none or predates v24.
-    pub acks: String,
+    /// The delivery rows this event is about (board #249), a JSON array of
+    /// `{id, msg?}`: the rows a `prompt` echo settled, or the one row a `warn`
+    /// reported. '' for every other event and for rows before v24.
+    pub deliveries: String,
 }
 
 /// One outstanding delivery (board #249): the row id is its identity, so two
@@ -36,6 +37,9 @@ pub struct DeliveryRow {
     /// The chat message this line carries; '' for a line with none (a board
     /// notice, a reply, a typed first prompt) and for pre-v24 rows.
     pub msg_id: String,
+    /// Already reported unconfirmed. A reported row stays OUTSTANDING — a late
+    /// real echo still settles it — but is never reported twice.
+    pub warned: bool,
 }
 
 impl Store {
@@ -51,15 +55,15 @@ impl Store {
         tool: &str,
         via: &str,
         state: &str,
-        acks: &str,
+        deliveries: &str,
     ) -> Result<(), String> {
         // `window` (the INDEX column) is 0 for name-keyed rows; `win` carries
         // the identity (board #120). Old rows read back via the COALESCE below.
         self.conn
             .execute(
-                "INSERT INTO activity (session, window, win, ts, kind, text, tool, via, state, acks)
+                "INSERT INTO activity (session, window, win, ts, kind, text, tool, via, state, deliveries)
                  VALUES (?1, 0, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                rusqlite::params![session, window, ts as i64, kind, text, tool, via, state, acks],
+                rusqlite::params![session, window, ts as i64, kind, text, tool, via, state, deliveries],
             )
             .map(|_| ())
             .map_err(|e| format!("insert activity: {e}"))
@@ -100,12 +104,12 @@ impl Store {
     /// Windows whose newest recorded turn edge is a `prompt` (no `completed` /
     /// `failed` after it), with that prompt's ts in ms (board #249): the turns
     /// that were open when an earlier process last heard of them. One grouped
-    /// scan of the session's prompt/notif rows.
-    pub fn open_turns(&self, session: &str) -> Result<Vec<(String, u64)>, String> {
+    /// scan of the session's prompt/notif rows. Returns (window, ts, row id).
+    pub fn open_turns(&self, session: &str) -> Result<Vec<(String, u64, i64)>, String> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT t.w, a.ts FROM (
+                "SELECT t.w, a.ts, a.id FROM (
                    SELECT COALESCE(NULLIF(win, ''), CAST(window AS TEXT)) AS w,
                           MAX(CASE WHEN kind = 'prompt' THEN id END) AS p,
                           MAX(CASE WHEN kind = 'notif' AND text IN ('completed', 'failed') THEN id END) AS e
@@ -116,7 +120,7 @@ impl Store {
             )
             .map_err(|e| format!("prepare open turns: {e}"))?;
         let rows = stmt
-            .query_map(rusqlite::params![session], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64)))
+            .query_map(rusqlite::params![session], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64, r.get::<_, i64>(2)?)))
             .map_err(|e| format!("query open turns: {e}"))?;
         Ok(rows.filter_map(Result::ok).collect())
     }
@@ -155,7 +159,7 @@ impl Store {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, COALESCE(NULLIF(win, ''), CAST(window AS TEXT)), ts, kind, text, tool, via, state, acks FROM activity
+                "SELECT id, COALESCE(NULLIF(win, ''), CAST(window AS TEXT)), ts, kind, text, tool, via, state, deliveries FROM activity
                  WHERE session = ?1 AND ts > ?2
                    AND (ts < ?3 OR (ts = ?3 AND id < ?4))
                  ORDER BY ts DESC, id DESC LIMIT ?5",
@@ -174,7 +178,7 @@ impl Store {
                         tool: r.get(5)?,
                         via: r.get(6)?,
                         state: r.get(7)?,
-                        acks: r.get(8)?,
+                        deliveries: r.get(8)?,
                     })
                 },
             )
@@ -249,12 +253,12 @@ impl Store {
     ) -> Result<Vec<DeliveryRow>, String> {
         let (sql, args): (&str, Vec<Box<dyn rusqlite::ToSql>>) = match window {
             Some(w) => (
-                "SELECT id, win, line, ts, msg_id FROM deliveries
+                "SELECT id, win, line, ts, msg_id, warned FROM deliveries
                  WHERE session = ?1 AND win = ?2 ORDER BY id",
                 vec![Box::new(session.to_string()), Box::new(w.to_string())],
             ),
             None => (
-                "SELECT id, win, line, ts, msg_id FROM deliveries WHERE session = ?1 ORDER BY id",
+                "SELECT id, win, line, ts, msg_id, warned FROM deliveries WHERE session = ?1 ORDER BY id",
                 vec![Box::new(session.to_string())],
             ),
         };
@@ -270,6 +274,7 @@ impl Store {
                     line: r.get(2)?,
                     ts: r.get::<_, i64>(3)? as u64,
                     msg_id: r.get(4)?,
+                    warned: r.get::<_, i64>(5)? != 0,
                 })
             })
             .map_err(|e| format!("query deliveries: {e}"))?;
@@ -278,6 +283,22 @@ impl Store {
 
     /// A line is settled — acknowledged by its echo, or reported as
     /// unconfirmed. By ROW, so a duplicate body's sibling stays outstanding.
+    /// Report a row once: true only for the call that flipped it (board #249).
+    pub fn mark_delivery_warned(&self, id: i64) -> Result<bool, String> {
+        self.conn
+            .execute("UPDATE deliveries SET warned = 1 WHERE id = ?1 AND warned = 0", rusqlite::params![id])
+            .map(|n| n > 0)
+            .map_err(|e| format!("mark delivery warned: {e}"))
+    }
+
+    /// The newest activity row id, 0 for none. Row ids only grow, so turn
+    /// facts ordered by it keep their order across a restart (board #249).
+    pub fn max_activity_id(&self) -> Result<i64, String> {
+        self.conn
+            .query_row("SELECT COALESCE(MAX(id), 0) FROM activity", [], |r| r.get(0))
+            .map_err(|e| format!("max activity id: {e}"))
+    }
+
     /// The newest delivery row of a session, 0 for none (board #249: the
     /// recovery mark between rows an earlier process typed and ours).
     pub fn max_delivery_id(&self, session: &str) -> Result<i64, String> {
@@ -410,7 +431,12 @@ mod tests {
         store.insert_activity("s", "w1", 1000, "prompt", "same", "", "app", "", r#"["m1"]"#).unwrap();
         store.insert_activity("s", "w1", 1001, "prompt", "typed", "", "local", "", "").unwrap();
         let evs = store.activity_since("s", 0, 10).unwrap();
-        assert_eq!(evs.iter().map(|e| e.acks.as_str()).collect::<Vec<_>>(), vec![r#"["m1"]"#, ""]);
+        assert_eq!(evs.iter().map(|e| e.deliveries.as_str()).collect::<Vec<_>>(), vec![r#"["m1"]"#, ""]);
+        // Reported once: only the first call flips the mark, and the row stays.
+        assert!(store.mark_delivery_warned(left[0].id).unwrap());
+        assert!(!store.mark_delivery_warned(left[0].id).unwrap());
+        let after = store.pending_deliveries("s", Some("w1")).unwrap();
+        assert_eq!(after.iter().map(|r| r.warned).collect::<Vec<_>>(), vec![true, false], "warned, still outstanding");
     }
 
     #[test]

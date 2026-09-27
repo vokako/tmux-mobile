@@ -170,12 +170,29 @@ pub struct ActivityEvent {
     /// halves differently, and a note is the half a human reads.
     #[serde(skip_serializing_if = "str::is_empty")]
     pub state: String,
-    /// `prompt` events only: the chat message ids this echo settled (board
-    /// #249). A client marks exactly these delivered, whether or not it has
-    /// them loaded, and draws no INPUT row for the echo. Empty for a local
-    /// prompt, for an echo of a line with no message, and for old rows.
+    /// The delivery rows this event is about (board #249). The ONE
+    /// correlation key is the delivery row id: a `prompt` echo lists the rows
+    /// it settled, a `warn` the one row it reported. `msg` is the chat message
+    /// that row carries, where one exists. A client marks those messages
+    /// delivered whether or not it has them loaded, draws no INPUT row for a
+    /// settling echo, and drops a warn whose row a later echo settled. Empty
+    /// for every other event and for rows before v24.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub acks: Vec<String>,
+    pub deliveries: Vec<DeliveryRef>,
+}
+
+/// One delivery row named by an event: its id, and the message it carries.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DeliveryRef {
+    pub id: i64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub msg: String,
+}
+
+impl DeliveryRef {
+    fn of(row: &super::store::DeliveryRow) -> Self {
+        DeliveryRef { id: row.id, msg: row.msg_id.clone() }
+    }
 }
 
 fn is_zero(n: &i64) -> bool {
@@ -191,7 +208,7 @@ fn push_event(session: &str, window: &str, kind: &str, text: String) {
     push_full(session, window, kind, text, String::new(), String::new(), Vec::new());
 }
 
-fn push_full(session: &str, window: &str, kind: &str, text: String, tool: String, via: String, acks: Vec<String>) {
+fn push_full(session: &str, window: &str, kind: &str, text: String, tool: String, via: String, deliveries: Vec<DeliveryRef>) {
     push(
         session,
         ActivityEvent {
@@ -203,7 +220,7 @@ fn push_full(session: &str, window: &str, kind: &str, text: String, tool: String
             tool,
             via,
             state: String::new(),
-            acks,
+            deliveries,
         },
     );
 }
@@ -234,8 +251,8 @@ fn persist(_session: &str, _ev: &ActivityEvent) {}
 #[cfg(not(test))]
 fn persist(session: &str, ev: &ActivityEvent) {
     let written = super::with_store(|s| {
-        let acks = if ev.acks.is_empty() { String::new() } else { serde_json::to_string(&ev.acks).unwrap_or_default() };
-        s.insert_activity(session, &ev.window, ev.ts, &ev.kind, &ev.text, &ev.tool, &ev.via, &ev.state, &acks)
+        let refs = if ev.deliveries.is_empty() { String::new() } else { serde_json::to_string(&ev.deliveries).unwrap_or_default() };
+        s.insert_activity(session, &ev.window, ev.ts, &ev.kind, &ev.text, &ev.tool, &ev.via, &ev.state, &refs)
     });
     if let Err(e) = written {
         // Fail-soft, but not SILENT: a lost write is a hole in the trace, and the
@@ -295,7 +312,7 @@ pub fn events_page(
                     tool: r.tool,
                     via: r.via,
                     state: r.state,
-                    acks: serde_json::from_str(&r.acks).unwrap_or_default(),
+                    deliveries: serde_json::from_str(&r.deliveries).unwrap_or_default(),
                 })
                 .collect();
             return (events, has_more);
@@ -425,10 +442,11 @@ fn recovery_mark(session: &str) -> (i64, u64) {
 /// the turn when it is read. Known gap: an interrupt is not logged, so a turn
 /// interrupted just before a restart reopens until that agent's next hook.
 fn recover_open_turns(session: &str) {
-    for (window, ts_ms) in queue(|s| s.open_turns(session)).unwrap_or_default() {
+    for (window, ts_ms, row_id) in queue(|s| s.open_turns(session)).unwrap_or_default() {
         with_rec(session, &window, |r| {
             if r.prompt.is_none() && r.end.is_none() && r.tool.is_none() && r.ask.is_none() {
                 r.prompt = Some(ts_ms / 1000);
+                let _ = row_id;
                 r.prompt_seq = arrival();
             }
         });
@@ -566,12 +584,7 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
         .filter(|row| queue(|s| s.delete_delivery_id(row.id)).unwrap_or(false))
         .collect();
     let acked = !won.is_empty();
-    let mut acks: Vec<String> = Vec::new();
-    for row in &won {
-        if !row.msg_id.is_empty() && !acks.contains(&row.msg_id) {
-            acks.push(row.msg_id.clone());
-        }
-    }
+    let refs: Vec<DeliveryRef> = won.iter().map(|row| DeliveryRef::of(row)).collect();
     // A turn just opened. This is the ONE honest "it started working" signal:
     // pane activity cannot be it, because an agent TUI repaints its prompt
     // (spinner, status line, cursor) long after it finished.
@@ -586,7 +599,7 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
         text,
         String::new(),
         if acked { "app".into() } else { "local".into() },
-        acks,
+        refs,
     );
     acked
 }
@@ -678,6 +691,7 @@ fn overdue_rows(rec: &Rec, rows: &[super::store::DeliveryRow], mark: (i64, u64),
     }
     let turn_end = rec.end.as_ref().map(|(_, t)| *t).unwrap_or(0);
     rows.iter()
+        .filter(|row| !row.warned)
         .filter(|row| {
             let listened = if row.id <= mark.0 { mark.1 } else { 0 };
             let reference = row.ts.max(listened).max(turn_end.min(now));
@@ -688,8 +702,12 @@ fn overdue_rows(rec: &Rec, rows: &[super::store::DeliveryRow], mark: (i64, u64),
 }
 
 /// Report deliveries that never came back as a prompt. Called before a client
-/// reads the feed, which is exactly when the answer is wanted; a reported row
-/// is settled, so the warning is emitted once — across restarts too.
+/// reads the feed, which is exactly when the answer is wanted. A report does
+/// NOT settle the row (board #249): the line may still be in the CLI's queue,
+/// and a late real echo must still find it and settle it as ours, retracting
+/// the warn by its row id. The persisted `warned` mark makes the report
+/// happen once per row, across sweeps and restarts; the 24 h prune bounds the
+/// rows that never echo.
 pub fn sweep_deliveries(session: &str) {
     let mark = recovery_mark(session);
     let rows = queue(|s| s.pending_deliveries(session, None)).unwrap_or_default();
@@ -709,11 +727,19 @@ pub fn sweep_deliveries(session: &str) {
             .cloned()
             .unwrap_or_default();
         for id in overdue_rows(&rec, &rows, mark, now) {
-            if !queue(|s| s.delete_delivery_id(id)).unwrap_or(false) {
-                continue; // settled by an echo in the meantime
+            if !queue(|s| s.mark_delivery_warned(id)).unwrap_or(false) {
+                continue; // settled, or reported by another sweep, meanwhile
             }
-            let line = rows.iter().find(|r| r.id == id).map(|r| r.line.as_str()).unwrap_or_default();
-            push_event(session, &window, "warn", format!("unconfirmed: {}", truncate_chars(line, 160)));
+            let Some(row) = rows.iter().find(|r| r.id == id) else { continue };
+            push_full(
+                session,
+                &window,
+                "warn",
+                format!("unconfirmed: {}", truncate_chars(&row.line, 160)),
+                String::new(),
+                String::new(),
+                vec![DeliveryRef::of(row)],
+            );
         }
     }
 }
@@ -900,7 +926,7 @@ mod tests {
     /// An outstanding row as the store returns it: typed at `ts`, by this
     /// process unless `id` is at or below the recovery mark.
     fn row(id: i64, line: &str, ts: u64) -> crate::projects::store::DeliveryRow {
-        crate::projects::store::DeliveryRow { id, window: "w".into(), line: line.into(), ts, msg_id: String::new() }
+        crate::projects::store::DeliveryRow { id, window: "w".into(), line: line.into(), ts, msg_id: String::new(), warned: false }
     }
     const MARK: (i64, u64) = (0, 0);
 
@@ -1351,15 +1377,21 @@ mod tests {
         sweep_deliveries(&session);
         assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 1);
 
-        // A restart must not find it again: reported IS settled, and warning a
-        // second time about the same line is the noise this table could add.
+        // A restart must not report it again: the row stays outstanding for a
+        // late echo (board #249), but its warned mark is persisted.
         simulate_restart(&session);
         sweep_deliveries(&session);
         assert_eq!(
             recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(),
             1,
-            "the durable copy left with the warning"
+            "reported once, across a restart"
         );
+        // And the late real echo still settles it as ours, naming the row the
+        // warn named, so a client can retract exactly that warn.
+        let warned_id = recent_events(&session, 0).into_iter().find(|e| e.kind == "warn").unwrap().deliveries[0].id;
+        assert!(record_prompt(&session, "w3", "@dev hello"), "a warned row is still matchable");
+        let echo = recent_events(&session, 0).into_iter().filter(|e| e.kind == "prompt").last().unwrap();
+        assert_eq!((echo.via.as_str(), echo.deliveries[0].id), ("app", warned_id));
 
         // And a window that no longer exists can never echo, so its queue goes
         // with the record instead of waiting for a recycled index to inherit it.
@@ -1622,12 +1654,17 @@ mod tests {
         assert!(record_prompt(&session, "w1", "[tmm chat 12:41] validator: @builder one\n[tmm chat 12:42] validator: @builder two"));
         assert!(record_prompt(&session, "w1", "[board #241 reply] notice"));
         record_prompt(&session, "w1", "typed at the keyboard");
-        let acks: Vec<Vec<String>> = recent_events(&session, 0).into_iter().filter(|e| e.kind == "prompt").map(|e| e.acks).collect();
-        assert_eq!(acks, vec![vec!["m-41".to_string(), "m-42".to_string()], vec![], vec![]]);
+        let msgs: Vec<Vec<String>> = recent_events(&session, 0).into_iter().filter(|e| e.kind == "prompt")
+            .map(|e| e.deliveries.into_iter().map(|d| d.msg).collect()).collect();
+        assert_eq!(msgs, vec![vec!["m-41".to_string(), "m-42".to_string()], vec![String::new()], vec![]],
+            "each settled ROW is named, with its message where it has one");
         let wire = serde_json::to_value(recent_events(&session, 0).remove(0)).unwrap();
-        assert_eq!(wire["acks"], serde_json::json!(["m-41", "m-42"]), "on the wire as a string array");
+        assert_eq!(wire["deliveries"][0]["msg"], "m-41");
+        assert!(wire["deliveries"][0]["id"].as_i64().unwrap() > 0, "the row id is the key");
+        let notice = serde_json::to_value(recent_events(&session, 0).remove(1)).unwrap();
+        assert!(notice["deliveries"][0].get("msg").is_none(), "a notice row has no message");
         let local = serde_json::to_value(recent_events(&session, 0).pop().unwrap()).unwrap();
-        assert!(local.get("acks").is_none(), "absent, not [], when it settled none");
+        assert!(local.get("deliveries").is_none(), "absent, not [], when it settled none");
     }
 
     /// 13:12:38 in the trace: a stop and the next queued prompt in the SAME
@@ -1720,9 +1757,11 @@ mod tests {
         });
         sweep_deliveries(&session);
         assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 2, "each owed promise reported once");
-        assert!(held(&session, "dev").is_empty());
+        assert_eq!(held(&session, "dev").len(), 2, "reported, still outstanding for a late echo");
         sweep_deliveries(&session);
-        assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 2);
+        simulate_restart(&session);
+        sweep_deliveries(&session);
+        assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 2, "twice more, across a restart: still once each");
     }
 
     /// A row typed by an earlier process waits from the recovery mark, a row
@@ -1735,6 +1774,29 @@ mod tests {
         assert_eq!(overdue_rows(&r, &rows, mark, 1000 + DELIVERY_ACK_SECS - 1), Vec::<i64>::new());
         assert_eq!(overdue_rows(&r, &rows, mark, 1000 + DELIVERY_ACK_SECS), vec![5, 6]);
         assert_eq!(overdue_rows(&r, &rows, MARK, 100 + DELIVERY_ACK_SECS), vec![5], "without a mark it keeps its typing time");
+    }
+
+    /// Orchestrator's key rule (#249): two identical notices with no message,
+    /// both reported; one late echo settles exactly one row and names it, so
+    /// exactly one warn is retracted and its sibling stays reported and owed.
+    #[test]
+    fn a_late_echo_settles_one_of_two_warned_identical_notices() {
+        let session = format!("wdup-{}", uuid::Uuid::new_v4());
+        let notice = "[board #241 reply] Release 1.0.0 — status review → doing";
+        record_delivery(&session, "w1", notice, "");
+        record_delivery(&session, "w1", notice, "");
+        backdate(&session);
+        sweep_deliveries(&session);
+        let warns: Vec<i64> = recent_events(&session, 0).into_iter().filter(|e| e.kind == "warn").map(|e| e.deliveries[0].id).collect();
+        assert_eq!(warns.len(), 2);
+        assert_ne!(warns[0], warns[1], "each warn names its own row");
+        assert!(record_prompt(&session, "w1", notice));
+        let echo = recent_events(&session, 0).into_iter().filter(|e| e.kind == "prompt").last().unwrap();
+        assert_eq!(echo.deliveries.iter().map(|d| d.id).collect::<Vec<_>>(), vec![warns[0]], "the oldest row, and only it");
+        assert_eq!(held(&session, "w1").len(), 1, "the sibling is still owed");
+        assert!(record_prompt(&session, "w1", notice), "and its own late echo settles it too");
+        let last = recent_events(&session, 0).into_iter().filter(|e| e.kind == "prompt").last().unwrap();
+        assert_eq!(last.deliveries[0].id, warns[1]);
     }
 
     /// The matcher over rows, pure: order, duplicates and truncation.

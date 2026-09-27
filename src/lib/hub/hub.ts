@@ -1570,11 +1570,12 @@ export function echoContains(canonEcho: string, body: string, truncated: boolean
  *    message that caused it as delivered rather than shown as a separate row —
  *    the text would otherwise appear twice. This runs at EVERY feed level,
  *    because "did what I just sent arrive" is not a detail the user opted into.
- *    Since board #249 the echo also NAMES the messages it settled (`acks`):
- *    those are marked by id, and the echo is consumed even when none of them
- *    is in the loaded page — it is the receipt of a message that exists in
- *    the room, never keyboard input. An echo without `acks` (an old row, a
- *    board notice) keeps the content match.
+ *    Since board #249 the echo also NAMES the delivery rows it settled
+ *    (`deliveries`): their messages are marked by id, and the echo is
+ *    consumed even when none of them is in the loaded page — it is a receipt,
+ *    never keyboard input. A `warn` names the one row it reported; once an
+ *    echo settles that row the warn is dropped, by row id, never by text. An
+ *    echo without `deliveries` (a row before v24) keeps the content match.
  * 2. **A local prompt is the input half of the transcript.** Text typed at the
  *    agent's own keyboard exists in no other channel, so an unmatched `prompt`
  *    event renders as its own row.
@@ -1618,7 +1619,17 @@ export function feedBlocks(
   // Rule 1: pair echoes with the messages that produced them.
   const consumed = new Set<HubActivityEvent>();
   const turns: TurnMark[] = [];
+  const settledRows = new Set<number>();
   for (const e of activity) {
+    if (e.kind === 'prompt' && e.via === 'app') for (const d of e.deliveries ?? []) settledRows.add(d.id);
+  }
+  for (const e of activity) {
+    // A warn about a row a later echo settled is retracted: the line was late,
+    // not lost.
+    if (e.kind === 'warn' && e.deliveries?.some((d) => settledRows.has(d.id))) {
+      consumed.add(e);
+      continue;
+    }
     if (e.kind !== 'prompt' || e.via !== 'app') continue;
     // EVERY message at or before the echo whose body it contains. The typed line
     // is `[tmm chat] <from>: <body>`, an agent that was mid-typing submits it with
@@ -1629,8 +1640,9 @@ export function feedBlocks(
     // rides tmux send-keys and the TUI's composer before it echoes back, and a
     // newline in the body does not survive that byte-for-byte (owner,
     // 2026-08-22: multi-line messages never confirmed).
-    // Named receipts first: the server knows exactly which messages it settled.
-    const named = e.acks?.length ? new Set(e.acks) : null;
+    // Named receipts first: the server knows exactly which rows it settled,
+    // and which messages they carry.
+    const named = e.deliveries?.length ? new Set(e.deliveries.map((d) => d.msg).filter(Boolean)) : null;
     let hit = !!named;
     if (named) {
       for (const m of msgs) {
