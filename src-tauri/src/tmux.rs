@@ -1286,6 +1286,8 @@ mod tests {
             eprintln!("no tmux server — skipping");
             return None;
         }
+        // Guarded from the moment it exists (validator, #251).
+        let guard = KillOnDrop(session.to_string());
         let _ = run_tmux(&["new-window", "-d", "-t", &format!("={session}:"), "cat"]);
         std::thread::sleep(std::time::Duration::from_millis(300));
         let targets: Vec<String> = run_tmux(&["list-panes", "-s", "-t", &format!("={session}"), "-F", "#{session_name}:#{window_index}.#{pane_index}"])
@@ -1293,7 +1295,6 @@ mod tests {
             .lines()
             .map(str::to_string)
             .collect();
-        let guard = KillOnDrop(session.to_string());
         assert_eq!(targets.len(), 2);
         Some((guard, targets))
     }

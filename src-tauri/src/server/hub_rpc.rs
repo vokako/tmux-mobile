@@ -1751,11 +1751,13 @@ mod tests {
             let _ = std::fs::remove_dir_all(&ws);
             return;
         }
+        // The session exists from here on: guard it before any later step
+        // can panic (validator, #251 — a failed new-window used to leak it).
+        let _cleanup = KillOnDrop(session.clone(), ws.clone());
         std::process::Command::new("tmux")
             .args(["new-window", "-d", "-t", &session, "-n", "solo", "-c", &ws.to_string_lossy(), "cat"])
             .status()
             .unwrap();
-        let _cleanup = KillOnDrop(session.clone(), ws.clone());
         crate::projects::adopt(&session, Some("paste-hub-test")).expect("adopt project");
         let posts: Vec<_> = ["lead", "solo"]
             .into_iter()
@@ -1816,11 +1818,13 @@ mod tests {
             let _ = std::fs::remove_dir_all(&ws);
             return;
         }
+        // The session exists from here on: guard it before any later step
+        // can panic (validator, #251 — a failed new-window used to leak it).
+        let _cleanup = KillOnDrop(session.clone(), ws.clone());
         std::process::Command::new("tmux")
             .args(["new-window", "-d", "-t", &session, "-n", "solo", "-c", &ws.to_string_lossy(), "cat"])
             .status()
             .unwrap();
-        let _cleanup = KillOnDrop(session.clone(), ws.clone());
         crate::projects::adopt(&session, Some("copymode-hub-test")).expect("adopt project");
         let lead = format!("{session}:lead");
         crate::tmux::run_tmux(&["copy-mode", "-t", &lead]).unwrap();
@@ -1884,11 +1888,13 @@ mod tests {
             let _ = std::fs::remove_dir_all(&ws);
             return;
         }
+        // The session exists from here on: guard it before any later step
+        // can panic (validator, #251 — a failed new-window used to leak it).
+        let _cleanup = KillOnDrop(session.clone(), ws.clone());
         std::process::Command::new("tmux")
             .args(["new-window", "-d", "-t", &session, "-n", "solo", "-c", &ws.to_string_lossy(), "cat"])
             .status()
             .unwrap();
-        let _cleanup = KillOnDrop(session.clone(), ws.clone());
         crate::projects::adopt(&session, Some("copymode-cmd-test")).expect("adopt project");
         let lead = format!("{session}:lead");
         crate::tmux::run_tmux(&["copy-mode", "-t", &lead]).unwrap();
