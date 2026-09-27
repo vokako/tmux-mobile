@@ -1,6 +1,13 @@
 //! The grok backend's own knowledge (board #101/#127): every fact about how
 //! this CLI is driven lives here — one file to touch when it changes.
 
+/// No queue|steer choice (board #245): grok documents `[ui]
+/// follow_up_behavior = "queue" | "steer"` (default queue), but no managed
+/// grok turn completes on this host (every turn fails with a Bedrock 400,
+/// board #252), so neither mode could be measured. Unmeasured doors are not
+/// offered; grok keeps its default, queue.
+pub(crate) const SWITCHES_INPUT_MODE: bool = false;
+
 /// grok `/effort` doc: low|medium|high|xhigh (grok 1.0.5, measured).
 pub(crate) fn effort_values() -> &'static [&'static str] {
     &["low", "medium", "high", "xhigh"]

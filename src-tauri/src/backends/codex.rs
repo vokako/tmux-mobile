@@ -1,6 +1,29 @@
 //! The codex backend's own knowledge (board #101/#127): every fact about how
 //! this CLI is driven lives here — one file to touch when it changes.
 
+/// queue|steer for codex (board #245, measured on codex-cli 0.154.0). Enter
+/// while a task runs STEERS (`turn/steer`): the line's prompt hook fired
+/// inside the running turn, its one Stop answered the second sender, and the
+/// first sender never got a reply. Codex has no mode key; its documented
+/// keymap is the door — `tui.keymap.composer.queue = "enter"` with
+/// `composer.submit = "tab"` (one key may not be bound twice in a context, so
+/// submit moves to Tab, which a person in the pane can still use to steer).
+/// Measured: the line then waited for the turn, came back through the prompt
+/// hook as its own turn and was answered to its own sender; an idle Enter
+/// still submits at once, slash commands included.
+pub(crate) const SWITCHES_INPUT_MODE: bool = true;
+
+/// The keymap overrides that make codex queue (see `SWITCHES_INPUT_MODE`).
+/// Launch-line `-c` like every other codex key: `config.toml` in the
+/// isolated home is a symlink into the user's own and is never written.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn queue_keymap_overrides() -> [String; 2] {
+    [
+        shared::codex_config_override("tui.keymap.composer.queue", Value::String("enter".into())),
+        shared::codex_config_override("tui.keymap.composer.submit", Value::String("tab".into())),
+    ]
+}
+
 /// codex `model_reasoning_effort` (its ReasoningEffort enum): minimal..xhigh
 /// (measured 2026-08-22).
 pub(crate) fn effort_values() -> &'static [&'static str] {
@@ -307,6 +330,11 @@ pub(crate) fn render_codex(
     // quoted segment is not honoured (`-c` keys are split on dots and quotes
     // stay literal) — so a path containing a dot cannot be expressed here and
     // keeps the pane watcher below (StartupConfirmation) as its answer.
+    // The definition's input mode (board #245): queue unless it says steer,
+    // which is codex's own Enter.
+    if def.input_mode != "steer" {
+        config_args.extend(queue_keymap_overrides());
+    }
     config_args.push(shared::codex_config_override("check_for_update_on_startup", Value::Bool(false)));
     if let Some(key) = codex_trust_key(workspace) {
         config_args.push(shared::codex_config_override(&key, Value::String("trusted".into())));

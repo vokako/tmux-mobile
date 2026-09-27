@@ -78,6 +78,19 @@ pub fn validate_effort(backend: &str, effort: &str) -> Result<(), String> {
     ))
 }
 
+/// The input mode (board #245) at the door: `queue` everywhere, `steer` only
+/// on a backend whose switch is measured (`Backend::switches_input_mode`) —
+/// elsewhere `steer` would be a value no config carries, i.e. a lie in the
+/// editor.
+pub fn validate_input_mode(backend: &str, mode: &str) -> Result<(), String> {
+    match mode {
+        "queue" => Ok(()),
+        "steer" if crate::backends::Backend::parse(backend).is_some_and(|b| b.switches_input_mode()) => Ok(()),
+        "steer" => Err(format!("{backend} has no queue/steer switch; its input mode is queue")),
+        other => Err(format!("input mode must be queue|steer, got '{other}'")),
+    }
+}
+
 pub fn validate(backend: &str, model: &str) -> Result<(), String> {
     let model = model.trim();
     if model.is_empty() {

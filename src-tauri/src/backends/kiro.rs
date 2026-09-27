@@ -1,6 +1,17 @@
 //! The kiro backend's own knowledge (board #101/#127): every fact about how
 //! this CLI is driven lives here — one file to touch when it changes.
 
+/// queue|steer is kiro's own setting, `chat.defaultInterruptBehavior` in
+/// `settings/cli.json` (board #245, measured on kiro-cli 2.22.1): `queue` makes
+/// a line typed at a busy agent its own prompt after the turn (hook ack, reply
+/// to its sender); `steer` injects it into the running turn with NO
+/// `userPromptSubmit`, so the line is swept `unconfirmed` after the turn and
+/// its sender enters no reply edge.
+pub(crate) const SWITCHES_INPUT_MODE: bool = true;
+
+/// The cli.json key that carries the definition's input mode.
+const INTERRUPT_KEY: &str = "chat.defaultInterruptBehavior";
+
 /// Reasoning-effort levels kiro-cli accepts (`kiro-cli chat --effort`,
 /// measured 2026-08-22: "e.g. low, medium, high, xhigh, max").
 pub(crate) fn effort_values() -> &'static [&'static str] {
@@ -224,21 +235,20 @@ pub(crate) fn patch_profile(path: &Path, hooks: Value) -> bool {
 /// The CLI settings every managed kiro agent runs with (`<home>/settings/
 /// cli.json`, read because the pane launches with `KIRO_HOME=<home>`).
 ///
-/// `chat.defaultInterruptBehavior = "queue"` is an owner decision, 2026-08-20
-/// ("所有 Agent 在 kiro 里边发送指令的模式 默认给我设计成 Queue 队列模式吧 不要
-/// steer 模式"): a line typed at a BUSY agent waits for the turn to end instead
-/// of steering the turn mid-flight — the agent reads it whole, as its own
-/// prompt. That is also the contract the delivery pipeline already assumes:
-/// `overdue_rows` pauses the ack clock while a turn is open precisely
-/// because kiro "Type to queue"s what we send. The setting is only the
-/// START mode: kiro 2.22.1 v3 toggles it per session on Ctrl+S or from its
-/// settings menu, and a STEERED line fires no `userPromptSubmit`, so it can
-/// never be acknowledged (board #249, measured 2026-09-27).
+/// `chat.defaultInterruptBehavior` is NOT in this list: it is the
+/// definition's input mode (board #245), written by `render_kiro` from the def
+/// and only backfilled by `ensure_kiro_settings`. Queue is the default (owner,
+/// 2026-08-20: "所有 Agent 在 kiro 里边发送指令的模式 默认给我设计成 Queue 队列模式吧
+/// 不要 steer 模式"): a line typed at a BUSY agent waits for the turn to end
+/// and is read whole, as its own prompt — the contract the delivery pipeline
+/// assumes (`overdue_rows` pauses the ack clock while a turn is open). The
+/// setting is only the START mode: kiro 2.22.1 v3 toggles it per session on
+/// Ctrl+S or from its settings menu, and a STEERED line fires no
+/// `userPromptSubmit`, so it can never be acknowledged (board #249).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn kiro_cli_settings() -> Vec<(&'static str, Value)> {
     vec![
         ("chat.disableTrustAllConfirmation", json!(true)),
-        ("chat.defaultInterruptBehavior", json!("queue")),
         // MCP tool schemas are DEFERRED into a compact list and loaded on
         // demand via kiro's own tool_search (owner, 2026-08-28: "给 kiro 的
         // mcp 工具开启 toolsearch"). Thresholds 0/0 = defer whenever any MCP
@@ -285,6 +295,13 @@ pub(crate) fn ensure_kiro_settings(home: &Path, model: &str) -> bool {
             obj.insert(key.to_string(), value);
             changed = true;
         }
+    }
+    // The input mode is the DEFINITION's (render_kiro writes it at spawn and
+    // restart); this repair path has no def, so it keeps a valid value and
+    // only backfills a home that predates the key (board #245).
+    if !matches!(obj.get(INTERRUPT_KEY).and_then(Value::as_str), Some("queue" | "steer")) {
+        obj.insert(INTERRUPT_KEY.into(), json!("queue"));
+        changed = true;
     }
     let model = model.trim();
     if model.is_empty() {
@@ -603,6 +620,7 @@ pub(crate) fn render_kiro(
     // reuses the same canonical list fail-soft via ensure_kiro_settings.
     let mut settings: serde_json::Map<String, Value> =
         kiro_cli_settings().into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+    settings.insert(INTERRUPT_KEY.into(), json!(if def.input_mode == "steer" { "steer" } else { "queue" }));
     if !def.model.trim().is_empty() {
         settings.insert(DEFAULT_MODEL_KEY.into(), json!(def.model.trim()));
     }

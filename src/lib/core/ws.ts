@@ -965,6 +965,9 @@ export interface RegAgent {
   backend: string;
   model: string;
   effort?: string;
+  /** What a line typed while it is busy does (board #245); absent = queue.
+   * `steer` only on a backend whose `backends_list` entry has `input_modes`. */
+  input_mode?: 'queue' | 'steer';
   system: string;
   skills: string;
   mcp: string;

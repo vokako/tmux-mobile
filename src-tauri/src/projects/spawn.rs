@@ -897,6 +897,7 @@ mod tests {
             backend: backend.into(),
             model: String::new(),
             effort: String::new(),
+            input_mode: "queue".into(),
             system: "Persona text.".into(),
             skills: "[]".into(),
             mcp: r#"[{"name":"files","command":"mcp-files","args":["--root","/tmp"]}]"#.into(),
@@ -1427,6 +1428,60 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         assert!(!dotted.cmd.contains("trust_level"), "a dotted path is left to the watcher: {}", dotted.cmd);
         assert!(dotted.confirmation.is_some(), "the watcher stays as the fallback");
         assert!(dotted.cmd.contains("check_for_update_on_startup=false"));
+    }
+
+    /// Board #245: the definition's input mode, rendered by each switching
+    /// backend into its own config — kiro's `settings/cli.json` key, codex's
+    /// keymap overrides (measured doors; see the backend files). Queue is the
+    /// default; steer is the CLI's own behaviour, so codex carries no keymap.
+    #[test]
+    fn the_input_mode_renders_into_each_switching_backend() {
+        let dir = std::env::temp_dir().join(format!("tmm-spawn-mode-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cli = || -> serde_json::Value {
+            serde_json::from_str(&std::fs::read_to_string(dir.join("settings/cli.json")).unwrap()).unwrap()
+        };
+        let mut d = def("kiro");
+        let prompt = build_prompt(&d, "tester", "proj", "", "", "");
+        render_kiro(&d, "tester", &dir, &dir, &prompt, &[]).unwrap();
+        assert_eq!(cli()["chat.defaultInterruptBehavior"], "queue");
+        d.input_mode = "steer".into();
+        render_kiro(&d, "tester", &dir, &dir, &prompt, &[]).unwrap();
+        assert_eq!(cli()["chat.defaultInterruptBehavior"], "steer", "a restart re-renders the def's mode");
+        // The repair path (project up, no def) keeps a valid mode and only
+        // backfills a home that predates the key.
+        assert!(!ensure_kiro_settings(&dir, ""), "steer is kept, nothing to write");
+        assert_eq!(cli()["chat.defaultInterruptBehavior"], "steer");
+        let mut stale = cli();
+        stale.as_object_mut().unwrap().remove("chat.defaultInterruptBehavior");
+        std::fs::write(dir.join("settings/cli.json"), stale.to_string()).unwrap();
+        assert!(ensure_kiro_settings(&dir, ""));
+        assert_eq!(cli()["chat.defaultInterruptBehavior"], "queue", "a pre-key home backfills queue");
+
+        let mut c = def("codex");
+        let queue = render_codex(&c, "tester", &dir, &dir, &prompt, &[]).unwrap().cmd;
+        assert!(queue.contains(r#"-c 'tui.keymap.composer.queue="enter"'"#), "{queue}");
+        assert!(queue.contains(r#"-c 'tui.keymap.composer.submit="tab"'"#), "{queue}");
+        c.input_mode = "steer".into();
+        let steer = render_codex(&c, "tester", &dir, &dir, &prompt, &[]).unwrap().cmd;
+        assert!(!steer.contains("tui.keymap"), "steer is codex's own Enter: {steer}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Board #245: `steer` is accepted only where the switch was measured;
+    /// every backend accepts `queue`, and nothing else is a mode.
+    #[test]
+    fn steer_is_offered_only_where_it_was_measured() {
+        use crate::backends::Backend;
+        let switching: Vec<&str> = Backend::ALL.iter().filter(|b| b.switches_input_mode()).map(|b| b.name()).collect();
+        assert_eq!(switching, ["kiro", "codex"]);
+        for b in Backend::ALL {
+            assert!(super::super::models::validate_input_mode(b.name(), "queue").is_ok());
+            assert_eq!(super::super::models::validate_input_mode(b.name(), "steer").is_ok(), b.switches_input_mode(), "{}", b.name());
+            assert!(super::super::models::validate_input_mode(b.name(), "").is_err());
+            assert_eq!(b.describe()["input_modes"], b.switches_input_mode(), "the client reads the switch, never mirrors it");
+        }
+        assert!(super::super::models::validate_input_mode("kiro", "interrupt").is_err());
     }
 
     #[test]

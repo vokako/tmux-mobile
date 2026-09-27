@@ -11,6 +11,14 @@ test('agent payload preserves unknown references and inline MCP values', () => {
   assert.deepEqual(JSON.parse(value.mcp), ['remote', ...agent.mcpExtra]);
 });
 
+test('a steer draft on a backend without the switch saves queue (#245)', () => {
+  // No served list here, so no backend switches: a steer left over from a
+  // backend change can never reach the server as a value it rejects.
+  const value = configPayload({ kind: 'agent', value: { ...agent, backend: 'claude', input_mode: 'steer' } }) as { input_mode: string };
+  assert.equal(value.input_mode, 'queue');
+  assert.equal((configPayload({ kind: 'agent', value: agent }) as { input_mode: string }).input_mode, 'queue', 'absent = queue');
+});
+
 test('team disclosure state is not a draft change, but nested MCP expanded is data', () => {
   const draft: ConfigDraft = { kind: 'team', value: {
     name: 'squad', description: '', members: [{ name: 'dev', base: '', role: '', expanded: true, agent: structuredClone(agent) }],

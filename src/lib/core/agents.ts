@@ -75,6 +75,9 @@ export interface BackendInfo {
   color: string;
   /** Reasoning-effort levels the CLI accepts; '' (default) is the editor's. */
   efforts: string[];
+  /** Whether a definition may choose queue|steer (board #245): only where
+   * the switch was measured. Absent on older servers, which offer none. */
+  input_modes?: boolean;
 }
 let served: BackendInfo[] | null = null;
 export function setServedBackends(list: BackendInfo[] | null): void {
@@ -104,6 +107,11 @@ export function defaultBackend(): string {
 /** The effort levels a backend's editor offers ('' default is added by the caller). */
 export function backendEfforts(backend: string | null | undefined): readonly string[] {
   return servedBackend(backend)?.efforts ?? FALLBACK_EFFORTS[backend ?? ''] ?? [];
+}
+/** Whether this backend's editor offers queue|steer (board #245). Server
+ * truth only: no fallback list, so an older server offers nothing. */
+export function backendSwitchesInputMode(backend: string | null | undefined): boolean {
+  return servedBackend(backend)?.input_modes === true;
 }
 /** The backend's colour token NAME (`--backend-x`), or null when it has none. */
 export function backendColorToken(backend: string | null | undefined): string | null {

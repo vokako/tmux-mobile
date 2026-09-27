@@ -77,6 +77,13 @@ pub struct RegAgent {
     /// backend's default, same contract as `model`.
     #[serde(default)]
     pub effort: String,
+    /// What a line typed at the BUSY agent does (board #245): `queue` waits
+    /// for the turn to end and becomes the next prompt, `steer` goes into the
+    /// running turn. `queue` is the default for every agent; only a backend
+    /// whose switch is measured (`Backend::switches_input_mode`) accepts
+    /// `steer`, and its backend file renders the value into its own config.
+    #[serde(default = "default_input_mode")]
+    pub input_mode: String,
     #[serde(default)]
     pub system: String,
     /// JSON array of skill refs (local names or github URLs).
@@ -89,6 +96,10 @@ pub struct RegAgent {
 
 pub(super) fn empty_json_array() -> String {
     "[]".to_string()
+}
+
+pub(crate) fn default_input_mode() -> String {
+    "queue".to_string()
 }
 
 /// An agent TEAM (board #74): a named list of members. `members` is a JSON
@@ -116,6 +127,7 @@ pub(super) fn row_to_reg_agent(r: &rusqlite::Row<'_>) -> rusqlite::Result<RegAge
         system: r.get(4)?,
         skills: r.get(5)?,
         mcp: r.get(6)?,
+        input_mode: r.get(7)?,
     })
 }
 
@@ -124,7 +136,7 @@ impl Store {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT name, backend, model, effort, system, skills, mcp
+                "SELECT name, backend, model, effort, system, skills, mcp, input_mode
                    FROM reg_agents
                   ORDER BY CASE name
                     WHEN 'kiro' THEN 0
@@ -148,7 +160,7 @@ impl Store {
     pub fn reg_get(&self, name: &str) -> Result<Option<RegAgent>, String> {
         self.conn
             .query_row(
-                "SELECT name, backend, model, effort, system, skills, mcp FROM reg_agents WHERE name = ?1",
+                "SELECT name, backend, model, effort, system, skills, mcp, input_mode FROM reg_agents WHERE name = ?1",
                 [name],
                 row_to_reg_agent,
             )
@@ -160,10 +172,10 @@ impl Store {
     pub fn reg_save(&self, a: &RegAgent, now: u64) -> Result<(), String> {
         self.conn
             .execute(
-                "INSERT INTO reg_agents (name, backend, model, effort, system, skills, mcp, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+                "INSERT INTO reg_agents (name, backend, model, effort, system, skills, mcp, input_mode, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?9, ?8, ?8)
                  ON CONFLICT(name) DO UPDATE SET
-                   backend=?2, model=?3, effort=?4, system=?5, skills=?6, mcp=?7, updated_at=?8",
+                   backend=?2, model=?3, effort=?4, system=?5, skills=?6, mcp=?7, input_mode=?9, updated_at=?8",
                 rusqlite::params![
                     a.name,
                     a.backend,
@@ -173,6 +185,7 @@ impl Store {
                     a.skills,
                     a.mcp,
                     now as i64,
+                    a.input_mode,
                 ],
             )
             .map(|_| ())
@@ -263,6 +276,7 @@ impl Store {
                 backend: "kiro".into(),
                 model: String::new(),
                 effort: String::new(),
+                input_mode: "queue".into(),
                 system: DEFAULT_KIRO_SYSTEM.into(),
                 skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
                 mcp: "[]".into(),
@@ -272,6 +286,7 @@ impl Store {
                 backend: "codex".into(),
                 model: String::new(),
                 effort: String::new(),
+                input_mode: "queue".into(),
                 system: "You are a powerful 10x developer running on Codex who can handle any task with decisive execution and minimal words.".into(),
                 skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
                 mcp: r#"[{"name":"kiro-web-search","command":"uvx","args":["kiro-web-search==0.1.3"]}]"#.into(),
@@ -281,6 +296,7 @@ impl Store {
                 backend: "claude".into(),
                 model: "global.anthropic.claude-fable-5-1[1m]".into(),
                 effort: String::new(),
+                input_mode: "queue".into(),
                 system: "You are a powerful 10x developer running on Claude Code who can handle any task with decisive execution and minimal words.".into(),
                 skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
                 mcp: r#"[{"name":"kiro-web-search","command":"uvx","args":["kiro-web-search==0.1.3"]}]"#.into(),
@@ -290,6 +306,7 @@ impl Store {
                 backend: "grok".into(),
                 model: String::new(),
                 effort: String::new(),
+                input_mode: "queue".into(),
                 system: "You are a powerful 10x developer running on Grok who can handle any task with decisive execution and minimal words.".into(),
                 skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
                 mcp: r#"[{"name":"kiro-web-search","command":"uvx","args":["kiro-web-search==0.1.3"]}]"#.into(),
@@ -299,6 +316,7 @@ impl Store {
                 backend: "omp".into(),
                 model: DEFAULT_OMP_MODEL.into(),
                 effort: String::new(),
+                input_mode: "queue".into(),
                 system: DEFAULT_OMP_SYSTEM.into(),
                 skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
                 // omp ships its own web_search tool — no MCP search shim needed.
@@ -309,6 +327,7 @@ impl Store {
                 backend: "kimi".into(),
                 model: String::new(),
                 effort: String::new(),
+                input_mode: "queue".into(),
                 system: DEFAULT_KIMI_SYSTEM.into(),
                 skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
                 // kimi's built-in search is the Moonshot service (a Kimi API
@@ -436,6 +455,7 @@ mod tests {
             backend: "kiro".into(),
             model: String::new(),
             effort: String::new(),
+            input_mode: "queue".into(),
             system: "custom".into(),
             skills: "[]".into(),
             mcp: "[]".into(),
@@ -467,6 +487,7 @@ mod tests {
             backend: "kiro".into(),
             model: "gpt-5.6-sol".into(),
             effort: "high".into(),
+            input_mode: "queue".into(),
             system: legacy.into(),
             skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
             mcp: "[]".into(),

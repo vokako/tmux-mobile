@@ -34,6 +34,7 @@ pub fn registry_save(def: &Value) -> Result<Value, String> {
     // in a line nobody reads. See `models`.
     models::validate(&agent.backend, &agent.model)?;
     models::validate_effort(&agent.backend, &agent.effort)?;
+    models::validate_input_mode(&agent.backend, &agent.input_mode)?;
     with_store(|store| {
         store.reg_save(&agent, now())?;
         Ok(json!({ "ok": true, "name": agent.name }))
@@ -92,6 +93,7 @@ pub fn teams_save(def: &Value) -> Result<Value, String> {
         if let Some(a) = m.agent.as_ref().filter(|_| m.base.trim().is_empty()) {
             models::validate(&a.backend, &a.model).map_err(|e| format!("member '{}': {e}", m.name))?;
             models::validate_effort(&a.backend, &a.effort).map_err(|e| format!("member '{}': {e}", m.name))?;
+            models::validate_input_mode(&a.backend, &a.input_mode).map_err(|e| format!("member '{}': {e}", m.name))?;
             serde_json::from_str::<Vec<String>>(&a.skills).map_err(|e| format!("member '{}': skills must be a JSON array: {e}", m.name))?;
             serde_json::from_str::<Vec<Value>>(&a.mcp).map_err(|e| format!("member '{}': mcp must be a JSON array: {e}", m.name))?;
         }

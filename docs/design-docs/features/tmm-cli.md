@@ -53,7 +53,7 @@ tmm project up|down|archive|delete|rename <session>
 
 # identity assets (central registry)
 tmm registry list|save|delete        agent definitions (--backend --system --model
-                                     --effort --skills --mcp)
+                                     --effort --input-mode --skills --mcp)
 tmm teams list|save|delete           named agent teams (members + roles)
 tmm prompt show|path|set|clear       the app-wide instructions (<config>/AGENTS.md)
 tmm skills list|save|delete|refresh|import   app-owned skill store

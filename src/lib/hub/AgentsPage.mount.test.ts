@@ -235,6 +235,36 @@ test('a hidden page retains its draft and a held deep link opens only after the 
   } finally { await app.close(); }
 });
 
+test('the input mode is offered only where the server says the backend switches, and saves steer (#245)', async context => {
+  const fixture = await hostFixture();
+  const served = (name: string, input_modes: boolean) => ({ name, icon: `/assets/${name}.svg`, color: `--backend-${name}`, efforts: [], input_modes });
+  const writes: any[] = [];
+  const app = await fixture.mount(context, {
+    props: { ready: () => {}, backends: [served('kiro', true), served('codex', true), served('claude', false)] },
+    modules: [rpc({
+      registryList: async () => ({ agents: [alpha, { ...alpha, name: 'cc', backend: 'claude' }] }),
+      registrySave: async (value: unknown) => { writes.push(value); },
+    })],
+  });
+  const field = () => app.document.querySelector<HTMLButtonElement>('[aria-label="While busy"]');
+  try {
+    await openAgent(app, 'cc');
+    assert.equal(field(), null, 'claude: no switch, no field');
+    command(app, 'Cancel').click(); await app.flush();
+    await openAgent(app, 'alpha');
+    assert.equal(field()?.querySelector('.sel-value')?.textContent, 'Queue', 'queue is the default');
+    const steerHint = () => [...app.document.querySelectorAll('.editor .hint')].find(h => /wrong sender/u.test(h.textContent ?? ''));
+    assert.equal(steerHint(), undefined, 'no warning while queued');
+    field()!.click(); await app.flush();
+    [...app.document.querySelectorAll<HTMLButtonElement>('[role=option]')].find(o => o.textContent?.trim() === 'Steer')!.click();
+    await app.flush();
+    assert.match(steerHint()?.textContent ?? '', /no delivery receipt.*wrong sender/u, 'steer says what it costs');
+    command(app, 'Save').click();
+    for (let i = 0; i < 5 && !writes.length; i++) await app.flush();
+    assert.equal(writes[0]?.input_mode, 'steer');
+  } finally { await app.close(); }
+});
+
 test('Team disclosure is not an edit; its actual role uses the guarded Save (#156)', async context => {
   const writes: any[] = [];
   const team = { name: 'squad', description: 'Rules', members: JSON.stringify([

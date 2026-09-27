@@ -95,6 +95,7 @@ impl Backend {
             "icon": format!("/assets/{}.svg", self.name()),
             "color": format!("--backend-{}", self.name()),
             "efforts": self.effort_values(),
+            "input_modes": self.switches_input_mode(),
         })
     }
 
@@ -115,6 +116,24 @@ impl Backend {
             Backend::Grok => grok::effort_values(),
             Backend::Omp => omp::effort_values(),
             Backend::Kimi => kimi::effort_values(),
+        }
+    }
+
+    /// Whether this backend's definition may choose `queue` | `steer` for a
+    /// line typed while it is busy (board #245). True only where BOTH halves
+    /// were measured on this host: the switch is a documented config door,
+    /// and in queue mode the queued line comes back through the prompt hook
+    /// as its own turn (ack + reply edge). Each backend file says why it is or
+    /// is not one. A backend that cannot switch runs `queue` semantics or its
+    /// CLI's own behaviour, and the editor does not offer the choice.
+    pub fn switches_input_mode(self) -> bool {
+        match self {
+            Backend::Kiro => kiro::SWITCHES_INPUT_MODE,
+            Backend::Claude => claude::SWITCHES_INPUT_MODE,
+            Backend::Codex => codex::SWITCHES_INPUT_MODE,
+            Backend::Grok => grok::SWITCHES_INPUT_MODE,
+            Backend::Omp => omp::SWITCHES_INPUT_MODE,
+            Backend::Kimi => kimi::SWITCHES_INPUT_MODE,
         }
     }
 

@@ -9,7 +9,7 @@ use super::registry::{DEFAULT_KIMI_SYSTEM, DEFAULT_OMP_MODEL, DEFAULT_OMP_SYSTEM
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 24;
+const SCHEMA_VERSION: i64 = 25;
 
 impl Store {
     /// Ensure the durable half of Board editability exists, then
@@ -665,6 +665,34 @@ impl Store {
             // existing row — those keep the content match they always had.
             self.ensure_delivery_msg_ids()?;
         }
+        if version < 25 {
+            // v25 (board #245): what a line typed at a busy agent does,
+            // `queue` | `steer`, on the definition next to model and effort.
+            // Every existing agent reads `queue` (owner, 2026-08-20: the
+            // default for every agent), which is what kiro was already
+            // pinned to; a codex agent moves from its CLI's steer to queue at
+            // its next restart.
+            self.ensure_input_mode()?;
+        }
+        Ok(())
+    }
+
+    /// The v25 shape (also a heal floor): `reg_agents.input_mode`, added only
+    /// when absent — a database copied back to an older stamp still has it.
+    pub(super) fn ensure_input_mode(&self) -> Result<(), String> {
+        let has: bool = self
+            .conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('reg_agents') WHERE name = 'input_mode')",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("inspect reg_agents.input_mode: {e}"))?;
+        if !has {
+            self.conn
+                .execute_batch("ALTER TABLE reg_agents ADD COLUMN input_mode TEXT NOT NULL DEFAULT 'queue';")
+                .map_err(|e| format!("add reg_agents.input_mode: {e}"))?;
+        }
         Ok(())
     }
 
@@ -780,6 +808,30 @@ impl Store {
 mod tests {
     use super::super::test_support::*;
     use super::*;
+
+    /// v24 -> v25 (board #245): every existing agent definition gains
+    /// `input_mode = 'queue'`, and a saved `steer` round-trips.
+    #[test]
+    fn v24_agents_gain_queue_input_mode() {
+        let dir = std::env::temp_dir().join(format!("tmm-store-v25-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("state.db");
+        {
+            let store = Store::open(&path).unwrap();
+            store.conn.execute_batch(
+                "ALTER TABLE reg_agents DROP COLUMN input_mode;
+                 INSERT OR REPLACE INTO reg_agents (name, backend, created_at, updated_at) VALUES ('old', 'codex', 1, 1);
+                 PRAGMA user_version = 24;",
+            ).unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.reg_get("old").unwrap().unwrap().input_mode, "queue");
+        let mut steer = store.reg_get("old").unwrap().unwrap();
+        steer.input_mode = "steer".into();
+        store.reg_save(&steer, 2).unwrap();
+        assert_eq!(store.reg_get("old").unwrap().unwrap().input_mode, "steer");
+        drop(store);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// v23 -> v24 (board #249): an existing database keeps its outstanding
     /// deliveries and activity rows, and both gain the new columns empty — an
@@ -1029,6 +1081,7 @@ mod tests {
                 backend: "omp".into(),
                 model: String::new(),
                 effort: String::new(),
+                input_mode: "queue".into(),
                 system: "My own omp persona.".into(),
                 skills: "[]".into(),
                 mcp: "[]".into(),
@@ -1081,6 +1134,7 @@ mod tests {
                 backend: "kimi".into(),
                 model: String::new(),
                 effort: String::new(),
+                input_mode: "queue".into(),
                 system: "My own kimi persona.".into(),
                 skills: "[]".into(),
                 mcp: "[]".into(),

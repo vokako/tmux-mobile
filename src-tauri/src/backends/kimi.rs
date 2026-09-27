@@ -31,6 +31,11 @@
 //! * an Enter glued to the text burst is swallowed as paste — codex's beat
 //!   (tmux.rs) already covers it.
 
+/// No queue|steer choice (board #245): kimi 2.0.2 always queues (Enter
+/// while a turn runs queues; `tui.toml` has no key for it) — measured: the
+/// queued line became its own turn with its own prompt hook and reply.
+pub(crate) const SWITCHES_INPUT_MODE: bool = false;
+
 /// kimi `[thinking].effort` (its config-files doc): low / medium / high /
 /// xhigh / max; bound as `thinkingEffort` in the wire (measured with `max`).
 /// A model whose `support_efforts` lacks the value falls back to its default.
@@ -687,6 +692,7 @@ pattern = "Bash(rm -rf*)"
             backend: "kimi".into(),
             model: "bedrock-kimi-k3".into(),
             effort: "high".into(),
+            input_mode: "queue".into(),
             system: String::new(),
             skills: "[]".into(),
             mcp: r#"[{"name":"kiro-web-search","command":"uvx","args":["kiro-web-search==0.1.3"]}]"#.into(),

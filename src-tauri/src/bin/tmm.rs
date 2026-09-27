@@ -88,6 +88,10 @@ USAGE (human or agent — self-management):
   tmm teams delete <name>
   tmm registry save --name <n> --backend <{backends}> [--system <text>]
                     [--model m] [--effort low|medium|high|…] [--skills a,b] [--mcp <json>]
+                    [--input-mode queue|steer]   a line typed while it is busy waits
+                                      (queue, default) or enters the running turn
+                                      (steer: kiro, codex only; no receipt, reply may
+                                      go to the wrong sender). Applied on restart
   tmm registry delete <name>
   tmm prompt show|path                the app-wide agent instructions (<config>/AGENTS.md),
   tmm prompt set <text> | --file <p>  prepended to EVERY managed agent's system prompt at spawn;
@@ -605,6 +609,7 @@ async fn main() {
                 "system": flags.get("system").cloned().flatten().unwrap_or_default(),
                 "skills": serde_json::to_string(&skills).unwrap(),
                 "mcp": flags.get("mcp").cloned().flatten().unwrap_or_else(|| "[]".into()),
+                "input_mode": flags.get("input-mode").cloned().flatten().unwrap_or_else(|| "queue".into()),
             });
             let r = rpc(&ctx, "registry_save", json!({ "def": def })).await;
             if ctx.json { println!("{r}"); } else { println!("✓ saved {name}"); }
@@ -1105,7 +1110,7 @@ fn has_address(body: &str) -> bool {
 /// the map keeps one value per key by design and that is fine for the rest.
 fn split_flags(args: &[String]) -> (std::collections::HashMap<String, Option<String>>, Vec<String>, Vec<(String, String)>) {
     const VALUED: &[&str] = &["project", "agent", "server", "output", "since", "limit", "brief",
-                          "name", "session", "with-agent", "backend", "model", "effort", "system", "skills", "mcp",
+                          "name", "session", "with-agent", "backend", "model", "effort", "input-mode", "system", "skills", "mcp",
                           "ref", "source", "description", "def", "grep", "image", "body", "assignee", "team", "file"];
     let mut flags = std::collections::HashMap::new();
     let mut pos = Vec::new();
@@ -1302,6 +1307,20 @@ mod tests {
         assert_eq!(flags.get("image").cloned().flatten().as_deref(), Some("b.png"), "map keeps the last");
         let images: Vec<&str> = repeated.iter().filter(|(k, _)| k == "image").map(|(_, v)| v.as_str()).collect();
         assert_eq!(images, vec!["a.png", "b.png"], "both reach the sender");
+    }
+
+    #[test]
+    fn registry_save_takes_an_input_mode_value() {
+        // Board #245: `--input-mode` is a VALUED flag; were it boolean, its
+        // value would fall out as a positional and the def would save queue.
+        let args: Vec<String> = ["registry", "save", "--name", "dev", "--input-mode", "steer", "--backend", "kiro"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let (flags, pos, _) = split_flags(&args);
+        assert_eq!(flags.get("input-mode").cloned().flatten().as_deref(), Some("steer"));
+        assert_eq!(flags.get("backend").cloned().flatten().as_deref(), Some("kiro"));
+        assert_eq!(pos, vec!["registry", "save"]);
     }
 
     #[test]

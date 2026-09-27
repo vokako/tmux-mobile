@@ -1,6 +1,15 @@
 //! The omp backend's own knowledge (board #101/#127): every fact about how
 //! this CLI is driven lives here — one file to touch when it changes.
 
+/// No queue|steer choice (board #245, measured on omp 18.2.10): Enter
+/// steers, and `<home>/keybindings.yml` `app.message.followUp: enter` does
+/// queue the line in the pane — but a follow-up continues the same run with no
+/// new `agent_start`, so our telemetry extension reports no prompt for it: the
+/// line was swept `unconfirmed` and the one Stop replied to the first sender
+/// with the second sender's answer. Offering queue would need the extension
+/// to report follow-ups first.
+pub(crate) const SWITCHES_INPUT_MODE: bool = false;
+
 /// omp 18.0.6 `--thinking` (its own --help): "off, minimal, low, medium,
 /// high, xhigh, max, auto".
 pub(crate) fn effort_values() -> &'static [&'static str] {

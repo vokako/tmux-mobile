@@ -12,7 +12,7 @@
   import { registryList, registrySave, registryDelete, modelsList, skillsList, skillsSave, skillsDelete, skillsRefresh, skillsImport, skillsFiles, skillsFile, mcpList, mcpSave, mcpDelete, teamsList, teamsSave, teamsDelete, globalPromptGet, globalPromptSet } from '../core/ws.ts';
   import { renderMarkdown } from '../core/markdown.ts';
   import { backendColor } from '../hub/hub.ts';
-  import { backendIcon, spawnableBackends, defaultBackend, backendEfforts } from '../core/agents.ts';
+  import { backendIcon, spawnableBackends, defaultBackend, backendEfforts, backendSwitchesInputMode } from '../core/agents.ts';
   import { moveMs, revealMs } from '../ui/motion.ts';
   import { hoverInfo } from '../ui/hover.ts';
   import Select from '../ui/Select.svelte';
@@ -407,6 +407,7 @@
       backend: agent.backend ?? defaultBackend(),
       model: agent.model ?? '',
       effort: agent.effort ?? '',
+      input_mode: agent.input_mode ?? 'queue',
       system: agent.system ?? '',
       skillSel: skillEntries.filter((x) => typeof x === 'string'),
       mcpSel: mcpEntries.filter((x) => typeof x === 'string'),
@@ -585,11 +586,12 @@
         ? {
             ...def,
             effort: def.effort ?? '',
+            input_mode: def.input_mode ?? 'queue',
             skillSel: skillSel.filter((x) => typeof x === 'string'),
             mcpSel: mcpEntries.filter((x) => typeof x === 'string'),
             mcpExtra: mcpEntries.filter((x) => typeof x !== 'string'),
           }
-        : { name: '', backend: defaultBackend(), model: '', effort: '', system: '', skillSel: [], mcpSel: [], mcpExtra: [] };
+        : { name: '', backend: defaultBackend(), model: '', effort: '', input_mode: 'queue', system: '', skillSel: [], mcpSel: [], mcpExtra: [] };
       rememberDraft();
     });
   }
@@ -1016,7 +1018,20 @@
               options={[{ value: '', label: t('agentsModelDefault') }, ...backendEfforts(editing.backend)]}
               ariaLabel={t('agentsEffort')} />
           </label>
+          {#if backendSwitchesInputMode(editing.backend)}
+            <!-- Board #245: only where the switch was measured (the server's
+                 backends_list says which); elsewhere the CLI decides and the
+                 field would promise a behaviour no config carries. -->
+            <label class="config-field"><span class="config-field-label">{t('agentsInputMode')}</span>
+              <Select bind:value={editing.input_mode} disabled={saving || removing}
+                options={[{ value: 'queue', label: t('agentsInputQueue') }, { value: 'steer', label: t('agentsInputSteer') }]}
+                ariaLabel={t('agentsInputMode')} />
+            </label>
+          {/if}
         </div>
+        {#if backendSwitchesInputMode(editing.backend) && editing.input_mode === 'steer'}
+          <p class="hint">{t('agentsInputSteerHint')}</p>
+        {/if}
         <label class="config-field"><span class="config-field-label">{t('agentsSystem')}</span>
           <textarea class="config-input" rows="6" bind:value={editing.system} placeholder={t('agentsSystemPh')}></textarea>
         </label>

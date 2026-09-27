@@ -131,7 +131,7 @@ Projects section hides itself when these return -32601. See
 | `project_autostart` | `id`, `autostart?` | Flag only; no boot integration yet |
 | `project_delete` | `id` | Forgets the project (slots cascade), closes the session, deletes `<path>/.tmm/agents/*` and its Board issues/note threads — the chat room and the user's files survive. Reached in the UI only through the recycle bin |
 | `models_list` | `backend?` (default: the first entry of `backends_list`) | `{backend, models}` — model ids the backend accepts, asked of its own CLI (cached). `models` is `null` when it cannot be enumerated (claude, or codex without a `model_catalog_json` in the user's config), and the agent editor keeps free text |
-| `backends_list` | — (no session, no gate: answered by every server, phone-hosted included) | `{backends: [{name, icon, color, efforts}]}` — the backends this server can spawn, in canonical order (first = the default an absent `backend` means). `icon` is the avatar path (`/assets/<name>.svg`), `color` the colour token NAME (`--backend-<name>`, values live in the client's app.css), `efforts` the reasoning levels the CLI accepts. The client keeps NO list of its own (source test `core/backends.source.test.ts`); on a pre-#130 server (method-not-found) it falls back to a frozen copy of this shape |
+| `backends_list` | — (no session, no gate: answered by every server, phone-hosted included) | `{backends: [{name, icon, color, efforts, input_modes}]}` — the backends this server can spawn, in canonical order (first = the default an absent `backend` means). `icon` is the avatar path (`/assets/<name>.svg`), `color` the colour token NAME (`--backend-<name>`, values live in the client's app.css), `efforts` the reasoning levels the CLI accepts, `input_modes` whether a definition may choose `queue`/`steer` (board #245; absent on older servers = no choice). The client keeps NO list of its own (source test `core/backends.source.test.ts`); on a pre-#130 server (method-not-found) it falls back to a frozen copy of this shape |
 
 ### Project Hub (desktop-only — the `tmm` CLI's surface)
 One chat room per project on the bus (`proj:<session>`), agent status
@@ -172,8 +172,8 @@ server start (`source = "builtin"`; save/delete refuse their names).
 
 | Method | Params | Response |
 |--------|--------|----------|
-| `registry_list` | — | `{agents: [{name, backend, model, effort, system, skills, mcp}]}` (the `can_hire` flag was retired 2026-09-26) |
-| `registry_save` | `def` | Validates backend, model id (against the backend's own CLI) and effort enum |
+| `registry_list` | — | `{agents: [{name, backend, model, effort, input_mode, system, skills, mcp}]}` (the `can_hire` flag was retired 2026-09-26; `input_mode` is `queue`\|`steer`, v25) |
+| `registry_save` | `def` | Validates backend, model id (against the backend's own CLI), effort enum and `input_mode` (`queue` default when absent; `steer` only where `backends_list` says `input_modes`) |
 | `registry_delete` | `name` | OK |
 | `global_prompt_get` | — | `{text, path, max_bytes}` — the app-wide agent instructions (`<config>/AGENTS.md`), prepended to every managed agent's system prompt at spawn |
 | `global_prompt_set` | `text` | `{ok, bytes}`; empty text deletes the file; > 24 KB rejected |

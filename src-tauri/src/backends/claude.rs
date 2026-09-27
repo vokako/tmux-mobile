@@ -1,6 +1,14 @@
 //! The claude backend's own knowledge (board #101/#127): every fact about how
 //! this CLI is driven lives here — one file to touch when it changes.
 
+/// No queue|steer choice (board #245, measured on claude 2.1.283): a line
+/// typed while claude runs tools is passed into the SAME turn at the next tool
+/// boundary, and the documented `chat:queueSubmit` binding (`keybindings.json`
+/// under CLAUDE_CONFIG_DIR, read) does exactly the same for a delivered line:
+/// its prompt hook fired at typing time and one Stop answered both senders.
+/// Claude has no mode in which a queued line becomes its own turn.
+pub(crate) const SWITCHES_INPUT_MODE: bool = false;
+
 /// Claude's own warning text names its effort levels: "Valid values: low,
 /// medium, high, xhigh, max" (claude 2.1.239, measured 2026-08-22).
 pub(crate) fn effort_values() -> &'static [&'static str] {

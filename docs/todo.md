@@ -271,6 +271,16 @@ closed; kept as the record of what the scattering looked like.
 
 ## E. Recorded Limitations (P3)
 
+- A line sent to a BUSY claude or omp joins the running turn, so its reply
+  can go to the wrong sender (board #245, measured on claude 2.1.283 and omp
+  18.2.10). Claude has no queue mode (`chat:queueSubmit` still folds the line
+  in at the next tool boundary, one Stop for both senders). omp's follow-up
+  binding does queue, but our telemetry extension reports no prompt for a
+  follow-up, so the line is swept `unconfirmed` and the Stop replies to the
+  first sender. Neither is offered the input-mode choice. The omp half is
+  fixable on our side: the extension would have to report follow-ups (its
+  `input` event, unverified). See agents-overview.md § The input mode.
+
 - Emoji width: tmux measures 2 cells, xterm's UnicodeV6 table 1 — a joined
   (`capture -J`) line with emoji can re-wrap differently and shear pane rows.
   Fix = `@xterm/addon-unicode11` AND the same table in
