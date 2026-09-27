@@ -740,7 +740,28 @@ baseline shows exactly where the marker is not. The measure is layout (offsets),
 so the marker is not fooled by the press scale or the root zoom; its box is
 integer offsets, up to half a pixel wider than the card, inside the gap.
 Frames at a 2.5s tempo: card → card, card → team and team → All each show
-one enclosure in flight with both feet, nothing popping. The strip's
+one enclosure in flight with both feet, nothing popping.
+**The silhouette is one path** (owner, 2026-09-27: "这个拐角还是不够连续 感觉
+线错位了…这个拐角渲染的效果感觉不是很自然…用最标准的方式"). The marker's
+outline had been assembled from four rasterisations — a bordered box for the
+sides and top, a radial-gradient fill and a bordered ring per foot, and a
+join layer — and they had to meet: the side border snaps to device pixels,
+the ring's arc and the gradient's hard stop do not. A static probe of that
+construction measured the floor line's ink dropping to 60% of the line
+under the foot at 1x (a visible break) and to 50% at 1.5x. Now the
+silhouette is Chrome's own construction: ONE SVG path, filled once with
+`--bubble-in` and stroked once with `--card-line` (`.tab-shape`, drawn by
+`hub/tab-shape.ts`). The stroke runs on half-pixel centres and meets the
+floor row tangentially; the fill is the stroke offset half a pixel outward
+(radius r+½ on the top corners, f−½ on the feet) and closed one pixel into
+the band, so the translucent stroke lies on fill along its whole length,
+as the floor line does. The radii remain the tokens (`--ui-radius-row`,
+`--roster-foot-radius`), read from the element. A ResizeObserver redraws
+the path from the box's layout size, which it reports after layout and
+before paint on every frame of the width glide, so the outline never lags
+the marker. The same probe, same colours: the floor line's ink is constant
+across the join at 1x, 1.25x, 1.5x and 2x; the real Roster at 1.5x and 2x
+shows one continuous line from floor to foot to side. The strip's
 skeleton (three shimmering cards) shows only while there is nothing to
 show — with the cards already rendered it sat in front of them on a room
 switch (owner, 17:38: "Agent 卡片都已经渲染出来了，前面还有 3 个空的过渡动画"). Same day, the band

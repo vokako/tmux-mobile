@@ -301,9 +301,9 @@ test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosur
   // card paints nothing of its own; one `.slide-pill` marker carries fill,
   // edge, feet and join and glides between destinations via slideIndicator.
   assert.match(source, /use:slideIndicator=\{\{ key: markerKey, active: markerTarget, hidden: expanded \|\| !markerTarget \}\}/u);
-  assert.match(source, /\{#if !expanded && markerTarget\}[\s\S]{0,700}?<span class="slide-pill tab" class:raised=\{litInGroup\} aria-hidden="true">\s*<span class="tab-foot left"><\/span><span class="tab-foot right"><\/span>\s*<\/span>\s*\{\/if\}/u,
-    'the marker is the only wearer of the feet');
-  assert.equal((source.match(/class="tab-foot left"/gu) ?? []).length, 1, 'no per-card, per-team or per-group feet remain');
+  assert.match(source, /\{#if !expanded && markerTarget\}[\s\S]{0,700}?<span class="slide-pill tab" class:raised=\{litInGroup\} aria-hidden="true">\s*<span class="tab-shape" use:tabShape><svg><path class="tab-fill" \/><path class="tab-edge" \/><\/svg><\/span>\s*<\/span>\s*\{\/if\}/u,
+    'the marker is ONE outline: feet, sides and top corners are one filled, once-stroked path (owner, 2026-09-27)');
+  assert.doesNotMatch(source, /class="tab-foot|\.tab-foot\b|background: radial-gradient/u, 'no pieced feet: separate rasterisations are what failed to meet');
   assert.match(source, /const markerTarget = \$derived\(allLit \? ':scope > \.tabs-extent' : litTeam \? '\.roster-cluster\.team-lit' : managedAgents\.some\(\(a\) => a\.name === recipient\) \? '\.acard\.sel\[data-agent\]' : ''\);/u,
     'All, a team and a card are the same marker at a different width; the room itself has no marker');
   assert.match(source, /\.cards:not\(\.expanded\) \.acard\.sel \{ --card-paint: transparent; --card-line: transparent; \}/u,
@@ -312,15 +312,14 @@ test('a card is a TAB wearing the agent bubble, and multi-select is ONE enclosur
   assert.match(rule('.tabs'), /position: relative; z-index: 0/u, 'the marker\'s container, and the stacking context it and the baseline sink in');
   assert.match(rule('.slide-pill.tab'), /z-index: -1/u, 'under the cards; over the baseline by DOM order, so All stays the group\'s first child');
   assert.match(source, /\{\/each\}\n\s*<!--[\s\S]{0,600}?-->\n\s*\{#if !expanded && markerTarget\}/u, 'the marker is the last thing in the destinations group');
-  assert.match(rule('.slide-pill.tab::before'), /inset: var\(--control-paint-inset\) 0 0; box-sizing: border-box/u);
-  assert.match(rule('.slide-pill.tab::before'), /background: var\(--bubble-in\); border: 1px solid var\(--card-line\); border-bottom: 0/u,
-    'the marker wears the agent bubble and stays open into the band');
-  assert.match(rule('.slide-pill.tab::before'), /border-radius: var\(--ui-radius-row\) var\(--ui-radius-row\) 0 0/u,
-    'the card tier and the context ring\'s own curvature; the panel radius read as a half-circle on a 32px tab (owner, 2026-09-23)');
-  assert.doesNotMatch(rule('.slide-pill.tab::before'), /transition:[^;]*(?:inset|border-radius|background)/u,
+  assert.match(rule('.tab-shape'), /--tab-radius: var\(--ui-radius-row\); --tab-foot: var\(--roster-foot-radius\)/u,
+    'the card tier and the context ring\'s own curvature (the panel radius read as a half-circle, owner 2026-09-23); the 8px foot');
+  assert.match(rule('.tab-shape'), /inset: var\(--control-paint-inset\) calc\(-1 \* var\(--roster-foot-radius\)\) -1px/u,
+    'the paint box widened by a foot each side and one pixel into the band, where the fill overlaps the junction');
+  assert.match(rule('.tab-fill'), /fill: var\(--bubble-in\)/u, 'the marker wears the agent bubble');
+  assert.match(rule('.tab-edge'), /fill: none; stroke: var\(--card-line\); stroke-width: 1px; transition: stroke var\(--t-move\) ease/u,
     'the marker MOVES; only its stroke colour crossfades');
-  assert.match(rule('.slide-pill.tab::after'), /inset: auto 0 -1px; height: 2px; background: var\(--bubble-in\)/u,
-    'the marker\'s join: fill over the floor line and 1px into the band, strokes untouched (a 1px layer left 35 at 1.5x)');
+  assert.doesNotMatch(source, /\.slide-pill\.tab::(?:before|after)/u, 'no box-and-border paint beside the path');
   assert.doesNotMatch(source, /inset: 0 0 -1px/u, 'no enclosure PAINT reaches into the band: its strokes would tick under the floor line');
   assert.match(rule('.tabs-extent'), /position: absolute; inset: 0; pointer-events: none/u, 'the measurement box for All');
   assert.match(source, /\.cards:not\(\.expanded\) \.tabs, \.cards:not\(\.expanded\) \.roster-cluster, \.cards:not\(\.expanded\) \.acard \{ align-self: stretch; \}/u,
@@ -391,24 +390,11 @@ test('team tabs use the reference pill, broken baseline and raised member contou
 });
 
 test('one outward foot joins every lit enclosure to the floor line (#238 owner corrections)', () => {
-  assert.match(rule('.slide-pill.tab::before'), /border-bottom: 0/u, 'the lit enclosure stays open into the composer band');
   assert.match(rule('.roster'), /--roster-foot-radius: 8px/u, 'a 4px arc at a 1px stroke read as jagged (owner, 2026-09-23)');
-  assert.match(rule('.tab-foot'), /display: block; position: absolute; z-index: 1; bottom: 0/u,
-    'the feet belong to the marker and show whenever it does');
-  assert.match(rule('.tab-foot'), /width: calc\(var\(--roster-foot-radius\) \+ 1px\); height: var\(--roster-foot-radius\); pointer-events: none/u,
-    'one pixel into the enclosure: at a fractional device scale the snapped side stroke spilled past a foot that ended on it');
-  assert.match(rule('.tab-foot.left'), /transparent calc\(var\(--roster-foot-radius\) - 1px\), var\(--bubble-in\) calc\(var\(--roster-foot-radius\) - 1px\)/u,
-    'the ring lies on band fill, like the tab edge it continues');
-  assert.match(rule('.tab-foot::after'), /width: var\(--roster-foot-radius\); box-sizing: border-box/u,
-    'the ring box is exactly the radius, so the arc lands on the side-stroke column');
-  assert.match(rule('.tab-foot.left'), /left: calc\(1px - var\(--roster-foot-radius\)\)/u,
-    'the foot\'s inner column IS the side stroke\'s column, so the arc leaves it tangentially (no 1px step)');
-  assert.match(rule('.tab-foot.right'), /right: calc\(1px - var\(--roster-foot-radius\)\)/u);
-  assert.match(rule('.tab-foot.left::after'), /left: 0; border-right-width: 1px; border-bottom-right-radius: var\(--roster-foot-radius\)/u);
-  assert.match(rule('.tab-foot.right::after'), /right: 0; border-left-width: 1px; border-bottom-left-radius: var\(--roster-foot-radius\)/u);
+  assert.match(source, /import \{ tabShape \} from '\.\/tab-shape\.ts';/u,
+    'the feet, sides and top are one path (hub/tab-shape.ts): its joints are geometry, tested there');
   assert.match(source, /linear-gradient\(to top, var\(--bubble-line\) 1px, transparent 1px\),\n\s*linear-gradient\(to top, var\(--bubble-in\) 1px, transparent 1px\);/u,
     'the translucent floor line lies on band fill: over the frame it read a third dimmer and thinner than the tab edge');
-  assert.doesNotMatch(source, /\.tab-foot::before/u, 'no stub patch: the foot itself covers the side stroke below the arc');
   assert.match(rule('.cards:not(.expanded) .roster-cluster.team::before'), /inset: auto var\(--roster-gap\) 0/u,
     'the group baseline stays the group\'s own');
 });

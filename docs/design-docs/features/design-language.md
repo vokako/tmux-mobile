@@ -77,10 +77,12 @@ reversed (owner 10:39). Every lit enclosure — a tab, a team group, All —
 keeps its `--ui-radius-row` top corners (17:19: the panel radius "半圆半径变
 大了…稍微小一点显得更加精致"; 12px is the card tier and the 24px context ring's
 own curvature) and opens into the band through
-the SAME pair of outward feet (`.tab-foot`, `--roster-foot-radius` 8px; a
-4px arc read as jagged). The foot's inner column is the side stroke's own
-column, so the stroke turns into the floor tangentially with no vertical
-stub. The feet take no pointer and reach into a neighbour's empty bottom
+the SAME pair of outward feet (`--roster-foot-radius` 8px; a 4px arc read
+as jagged). Since 2026-09-27 the whole silhouette — foot, side, top
+corners, side, foot — is ONE vector path filled once and stroked once
+(`.tab-shape`, `hub/tab-shape.ts`), Chrome's own construction: the side
+turns into the floor tangentially on half-pixel centres, and no piece can
+land beside another at a fractional scale. The feet take no pointer and reach into a neighbour's empty bottom
 corner; tab gaps stay `--roster-gap`. The band's top edge is the strip's
 floor line: a full-width `--bubble-line` pixel painted as the strip's
 background, which each lit enclosure breaks and its feet turn into.

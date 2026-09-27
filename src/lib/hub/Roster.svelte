@@ -13,6 +13,7 @@
   import { moveMs } from '../ui/motion.ts';
   import { scrollEdges } from '../ui/scroll-edges.ts';
   import { slideIndicator } from '../ui/indicator.ts';
+  import { tabShape } from './tab-shape.ts';
 
   let {
     selected = '', compact = false, managedAgents = [], stopped = [], selectedRow = null,
@@ -319,7 +320,7 @@
            stays its first child; it paints beneath the cards by z-index. -->
       {#if !expanded && markerTarget}
         <span class="slide-pill tab" class:raised={litInGroup} aria-hidden="true">
-          <span class="tab-foot left"></span><span class="tab-foot right"></span>
+          <span class="tab-shape" use:tabShape><svg><path class="tab-fill" /><path class="tab-edge" /></svg></span>
         </span>
       {/if}
       <!-- The measurement box for All: the group's own extent. -->
@@ -474,34 +475,6 @@
     border-radius: inherit; pointer-events: none;
   }
   .cards.expanded .roster-cluster.team-lit .acard::before { background: transparent; border-color: transparent; }
-  /* ONE foot for every lit enclosure — a tab, a team, All. The arc's ring
-     sits ON the enclosure's side-stroke column, so it leaves that stroke
-     tangentially instead of stepping 1px beside it. The foot box reaches one
-     more pixel INTO the enclosure and fills it: the straight side stroke is
-     pixel-snapped while the arc is not, and at a fractional device scale
-     (1.25, 1.5 — Windows scaling, the UI zoom) the snapped stroke spilled
-     past a foot that ended exactly on it and showed as a stub beside the
-     arc down to the floor ("竖线…对齐得不是很严谨", owner, 2026-09-23). The
-     fill starts where the ring does, so the ring always lies on band fill,
-     like the tab edge above it. It reaches into the neighbour's bottom
-     corner, which is empty at rest and on hover; it takes no pointer.
-     z-index 1 lifts it over a team enclosure's own stroke, which paints
-     after it. */
-  .tab-foot {
-    display: block; position: absolute; z-index: 1; bottom: 0;
-    width: calc(var(--roster-foot-radius) + 1px); height: var(--roster-foot-radius); pointer-events: none;
-  }
-  .tab-foot.left {
-    left: calc(1px - var(--roster-foot-radius));
-    background: radial-gradient(circle at 0 0, transparent calc(var(--roster-foot-radius) - 1px), var(--bubble-in) calc(var(--roster-foot-radius) - 1px));
-  }
-  .tab-foot.right {
-    right: calc(1px - var(--roster-foot-radius));
-    background: radial-gradient(circle at 100% 0, transparent calc(var(--roster-foot-radius) - 1px), var(--bubble-in) calc(var(--roster-foot-radius) - 1px));
-  }
-  .tab-foot::after { content: ''; position: absolute; top: 0; bottom: 0; width: var(--roster-foot-radius); box-sizing: border-box; border: 0 solid var(--card-line, var(--bubble-line)); border-bottom-width: 1px; }
-  .tab-foot.left::after { left: 0; border-right-width: 1px; border-bottom-right-radius: var(--roster-foot-radius); }
-  .tab-foot.right::after { right: 0; border-left-width: 1px; border-bottom-left-radius: var(--roster-foot-radius); }
   .tabs.all-lit .roster-cluster.team::before { display: none; }
   .cards.expanded .roster-cluster.team { flex: 0 1 100%; min-width: 0; flex-wrap: wrap; }
   /* MULTI-SELECT IS ONE ENCLOSURE (owner, 2026-09-22: "如果是选择多个 Agent，
@@ -533,26 +506,32 @@
     --card-line: var(--bubble-line);
     background: none; box-shadow: none; border-radius: 0; z-index: -1;
   }
-  .slide-pill.tab::before {
-    content: ''; position: absolute; inset: var(--control-paint-inset) 0 0; box-sizing: border-box;
-    background: var(--bubble-in); border: 1px solid var(--card-line); border-bottom: 0;
-    /* The card tier's radius, which is also the 24px context ring's: the arc
-       curves as the ring inside it does. The panel radius (14px) read as a
-       half-circle on a 32px tab (owner, 2026-09-23: "半圆半径变大了…稍微小一点
-       显得更加精致一点"). */
-    border-radius: var(--ui-radius-row) var(--ui-radius-row) 0 0;
-    transition: border-color var(--t-move) ease;
+  /* THE SILHOUETTE IS ONE PATH (owner, 2026-09-27: "这个拐角还是不够连续 感觉
+     线错位了…能不能用最标准的方式"): Chrome's own construction — outward foot,
+     side, rounded top, side, foot — filled once and stroked once
+     (`hub/tab-shape.ts`). It replaces a bordered box, two radial-gradient
+     feet, their bordered rings and a join layer, four rasterisations that had
+     to meet: the side border snapped to device pixels while the ring's arc
+     and the gradient's hard stop did not, so at a fractional scale the arc
+     landed beside the side stroke and the gradient edge was jagged. The
+     drawing box is the paint box (below the card's paint inset, down to the
+     floor row) widened by one foot on each side — the feet reach into the
+     neighbours' empty bottom corners — and one pixel into the band, where the
+     fill overlaps the junction. The radii stay tokens: the card tier (also
+     the 24px context ring's curvature — the panel radius read as a half
+     circle on a 32px tab, owner 2026-09-23) and the 8px foot (a 4px arc at a
+     1px stroke was a staircase). Only the stroke colour crossfades; the
+     geometry moves with the marker. */
+  .tab-shape {
+    --tab-radius: var(--ui-radius-row); --tab-foot: var(--roster-foot-radius);
+    position: absolute; inset: var(--control-paint-inset) calc(-1 * var(--roster-foot-radius)) -1px;
   }
+  .tab-shape svg { display: block; width: 100%; height: 100%; overflow: visible; }
+  .tab-fill { fill: var(--bubble-in); }
+  .tab-edge { fill: none; stroke: var(--card-line); stroke-width: 1px; transition: stroke var(--t-move) ease; }
+  @media (prefers-reduced-motion: reduce) { .tab-edge { transition: none; } }
   /* A lit member inside a group wears the raised neutral contour (#238). */
   .slide-pill.tab.raised { --card-line: var(--text2); }
-  /* The join: the enclosure's own fill over the floor-line pixel and one
-     pixel into the band, as a layer of its own so the side strokes end AT the
-     floor (reaching into the band, they ticked a pixel below the floor line:
-     owner's screenshot, 2026-09-23 15:07), while the fill still overlaps the
-     junction, where a fractional device scale otherwise lets part of a row of
-     floor line or frame through (measured under the tab, band 31: without it
-     37 at 1.5x and 27 at 1.25x; a 1px layer 35 and 27; this 2px overlap 31). */
-  .slide-pill.tab::after { content: ''; position: absolute; inset: auto 0 -1px; height: 2px; background: var(--bubble-in); pointer-events: none; }
   .cards:not(.expanded)::-webkit-scrollbar { display: none; }
   .cards.expanded {
     flex-wrap: wrap; align-content: start;
