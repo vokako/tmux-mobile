@@ -85,6 +85,10 @@ mod tests {
             // letter after `.` is a host; a combining vowel sign is Alphabetic.
             ("see @bob.𐐀 and @राम, ok", vec!["राम"]),
             ("@𐐀𐐁 hi", vec!["𐐀𐐁"]),
+            // U+0345 (combining ypogegrammeni) is Alphabetic but neither a
+            // Letter nor a Number: a name character here and on the client.
+            ("@bob.ͅ x", vec![]),
+            ("@bobͅ hi", vec!["bobͅ"]),
         ] {
             assert_eq!(mention_names(body), tokens, "{body:?}");
         }
