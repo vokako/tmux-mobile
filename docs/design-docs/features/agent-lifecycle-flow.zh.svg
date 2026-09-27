@@ -59,7 +59,7 @@
   <text class="t ln" x="246.0" y="195" text-anchor="middle" fill="#2563eb">hub_spawn { agent, brief }</text>
   <text class="t sm" x="246.0" y="219" text-anchor="middle">在开场面板里点一个 agent</text>
   <path d="M 360,226 L 404,226 L 404,246 L 366,246" fill="none" stroke="#ea580c" stroke-width="1.8" marker-end="url(#a_orange)"/>
-  <text class="t ln" x="412" y="231" fill="#ea580c" text-anchor="start">registry_get · can_hire · 上限 4</text>
+  <text class="t ln" x="412" y="231" fill="#ea580c" text-anchor="start">registry_get · 上限 4</text>
   <text class="t sm" x="412" y="248" text-anchor="start">projects/spawn.rs</text>
   <path d="M 360,272 L 404,272 L 404,292 L 366,292" fill="none" stroke="#7c3aed" stroke-width="1.8" marker-end="url(#a_purple)"/>
   <text class="t ln" x="412" y="277" fill="#7c3aed" text-anchor="start">物化隔离 home + hooks</text>
