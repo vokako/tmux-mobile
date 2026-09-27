@@ -744,12 +744,30 @@ fn pane_send_lock(target: &str) -> std::sync::Arc<std::sync::Mutex<()>> {
     map.entry(target.to_string()).or_default().clone()
 }
 
+/// The error `send_command` returns for a pane in copy-mode (board #250).
+pub const PANE_IN_MODE: &str = "pane is in copy mode";
+
+/// Is this pane in a mode (copy-mode, view-mode, a chooser) right now?
+pub fn pane_in_mode(target: &str) -> Result<bool, String> {
+    Ok(run_tmux(&["display-message", "-p", "-t", target, "#{pane_in_mode}"])?.trim() == "1")
+}
+
 /// 向 pane 发送文本 + Enter
 pub fn send_command(target: &str, command: &str) -> Result<(), String> {
     // Serialize per pane (board #122): the text→Enter pair below must land
     // whole before another caller's does.
     let lock = pane_send_lock(target);
     let _guard = lock.lock().unwrap();
+    // A pane in a mode (copy-mode, a chooser) routes every key and paste to
+    // the MODE: the text is swallowed, and the mode's own bindings may even
+    // leave it (`q`, Enter), after which tmux reported success and nothing had
+    // been typed (board #250, measured on tmux 3.6a: send-keys and
+    // paste-buffer both vanish, `pane_in_mode` 1 → 0). The mode is a person
+    // reading scrollback, so it is never cancelled for them; the send fails
+    // instead and the caller says so.
+    if pane_in_mode(target)? {
+        return Err(PANE_IN_MODE.to_string());
+    }
     if command.contains('\n') {
         // A newline cannot ride send-keys: literal mode passes it as a raw C0
         // byte inside `-l`, and with `extended-keys on` tmux silently DROPS
@@ -1250,6 +1268,87 @@ mod tests {
         let wrap = "\x1b[31m中文宽字\x1b[0m\n\x1b[31m符\x1b[0m";
         assert_eq!(join_unflagged_wraps(wrap, 9), "\x1b[31m中文宽字\x1b[0m\x1b[31m符\x1b[0m");
     }
+    /// A session with two `cat` panes; the targets, or None without tmux.
+    fn two_cat_panes(session: &str) -> Option<Vec<String>> {
+        let _ = kill_session(session);
+        if new_session(session, None, Some("cat")).is_err() {
+            eprintln!("no tmux server — skipping");
+            return None;
+        }
+        let _ = run_tmux(&["new-window", "-d", "-t", &format!("={session}:"), "cat"]);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let targets: Vec<String> = run_tmux(&["list-panes", "-s", "-t", &format!("={session}"), "-F", "#{session_name}:#{window_index}.#{pane_index}"])
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_string)
+            .collect();
+        assert_eq!(targets.len(), 2);
+        Some(targets)
+    }
+
+    /// Board #250 (orchestrator 17:00): 20 concurrent two-pane multi-line
+    /// pairs — the measured race (38 misdelivered, 20 lost with one shared
+    /// buffer name) — lose nothing and swap nothing. Every thread holds its
+    /// load and its paste 20 ms apart, so the pastes of the two panes overlap.
+    #[test]
+    fn concurrent_multiline_sends_to_two_panes_keep_their_own_text() {
+        let session = format!("tmm-paste2-{}", std::process::id());
+        let Some(targets) = two_cat_panes(&session) else { return };
+        const PAIRS: usize = 20;
+        let handles: Vec<_> = (0..PAIRS)
+            .flat_map(|i| targets.iter().enumerate().map(move |(n, t)| (i, n, t.clone())))
+            .map(|(i, n, t)| {
+                std::thread::spawn(move || {
+                    PASTE_GAP.with(|g| g.set(std::time::Duration::from_millis(20)));
+                    send_command(&t, &format!("p{n}-m{i}-first\np{n}-m{i}-second"))
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap().expect("every paste succeeds");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let panes: Vec<String> = targets.iter().map(|t| capture_pane_plain(t, Some(400)).unwrap_or_default()).collect();
+        let leftover = run_tmux(&["list-buffers", "-F", "#{buffer_name}"]).unwrap_or_default();
+        let _ = kill_session(&session);
+        for (n, text) in panes.iter().enumerate() {
+            let lost: Vec<usize> = (0..PAIRS)
+                .filter(|i| !(text.contains(&format!("p{n}-m{i}-first")) && text.contains(&format!("p{n}-m{i}-second"))))
+                .collect();
+            assert!(lost.is_empty(), "pane {n} lost {lost:?}:\n{text}");
+            assert!(!text.contains(&format!("p{}-", 1 - n)), "pane {n} got the other pane's text:\n{text}");
+        }
+        assert!(!leftover.lines().any(|b| b.starts_with("tmm-paste")), "no buffer left behind: {leftover}");
+    }
+
+    /// Board #250: a pane in copy-mode swallows both send-keys and
+    /// paste-buffer, and the mode's bindings can even end it — so the send
+    /// is refused before anything is typed, and the mode (a person reading
+    /// scrollback) is left exactly as it was. The other pane is unaffected.
+    #[test]
+    fn send_command_refuses_a_pane_in_copy_mode_and_leaves_the_mode() {
+        let session = format!("tmm-copymode-{}", std::process::id());
+        let Some(targets) = two_cat_panes(&session) else { return };
+        let (reading, free) = (&targets[0], &targets[1]);
+        run_tmux(&["copy-mode", "-t", reading]).unwrap();
+        assert!(pane_in_mode(reading).unwrap());
+        let single = send_command(reading, "single-line q");
+        let multi = send_command(reading, "multi-first\nmulti-second");
+        let still = pane_in_mode(reading).unwrap();
+        let other = send_command(free, "free-line");
+        run_tmux(&["send-keys", "-t", reading, "-X", "cancel"]).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let typed = capture_pane_plain(reading, Some(40)).unwrap_or_default();
+        let free_text = capture_pane_plain(free, Some(40)).unwrap_or_default();
+        let _ = kill_session(&session);
+        assert_eq!(single, Err(PANE_IN_MODE.to_string()));
+        assert_eq!(multi, Err(PANE_IN_MODE.to_string()));
+        assert!(still, "the mode is never cancelled for us");
+        assert!(!typed.contains("single-line") && !typed.contains("multi-"), "nothing typed: {typed:?}");
+        assert_eq!(other, Ok(()));
+        assert!(free_text.contains("free-line"), "{free_text:?}");
+    }
+
     /// Board #122 (2): concurrent deliveries to ONE pane must not interleave.
     /// `send_command` types the text, sleeps 200 ms, then sends Enter — two
     /// unsynchronized callers could weave A-text, B-text, A-Enter, B-Enter,
@@ -1257,56 +1356,6 @@ mod tests {
     /// one. The per-target lock serializes the pair; this test races four
     /// threads at a `cat` pane and requires every line to arrive whole, alone
     /// on its own row.
-    #[test]
-    fn concurrent_multiline_sends_to_two_panes_keep_their_own_text() {
-        let session = format!("tmm-paste2-{}", std::process::id());
-        let _ = kill_session(&session);
-        if new_session(&session, None, Some("cat")).is_err() {
-            eprintln!("no tmux server — skipping");
-            return;
-        }
-        let _ = run_tmux(&["new-window", "-d", "-t", &format!("={session}:"), "cat"]);
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        let targets: Vec<String> = String::from_utf8(
-            std::process::Command::new("tmux")
-                .args(["list-panes", "-s", "-t", &format!("={session}"), "-F", "#{session_name}:#{window_index}.#{pane_index}"])
-                .output()
-                .unwrap()
-                .stdout,
-        )
-        .unwrap()
-        .lines()
-        .map(str::to_string)
-        .collect();
-        assert_eq!(targets.len(), 2);
-        // Multi-line bodies take the paste path; each thread holds its load
-        // and its paste 150 ms apart, so the two calls really overlap.
-        let handles: Vec<_> = targets
-            .iter()
-            .enumerate()
-            .map(|(n, t)| {
-                let t = t.clone();
-                std::thread::spawn(move || {
-                    PASTE_GAP.with(|g| g.set(std::time::Duration::from_millis(150)));
-                    send_command(&t, &format!("pane-{n}-first\npane-{n}-second"))
-                })
-            })
-            .collect();
-        for h in handles {
-            h.join().unwrap().expect("both pastes succeed");
-        }
-        std::thread::sleep(std::time::Duration::from_millis(400));
-        let panes: Vec<String> = targets.iter().map(|t| capture_pane_plain(t, Some(40)).unwrap_or_default()).collect();
-        let leftover = run_tmux(&["list-buffers", "-F", "#{buffer_name}"]).unwrap_or_default();
-        let _ = kill_session(&session);
-        for (n, text) in panes.iter().enumerate() {
-            let other = 1 - n;
-            assert!(text.contains(&format!("pane-{n}-first")) && text.contains(&format!("pane-{n}-second")), "pane {n} got its own text:\n{text}");
-            assert!(!text.contains(&format!("pane-{other}-")), "pane {n} got none of pane {other}'s:\n{text}");
-        }
-        assert!(!leftover.lines().any(|b| b.starts_with("tmm-paste")), "no buffer left behind: {leftover}");
-    }
-
     #[test]
     fn concurrent_sends_to_one_pane_never_interleave() {
         let session = format!("tmm-burst-{}", std::process::id());

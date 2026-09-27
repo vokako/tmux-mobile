@@ -535,6 +535,21 @@ test('a late echo retracts exactly the warn about the row it settled (#249)', ()
   assert.equal(old.length, 1);
 });
 
+test('a warn about a line never typed stays, and its message stays undelivered (#250)', () => {
+  // The pane was in copy-mode: no row, only the message id. An unrelated echo
+  // that settles some row must neither retract it nor mark the message.
+  const msg = { id: 'm-7735', ts: 50, from: 'human', body: '@builder look' };
+  const activity = [
+    ev({ ts: 100, kind: 'warn', text: 'undelivered (pane is in copy mode): [tmm chat] human: @builder look', deliveries: [{ msg: 'm-7735' }] }),
+    ev({ ts: 200, kind: 'prompt', via: 'app', text: '[board #250 reply] notice', deliveries: [{ id: 3 }] }),
+  ];
+  const rows = feedBlocks([msg], activity, 'chat');
+  assert.equal(rows.filter((b) => b.type === 'note').length, 1, 'the warn survives the chat level');
+  const m = rows.find((b) => b.type === 'msg');
+  assert.ok(m?.type === 'msg');
+  assert.equal(m.delivered, false, 'never typed, never delivered');
+});
+
 test('pickLead: a remembered choice wins while that agent is present', () => {
   const agents = [ag({ window: 1, name: 'dev' }), ag({ window: 2, name: 'qa' })];
   assert.equal(pickLead(agents, 'qa'), 'qa');

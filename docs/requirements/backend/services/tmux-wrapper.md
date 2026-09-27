@@ -16,7 +16,13 @@ Rust wrapper around tmux CLI commands. File: `src-tauri/src/tmux.rs`
   (`#{pane_key_mode}` = `Ext …` — kiro/claude/codex all do). Named keys are
   re-encoded by tmux to match the pane's key mode, so they reach both legacy
   and extended panes. `\t` `\n` `\r` and standalone ESC stay literal.
-- `send_command(target, command)` — send text + Enter
+- `send_command(target, command)` — send text + Enter. Refused with
+  `Err("pane is in copy mode")` (`PANE_IN_MODE`) when `#{pane_in_mode}` is 1:
+  a pane in copy-mode or another mode routes keys and pastes to the MODE, so
+  the text vanished and the mode's bindings could even end it while tmux
+  reported success (board #250, tmux 3.6a). The mode is a person reading
+  scrollback and is never cancelled; the caller reports the refusal.
+- `pane_in_mode(target)` — is the pane in a mode right now
 - `paste_text(target, text)` — paste via tmux `load-buffer -b tmm-paste-<uuid> -` +
   `paste-buffer -p -d`: tmux wraps the block in bracketed-paste markers
   exactly when the pane app enabled mode `?2004`, so multi-line pastes are

@@ -1621,12 +1621,12 @@ export function feedBlocks(
   const turns: TurnMark[] = [];
   const settledRows = new Set<number>();
   for (const e of activity) {
-    if (e.kind === 'prompt' && e.via === 'app') for (const d of e.deliveries ?? []) settledRows.add(d.id);
+    if (e.kind === 'prompt' && e.via === 'app') for (const d of e.deliveries ?? []) if (d.id) settledRows.add(d.id);
   }
   for (const e of activity) {
     // A warn about a row a later echo settled is retracted: the line was late,
-    // not lost.
-    if (e.kind === 'warn' && e.deliveries?.some((d) => settledRows.has(d.id))) {
+    // not lost. A warn with no row (a line never typed) has nothing to retract.
+    if (e.kind === 'warn' && e.deliveries?.some((d) => d.id && settledRows.has(d.id))) {
       consumed.add(e);
       continue;
     }

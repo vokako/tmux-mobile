@@ -155,12 +155,18 @@ pub fn deliver_chat_line(session: &str, target_name: &str, line: &str) -> bool {
             return false;
         }
         let target = format!("{}:{}.{}", session, p.window, p.pane);
-        if crate::tmux::send_command(&target, line).is_ok() {
-            crate::projects::telemetry::record_delivery(session, &p.window_name, line, "");
-            crate::projects::vitals::sniff_window_soon(session, &p.window_name);
-            return true;
-        }
-        return false;
+        return match crate::tmux::send_command(&target, line) {
+            Ok(()) => {
+                crate::projects::telemetry::record_delivery(session, &p.window_name, line, "");
+                crate::projects::vitals::sniff_window_soon(session, &p.window_name);
+                true
+            }
+            // Same as deliver_mentions (board #250): an untyped line is said.
+            Err(e) => {
+                crate::projects::telemetry::record_undelivered(session, &p.window_name, line, "", e.trim());
+                false
+            }
+        };
     }
     false
 }

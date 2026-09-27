@@ -104,6 +104,7 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
             let ws = crate::projects::project_for_session(session).ok().flatten().map(|pr| pr.path);
             let panes = crate::tmux::list_panes(session).unwrap_or_default();
             let mut sent: Vec<String> = Vec::new();
+            let mut refused: Vec<String> = Vec::new();
             let mut seen = std::collections::HashSet::new();
             for pane in &panes {
                 if !seen.insert(pane.window) || !pane.active {
@@ -119,9 +120,14 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
                     continue;
                 }
                 let target = format!("{}:{}.{}", session, pane.window, pane.pane);
-                if crate::tmux::send_command(&target, text).is_ok() {
-                    sent.push(pane.window_name.clone());
+                match crate::tmux::send_command(&target, text) {
+                    Ok(()) => sent.push(pane.window_name.clone()),
+                    // Board #250: a pane in copy-mode refuses; say which and why.
+                    Err(e) => refused.push(format!("{}: {}", pane.window_name, e.trim())),
                 }
+            }
+            if sent.is_empty() && !refused.is_empty() {
+                return Err(RpcError::Internal(format!("not sent — {}", refused.join("; "))));
             }
             if sent.is_empty() {
                 return Err(RpcError::InvalidParams(format!("no managed agent named '{agent}' in session '{session}'")));
@@ -1116,15 +1122,23 @@ fn deliver_mentions(
         let context = crate::projects::team_of(ws.as_deref(), &p.window_name)
             .and_then(|_| team_context(&history, &p.window_name, history_clipped));
         let line = delivered_chat_line(from, body, context.as_deref());
-        if crate::tmux::send_command(&target, &line).is_ok() {
-            // send_command only proves the pane existed. The delivery is
-            // confirmed when that agent's userPromptSubmit hook echoes the line
-            // back; until then it is pending, and telemetry reports it if the
-            // echo never comes.
-            crate::projects::telemetry::record_delivery(session, &p.window_name, &line, msg_id);
-            // A line just landed in this pane: sniff its vitals once the TUI
-            // has repainted (delayed + throttled inside).
-            crate::projects::vitals::sniff_window_soon(session, &p.window_name);
+        match crate::tmux::send_command(&target, &line) {
+            Ok(()) => {
+                // send_command only proves the pane existed. The delivery is
+                // confirmed when that agent's userPromptSubmit hook echoes the
+                // line back; until then it is pending, and telemetry reports it
+                // if the echo never comes.
+                crate::projects::telemetry::record_delivery(session, &p.window_name, &line, msg_id);
+                // A line just landed in this pane: sniff its vitals once the TUI
+                // has repainted (delayed + throttled inside).
+                crate::projects::vitals::sniff_window_soon(session, &p.window_name);
+            }
+            // Nothing was recorded as delivered, so no echo and no sweep will
+            // ever speak for this line: say so now (board #250 — the pane was
+            // in copy-mode, the refusal a person reading scrollback earns).
+            Err(e) => {
+                crate::projects::telemetry::record_undelivered(session, &p.window_name, &line, msg_id, e.trim());
+            }
         }
     }
 }
@@ -1753,6 +1767,70 @@ mod tests {
         assert!(lead.contains("first line for lead") && lead.contains("second line for lead"), "lead: {lead:?}");
         assert!(solo.contains("first line for solo") && solo.contains("second line for solo"), "solo: {solo:?}");
         assert!(!lead.contains("for solo") && !solo.contains("for lead"), "no cross-pane text: {lead:?} / {solo:?}");
+    }
+
+    /// Board #250 (orchestrator 17:00), through hub_post: a message to an
+    /// agent whose pane is in copy-mode is refused, not typed — the mode stays,
+    /// no pending row is written, and ONE warn names the window, the message
+    /// id and the reason at once. The other recipient of the same message is
+    /// delivered as usual.
+    #[test]
+    fn a_mention_to_a_pane_in_copy_mode_warns_at_once_and_owes_nothing() {
+        crate::projects::tests::use_test_store();
+        let session = format!("tmm-copymode-hub-{}", uuid::Uuid::new_v4());
+        let ws = std::env::temp_dir().join(format!("tmm-copymode-hub-ws-{}", uuid::Uuid::new_v4()));
+        for name in ["lead", "solo"] {
+            let home = ws.join(".tmm/agents").join(name);
+            std::fs::create_dir_all(&home).unwrap();
+            std::fs::write(
+                home.join("launch.json"),
+                serde_json::json!({ "backend": "kiro", "cmd": format!("kiro-cli chat --agent {name}"), "team": "" }).to_string(),
+            )
+            .unwrap();
+        }
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "-n", "lead", "-c", &ws.to_string_lossy(), "cat"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            let _ = std::fs::remove_dir_all(&ws);
+            return;
+        }
+        std::process::Command::new("tmux")
+            .args(["new-window", "-d", "-t", &session, "-n", "solo", "-c", &ws.to_string_lossy(), "cat"])
+            .status()
+            .unwrap();
+        crate::projects::adopt(&session, Some("copymode-hub-test")).expect("adopt project");
+        let lead = format!("{session}:lead");
+        crate::tmux::run_tmux(&["copy-mode", "-t", &lead]).unwrap();
+        let r = handle_hub_request(
+            &req("hub_post", serde_json::json!({ "session": session, "from": "human", "body": "@lead @solo read this" })),
+            None,
+        );
+        assert!(r.error.is_none(), "{:?}", r.error.map(|e| e.message));
+        let msg_id = r.result.as_ref().and_then(|m| m.get("id")).and_then(|v| v.as_str()).unwrap().to_string();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let still = crate::tmux::pane_in_mode(&lead).unwrap();
+        let owed = crate::projects::telemetry::owed_message_ids(&session);
+        let warns: Vec<_> = crate::projects::telemetry::recent_events(&session, 0).into_iter().filter(|e| e.kind == "warn").collect();
+        crate::tmux::run_tmux(&["send-keys", "-t", &lead, "-X", "cancel"]).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let lead_text = crate::tmux::capture_pane_plain(&lead, Some(0)).unwrap_or_default();
+        let solo_text = crate::tmux::capture_pane_plain(&format!("{session}:solo"), Some(0)).unwrap_or_default();
+        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
+        let _ = std::fs::remove_dir_all(&ws);
+        assert!(still, "copy-mode is never cancelled for a delivery");
+        assert!(!lead_text.contains("read this"), "nothing typed into the reading pane: {lead_text:?}");
+        assert!(solo_text.contains("read this"), "the other recipient still gets it: {solo_text:?}");
+        assert_eq!(owed, vec![msg_id.clone()], "only solo's line is owed; lead's refused line is no pending row");
+        assert_eq!(warns.len(), 1, "{warns:?}");
+        assert_eq!(warns[0].window, "lead");
+        assert!(warns[0].text.starts_with("undelivered (pane is in copy mode): "), "{}", warns[0].text);
+        assert_eq!(warns[0].deliveries, vec![crate::projects::telemetry::DeliveryRef { id: 0, msg: msg_id }]);
+        // The wire form names the message and no row.
+        assert_eq!(serde_json::to_value(&warns[0].deliveries).unwrap(), serde_json::json!([{ "msg": warns[0].deliveries[0].msg }]));
     }
 
     #[test]

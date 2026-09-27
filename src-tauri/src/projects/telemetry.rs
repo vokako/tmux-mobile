@@ -225,6 +225,9 @@ pub struct ActivityEvent {
 /// One delivery row named by an event: its id, and the message it carries.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DeliveryRef {
+    /// The delivery row; 0 (omitted) for a line that never became a row —
+    /// one `send_command` refused (board #250).
+    #[serde(default, skip_serializing_if = "is_zero")]
     pub id: i64,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub msg: String,
@@ -715,6 +718,24 @@ pub fn record_delivery(session: &str, window: &str, line: &str, msg_id: &str) {
     // sees it and drops its queue when the window goes.
     with_rec(session, window, |_| {});
     let _ = queue(|s| s.insert_delivery(session, window, line, now(), msg_id));
+}
+
+/// A line `send_command` refused to type (board #250: the pane was in
+/// copy-mode). It was never typed, so it is not a pending delivery and no echo
+/// will come; the same `warn` the sweep uses says so at once, naming the
+/// message it carried. Nothing retries it: the person reading scrollback
+/// leaves the mode, and the sender decides whether to say it again.
+pub fn record_undelivered(session: &str, window: &str, line: &str, msg_id: &str, reason: &str) {
+    let refs = if msg_id.is_empty() { Vec::new() } else { vec![DeliveryRef { id: 0, msg: msg_id.to_string() }] };
+    push_full(
+        session,
+        window,
+        "warn",
+        format!("undelivered ({reason}): {}", truncate_chars(line, 160)),
+        String::new(),
+        String::new(),
+        refs,
+    );
 }
 
 /// The `userPromptSubmit` hook: the agent accepted a prompt. This is BOTH the
