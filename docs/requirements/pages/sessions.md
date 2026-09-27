@@ -23,23 +23,27 @@ glance without requiring interaction.
   language). A source test pins the absence.
 
 ### Top row
-- **Single row combining MRU chips and search**. Chips fill the left, a
-  round search icon button sits on the right. Tapping search swaps the
-  entire row into full-width input mode (chips hide, input grows, × on
-  the right closes / clears). Escape also closes.
-- **MRU chips** (shown in the default row state). Up to 5 most-recently-
-  opened **AI sessions** — sessions where at least one pane is running a
-  known coding-agent CLI (the shared detection table in `core/agents.ts`,
-  not a list kept here), excluding the currently-open one. The filter is
-  deliberate: plain zsh/node/vim sessions clutter a "fast switch" surface
-  and are still reachable via search or the full list. Horizontally
-  scrollable. One tap on a chip opens that session at its primary AI pane.
+The live list — Terminal's sidebar, the one host that mounts this component
+(`chips={false}`) — has **no top row**: the MRU chip strip is pure
+duplication there (owner: "左侧侧边栏不要显示"; the terminal already has a
+window bar and the rows sit right below), and search moves to the bottom
+bar. The component still carries the page dialect (`chips`, default true):
+a single top row combining up to 5 MRU chips of recently opened **AI
+sessions** (the shared detection table in `core/agents.ts`, not a list kept
+here) with a round search button that swaps the row into a full-width input
+(× or Escape closes). No host mounts that dialect since the list became
+Terminal's sidebar on 2026-08-18; the chip strip hides while searching, and
+one tap on a chip opens that session at its primary AI pane, never toggling
+a row.
 
 ### Grouping
-The list is one flat, headerless group. (The Teams/Sessions split keyed on
-`tmm-team-<room>` sessions left with the team bus on 2026-09-09, board
-#100/#107; today's agent teams live in the Hub, not in tmux session names.
-Group headers carry no count pill since board #235 — the word alone.)
+One group, one header: in the sidebar the list carries a **GROUP SESSIONS**
+label (terminal icon + the word alone — no count pill since board #235),
+because bare rows under the Projects header read as more projects
+(ui-unification: every sidebar speaks the same language). The header hides
+with an empty list. (The Teams/Sessions split keyed on `tmm-team-<room>`
+sessions left with the team bus on 2026-09-09, board #100/#107; today's
+agent teams live in the Hub, not in tmux session names.)
 
 ### Session row (single line, dense)
 Left-to-right:
@@ -76,8 +80,14 @@ Each pane row shows: `W.P` index (monospace, accent) · `current_command` ·
 Plus a `+ Window` button at the end of the pane list.
 
 ### Bottom bar
-- **New Session** — expands an inline form with session name, working-dir
-  picker, optional startup command with Kiro/Claude presets.
+- In the sidebar the bar holds the two list utilities: **search** (opens
+  the search row) and **refresh**. Creation does not live here: since
+  2026-09-23 the New command sits at the Projects head (owner: "每次还得滚
+  动到最下边才能新建"), and an in-list add row appears only while there are
+  no projects to head. Either route opens the shared **New Project** dialog
+  (`CreateProjectDialog`, the same one the Chat sidebar opens — every
+  session is a project), and a successful create jumps straight into the
+  new session's first pane.
 - **Refresh** icon. Pull-to-refresh was removed: it was a custom
   touch-handler implementation and on top of a scrolling list it conflicted
   too often with ordinary vertical scrolling near the top edge. A tap on
@@ -90,12 +100,12 @@ Plus a `+ Window` button at the end of the pane list.
   navigates directly to Terminal with that pane.
 - **Multi-window session** → tap the session row → expands the pane list in
   place. Tap again to collapse. Tap any pane to navigate.
-- **MRU chip** → single tap → opens the session at its *primary AI pane*
-  (the first pane running a known agent CLI, falling back to the first
-  pane). **Chips never toggle the inline pane list** — the chip strip is
-  the fast-switch surface, so a chip tap must move the user to the
-  terminal, not leave them on the Sessions page with an unexpected row
-  expansion elsewhere.
+- **MRU chip** (page dialect, currently unmounted — see Top row) → single
+  tap → opens the session at its *primary AI pane* (the first pane running
+  a known agent CLI, falling back to the first pane). **Chips never toggle
+  the inline pane list** — the chip strip is the fast-switch surface, so a
+  chip tap must move the user to the terminal, not leave them on the
+  Sessions page with an unexpected row expansion elsewhere.
 
 ### Searching
 - Type in the search box → list filters instantly. Matches highlight by
@@ -117,11 +127,12 @@ Plus a `+ Window` button at the end of the pane list.
 - `list_sessions` — sessions with `last_opened` annotation.
 - `list_panes(session)` — called for every session on load (needed for
   inline summary). One call per session; cheap.
-- `new_session(name?, path?, command?)`.
+- `project_create` + `project_up` — creation goes through the shared New
+  Project dialog; `new_session` is no longer called from this list.
 - `kill_session(name)`.
 - `new_window(session)`.
 - `kill_window(target)`.
-- `fs_list(path)` — for the working-dir picker in the new-session form.
+- `fs_list(path)` — for the dialog's directory picker.
 
 ## State Management
 - `sessions`: array of `TmuxSession` sorted as: (1) active session, then
