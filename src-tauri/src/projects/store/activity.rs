@@ -414,7 +414,8 @@ mod tests {
 
     /// Board #249: a delivery row carries its chat message id and settles by
     /// ROW id, so one of two identical bodies can settle while its sibling
-    /// stays; a prompt event keeps the ids it settled.
+    /// stays; an activity event keeps the ROWS it is about as `{id, msg?}` —
+    /// the row id is the key, the message id only rides along.
     #[test]
     fn deliveries_carry_their_message_and_settle_by_row() {
         let store = Store::open_memory().unwrap();
@@ -428,10 +429,11 @@ mod tests {
         let left = store.pending_deliveries("s", Some("w1")).unwrap();
         assert_eq!(left.iter().map(|r| r.msg_id.as_str()).collect::<Vec<_>>(), vec!["m1", ""]);
 
-        store.insert_activity("s", "w1", 1000, "prompt", "same", "", "app", "", r#"["m1"]"#).unwrap();
+        let refs = format!(r#"[{{"id":{},"msg":"m1"}}]"#, left[0].id);
+        store.insert_activity("s", "w1", 1000, "prompt", "same", "", "app", "", &refs).unwrap();
         store.insert_activity("s", "w1", 1001, "prompt", "typed", "", "local", "", "").unwrap();
         let evs = store.activity_since("s", 0, 10).unwrap();
-        assert_eq!(evs.iter().map(|e| e.deliveries.as_str()).collect::<Vec<_>>(), vec![r#"["m1"]"#, ""]);
+        assert_eq!(evs.iter().map(|e| e.deliveries.as_str()).collect::<Vec<_>>(), vec![refs.as_str(), ""]);
         // Reported once: only the first call flips the mark, and the row stays.
         assert!(store.mark_delivery_warned(left[0].id).unwrap());
         assert!(!store.mark_delivery_warned(left[0].id).unwrap());
