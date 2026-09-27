@@ -1632,4 +1632,7 @@ test('mentionPalette: @ at a word start offers the room\'s addressable names (#2
   assert.equal(mentionPalette('@bob ', names), null, 'only the last token is completed');
   assert.equal(mentionPalette('@zz', names), null);
   assert.equal(mentionPalette('@', []), null, 'no managed agents: nothing to offer');
+  assert.equal(mentionPalette('/compact @b', names), null, 'a command line is typed verbatim; a name in it reaches nobody');
+  assert.equal(mentionPalette('@alice /compact @b', names), null, 'an addressed command line likewise');
+  assert.deepEqual(mentionPalette('see /tmp/x @b', names)?.items.map((i) => i.value), ['@bob'], 'a path mid-sentence is not a command');
 });

@@ -948,14 +948,19 @@ Owner: "输入“@”，可以提示我 @ 某一个 Agent 的候选项". `mentio
 `commandPalette`, so the popover, the arrow/Tab/Enter/tap keys, Escape and
 the back layer are the existing ones; there is no second list. It
 completes only the LAST token, and only an `@` at the start or after
-whitespace, because `deliver_mentions` reads `a@b` as an address, not a
-mention. The candidates are exactly what delivery reaches: the room's
+whitespace: an `@` inside a word (`me@b`, an email address) does not open
+the list. That is a completion rule only; the server's `mention_names`
+still splits on every `@`, which is older behaviour outside #242. The
+candidates are exactly what delivery reaches: the room's
 managed agents (hint: backend) and `all`. Team names are not offered: a
 body `@team` names no window and reaches nobody; a team is addressed by
 its tab (orchestrator, #242). A query that already equals the only
 remaining candidate offers nothing, so Enter after a finished `@bob`
-sends instead of re-completing. The slash palette is asked first, so a
-`/command` line never shows names.
+sends instead of re-completing. A slash-command line (the same
+`slashCommand` test `send()` uses, with or without a leading `@name`)
+offers no names, because it is typed verbatim through `hub_command` and a
+name inside it reaches nobody (validator, #242: `/compact @b` offered
+`@bob`).
 
 ### The `/` palette is transcribed, not invented
 

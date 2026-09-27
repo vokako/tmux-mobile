@@ -929,14 +929,18 @@ export function commandPalette(text: string, models: readonly string[] = [], bac
  * The `@` completion (board #242, owner 2026-09-27: "输入“@”，可以提示我 @ 某
  * 一个 Agent 的候选项"). It rides the slash palette: same `Palette` shape, same
  * popover, same keys. Only the LAST token of the text is completed, and only
- * when it is an `@` at the start or after whitespace — `a@b` is an address,
- * never a mention. The query is the run `mentionTokens` would read (no second
+ * when it is an `@` at the start or after whitespace: an `@` inside a word
+ * (an email address) does not open it. The query is the run `mentionTokens` would read (no second
  * `@`, no whitespace). `candidates` are the names `deliver_mentions` delivers
  * to: the room's managed agents plus `all`, with the caller's hint text.
  * A query that already IS the one remaining candidate offers nothing, so
  * Enter after a finished `@bob` sends instead of completing it again.
+ * A slash-command line offers no names: send() types it verbatim through
+ * `hub_command`, so an `@bob` inside it would reach nobody (validator, #242).
+ * `slashCommand` is the same test send() uses.
  */
 export function mentionPalette(text: string, candidates: readonly PaletteItem[]): Palette | null {
+  if (slashCommand(text ?? '')) return null;
   const m = /(^|\s)@([\w.-]*)$/u.exec(text ?? '');
   if (!m || !candidates.length) return null;
   const query = m[2]!;

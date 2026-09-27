@@ -953,6 +953,10 @@ test('typing @ offers the room\'s agents in the slash palette; Enter inserts, Es
     assert.equal(await app.key('Escape'), true);
     assert.equal(app.document.querySelector('.cmd-menu'), null, 'Escape dismisses without touching the text');
     assert.equal(app.input.value, 'ask @bob and @');
+    await app.text('/compact @b');
+    assert.equal(app.document.querySelector('.cmd-menu'), null, 'a slash-command line offers no names');
+    await app.text('@alice /compact @b');
+    assert.equal(app.document.querySelector('.cmd-menu'), null);
     await app.text('mail me@b');
     assert.equal(app.document.querySelector('.cmd-menu'), null, 'an address never opens it');
     await app.text('@a');
