@@ -66,6 +66,21 @@ struct Rec {
     ask: Option<(String, u64)>,
     /// Last hook tool event: (activity line, ts). Work observed inside a turn.
     tool: Option<(String, u64)>,
+    /// When each fact above ARRIVED, as a process-wide sequence number (board
+    /// #249). Hook timestamps are whole seconds, so a stop and the next prompt
+    /// often share one; the old `end >= start` tie read that turn as idle, and
+    /// the sweep reported its queued lines mid-turn. The sequence breaks only
+    /// that tie; seconds stay the ordering authority. 0 = never set.
+    prompt_seq: u64,
+    end_seq: u64,
+    ask_seq: u64,
+    tool_seq: u64,
+}
+
+/// The next arrival number. Starts at 1, so 0 means "no fact".
+fn arrival() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -405,9 +420,13 @@ pub fn record_notification(session: &str, window: &str, kind: &str, ts: u64) {
     push_event(session, window, "notif", kind.to_string());
     let kind = kind.to_string();
     with_rec(session, window, |r| match kind.as_str() {
-        "permission_required" | "input_required" => r.ask = Some((kind, ts)),
+        "permission_required" | "input_required" => {
+            r.ask = Some((kind, ts));
+            r.ask_seq = arrival();
+        }
         _ => {
             r.end = Some((kind, ts));
+            r.end_seq = arrival();
             r.ask = None; // a finished turn cannot still be asking
         }
     });
@@ -431,6 +450,7 @@ pub fn record_interrupt(session: &str, window: &str) {
     let ts = now();
     with_rec(session, window, |r| {
         r.end = Some(("completed".to_string(), ts));
+        r.end_seq = arrival();
         r.ask = None;
     });
 }
@@ -473,6 +493,7 @@ pub fn record_tool(session: &str, window: &str, tool: &str, detail: &str) {
             .as_ref()
             .is_some_and(|(prev, at)| prev == &line && ts.saturating_sub(*at) <= TOOL_DEDUPE_SECS);
         r.tool = Some((line.clone(), ts));
+        r.tool_seq = arrival();
     });
     if dup {
         return;
@@ -518,7 +539,10 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
     // A turn just opened. This is the ONE honest "it started working" signal:
     // pane activity cannot be it, because an agent TUI repaints its prompt
     // (spinner, status line, cursor) long after it finished.
-    with_rec(session, window, |r| r.prompt = Some(ts));
+    with_rec(session, window, |r| {
+        r.prompt = Some(ts);
+        r.prompt_seq = arrival();
+    });
     push_event_via(
         session,
         window,
@@ -778,6 +802,13 @@ fn derive_from(rec: &Rec, activity_ts: u64, now: u64) -> AgentStatus {
     let turn_start = prompt_ts.max(tool_ts);
     let turn_end = end_ts;
     let newest = turn_start.max(turn_end).max(ask_ts);
+    // Ordering keys: (second, arrival). Equal seconds are decided by which
+    // fact arrived later (board #249); unequal seconds exactly as before.
+    let prompt_k = (prompt_ts, rec.prompt_seq);
+    let tool_k = (tool_ts, rec.tool_seq);
+    let end_k = (end_ts, rec.end_seq);
+    let ask_k = (ask_ts, rec.ask_seq);
+    let start_k = prompt_k.max(tool_k);
 
     // No hook has ever spoken for this window: fall back to pane activity,
     // which is all a hookless backend gives us.
@@ -788,17 +819,17 @@ fn derive_from(rec: &Rec, activity_ts: u64, now: u64) -> AgentStatus {
 
     // A failed stop is the one distress signal we can observe. It stands until
     // a new turn starts.
-    if end_kind == "failed" && end_ts >= turn_start && end_ts >= ask_ts {
+    if end_kind == "failed" && end_k >= start_k && end_k >= ask_k {
         return AgentStatus { state: "failed".into(), detail: "failed".into(), since: end_ts };
     }
 
     // A turn that ended is rest, not distress.
-    if turn_end >= turn_start && turn_end >= ask_ts {
+    if end_k >= start_k && end_k >= ask_k {
         return AgentStatus { state: "idle".into(), detail: String::new(), since: turn_end };
     }
 
     // Blocked on the human, and nothing has happened since.
-    if ask_ts > tool_ts && ask_ts >= prompt_ts {
+    if ask_k > tool_k && ask_k >= prompt_k {
         let kind = rec.ask.as_ref().map(|(k, _)| k.clone()).unwrap_or_default();
         return AgentStatus { state: "waiting".into(), detail: kind, since: ask_ts };
     }
@@ -807,7 +838,7 @@ fn derive_from(rec: &Rec, activity_ts: u64, now: u64) -> AgentStatus {
     let detail = rec
         .tool
         .as_ref()
-        .filter(|(_, t)| *t >= prompt_ts)
+        .filter(|_| tool_k >= prompt_k)
         .map(|(l, _)| l.clone())
         .unwrap_or_default();
     let since = if prompt_ts > 0 { prompt_ts } else { tool_ts };
@@ -1493,6 +1524,27 @@ mod tests {
 
     // ── Board #249: the table is the ONE queue ────────────────────────────
 
+    /// 13:12:38 in the trace: a stop and the next queued prompt in the SAME
+    /// second. `end >= start` on whole seconds read the new turn as idle, the
+    /// ack clock started, and 45 s later the sweep reported the lines the
+    /// running agent was still holding. Arrival order decides the tie.
+    #[test]
+    fn a_prompt_after_a_stop_in_the_same_second_opens_the_turn() {
+        let session = format!("tie-{}", uuid::Uuid::new_v4());
+        let t = now();
+        record_prompt(&session, "w1", "turn one");
+        record_notification(&session, "w1", "completed", t);
+        record_prompt(&session, "w1", "turn two, queued"); // same second
+        assert_eq!(derive(&session, "w1", 0).state, "running", "the later arrival wins the tie");
+        record_delivery(&session, "w1", "@builder still queued");
+        backdate(&session);
+        sweep_deliveries(&session);
+        assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 0, "a running turn is not swept");
+        // And the reverse order in one second is a finished turn.
+        record_notification(&session, "w1", "completed", now());
+        assert_eq!(derive(&session, "w1", 0).state, "idle");
+    }
+
     /// 20 lines typed at a busy window and echoed in order are all OUR
     /// deliveries. With the 16-line memory cap the oldest four echoed as
     /// keyboard input (INPUT rows) while their rows stayed in the table.
@@ -1551,10 +1603,14 @@ mod tests {
         backdate(&session);
         sweep_deliveries(&session);
         assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 0, "queued, not lost");
+        // The turn ended long enough ago for the clock: the stop arrived after
+        // the prompt that opened it, both past the ack window.
         let ended = now() - DELIVERY_ACK_SECS - 1;
         with_rec(&session, "dev", |r| {
             r.prompt = Some(ended);
+            r.prompt_seq = arrival();
             r.end = Some(("completed".into(), ended));
+            r.end_seq = arrival();
         });
         sweep_deliveries(&session);
         assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 2, "each owed promise reported once");
