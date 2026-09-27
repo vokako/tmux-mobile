@@ -229,7 +229,7 @@ fn persist(_session: &str, _ev: &ActivityEvent) {}
 #[cfg(not(test))]
 fn persist(session: &str, ev: &ActivityEvent) {
     let written = super::with_store(|s| {
-        s.insert_activity(session, &ev.window, ev.ts, &ev.kind, &ev.text, &ev.tool, &ev.via, &ev.state)
+        s.insert_activity(session, &ev.window, ev.ts, &ev.kind, &ev.text, &ev.tool, &ev.via, &ev.state, "")
     });
     if let Err(e) = written {
         // Fail-soft, but not SILENT: a lost write is a hole in the trace, and the
@@ -393,7 +393,7 @@ fn remember_delivery(session: &str, window: &str, line: &str, ts: u64) {
     if !durable() {
         return;
     }
-    let _ = super::with_store(|s| s.insert_delivery(session, window, line, ts));
+    let _ = super::with_store(|s| s.insert_delivery(session, window, line, ts, ""));
 }
 
 /// A line is settled — acked by its echo, or reported by the sweep. One ROW
@@ -452,8 +452,8 @@ fn hydrate(session: &str, window: Option<&str>) {
 
     let rows = super::with_store(|s| s.pending_deliveries(session, window)).unwrap_or_default();
     let mut by_window: HashMap<String, Vec<String>> = HashMap::new();
-    for (w, line, _typed_at) in rows {
-        by_window.entry(w).or_default().push(line);
+    for row in rows {
+        by_window.entry(row.window).or_default().push(row.line);
     }
     // A queried window with no rows still counts as recovered, so the echo path
     // asks the database once and then stays in memory.
@@ -1345,7 +1345,7 @@ mod tests {
         // typing time, which is what would make the first sweep after a restart
         // report it as unconfirmed seconds before its echo arrives.
         let long_ago = now().saturating_sub(DELIVERY_ACK_SECS * 20);
-        let _ = crate::projects::with_store(|s| s.insert_delivery(&session, "w2", "stale line", long_ago));
+        let _ = crate::projects::with_store(|s| s.insert_delivery(&session, "w2", "stale line", long_ago, ""));
 
         simulate_restart(&session);
 

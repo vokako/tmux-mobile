@@ -121,7 +121,8 @@ impl Store {
         // block must still get the name columns (the v13 lesson, same floor).
         self.ensure_activity_names()?;
         self.ensure_delivery_names()?;
-        self.ensure_delivery_duplicates()
+        self.ensure_delivery_duplicates()?;
+        self.ensure_delivery_msg_ids()
     }
 
     // ---- archived messages ----------------------------------------------

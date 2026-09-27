@@ -20,6 +20,22 @@ pub struct ActivityRow {
     pub tool: String,
     pub via: String,
     pub state: String,
+    /// `prompt` events only: the chat message ids this echo settled (board
+    /// #249), a JSON array; '' when it settled none or predates v24.
+    pub acks: String,
+}
+
+/// One outstanding delivery (board #249): the row id is its identity, so two
+/// deliveries of the same body are two rows and each settles on its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeliveryRow {
+    pub id: i64,
+    pub window: String,
+    pub line: String,
+    pub ts: u64,
+    /// The chat message this line carries; '' for a line with none (a board
+    /// notice, a reply, a typed first prompt) and for pre-v24 rows.
+    pub msg_id: String,
 }
 
 impl Store {
@@ -35,14 +51,15 @@ impl Store {
         tool: &str,
         via: &str,
         state: &str,
+        acks: &str,
     ) -> Result<(), String> {
         // `window` (the INDEX column) is 0 for name-keyed rows; `win` carries
         // the identity (board #120). Old rows read back via the COALESCE below.
         self.conn
             .execute(
-                "INSERT INTO activity (session, window, win, ts, kind, text, tool, via, state)
-                 VALUES (?1, 0, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                rusqlite::params![session, window, ts as i64, kind, text, tool, via, state],
+                "INSERT INTO activity (session, window, win, ts, kind, text, tool, via, state, acks)
+                 VALUES (?1, 0, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![session, window, ts as i64, kind, text, tool, via, state, acks],
             )
             .map(|_| ())
             .map_err(|e| format!("insert activity: {e}"))
@@ -114,7 +131,7 @@ impl Store {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, COALESCE(NULLIF(win, ''), CAST(window AS TEXT)), ts, kind, text, tool, via, state FROM activity
+                "SELECT id, COALESCE(NULLIF(win, ''), CAST(window AS TEXT)), ts, kind, text, tool, via, state, acks FROM activity
                  WHERE session = ?1 AND ts > ?2
                    AND (ts < ?3 OR (ts = ?3 AND id < ?4))
                  ORDER BY ts DESC, id DESC LIMIT ?5",
@@ -133,6 +150,7 @@ impl Store {
                         tool: r.get(5)?,
                         via: r.get(6)?,
                         state: r.get(7)?,
+                        acks: r.get(8)?,
                     })
                 },
             )
@@ -176,43 +194,43 @@ impl Store {
             .map_err(|e| format!("prune activity: {e}"))
     }
 
-    /// Remember a line we typed into a pane, so its `userPromptSubmit` echo can
-    /// still be recognised as OUR delivery after a server restart. Upsert on the
-    /// line: the in-memory queue replaces a re-typed line rather than holding two
-    /// copies of it, and the durable half must not disagree.
+    /// Remember a line we typed into a pane: the ONE pending-delivery queue
+    /// (board #249). Its `userPromptSubmit` echo settles the row; a plain
+    /// INSERT (board #122), because the same line delivered again is a new
+    /// promise with its own echo.
     pub fn insert_delivery(
         &self,
         session: &str,
         window: &str,
         line: &str,
         ts: u64,
+        msg_id: &str,
     ) -> Result<(), String> {
-        // A plain INSERT (board #122): the same line delivered again is a new
-        // promise with its own row and its own echo.
         self.conn
             .execute(
-                "INSERT INTO deliveries (session, win, line, ts) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![session, window, line, ts as i64],
+                "INSERT INTO deliveries (session, win, line, ts, msg_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![session, window, line, ts as i64, msg_id],
             )
             .map(|_| ())
             .map_err(|e| format!("insert delivery: {e}"))
     }
 
-    /// Outstanding lines, oldest first. `window` narrows it to one window; `None`
-    /// is the whole session, which is what the sweep asks for.
+    /// Outstanding lines, in the order they were typed (row id). `window`
+    /// narrows it to one window; `None` is the whole session, which is what
+    /// the sweep asks for.
     pub fn pending_deliveries(
         &self,
         session: &str,
         window: Option<&str>,
-    ) -> Result<Vec<(String, String, u64)>, String> {
+    ) -> Result<Vec<DeliveryRow>, String> {
         let (sql, args): (&str, Vec<Box<dyn rusqlite::ToSql>>) = match window {
             Some(w) => (
-                "SELECT win, line, ts FROM deliveries
+                "SELECT id, win, line, ts, msg_id FROM deliveries
                  WHERE session = ?1 AND win = ?2 ORDER BY id",
                 vec![Box::new(session.to_string()), Box::new(w.to_string())],
             ),
             None => (
-                "SELECT win, line, ts FROM deliveries WHERE session = ?1 ORDER BY id",
+                "SELECT id, win, line, ts, msg_id FROM deliveries WHERE session = ?1 ORDER BY id",
                 vec![Box::new(session.to_string())],
             ),
         };
@@ -222,15 +240,20 @@ impl Store {
             .map_err(|e| format!("prepare deliveries: {e}"))?;
         let rows = stmt
             .query_map(rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())), |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)? as u64))
+                Ok(DeliveryRow {
+                    id: r.get(0)?,
+                    window: r.get(1)?,
+                    line: r.get(2)?,
+                    ts: r.get::<_, i64>(3)? as u64,
+                    msg_id: r.get(4)?,
+                })
             })
             .map_err(|e| format!("query deliveries: {e}"))?;
         Ok(rows.filter_map(Result::ok).collect())
     }
 
-    /// A line is settled — acknowledged by its echo, or reported as unconfirmed.
-    /// Either way it stops being outstanding.
-    /// Settle ONE row of a possibly-duplicated line, oldest first (board #122).
+    /// A line is settled — acknowledged by its echo, or reported as
+    /// unconfirmed. By ROW, so a duplicate body's sibling stays outstanding.
     pub fn delete_one_delivery(&self, session: &str, window: &str, line: &str) -> Result<bool, String> {
         self.conn
             .execute(
@@ -245,12 +268,9 @@ impl Store {
             .map_err(|e| format!("delete one delivery: {e}"))
     }
 
-    pub fn delete_delivery(&self, session: &str, window: &str, line: &str) -> Result<bool, String> {
+    pub fn delete_delivery_id(&self, id: i64) -> Result<bool, String> {
         self.conn
-            .execute(
-                "DELETE FROM deliveries WHERE session = ?1 AND win = ?2 AND line = ?3",
-                rusqlite::params![session, window, line],
-            )
+            .execute("DELETE FROM deliveries WHERE id = ?1", rusqlite::params![id])
             .map(|n| n > 0)
             .map_err(|e| format!("delete delivery: {e}"))
     }
@@ -291,27 +311,29 @@ mod tests {
     #[test]
     fn outstanding_deliveries_are_kept_per_window_and_settle_once() {
         let store = Store::open_memory().unwrap();
-        store.insert_delivery("s", "w1", "hello", 100).unwrap();
+        store.insert_delivery("s", "w1", "hello", 100, "").unwrap();
         // Delivering the same body again is a SECOND promise with its own row
         // (board #122): the pane was typed into twice, two echoes are coming,
         // and each settles one row, oldest first.
-        store.insert_delivery("s", "w1", "hello", 150).unwrap();
-        store.insert_delivery("s", "w2", "other", 120).unwrap();
-        store.insert_delivery("t", "w1", "elsewhere", 130).unwrap();
+        store.insert_delivery("s", "w1", "hello", 150, "").unwrap();
+        store.insert_delivery("s", "w2", "other", 120, "").unwrap();
+        store.insert_delivery("t", "w1", "elsewhere", 130, "").unwrap();
 
+        let triple = |rows: Vec<DeliveryRow>| rows.into_iter().map(|r| (r.window, r.line, r.ts)).collect::<Vec<_>>();
         let all = store.pending_deliveries("s", None).unwrap();
-        assert_eq!(all, vec![
+        assert_eq!(triple(all.clone()), vec![
             ("w1".to_string(), "hello".to_string(), 100),
             ("w1".to_string(), "hello".to_string(), 150),
             ("w2".to_string(), "other".to_string(), 120),
         ]);
+        assert!(all.windows(2).all(|p| p[0].id < p[1].id), "typed order is row order");
         assert_eq!(store.pending_deliveries("s", Some("w2")).unwrap().len(), 1);
         assert_eq!(store.pending_deliveries("t", None).unwrap().len(), 1, "sessions never cross");
 
         // Each echo settles ONE row, oldest first; leaving past the last is
         // not an error.
         assert!(store.delete_one_delivery("s", "w1", "hello").unwrap());
-        assert_eq!(store.pending_deliveries("s", Some("w1")).unwrap(), vec![("w1".to_string(), "hello".to_string(), 150)], "the older row went first");
+        assert_eq!(triple(store.pending_deliveries("s", Some("w1")).unwrap()), vec![("w1".to_string(), "hello".to_string(), 150)], "the older row went first");
         assert!(store.delete_one_delivery("s", "w1", "hello").unwrap());
         assert!(!store.delete_one_delivery("s", "w1", "hello").unwrap());
         // A window that no longer exists can never echo: drop its whole queue.
@@ -320,9 +342,31 @@ mod tests {
 
         // The recovery horizon: a line nobody ever acked is forgotten rather
         // than resurrected days later, and the fresh one stays.
-        store.insert_delivery("t", "w2", "ancient", 10).unwrap();
+        store.insert_delivery("t", "w2", "ancient", 10, "").unwrap();
         assert_eq!(store.prune_deliveries(100).unwrap(), 1);
         assert_eq!(store.pending_deliveries("t", None).unwrap().len(), 1);
+    }
+
+    /// Board #249: a delivery row carries its chat message id and settles by
+    /// ROW id, so one of two identical bodies can settle while its sibling
+    /// stays; a prompt event keeps the ids it settled.
+    #[test]
+    fn deliveries_carry_their_message_and_settle_by_row() {
+        let store = Store::open_memory().unwrap();
+        store.insert_delivery("s", "w1", "same", 100, "m1").unwrap();
+        store.insert_delivery("s", "w1", "same", 101, "m2").unwrap();
+        store.insert_delivery("s", "w1", "notice", 102, "").unwrap();
+        let rows = store.pending_deliveries("s", Some("w1")).unwrap();
+        assert_eq!(rows.iter().map(|r| r.msg_id.as_str()).collect::<Vec<_>>(), vec!["m1", "m2", ""]);
+        assert!(store.delete_delivery_id(rows[1].id).unwrap(), "the second of two identical bodies");
+        assert!(!store.delete_delivery_id(rows[1].id).unwrap(), "settling twice is a no-op");
+        let left = store.pending_deliveries("s", Some("w1")).unwrap();
+        assert_eq!(left.iter().map(|r| r.msg_id.as_str()).collect::<Vec<_>>(), vec!["m1", ""]);
+
+        store.insert_activity("s", "w1", 1000, "prompt", "same", "", "app", "", r#"["m1"]"#).unwrap();
+        store.insert_activity("s", "w1", 1001, "prompt", "typed", "", "local", "", "").unwrap();
+        let evs = store.activity_since("s", 0, 10).unwrap();
+        assert_eq!(evs.iter().map(|e| e.acks.as_str()).collect::<Vec<_>>(), vec![r#"["m1"]"#, ""]);
     }
 
     #[test]
@@ -330,11 +374,11 @@ mod tests {
         let store = Store::open_memory().unwrap();
         for n in 0..5u64 {
             store
-                .insert_activity("s1", "w3", 1000 + n, "tool", &format!("file{n}.rs"), "Edit", "", "")
+                .insert_activity("s1", "w3", 1000 + n, "tool", &format!("file{n}.rs"), "Edit", "", "", "")
                 .unwrap();
         }
         // Another session's rows never leak into this one's feed.
-        store.insert_activity("s2", "w1", 1002, "tool", "other.rs", "Read", "", "").unwrap();
+        store.insert_activity("s2", "w1", 1002, "tool", "other.rs", "Read", "", "", "").unwrap();
 
         let all = store.activity_since("s1", 0, 100).unwrap();
         assert_eq!(all.len(), 5);
@@ -369,14 +413,14 @@ mod tests {
     #[test]
     fn current_turn_prompt_survives_the_server_process() {
         let store = Store::open_memory().unwrap();
-        store.insert_activity("s", "w2", 1000, "notif", "completed", "", "", "").unwrap();
-        store.insert_activity("s", "w2", 1100, "prompt", "[tmm chat] lead: work", "", "app", "").unwrap();
-        store.insert_activity("s", "w2", 1200, "tool", "file.rs", "Edit", "", "").unwrap();
+        store.insert_activity("s", "w2", 1000, "notif", "completed", "", "", "", "").unwrap();
+        store.insert_activity("s", "w2", 1100, "prompt", "[tmm chat] lead: work", "", "app", "", "").unwrap();
+        store.insert_activity("s", "w2", 1200, "tool", "file.rs", "Edit", "", "", "").unwrap();
         assert_eq!(
             store.current_turn_prompt("s", "w2").unwrap().as_deref(),
             Some("[tmm chat] lead: work")
         );
-        store.insert_activity("s", "w2", 1300, "notif", "completed", "", "", "").unwrap();
+        store.insert_activity("s", "w2", 1300, "notif", "completed", "", "", "", "").unwrap();
         assert_eq!(store.current_turn_prompt("s", "w2").unwrap(), None);
     }
 
@@ -388,7 +432,7 @@ mod tests {
         let store = Store::open_memory().unwrap();
         // Six events, and three of them share ts 1002 — the shape a real turn has.
         for (n, ts) in [1000u64, 1001, 1002, 1002, 1002, 1003].into_iter().enumerate() {
-            store.insert_activity("s", "w1", ts, "tool", &format!("e{n}"), "Edit", "", "").unwrap();
+            store.insert_activity("s", "w1", ts, "tool", &format!("e{n}"), "Edit", "", "", "").unwrap();
         }
         assert_eq!(store.activity_stats("s").unwrap(), (6, 1000, 1003));
 

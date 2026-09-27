@@ -9,7 +9,7 @@ use super::registry::{DEFAULT_KIMI_SYSTEM, DEFAULT_OMP_MODEL, DEFAULT_OMP_SYSTEM
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 23;
+const SCHEMA_VERSION: i64 = 24;
 
 impl Store {
     /// Ensure the durable half of Board editability exists, then
@@ -657,6 +657,36 @@ impl Store {
                     .map_err(|e| format!("migrate to 23: {e}"))?;
             }
         }
+        if version < 24 {
+            // v24 (board #249): a delivery row names the chat message it
+            // carries, and a prompt event names the messages it settled, so a
+            // client marks the original delivered without holding it in its
+            // loaded page. Additive, '' for every existing row — those keep
+            // the content match they always had.
+            self.ensure_delivery_msg_ids()?;
+        }
+        Ok(())
+    }
+
+    /// The v24 shape (also a heal floor): `deliveries.msg_id` and
+    /// `activity.acks`, each added only when absent.
+    pub(super) fn ensure_delivery_msg_ids(&self) -> Result<(), String> {
+        for (table, column, ddl) in [
+            ("deliveries", "msg_id", "ALTER TABLE deliveries ADD COLUMN msg_id TEXT NOT NULL DEFAULT '';"),
+            ("activity", "acks", "ALTER TABLE activity ADD COLUMN acks TEXT NOT NULL DEFAULT '';"),
+        ] {
+            let has: bool = self
+                .conn
+                .query_row(
+                    &format!("SELECT EXISTS(SELECT 1 FROM pragma_table_info('{table}') WHERE name = '{column}')"),
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(|e| format!("inspect {table}.{column}: {e}"))?;
+            if !has {
+                self.conn.execute_batch(ddl).map_err(|e| format!("add {table}.{column}: {e}"))?;
+            }
+        }
         Ok(())
     }
 
@@ -749,6 +779,37 @@ mod tests {
     use super::super::test_support::*;
     use super::*;
 
+    /// v23 -> v24 (board #249): an existing database keeps its outstanding
+    /// deliveries and activity rows, and both gain the new columns empty — an
+    /// old row therefore takes the content match it always had.
+    #[test]
+    fn v23_deliveries_and_activity_gain_message_ids_empty() {
+        let dir = std::env::temp_dir().join(format!("tmm-store-v24-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("state.db");
+        {
+            let store = Store::open(&path).unwrap();
+            store.conn.execute_batch(
+                "ALTER TABLE deliveries DROP COLUMN msg_id;
+                 ALTER TABLE activity DROP COLUMN acks;
+                 INSERT INTO deliveries (session, win, line, ts) VALUES ('s', 'w1', 'old line', 100);
+                 INSERT INTO activity (session, window, win, ts, kind, text, tool, via, state)
+                   VALUES ('s', 0, 'w1', 1000, 'prompt', 'old line', '', 'app', '');
+                 PRAGMA user_version = 23;",
+            ).unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        let rows = store.pending_deliveries("s", None).unwrap();
+        assert_eq!((rows.len(), rows[0].line.as_str(), rows[0].msg_id.as_str()), (1, "old line", ""));
+        let evs = store.activity_since("s", 0, 10).unwrap();
+        assert_eq!((evs.len(), evs[0].acks.as_str()), (1, ""));
+        store.insert_delivery("s", "w1", "new line", 200, "m9").unwrap();
+        assert_eq!(store.pending_deliveries("s", None).unwrap()[1].msg_id, "m9");
+        // Re-running the step is harmless (the heal floor calls it on every open).
+        store.ensure_delivery_msg_ids().unwrap();
+        drop(store);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The heal step, which is not hypothetical: a dev binary built in the
     /// seconds between the version bump and its migration block stamped this
     /// host's real state.db at v13 with no `deliveries` table, and a
@@ -775,7 +836,7 @@ mod tests {
             assert!(store.pending_deliveries("s", None).is_err(), "the table really is gone");
         }
         let store = Store::open(&path).unwrap();
-        store.insert_delivery("s", "w1", "hello", 100).unwrap();
+        store.insert_delivery("s", "w1", "hello", 100, "").unwrap();
         assert_eq!(store.pending_deliveries("s", None).unwrap().len(), 1, "healed on open");
         assert_eq!(store.issue_get("legacy", 1).unwrap().unwrap()["editable"], false, "legacy workflow evidence is locked during repair");
         assert_eq!(
