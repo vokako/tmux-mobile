@@ -83,6 +83,7 @@ mod tests {
             ("@all standup", vec!["all"]),
             // Unicode parity with the client (validator, #248): a non-BMP
             // letter after `.` is a host; a combining vowel sign is Alphabetic.
+            ("@bob.𐐀", vec![]),
             ("see @bob.𐐀 and @राम, ok", vec!["राम"]),
             ("@𐐀𐐁 hi", vec!["𐐀𐐁"]),
             // U+0345 (combining ypogegrammeni) is Alphabetic but neither a
