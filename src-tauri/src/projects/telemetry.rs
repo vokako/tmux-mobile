@@ -690,6 +690,12 @@ fn turn_fact_unless_row(
 /// turn stays open.
 pub fn record_notification(session: &str, window: &str, kind: &str, ts: u64) {
     let kind_is_ask = matches!(kind, "permission_required" | "input_required");
+    // Did the turn this end closes accept a prompt? Read before the end lands.
+    let turn_had_prompt = store()
+        .lock()
+        .unwrap()
+        .get(&(session.to_string(), window.to_string()))
+        .is_some_and(|r| r.prompt.is_some() && r.prompt_seq > r.end_seq);
     let event = ("notif", kind.to_string(), String::new(), String::new(), Vec::new());
     let kind = kind.to_string();
     turn_fact(session, window, ts, Some(event), |r, ts, seq| match kind.as_str() {
@@ -704,8 +710,7 @@ pub fn record_notification(session: &str, window: &str, kind: &str, ts: u64) {
         }
     });
     if !kind_is_ask {
-        // The commands this turn's CLI queued run from here (board #264).
-        let _ = queue(|s| s.promote_queued_commands(session, window));
+        end_commands(session, window, turn_had_prompt);
     }
 }
 
@@ -730,12 +735,18 @@ pub fn record_notification(session: &str, window: &str, kind: &str, ts: u64) {
 /// the feed draws nothing for it because the room already carries
 /// `[tmm] interrupted <name>`.
 pub fn record_interrupt(session: &str, window: &str) {
+    let turn_had_prompt = store()
+        .lock()
+        .unwrap()
+        .get(&(session.to_string(), window.to_string()))
+        .is_some_and(|r| r.prompt.is_some() && r.prompt_seq > r.end_seq);
     let event = ("notif", "interrupted".to_string(), String::new(), String::new(), Vec::new());
     turn_fact(session, window, now(), Some(event), |r, ts, seq| {
         r.end = Some(("completed".to_string(), ts));
         r.end_seq = seq;
         r.ask = None;
     });
+    end_commands(session, window, turn_had_prompt);
 }
 
 /// A hook tool event (isolated-home agents only, Phase B+): `("Edit",
@@ -825,6 +836,21 @@ pub fn record_command_delivery(session: &str, window: &str, echo: &str, msg_id: 
         .is_some_and(|r| matches!(derive_from(r, 0, now()).state.as_str(), "running" | "waiting"));
     let life = if running { super::store::CommandLife::Queued } else { super::store::CommandLife::Idle };
     queue(|s| s.insert_command_delivery(session, window, echo, now(), msg_id, life)).ok()
+}
+
+/// A turn end's effect on a window's command rows (board #264). An end that
+/// closes a turn with NO prompt of its own proves the oldest Idle command
+/// echoed nothing (the CLI ran it, or failed it, without a hook): that ONE
+/// row retires (validator 11:50 — else a later look-alike prompt could claim
+/// it). An end after a prompt retires nothing: that prompt was the turn of
+/// the command before it, and the next one runs now. Either way the rows the
+/// ending turn queued become Idle — after the retirement, so a row promoted
+/// here is never retired by the same end.
+fn end_commands(session: &str, window: &str, turn_had_prompt: bool) {
+    if !turn_had_prompt {
+        let _ = queue(|s| s.retire_oldest_idle_command(session, window));
+    }
+    let _ = queue(|s| s.promote_queued_commands(session, window));
 }
 
 /// The pane refused the command (copy mode, #250): nothing was typed, so
@@ -2604,6 +2630,26 @@ mod tests {
         assert!(!record_prompt(&session, "claude", "/goal do x"), "and a later look-alike cannot claim it");
     }
 
+    /// Validator 11:50: an idle /goal whose CLI emits no prompt hook but does
+    /// end a turn (completed or failed) retires at that end — one row, the
+    /// oldest Idle — so a later look-alike prompt cannot claim it; a row
+    /// queued behind it stays and is promoted.
+    #[test]
+    fn an_end_without_a_prompt_retires_the_oldest_idle_command() {
+        crate::projects::tests::use_test_store();
+        let session = format!("cmd-end-{}", uuid::Uuid::new_v4());
+        record_command_delivery(&session, "kiro", "goal a", "m-a").unwrap();
+        record_notification(&session, "kiro", "failed", now());
+        assert!(held(&session, "kiro").is_empty(), "no prompt in that turn: the command echoed nothing");
+        assert!(!record_prompt(&session, "kiro", "goal a"), "a later look-alike is local input, not its receipt");
+        // Only ONE row per end, and not one queued behind the ending turn.
+        record_notification(&session, "kiro", "completed", now());
+        record_command_delivery(&session, "kiro", "goal b", "m-b").unwrap();
+        record_command_delivery(&session, "kiro", "goal c", "m-c").unwrap();
+        record_notification(&session, "kiro", "completed", now());
+        assert_eq!(held(&session, "kiro"), vec!["goal c"], "the oldest Idle retired, the next stays");
+    }
+
     /// A command typed into a RUNNING turn is queued by the CLI: no prompt of
     /// that turn may take it, its end does not retire it, its echo settles it.
     #[test]
@@ -2710,9 +2756,10 @@ mod tests {
         crate::projects::tests::use_test_store();
         let session = format!("cmd-mixed-{}", uuid::Uuid::new_v4());
         record_delivery(&session, "kiro", "[tmm chat] human: @kiro hello", "m-chat");
-        record_command_delivery(&session, "kiro", "goal x", "m-cmd").unwrap();
-        // An end older than the ack window, so the chat line is overdue.
+        // An end older than the ack window, so the chat line is overdue; the
+        // command is typed after it, so that end does not concern it.
         record_notification(&session, "kiro", "completed", now() - DELIVERY_ACK_SECS - 5);
+        record_command_delivery(&session, "kiro", "goal x", "m-cmd").unwrap();
         assert_eq!(held(&session, "kiro"), vec!["[tmm chat] human: @kiro hello", "goal x"]);
         backdate(&session);
         sweep_deliveries(&session);

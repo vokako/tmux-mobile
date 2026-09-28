@@ -50,6 +50,10 @@ command's echo (validator, #264); the rows
 behind it stay owed (validator, #264: two `/goal` queued at one busy pane used
 to lose the second to the first echo). A command typed into a running turn is
 Queued — untouchable by that turn's prompts — until the turn's end promotes it.
+A turn end that closes a turn with no prompt of its own retires the oldest Idle
+command row (one row): its CLI ran or failed it without a hook, and a later
+look-alike prompt must not claim it (validator, #264); an end after a prompt
+retires nothing, because that prompt was the previous command's turn.
 Rows go in bulk only with their window (`retain_windows`). A command bubble
 shows the check or nothing — never a hollow ring, which would promise an echo
 most commands never send. A `/command` is typed by `hub_command` directly and

@@ -383,6 +383,18 @@ impl Store {
             .map_err(|e| format!("insert command delivery: {e}"))
     }
 
+    /// Retire the window's OLDEST Idle command row — one row, never the rows
+    /// behind it (board #264, validator 11:50). Returns whether one went.
+    pub fn retire_oldest_idle_command(&self, session: &str, window: &str) -> Result<bool, String> {
+        self.conn
+            .execute(
+                "DELETE FROM deliveries WHERE id = (SELECT MIN(id) FROM deliveries WHERE session = ?1 AND win = ?2 AND command = 1)",
+                rusqlite::params![session, window],
+            )
+            .map(|n| n > 0)
+            .map_err(|e| format!("retire idle command: {e}"))
+    }
+
     /// Put one command row back behind the turn that just opened (board #264).
     pub fn requeue_command(&self, id: i64) -> Result<bool, String> {
         self.conn
