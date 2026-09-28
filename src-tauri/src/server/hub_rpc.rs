@@ -457,17 +457,19 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
             let author = p.get("who").and_then(|v| v.as_str()).unwrap_or("human");
             crate::projects::board_note(session, issue_id, author, body).map_err(RpcError::InvalidParams)?;
             // A Board reply is communication, not just storage (board
-            // #26): after the note is durable, wake the issue's current
-            // assignee with the same targeted pane delivery/receipt path
-            // used by review handoffs. Every miss is fail-soft — an
-            // unassigned/human/self-owned issue has nobody to notify,
-            // and an offline or unmanaged target reads the persisted
-            // thread later instead of turning a successful note into an
-            // RPC failure.
+            // #26, #255): after the note is durable, wake the issue's
+            // assignee AND reporter (minus the author and the human) with
+            // the same targeted pane delivery/receipt path used by review
+            // handoffs. Every miss is fail-soft — an issue with only the
+            // author/human on it has nobody to notify, and an offline or
+            // unmanaged target reads the persisted thread later instead
+            // of turning a successful note into an RPC failure.
             if let Ok(issue) = crate::projects::board_get(session, issue_id) {
-                if let Some((assignee, notice)) = board_note_notice(&issue, author, body) {
+                if let Some((targets, notice)) = board_note_notice(&issue, author, body) {
                     let line = format!("[tmm chat {}] {author}: {notice}", stamp_now());
-                    deliver_chat_line(session, &assignee, &line);
+                    for target in &targets {
+                        deliver_chat_line(session, target, &line);
+                    }
                 }
             }
             Ok(serde_json::json!({ "ok": true }))
@@ -799,20 +801,32 @@ fn board_change_notice(
     if changes.is_empty() { None } else { Some(changes.join("; ")) }
 }
 
-/// A reply on an issue reaches its CURRENT assignee (board #26). Pure half:
-/// decide whether there is an agent to wake and carry enough issue context that
-/// the recipient can act without first fetching the board. Delivery itself is
+/// A note on an issue reaches BOTH declared parties — its current assignee
+/// and its reporter (`created_by`) — minus the note's author and minus the
+/// human, who reads the board itself (board #26, #255). The recipients are
+/// derived from the issue, never from what the note says: a reviewer's SHIP
+/// note on an issue the lead opened reaches the lead (the merger) as well as
+/// the implementer, which is exactly the route that was missing when five of
+/// six 2026-09-27 stalls left the merger unaware (temp/stall-analysis.md).
+/// Pure half: decide whom to wake and carry enough issue context that each
+/// recipient can act without first fetching the board. Delivery itself is
 /// still `deliver_chat_line`, whose managed/live gate and receipt bookkeeping
-/// are the authority. No target for unassigned/human/self replies — persistence
-/// remains the fallback, never an RPC error or a duplicate self-prompt.
+/// are the authority. No recipients when only the author/human is left —
+/// persistence remains the fallback, never an RPC error or a self-prompt.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn board_note_notice(
     issue: &serde_json::Value,
     author: &str,
     body: &str,
-) -> Option<(String, String)> {
-    let assignee = issue["assignee"].as_str().unwrap_or("");
-    if assignee.is_empty() || assignee == "human" || assignee == author {
+) -> Option<(Vec<String>, String)> {
+    let mut targets: Vec<String> = Vec::new();
+    for key in ["assignee", "created_by"] {
+        let who = issue[key].as_str().unwrap_or("");
+        if !who.is_empty() && who != "human" && who != author && !targets.iter().any(|t| t == who) {
+            targets.push(who.to_string());
+        }
+    }
+    if targets.is_empty() {
         return None;
     }
     let id = issue["id"].as_i64().unwrap_or(0);
@@ -828,7 +842,7 @@ fn board_note_notice(
     let notice = format!(
         "[board #{id} reply] {title} — {note}. Reply on the issue with `tmm board note {id} \"...\"`."
     );
-    Some((assignee.to_string(), notice))
+    Some((targets, notice))
 }
 
 /// The delivered-message budget (owner, 2026-08-30: "尽量保证我们发送的内容
@@ -1316,17 +1330,17 @@ mod tests {
     }
 
     #[test]
-    fn board_note_notice_targets_only_the_other_agent() {
+    fn board_note_notice_reaches_both_parties_but_never_the_author_or_human() {
         let issue = serde_json::json!({
-            "id": 26, "title": "Reply delivery", "assignee": "builder",
+            "id": 26, "title": "Reply delivery", "assignee": "builder", "created_by": "human",
         });
-        let (target, notice) = super::board_note_notice(
+        let (targets, notice) = super::board_note_notice(
             &issue,
             "human",
             "please revise the retry path",
         )
         .expect("a human reply wakes the assigned agent");
-        assert_eq!(target, "builder");
+        assert_eq!(targets, vec!["builder".to_string()]);
         assert_eq!(
             notice,
             "[board #26 reply] Reply delivery — please revise the retry path. Reply on the issue with `tmm board note 26 \"...\"`."
@@ -1337,11 +1351,39 @@ mod tests {
         assert!(shortened.contains('…'), "a long note names that more is on the issue");
         assert!(shortened.chars().count() < 500, "the interrupt stays concise");
 
+        // The human reporter reads the board itself: the assignee's own
+        // note on a human-filed issue wakes nobody.
         assert_eq!(super::board_note_notice(&issue, "builder", "my own note"), None);
         let unassigned = serde_json::json!({ "id": 1, "title": "T", "assignee": "" });
         assert_eq!(super::board_note_notice(&unassigned, "human", "hello"), None);
         let human = serde_json::json!({ "id": 1, "title": "T", "assignee": "human" });
         assert_eq!(super::board_note_notice(&human, "lead", "hello"), None);
+
+        // #255 regression (temp/stall-analysis.md #248/#241): a THIRD
+        // party's note — validator's SHIP on an issue orchestrator opened
+        // and builder holds — reaches both declared parties, not the author.
+        let shared = serde_json::json!({
+            "id": 248, "title": "Addresses", "assignee": "builder", "created_by": "orchestrator",
+        });
+        let (both, _) = super::board_note_notice(&shared, "validator", "SHIP @5138fec8").unwrap();
+        assert_eq!(both, vec!["builder".to_string(), "orchestrator".to_string()]);
+        // The assignee's own note reaches the reporter (what board.md always
+        // said and the code never did) ...
+        let (up, _) = super::board_note_notice(&shared, "builder", "ready").unwrap();
+        assert_eq!(up, vec!["orchestrator".to_string()]);
+        // ... and the reporter's note reaches the assignee.
+        let (down, _) = super::board_note_notice(&shared, "orchestrator", "merged").unwrap();
+        assert_eq!(down, vec!["builder".to_string()]);
+        // An unassigned issue still reaches its agent reporter.
+        let filed = serde_json::json!({ "id": 7, "title": "T", "assignee": "", "created_by": "orchestrator" });
+        let (r, _) = super::board_note_notice(&filed, "validator", "repro attached").unwrap();
+        assert_eq!(r, vec!["orchestrator".to_string()]);
+        // A self-filed, self-held issue has nobody else on it; the same
+        // name twice (reporter == assignee) is one delivery to a third party.
+        let own = serde_json::json!({ "id": 251, "title": "T", "assignee": "builder", "created_by": "builder" });
+        assert_eq!(super::board_note_notice(&own, "builder", "done"), None);
+        let (once, _) = super::board_note_notice(&own, "validator", "SHIP").unwrap();
+        assert_eq!(once, vec!["builder".to_string()]);
 
         // A TITLELESS issue (board #31) is named by its body through the
         // shared issue_ref fallback — never an empty head + dangling dash.

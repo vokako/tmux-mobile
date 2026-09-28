@@ -59,6 +59,8 @@ Conventions that keep the board honest:
   conflict the board exists to prevent.
 - `note` decisions and findings ON the issue (not only in chat): the issue
   outlives the conversation and is what the next reader loads first.
+  A note is delivered to the issue's reporter AND assignee (never to you or
+  the human), so do not also `tmm send` it to them.
 - `move <id> review` when YOUR part is done — this is a HANDOFF, not a
   label: the issue's reporter is notified automatically (the line lands in
   their pane) and reviews it. Only the reviewer moves it to `done`; if it
