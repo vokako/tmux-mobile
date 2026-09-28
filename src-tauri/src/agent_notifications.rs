@@ -1722,7 +1722,10 @@ mod tests {
         use crate::projects::telemetry::{record_interrupt, record_notification, record_prompt};
         crate::projects::tests::use_test_store();
         let session = format!("reply-join-{}", uuid::Uuid::new_v4());
-        let root = std::env::temp_dir().join(format!("tmm-reply-join-{}", uuid::Uuid::new_v4()));
+        // Removed on drop, also when an assertion fails (board #269: failed
+        // runs had left seven of these behind).
+        let scratch = crate::tmux::Scratch::new("reply-join");
+        let root = std::path::PathBuf::from(scratch.path());
         let hub = AgentNotificationHub::load_at(root.clone());
         // The live order: start_turn, then the prompt is recorded.
         let input = |hub: &AgentNotificationHub, line: &str| {
@@ -1831,6 +1834,5 @@ mod tests {
         assert_eq!(live[0], "orchestrator");
         let restarted = AgentNotificationHub::load_at(root.clone());
         assert_eq!(restarted.take_reply_targets(&session, "v"), live, "recovery folds to the same capped edge");
-        let _ = std::fs::remove_dir_all(root);
     }
 }

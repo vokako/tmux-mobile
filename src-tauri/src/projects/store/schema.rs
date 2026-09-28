@@ -1121,9 +1121,9 @@ mod tests {
     /// never re-runs — and a user's own `omp` definition is never overwritten.
     #[test]
     fn v18_backfills_omp_into_an_already_seeded_registry() {
-        let dir = std::env::temp_dir().join(format!("tmm-migrate-omp-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("state.db");
+        // Removed on drop, also on failure (board #269).
+        let scratch = crate::tmux::Scratch::new("migrate-omp");
+        let path = std::path::PathBuf::from(scratch.path()).join("state.db");
 
         // A fresh store, seeded, then rewound to look like a v17 install:
         // the omp row gone, the stamp pre-backfill.
@@ -1169,7 +1169,6 @@ mod tests {
                 "NOT EXISTS respects a custom definition"
             );
         }
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// v22 (board #224): the v18 mechanism again for `kimi` — backfilled once

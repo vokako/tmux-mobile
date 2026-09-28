@@ -1443,8 +1443,9 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
     /// user's own config.toml (symlinked into the home) may remap them.
     #[test]
     fn the_input_mode_renders_into_each_switching_backend() {
-        let dir = std::env::temp_dir().join(format!("tmm-spawn-mode-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
+        // Removed on drop, also on failure (board #269).
+        let scratch = crate::tmux::Scratch::new("spawn-mode");
+        let dir = std::path::PathBuf::from(scratch.path());
         let cli = || -> serde_json::Value {
             serde_json::from_str(&std::fs::read_to_string(dir.join("settings/cli.json")).unwrap()).unwrap()
         };
@@ -1475,7 +1476,6 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         // config.toml (symlinked into the home) cannot make it queue.
         assert!(steer.contains(r#"-c 'tui.keymap.composer.submit="enter"'"#), "{steer}");
         assert!(steer.contains(r#"-c 'tui.keymap.composer.queue="tab"'"#), "{steer}");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Board #245: `steer` is accepted only where the switch was measured;

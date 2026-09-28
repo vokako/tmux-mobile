@@ -1209,6 +1209,15 @@ mod tests {
         });
         let name = *panicked.unwrap_err().downcast::<String>().unwrap();
         assert!(!session_exists(&name), "a panicking test still cleans up");
+        // A directory-only guard (no session) — how the file-only tests use
+        // it (#269) — removes its directory when the test fails mid-way.
+        let failed = std::panic::catch_unwind(|| {
+            let s = Scratch::new("scratch-dir-panic");
+            std::fs::write(std::path::Path::new(&s.path()).join("state.db"), "x").unwrap();
+            panic!("{}", s.path());
+        });
+        let dir = *failed.unwrap_err().downcast::<String>().unwrap();
+        assert!(!std::path::Path::new(&dir).exists(), "a failing file-only test leaves no directory");
     }
 
     #[test]
