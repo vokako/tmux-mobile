@@ -1971,6 +1971,53 @@ mod tests {
         assert!(serde_json::to_value(&warns[0]).unwrap().get("deliveries").is_none());
     }
 
+    /// Board #264 × #257 (orchestrator 11:29): a CLI reads a command only as a
+    /// whole line, so `hub_command` never goes through delivery holding. At a
+    /// BUSY queue-mode kiro the chat line is held while the command is typed
+    /// at once, stays out of the held batch, and owns only its receipt row.
+    #[test]
+    fn a_command_to_a_busy_queue_mode_agent_is_typed_now_never_held() {
+        crate::projects::tests::use_test_store();
+        let session = format!("tmm-cmd-busy-{}", uuid::Uuid::new_v4());
+        let ws = std::env::temp_dir().join(format!("tmm-cmd-busy-ws-{}", uuid::Uuid::new_v4()));
+        let home = ws.join(".tmm/agents/lead");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(
+            home.join("launch.json"),
+            serde_json::json!({ "backend": "kiro", "cmd": "kiro-cli chat --agent lead", "team": "", "input_mode": "queue" }).to_string(),
+        )
+        .unwrap();
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "-n", "lead", "-c", &ws.to_string_lossy(), "cat"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            let _ = std::fs::remove_dir_all(&ws);
+            return;
+        }
+        let _cleanup = KillOnDrop(session.clone(), ws.clone());
+        crate::projects::adopt(&session, Some("cmd-busy-test")).expect("adopt project");
+        // A turn is open: lead is running, so chat lines are held (#257).
+        crate::projects::telemetry::record_prompt(&session, "lead", "a long task");
+        let chat = handle_hub_request(&req("hub_post", serde_json::json!({ "session": session, "from": "human", "body": "@lead read this later" })), None);
+        assert!(chat.error.is_none(), "{:?}", chat.error.map(|e| e.message));
+        let cmd = handle_hub_request(&req("hub_command", serde_json::json!({ "session": session, "agent": "lead", "text": "/goal next step" })), None);
+        assert!(cmd.error.is_none(), "{:?}", cmd.error.map(|e| e.message));
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let text = crate::tmux::capture_pane_plain(&format!("{session}:lead"), Some(0)).unwrap_or_default();
+        let held: Vec<String> = crate::projects::telemetry::held_rows(&session, "lead").into_iter().map(|r| r.line).collect();
+        let owed = crate::projects::telemetry::owed_rows(&session, "lead");
+        assert!(text.contains("/goal next step"), "the command is typed at once, whole: {text:?}");
+        assert!(!text.contains("read this later"), "the chat line waits for the turn's end: {text:?}");
+        assert_eq!(held.len(), 1, "{held:?}");
+        assert!(held[0].contains("read this later") && !held[0].contains("/goal"), "the command is never in the held batch: {held:?}");
+        assert_eq!(owed.len(), 1, "only the command's receipt is a typed row: {owed:?}");
+        assert_eq!(owed[0].line, "goal next step", "kiro's declared echo");
+        assert_eq!(owed[0].command, Some(crate::projects::store::CommandLife::Queued), "typed into a running turn");
+    }
+
     /// Board #250 (validator 17:35): `hub_command` to `all` where one pane is
     /// in copy-mode and the other is not. The one that took it is recorded
     /// and answered as success; the refused one gets the same immediate plain

@@ -1151,6 +1151,12 @@ pub fn retain_windows(session: &str, live: &[String]) {
     }
 }
 
+/// Test-only: a window's outstanding (typed, unsettled) rows, in typed order.
+#[cfg(test)]
+pub fn owed_rows(session: &str, window: &str) -> Vec<super::store::DeliveryRow> {
+    queue(|s| s.pending_deliveries(session, Some(window))).unwrap_or_default()
+}
+
 /// Test-only: the message id each outstanding row carries, in typed order.
 #[cfg(test)]
 pub fn owed_message_ids(session: &str) -> Vec<String> {
