@@ -383,6 +383,14 @@ impl Store {
             .map_err(|e| format!("insert command delivery: {e}"))
     }
 
+    /// Put one command row back behind the turn that just opened (board #264).
+    pub fn requeue_command(&self, id: i64) -> Result<bool, String> {
+        self.conn
+            .execute("UPDATE deliveries SET command = 2 WHERE id = ?1 AND command = 1", rusqlite::params![id])
+            .map(|n| n > 0)
+            .map_err(|e| format!("requeue command: {e}"))
+    }
+
     /// The turn that queued a window's commands has ended: they run from
     /// here, so each becomes Idle and the prompts that follow may take it
     /// (board #264). Nothing is deleted — rows retire one per prompt.

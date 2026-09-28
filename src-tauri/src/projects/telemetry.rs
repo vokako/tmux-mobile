@@ -958,8 +958,15 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
     // of ours proves that command echoes nothing: that ONE row is dropped,
     // the rows behind it stay owed. A prompt that was a chat line of ours
     // (a held batch released at the turn's end, say) leaves it alone.
+    // A prompt that only QUOTES the command ("please do goal a", typed by a
+    // person) is not its echo and no proof it echoed nothing (orchestrator
+    // 11:43): the command waits behind the turn that prompt opened.
     if let Some(row) = next_command.filter(|_| !command_hit && won.is_empty()) {
-        let _ = queue(|s| s.delete_delivery_id(row.id));
+        if strip_ws(prompt).contains(&strip_ws(&row.line)) {
+            let _ = queue(|s| s.requeue_command(row.id));
+        } else {
+            let _ = queue(|s| s.delete_delivery_id(row.id));
+        }
     }
     // A turn just opened. This is the ONE honest "it started working" signal:
     // pane activity cannot be it, because an agent TUI repaints its prompt
@@ -2652,7 +2659,18 @@ mod tests {
         crate::projects::tests::use_test_store();
         let session = format!("cmd-eq-{}", uuid::Uuid::new_v4());
         record_command_delivery(&session, "kiro", "goal a", "m-a").unwrap();
-        assert!(!record_prompt(&session, "kiro", "goal a and something else"), "containment is not equality");
+        // Orchestrator 11:43: a local prompt that quotes it, with no chat line
+        // owed, settles nothing; the command waits behind that turn…
+        assert!(!record_prompt(&session, "kiro", "please do goal a"), "containment is not equality");
+        let last = recent_events(&session, 0).into_iter().last().unwrap();
+        assert_eq!(last.via, "local", "the typed prompt renders as itself");
+        assert!(last.deliveries.is_empty(), "no bubble is checked");
+        assert_eq!(held(&session, "kiro"), vec!["goal a"], "still owed");
+        // …and its real echo, after that turn, settles it: no INPUT row.
+        record_notification(&session, "kiro", "completed", now());
+        assert!(record_prompt(&session, "kiro", "goal a"));
+        let last = recent_events(&session, 0).into_iter().last().unwrap();
+        assert_eq!((last.via.as_str(), last.deliveries.iter().map(|d| d.msg.as_str()).collect::<Vec<_>>()), ("app", vec!["m-a"]));
         assert!(held(&session, "kiro").is_empty());
         // Whitespace is forgiven the same way as for chat lines. (That prompt
         // opened a turn; end it, so the next command is typed at an idle pane.)

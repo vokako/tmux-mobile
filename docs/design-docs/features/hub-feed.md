@@ -41,7 +41,9 @@ is consumed. A command row is never swept: an "unconfirmed" warn about a
 command would be a lie. A prompt takes AT MOST ONE command row, the window's
 oldest Idle one (a CLI runs commands in the order typed): settled if the prompt
 EQUALS its declared echo (whitespace-blind, the chat rule, never containment —
-a command's echo is the whole submission), dropped if the prompt was neither it nor one of our chat lines, and left
+a command's echo is the whole submission); a prompt of nobody's that merely
+QUOTES the echo ("please do goal a", typed by a person) puts the row back
+behind the turn it opened, and one that does not even quote it drops it, dropped if the prompt was neither it nor one of our chat lines, and left
 owed when the prompt settled a chat line of ours — one prompt is one
 submission, so a delivered line that merely contains "goal a" is not the
 command's echo (validator, #264); the rows
