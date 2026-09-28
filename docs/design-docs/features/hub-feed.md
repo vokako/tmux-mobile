@@ -40,7 +40,10 @@ typing, and the #249 matcher settles it — the bubble gets the check, the echo
 is consumed. A command row is never swept: an "unconfirmed" warn about a
 command would be a lie. A prompt takes AT MOST ONE command row, the window's
 oldest Idle one (a CLI runs commands in the order typed): settled if it carries
-it, dropped if the prompt was neither it nor one of our chat lines; the rows
+it, dropped if the prompt was neither it nor one of our chat lines, and left
+owed when the prompt settled a chat line of ours — one prompt is one
+submission, so a delivered line that merely contains "goal a" is not the
+command's echo (validator, #264); the rows
 behind it stay owed (validator, #264: two `/goal` queued at one busy pane used
 to lose the second to the first echo). A command typed into a running turn is
 Queued — untouchable by that turn's prompts — until the turn's end promotes it.

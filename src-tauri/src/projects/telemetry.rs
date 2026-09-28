@@ -935,7 +935,12 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
     let (chat, commands): (Vec<_>, Vec<_>) = rows.into_iter().partition(|r| r.command.is_none());
     let next_command = commands.iter().find(|r| r.command == Some(super::store::CommandLife::Idle));
     let mut settled = settled_by(&chat, prompt);
-    let command_hit = next_command.is_some_and(|row| !settled_by(std::slice::from_ref(row), prompt).is_empty());
+    // One prompt is ONE submission: a chat line of ours OR a command, never
+    // both. A delivered line whose text merely contains a command's short
+    // echo ("please do goal a") is that line's receipt, and the command is
+    // still to run (validator, #264): it is neither settled nor dropped.
+    let command_hit = settled.is_empty()
+        && next_command.is_some_and(|row| !settled_by(std::slice::from_ref(row), prompt).is_empty());
     if command_hit {
         settled.extend(next_command);
     }
@@ -2647,7 +2652,17 @@ mod tests {
         record_delivery(&session, "kiro", "[tmm chat] lead: @kiro hi", "m-chat");
         assert!(record_prompt(&session, "kiro", "[tmm chat] lead: @kiro hi"));
         assert_eq!(held(&session, "kiro"), vec!["goal a"], "the command is still owed");
+        // Validator on #264: a chat line that CONTAINS the command's echo is
+        // that line's receipt only — the command has not run yet.
+        record_delivery(&session, "kiro", "[tmm chat] lead: @kiro please do goal a", "m-chat2");
+        assert!(record_prompt(&session, "kiro", "[tmm chat] lead: @kiro please do goal a"));
+        let last = recent_events(&session, 0).into_iter().last().unwrap();
+        assert_eq!(last.deliveries.iter().map(|d| d.msg.as_str()).collect::<Vec<_>>(), vec!["m-chat2"], "only the chat bubble is checked");
+        assert_eq!(held(&session, "kiro"), vec!["goal a"], "the command is still owed");
+        // Then the command's own echo settles it, not as INPUT.
         assert!(record_prompt(&session, "kiro", "goal a"));
+        let last = recent_events(&session, 0).into_iter().last().unwrap();
+        assert_eq!((last.via.as_str(), last.deliveries.iter().map(|d| d.msg.as_str()).collect::<Vec<_>>()), ("app", vec!["m-a"]));
         assert!(held(&session, "kiro").is_empty());
     }
 
