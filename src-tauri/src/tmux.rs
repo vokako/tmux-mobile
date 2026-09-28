@@ -1134,9 +1134,82 @@ pub fn is_server_running() -> bool {
     run_tmux(&["list-sessions"]).is_ok()
 }
 
+/// Scratch tmux sessions and directories for lib tests (board #268). Every
+/// cargo run on the host shares ONE tmux server and one temp dir, so a fixed
+/// name let a concurrent run kill another run's session or delete its
+/// directory mid-test — and a leaked `tmm-test-share-a` was auto-adopted as a
+/// live project. Names carry the pid; the guard is taken before anything
+/// exists and, on drop (also on panic), kills its sessions and removes its
+/// directory (the #251 rule).
+#[cfg(test)]
+pub(crate) struct Scratch {
+    tag: String,
+    sessions: Vec<String>,
+    dir: std::path::PathBuf,
+}
+
+#[cfg(test)]
+impl Scratch {
+    /// `tmm-test-<tag>-<pid>`, with a fresh empty directory of that name.
+    pub(crate) fn new(tag: &str) -> Self {
+        let tag = format!("tmm-test-{tag}-{}", std::process::id());
+        let dir = std::env::temp_dir().join(&tag);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create the scratch dir");
+        Scratch { tag, sessions: Vec::new(), dir }
+    }
+    /// A session name owned by this guard (killed now if a crashed run of
+    /// this same pid left it, and again on drop).
+    pub(crate) fn session(&mut self, part: &str) -> String {
+        let name = format!("{}-{part}", self.tag);
+        let _ = kill_session(&name);
+        self.sessions.push(name.clone());
+        name
+    }
+    /// The canonical scratch directory path.
+    pub(crate) fn path(&self) -> String {
+        self.dir.canonicalize().unwrap_or_else(|_| self.dir.clone()).to_string_lossy().to_string()
+    }
+}
+
+#[cfg(test)]
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        for s in &self.sessions {
+            let _ = kill_session(s);
+        }
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_scratch_guard_owns_unique_names_and_cleans_up_on_drop() {
+        let (session, dir) = {
+            let mut s = Scratch::new("scratch");
+            let session = s.session("x");
+            assert!(session.starts_with("tmm-test-scratch-") && session.contains(&std::process::id().to_string()));
+            if new_session(&session, Some(&s.path()), None).is_err() {
+                eprintln!("no tmux server — skipping");
+                return;
+            }
+            assert!(session_exists(&session));
+            (session, s.path())
+        };
+        assert!(!session_exists(&session), "the guard killed its session");
+        assert!(!std::path::Path::new(&dir).exists(), "and removed its directory");
+        let panicked = std::panic::catch_unwind(|| {
+            let mut s = Scratch::new("scratch-panic");
+            let name = s.session("y");
+            new_session(&name, None, None).unwrap();
+            panic!("{name}");
+        });
+        let name = *panicked.unwrap_err().downcast::<String>().unwrap();
+        assert!(!session_exists(&name), "a panicking test still cleans up");
+    }
 
     #[test]
     fn exact_session_prefixes_once() {

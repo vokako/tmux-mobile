@@ -678,7 +678,8 @@ mod tests {
     #[test]
     fn stop_ends_the_whole_process_group_not_just_the_wrapper() {
         let name = format!("tmm-test-pg-{}", std::process::id());
-        let session = "tmm-test-tasks";
+        let mut scratch = tmux::Scratch::new("tasks");
+        let session = &scratch.session("s");
         let argv: Vec<String> = ["bash", "-c", "trap '' INT; nohup sleep 300 >/dev/null 2>&1; echo never"]
             .iter()
             .map(|s| s.to_string())
@@ -715,7 +716,6 @@ mod tests {
         assert!(gone, "sleep {child} was orphaned by stop — only the sh wrapper died");
 
         let _ = remove(&name);
-        let _ = tmux::kill_session(session);
     }
 
     /// A PRIVATE tmux server for tests that sweep: a TTL-0 reap on the shared

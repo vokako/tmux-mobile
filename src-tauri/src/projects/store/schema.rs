@@ -1066,7 +1066,7 @@ mod tests {
     /// children, which a naive `DROP TABLE projects` would cascade away.
     #[test]
     fn migrating_a_v1_database_keeps_its_rows_and_moves_the_unique_constraint() {
-        let dir = std::env::temp_dir().join("tmm-store-migrate");
+        let dir = std::env::temp_dir().join(format!("tmm-store-migrate-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("state.db");

@@ -196,7 +196,8 @@ pub(crate) mod tests {
                 std::env::set_var("TMM_STATE_DB", child);
                 return;
             }
-            let dir = std::env::temp_dir().join("tmm-projects-test");
+            // Per process (board #268): a concurrent run wiped a shared dir.
+            let dir = std::env::temp_dir().join(format!("tmm-projects-test-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
             std::env::set_var("TMM_STATE_DB", dir.join("state.db"));

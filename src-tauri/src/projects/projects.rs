@@ -769,15 +769,12 @@ mod tests {
     /// ones that already existed. The guards are the interesting part.
     #[test]
     fn auto_track_picks_up_outside_sessions_but_respects_the_guards() {
-        let root = std::env::temp_dir().join("tmm-proj-auto");
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
+        let mut scratch = tmux::Scratch::new("auto");
         use_test_store();
-        let path = root.canonicalize().unwrap().to_string_lossy().to_string();
-        let old = "tmm-test-auto-old";
-        let fresh = "tmm-test-auto-fresh";
+        let path = scratch.path();
+        let old = &scratch.session("old");
+        let fresh = &scratch.session("fresh");
         for s in [old, fresh] {
-            let _ = tmux::kill_session(s);
             tmux::ensure_session(s, &path).unwrap();
         }
 
@@ -802,41 +799,30 @@ mod tests {
             auto_adopt_with(&ages, ts).unwrap().is_empty(),
             "an archived project must not come back on the next tick"
         );
-
-        for s in [old, fresh] {
-            let _ = tmux::kill_session(s);
-        }
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn two_sessions_in_the_same_directory_are_two_projects() {        let root = std::env::temp_dir().join("tmm-proj-share");
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
+    fn two_sessions_in_the_same_directory_are_two_projects() {
+        let mut scratch = tmux::Scratch::new("share");
         use_test_store();
-        let path = root.canonicalize().unwrap().to_string_lossy().to_string();
-        for s in ["tmm-test-share-a", "tmm-test-share-b"] {
-            let _ = tmux::kill_session(s);
+        let path = scratch.path();
+        let (a, b) = (scratch.session("a"), scratch.session("b"));
+        for s in [&a, &b] {
             tmux::ensure_session(s, &path).unwrap();
         }
 
-        let first = adopt("tmm-test-share-a", None).unwrap();
+        let first = adopt(&a, None).unwrap();
         // Used to fail with "<path> is already project ..." — several sessions
         // parked in one directory (typically $HOME) is the normal case.
-        let second = adopt("tmm-test-share-b", None).unwrap();
+        let second = adopt(&b, None).unwrap();
         assert_eq!(first["project"]["path"], second["project"]["path"]);
         assert_ne!(first["project"]["id"], second["project"]["id"]);
 
-        let again = adopt("tmm-test-share-a", None);
+        let again = adopt(&a, None);
         assert!(
             again.is_err_and(|e| e.contains("already tracked")),
             "the same session twice is the real conflict"
         );
-
-        for s in ["tmm-test-share-a", "tmm-test-share-b"] {
-            let _ = tmux::kill_session(s);
-        }
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// The P0 acceptance criterion, end to end against a real tmux server:
@@ -844,13 +830,11 @@ mod tests {
     ///
     #[test]
     fn adopt_then_down_then_up_restores_the_workspace() {
-        let root = std::env::temp_dir().join("tmm-proj-e2e");
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("api")).unwrap();
+        let mut scratch = tmux::Scratch::new("e2e");
         use_test_store();
-        let path = root.canonicalize().unwrap().to_string_lossy().to_string();
-        let session = "tmm-test-e2e";
-        let _ = tmux::kill_session(session);
+        let path = scratch.path();
+        std::fs::create_dir_all(format!("{path}/api")).unwrap();
+        let session = &scratch.session("s");
 
         tmux::ensure_session(session, &path).unwrap();
         tmux::rename_window(&format!("{session}:^"), "editor").unwrap();
@@ -899,8 +883,5 @@ mod tests {
         // Capturing a live project must not disturb a settled declaration.
         capture_once().unwrap();
         assert_eq!(with_store(|s| s.slots(&id)).unwrap().len(), 2);
-
-        let _ = tmux::kill_session(session);
-        let _ = std::fs::remove_dir_all(&root);
     }
 }

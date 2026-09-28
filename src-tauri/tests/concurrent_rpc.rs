@@ -384,7 +384,7 @@ async fn slow_rpc_does_not_block_fast_rpc() {
 
     // Create a ~4 MB temp file — big enough that base64 + write takes
     // measurable time, small enough to stay under fs::MAX_READ_SIZE.
-    let tmp = std::env::temp_dir().join("tmux_mobile_slow_rpc_test.bin");
+    let tmp = std::env::temp_dir().join(format!("tmux_mobile_slow_rpc_test-{}.bin", std::process::id()));
     {
         let mut f = tokio::fs::File::create(&tmp).await.unwrap();
         let chunk = vec![0u8; 64 * 1024];

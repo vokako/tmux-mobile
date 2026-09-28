@@ -323,10 +323,9 @@ mod tests {
 
     #[test]
     fn up_and_down_reconcile_a_real_session_idempotently() {
-        let path = std::env::temp_dir().join("tmm-proj-recon");
-        std::fs::create_dir_all(&path).unwrap();
-        let p = project("tmm-test-recon", path.to_str().unwrap());
-        let _ = tmux::kill_session(&p.session);
+        let mut scratch = tmux::Scratch::new("recon");
+        let path = std::path::PathBuf::from(scratch.path());
+        let p = project(&scratch.session("s"), path.to_str().unwrap());
 
         let slots = vec![
             slot("editor", "", true),
@@ -363,7 +362,6 @@ mod tests {
         down(&p).unwrap();
         assert!(!tmux::session_exists(&p.session));
         down(&p).unwrap_or_else(|e| panic!("down must be idempotent: {e}"));
-        let _ = std::fs::remove_dir_all(&path);
     }
 
     /// Restarting ONE stopped agent must bring back THAT agent only. It used
@@ -373,11 +371,10 @@ mod tests {
     /// never a degraded `--resume`.
     #[test]
     fn up_agent_restarts_only_the_named_agent_with_its_exact_conversation() {
-        let path = std::env::temp_dir().join(format!("tmm-proj-upagent-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&path).unwrap();
+        let mut scratch = tmux::Scratch::new("upagent");
+        let path = std::path::PathBuf::from(scratch.path());
         let ws = path.to_str().unwrap();
-        let p = project("tmm-test-upagent", ws);
-        let _ = tmux::kill_session(&p.session);
+        let p = project(&scratch.session("s"), ws);
 
         // Two managed agents, both with a recipe (a harmless `echo` stands in
         // for the CLI) and both with a recorded conversation.
@@ -433,7 +430,6 @@ mod tests {
         assert!(tmux::find_window_by_name(&p.session, "b").is_none(), "still stopped");
 
         down(&p).unwrap();
-        let _ = std::fs::remove_dir_all(&path);
     }
 
     /// The restart replay must never send-keys a long line (tty bursts ≳2KB

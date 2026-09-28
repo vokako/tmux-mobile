@@ -173,12 +173,17 @@ flaky wall-clock assertions in the test.
   board #216 (2026-09-20) — the live `kiro_engine = "v3"` turned three
   v2-default assertions red on every branch, and earlier the spawn tests
   had pointed the whole process at the real `state.db`.
-- Every Rust test that creates a tmux session names it for its process and
-  test (e.g. `_tmux_mobile_test_<pid>_t06`) and holds a guard that kills it
-  on drop, right after the session exists. Every cargo run on the host
-  shares one tmux server, so a fixed name let a second run kill or reuse the
-  first run's session mid-test. Reason: board #265 (t06 flaked during #264);
-  the guard rule is #251.
+- Every Rust test that creates a tmux session or a scratch directory names
+  it for its process: `tmux::Scratch::new(tag)` in the lib (sessions
+  `tmm-test-<tag>-<pid>-<part>`, directory `<temp>/tmm-test-<tag>-<pid>`),
+  `TestSession` in `main.rs` (`_tmux_mobile_test_<pid>_<test>`), a pid or
+  uuid suffix elsewhere. The guard is taken before anything exists and kills
+  and removes on drop, also on panic. Every cargo run on the host shares one
+  tmux server and one temp dir, so a fixed name let a second run kill,
+  reuse or delete the first run's session or directory mid-test, and a
+  leaked `tmm-test-share-a` was auto-adopted by the live server as a
+  project. Reason: board #265 (t06 flaked during #264) and #268 (the lib
+  tests #265 missed); the guard rule is #251.
 
 ## Current source-contract inventory
 
