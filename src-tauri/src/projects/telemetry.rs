@@ -939,8 +939,10 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
     // both. A delivered line whose text merely contains a command's short
     // echo ("please do goal a") is that line's receipt, and the command is
     // still to run (validator, #264): it is neither settled nor dropped.
-    let command_hit = settled.is_empty()
-        && next_command.is_some_and(|row| !settled_by(std::slice::from_ref(row), prompt).is_empty());
+    // And a command's echo is the WHOLE submitted prompt (orchestrator 11:40):
+    // equality under the same whitespace rule as the chat match, never
+    // containment — "goal a then b" is not the echo of `/goal a`.
+    let command_hit = settled.is_empty() && next_command.is_some_and(|row| strip_ws(&row.line) == strip_ws(prompt));
     if command_hit {
         settled.extend(next_command);
     }
@@ -2640,6 +2642,23 @@ mod tests {
             vec![("goal a".into(), vec!["m-a".to_string()]), ("goal a then b".into(), vec!["m-b".to_string()])],
             "each echo names exactly its own bubble"
         );
+    }
+
+    /// A command's echo is the whole prompt: one that merely CONTAINS it is
+    /// not its receipt (orchestrator, #264) — and, being nothing of ours,
+    /// proves that command echoed nothing, so its row goes.
+    #[test]
+    fn a_command_echo_must_equal_the_prompt() {
+        crate::projects::tests::use_test_store();
+        let session = format!("cmd-eq-{}", uuid::Uuid::new_v4());
+        record_command_delivery(&session, "kiro", "goal a", "m-a").unwrap();
+        assert!(!record_prompt(&session, "kiro", "goal a and something else"), "containment is not equality");
+        assert!(held(&session, "kiro").is_empty());
+        // Whitespace is forgiven the same way as for chat lines. (That prompt
+        // opened a turn; end it, so the next command is typed at an idle pane.)
+        record_notification(&session, "kiro", "completed", now());
+        record_command_delivery(&session, "kiro", "goal do x", "m-x").unwrap();
+        assert!(record_prompt(&session, "kiro", "goal  do\nx"));
     }
 
     /// A prompt that was one of OUR chat lines (a held batch released at the
