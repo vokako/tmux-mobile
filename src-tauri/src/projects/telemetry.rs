@@ -617,29 +617,24 @@ fn forget_window_deliveries(session: &str, window: &str) {
 /// and a restart that replays the log (`replay_turn_facts`) derives the
 /// state the live record had. Two unserialized paths used to take their
 /// order and their row in opposite sequence (prompt: order then row; stop:
-/// row then order), and a concurrent pair could land reversed.
-fn turn_fact(
-    session: &str,
-    window: &str,
-    ts: u64,
-    event: Option<(&str, String, String, String, Vec<DeliveryRef>)>,
-    apply: impl FnOnce(&mut Rec, u64, u64),
-) {
-    turn_fact_unless_row(session, window, ts, |_| false, event, apply, None);
+/// row then order), and a concurrent pair could land reversed. That entry is
+/// `turn_fact_unless_row`, or `turn_fact_held` under the lock below.
+///
+/// The ONE lock turn facts are recorded under (board #249). A caller whose
+/// step spans more than the fact — a prompt settling its delivery rows, an
+/// end retiring a command (board #264, orchestrator 11:57) — takes it itself
+/// and records through `turn_fact_held`, so no other turn fact of any window
+/// can land between its read and its write.
+static TURN_ORDER: Mutex<()> = Mutex::new(());
+
+fn turn_order() -> std::sync::MutexGuard<'static, ()> {
+    TURN_ORDER.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// `turn_fact` for a prompt: its requesters ride in the SAME activity INSERT
-/// as the row, under the same ORDER lock (board #257, validator 05:04).
-fn prompt_fact(
-    session: &str,
-    window: &str,
-    ts: u64,
-    event: (&str, String, String, String, Vec<DeliveryRef>),
-    requesters: Vec<String>,
-    apply: impl FnOnce(&mut Rec, u64, u64),
-) {
-    turn_fact_unless_row(session, window, ts, |_| false, Some(event), apply, Some(requesters));
-}
+/// Test-only: runs once inside the next prompt's critical section, so a test
+/// can race another turn fact against it and prove it waits (board #264).
+#[cfg(test)]
+static IN_PROMPT_HOOK: Mutex<Option<Box<dyn FnOnce() + Send>>> = Mutex::new(None);
 
 /// `turn_fact`, skipped when `same` says the record already holds exactly
 /// this fact as its newest one (read under the same lock). Returns whether it
@@ -664,8 +659,22 @@ fn turn_fact_unless_row(
     apply: impl FnOnce(&mut Rec, u64, u64),
     requesters: Option<Vec<String>>,
 ) -> bool {
-    static ORDER: Mutex<()> = Mutex::new(());
-    let _order = ORDER.lock().unwrap_or_else(|e| e.into_inner());
+    let order = turn_order();
+    turn_fact_held(&order, session, window, ts, same, event, apply, requesters)
+}
+
+/// `turn_fact_unless_row` for a caller already holding `turn_order()`.
+#[allow(clippy::too_many_arguments)]
+fn turn_fact_held(
+    _order: &std::sync::MutexGuard<'static, ()>,
+    session: &str,
+    window: &str,
+    ts: u64,
+    same: impl FnOnce(&Rec) -> bool,
+    event: Option<(&str, String, String, String, Vec<DeliveryRef>)>,
+    apply: impl FnOnce(&mut Rec, u64, u64),
+    requesters: Option<Vec<String>>,
+) -> bool {
     let held = store().lock().unwrap().get(&(session.to_string(), window.to_string())).cloned().unwrap_or_default();
     if same(&held) {
         return false;
@@ -690,7 +699,11 @@ fn turn_fact_unless_row(
 /// turn stays open.
 pub fn record_notification(session: &str, window: &str, kind: &str, ts: u64) {
     let kind_is_ask = matches!(kind, "permission_required" | "input_required");
-    // Did the turn this end closes accept a prompt? Read before the end lands.
+    // ONE critical section (board #264, orchestrator 11:57): whether the
+    // ending turn had a prompt is read, the end written and the window's
+    // command rows stepped under the lock a prompt settles them under, so no
+    // echo can land between the read and the retirement.
+    let order = turn_order();
     let turn_had_prompt = store()
         .lock()
         .unwrap()
@@ -698,7 +711,7 @@ pub fn record_notification(session: &str, window: &str, kind: &str, ts: u64) {
         .is_some_and(|r| r.prompt.is_some() && r.prompt_seq > r.end_seq);
     let event = ("notif", kind.to_string(), String::new(), String::new(), Vec::new());
     let kind = kind.to_string();
-    turn_fact(session, window, ts, Some(event), |r, ts, seq| match kind.as_str() {
+    turn_fact_held(&order, session, window, ts, |_| false, Some(event), |r, ts, seq| match kind.as_str() {
         "permission_required" | "input_required" => {
             r.ask = Some((kind, ts));
             r.ask_seq = seq;
@@ -708,7 +721,7 @@ pub fn record_notification(session: &str, window: &str, kind: &str, ts: u64) {
             r.end_seq = seq;
             r.ask = None; // a finished turn cannot still be asking
         }
-    });
+    }, None);
     if !kind_is_ask {
         end_commands(session, window, turn_had_prompt);
     }
@@ -735,17 +748,18 @@ pub fn record_notification(session: &str, window: &str, kind: &str, ts: u64) {
 /// the feed draws nothing for it because the room already carries
 /// `[tmm] interrupted <name>`.
 pub fn record_interrupt(session: &str, window: &str) {
+    let order = turn_order(); // one critical section, as `record_notification`
     let turn_had_prompt = store()
         .lock()
         .unwrap()
         .get(&(session.to_string(), window.to_string()))
         .is_some_and(|r| r.prompt.is_some() && r.prompt_seq > r.end_seq);
     let event = ("notif", "interrupted".to_string(), String::new(), String::new(), Vec::new());
-    turn_fact(session, window, now(), Some(event), |r, ts, seq| {
+    turn_fact_held(&order, session, window, now(), |_| false, Some(event), |r, ts, seq| {
         r.end = Some(("completed".to_string(), ts));
         r.end_seq = seq;
         r.ask = None;
-    });
+    }, None);
     end_commands(session, window, turn_had_prompt);
 }
 
@@ -952,6 +966,14 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
     let text = truncate_chars(prompt, MAX_PROMPT_CHARS);
     let ts = now();
     recovery_mark(session);
+    // The settlement and the prompt fact are ONE critical section under the
+    // turn-fact lock (board #264): an end edge stepping the command rows
+    // cannot interleave with this read-match-delete-record.
+    let order = turn_order();
+    #[cfg(test)]
+    if let Some(hook) = IN_PROMPT_HOOK.lock().unwrap().take() {
+        hook();
+    }
     let rows = queue(|s| s.pending_deliveries(session, Some(window))).unwrap_or_default();
     // Chat lines and commands settle apart (board #264, orchestrator 11:31):
     // the chat rows by the #249 matcher as always; of the command rows only
@@ -1001,10 +1023,12 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
     // the row's text is cut at MAX_PROMPT_CHARS for display, and a combined
     // prompt of held lines can put its second requester past that cut.
     let requesters = crate::address::requesters(prompt);
-    prompt_fact(session, window, ts, ("prompt", text, String::new(), via.to_string(), refs), requesters, |r, ts, seq| {
+    // Its requesters ride in the SAME activity INSERT as the row (#257).
+    let event = ("prompt", text, String::new(), via.to_string(), refs);
+    turn_fact_held(&order, session, window, ts, |_| false, Some(event), |r, ts, seq| {
         r.prompt = Some(ts);
         r.prompt_seq = seq;
-    });
+    }, Some(requesters));
     acked
 }
 
@@ -2647,6 +2671,36 @@ mod tests {
         record_command_delivery(&session, "kiro", "goal c", "m-c").unwrap();
         record_notification(&session, "kiro", "completed", now());
         assert_eq!(held(&session, "kiro"), vec!["goal c"], "the oldest Idle retired, the next stays");
+    }
+
+    /// Validator 11:56 / orchestrator 11:57: an end edge cannot land inside a
+    /// prompt's settlement. The end is released INSIDE the echo's critical
+    /// section; it must wait, then see that the turn had a prompt, and so
+    /// retire nothing — the second queued command stays owed.
+    #[test]
+    fn an_end_racing_an_echo_waits_and_keeps_the_next_command() {
+        crate::projects::tests::use_test_store();
+        let session = format!("cmd-race-{}", uuid::Uuid::new_v4());
+        assert!(!record_prompt(&session, "kiro", "a long task"));
+        record_command_delivery(&session, "kiro", "goal a", "m-a").unwrap();
+        record_command_delivery(&session, "kiro", "goal b", "m-b").unwrap();
+        record_notification(&session, "kiro", "completed", now()); // both Idle now
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (s2, d2) = (session.clone(), done.clone());
+        let racer: std::sync::Arc<Mutex<Option<std::thread::JoinHandle<()>>>> = Default::default();
+        let slot = racer.clone();
+        *IN_PROMPT_HOOK.lock().unwrap() = Some(Box::new(move || {
+            *slot.lock().unwrap() = Some(std::thread::spawn(move || {
+                record_notification(&s2, "kiro", "completed", now());
+                d2.store(true, std::sync::atomic::Ordering::SeqCst);
+            }));
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }));
+        assert!(record_prompt(&session, "kiro", "goal a"), "goal a's echo");
+        assert!(!done.load(std::sync::atomic::Ordering::SeqCst), "the end waited for the echo's section");
+        racer.lock().unwrap().take().unwrap().join().unwrap();
+        assert_eq!(held(&session, "kiro"), vec!["goal b"], "the end saw goal a's prompt and retired nothing");
+        assert!(record_prompt(&session, "kiro", "goal b"), "and goal b's own echo settles it");
     }
 
     /// A command typed into a RUNNING turn is queued by the CLI: no prompt of

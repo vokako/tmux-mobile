@@ -37,27 +37,38 @@ on kiro, claude, omp and kimi; every other `/name` is `None` — validator,
 settled by an unrelated later prompt). Where it has one, `hub_command` records
 a delivery row (v28 `deliveries.command`) carrying the room line's id, BEFORE
 typing, and the #249 matcher settles it — the bubble gets the check, the echo
-is consumed. A command row is never swept: an "unconfirmed" warn about a
-command would be a lie. A prompt takes AT MOST ONE command row, the window's
-oldest Idle one (a CLI runs commands in the order typed): settled if the prompt
-EQUALS its declared echo (whitespace-blind, the chat rule, never containment —
-a command's echo is the whole submission); a prompt of nobody's that merely
-QUOTES the echo ("please do goal a", typed by a person) puts the row back
-behind the turn it opened, and one that does not even quote it drops it, dropped if the prompt was neither it nor one of our chat lines, and left
-owed when the prompt settled a chat line of ours — one prompt is one
-submission, so a delivered line that merely contains "goal a" is not the
-command's echo (validator, #264); the rows
-behind it stay owed (validator, #264: two `/goal` queued at one busy pane used
-to lose the second to the first echo). A command typed into a running turn is
-Queued — untouchable by that turn's prompts — until the turn's end promotes it.
-A turn end that closes a turn with no prompt of its own retires the oldest Idle
-command row (one row): its CLI ran or failed it without a hook, and a later
-look-alike prompt must not claim it (validator, #264); an end after a prompt
-retires nothing, because that prompt was the previous command's turn.
-Rows go in bulk only with their window (`retain_windows`). A command bubble
-shows the check or nothing — never a hollow ring, which would promise an echo
-most commands never send. A `/command` is typed by `hub_command` directly and
-never passes through #257 holding, so it always reaches the CLI as a whole line.
+is consumed. The row's life, each rule from a review of #264:
+
+- **Never swept.** An "unconfirmed" warn about a command would be a lie.
+- **One prompt, one submission.** A prompt that settled a chat line of ours
+  settles no command, so a delivered line that merely contains "goal a" is
+  not the command's echo.
+- **FIFO, one row per prompt.** A prompt looks only at the window's oldest Idle
+  command row (a CLI runs commands in the order typed). It settles the row when
+  it EQUALS the declared echo (whitespace-blind, the chat rule; never
+  containment, since a command's echo is the whole submission). A prompt of
+  nobody's that only QUOTES the echo ("please do goal a", typed by a person)
+  puts the row back behind the turn it opened; one that does not even quote it
+  drops the row. The rows behind stay owed: two `/goal` queued at one busy
+  pane settle in order.
+- **Queued behind a running turn.** A command typed into a running turn is
+  Queued, untouchable by that turn's prompts, until the turn's end promotes
+  it to Idle.
+- **An end without a prompt retires one row.** An end (stop, failure,
+  interrupt) closing a turn that had no prompt of its own retires the oldest
+  Idle row: its CLI ran or failed it without a hook, and a later look-alike
+  must not claim it. An end after a prompt retires nothing, because that
+  prompt was the previous command's turn.
+- **One critical section.** A prompt's read-match-delete-record and an end's
+  read-write-retire-promote each run whole under the turn-fact lock, the
+  retire and promote in one SQLite transaction, so an echo cannot land
+  between an end's read and its retirement.
+- Rows go in bulk only with their window (`retain_windows`).
+
+A command bubble shows the check or nothing, never a hollow ring, which would
+promise an echo most commands never send. A `/command` is typed by
+`hub_command` directly and never passes through #257 holding, so it always
+reaches the CLI as a whole line.
 
 ### Copy feedback belongs to a message, not its body (#167, 2026-09-12)
 
