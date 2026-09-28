@@ -970,7 +970,7 @@ Measured end to end 2026-09-28 on kiro-cli 2.22.1 in a scratch stack (own config
 
 ### A `/command` goes to the CLI, not to the model
 
-`/model`, `/clear`, `/compact` are interpreted by the agent's TUI and only as a whole line, so `hub_command` types them VERBATIM into the pane — no `[tmm chat …] human:` stamp, no @address (owner, 2026-08-19). `slashCommand()` (pure + tested) requires the first token to be `/word` with NO second slash, so `/tmp/foo` and `/usr/bin/env node` stay messages; it needs a target (explicit `@name`, else the composer's recipient, `@all` = every managed agent) and falls back to an ordinary message when there is none; managed windows only (a `/clear` typed into a SHELL would run as a path); and the room records it as a `[tmm] ` lifecycle line, never a message, so the mention scanner cannot feed it back.
+`/model`, `/clear`, `/compact` are interpreted by the agent's TUI and only as a whole line, so `hub_command` types them VERBATIM into the pane — no `[tmm chat …] human:` stamp, no @address (owner, 2026-08-19). `slashCommand()` (pure + tested) requires the first token to be `/word` with NO second slash, so `/tmp/foo` and `/usr/bin/env node` stay messages; it needs a target (explicit `@name`, else the composer's recipient, `@all` = every managed agent) and falls back to an ordinary message when there is none; managed windows only (a `/clear` typed into a SHELL would run as a path); and the room records it as a `[tmm] ` lifecycle line, never a message, so the mention scanner cannot feed it back. The feed nevertheless draws that line as the sender's own bubble (board #264, hub-feed.md): what is stored is a record for the machine, what is shown is what the person said.
 
 ### An address starts a word (board #248, 2026-09-27)
 

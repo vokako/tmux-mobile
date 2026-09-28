@@ -79,3 +79,35 @@ test('Feed renders direct rows, safe rich content, complete capped tools and the
   assert.ok(empty.parentElement?.classList.contains('feed'), 'the parent snippet introduces no row wrapper');
   assert.ok(view({ blocks: [], roomReady: false }).querySelector('.sk-feed[aria-hidden="true"]'));
 });
+
+
+test('a sent /command renders as the sender bubble, whole, name in inline code (#264)', { timeout: RENDER_TIMEOUT_MS }, async () => {
+  const Feed = (await h.load('/src/lib/hub/Feed.svelte')).default;
+  const { render } = h;
+  const { createRawSnippet } = await h.load('svelte');
+  // The owner's case (2026-09-28): a long /goal that the capsule cut off.
+  const args = '你看一下 ../260928-eks-gpu-training 这里有可用的 gpu eks 集群，你准备好数据后，可以在 eks 上进行数据处理，以及先跑通一个 初始的实验，注意用验证集验证效果 *not bold* <b>x</b>';
+  const messages = [
+    { id: 'g', ts: 1, from: 'human', body: `[tmm] /goal ${args} → kiro` },
+    { id: 'm', ts: 2, from: 'human', body: '[tmm] /compact → lead, dev' },
+    { id: 's', ts: 3, from: 'human', body: '[tmm] stopped dev' },
+  ];
+  const blocks = feedBlocks(messages, [], 'chat', (n) => n);
+  const tree = h.fragment(render(Feed, { props: {
+    selected: 'fixture', roomReady: true, blocks, agents: [], managedNames: ['kiro', 'lead', 'dev'],
+    stepsRows: 5, following: false, newBelow: false,
+    emptyFeed: createRawSnippet(() => ({ render: () => '<div></div>' })),
+  } }).body as string);
+  const bubbles = tree.querySelectorAll('.msg.me');
+  assert.equal(bubbles.length, 2, 'both commands are the sender bubble, even at the chat level');
+  assert.equal(tree.querySelector('.sysline'), null, 'the lifecycle line is hidden at chat level; no command capsule');
+  const goal = bubbles[0]!.querySelector('.m-body p')!;
+  assert.equal(goal.querySelector('.m-to')?.textContent, '@kiro');
+  assert.equal(goal.querySelector('code')?.textContent, '/goal');
+  assert.ok(goal.textContent!.includes(args), 'the arguments render whole, as text');
+  assert.equal(goal.querySelector('b,em'), null, 'arguments are data, not markdown or HTML');
+  assert.equal(bubbles[0]!.querySelector('.m-unfold'), null, 'a command never folds');
+  const fan = bubbles[1]!.querySelector('.m-body p')!;
+  assert.deepEqual([...fan.querySelectorAll('.m-to')].map((n) => n.textContent), ['@lead', '@dev'], 'fan-out lists every target like a message does');
+  assert.equal(fan.querySelector('code')?.textContent, '/compact');
+});

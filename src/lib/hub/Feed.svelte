@@ -659,18 +659,10 @@
           {@const c = sysVerbColor(p.verb)}
           <div class="sys-item">
             {#if p.who}<span class="sys-who">{p.who}</span>{/if}
-            {#if p.cmd}
-              <!-- The typed line is ONE object in the composer's own
-                   command costume — splitting it into a micro-pill name
-                   plus loose args at another size broke it into fragments
-                   ("带参数的渲染好像不是很好", owner 2026-08-24). -->
-              <span class="sys-cmd">{p.text ? `${p.verb} ${p.text}` : p.verb}</span>
-            {:else}
-              {#if p.verb}
-                <span class="sys-verb" style:color={c}><span class="sv-dot" aria-hidden="true"></span>{p.verb}</span>
-              {/if}
-              {#if p.text}<span class="sys-text">{p.text}</span>{/if}
+            {#if p.verb}
+              <span class="sys-verb" style:color={c}><span class="sv-dot" aria-hidden="true"></span>{p.verb}</span>
             {/if}
+            {#if p.text}<span class="sys-text">{p.text}</span>{/if}
           </div>
           {/if}
         {/each}
@@ -695,7 +687,9 @@
              long user message (owner, 2026-08-27: "默认用户消息都截断 不要
              显示太多"): the bubble renders a rear-truncated body until the
              reader unfolds it by hand. -->
-        {@const foldable = isAsk && foldBody(parts.text) !== parts.text}
+        <!-- A sent /command (board #264) is never folded: it is one short
+             instruction, and cutting it was the capsule's failure. -->
+        {@const foldable = isAsk && !b.command && foldBody(parts.text) !== parts.text}
         {@const folded = foldable && !expanded[key]}
         <!-- An EXPANDED message is never pinned: sticky ignores the feed's
              scrolling, so a pinned screen-tall message had an unreachable
@@ -746,7 +740,13 @@
               <div class="m-head">{m.from}{#if note}<span class="m-note-state" style:color={noteStateColor(note.state)}><span class="mns-dot" aria-hidden="true"></span>{stateLabel(note.state)}</span>{/if}</div>
             {/if}
             <div class="m-body" lang={hanLang(m.body ?? '')}>
-              {#if parts.text}
+              {#if b.command && rawOpen !== key}
+                <!-- The command in the bubble's own atoms, as plain text (no
+                     markdown: arguments are data): the recipients in the
+                     leading-mention dialect, the name in the rendered inline-
+                     code dialect, the arguments wrapping in full. -->
+                <p>{#each b.command.to as n, k (n)}<span class="m-to">@{n}</span>{k < b.command.to.length - 1 ? ' ' : ''}{/each}{b.command.to.length ? ' ' : ''}<code>{b.command.name}</code>{#if b.command.args}{' '}{b.command.args}{/if}</p>
+              {:else if parts.text}
                 {#if rawOpen === key}
                   <pre class="raw">{m.body}</pre>
                 {:else}
@@ -1120,8 +1120,8 @@
      speaks (owner, 2026-08-24: "都用统一的 ui 来展示…不要随意瞎写"):
      the NAME wears the bubble header's ink (.m-head — 650-weight accent), the
      ACTION wears the status-note badge (.m-note-state — dot + word in a
-     currentColor pill, coloured by the one progressive status language), and a
-     /command is the composer's command dialect (monospace, accent lean). */
+     currentColor pill, coloured by the one progressive status language). A
+     sent /command is not a capsule: it is the person's own bubble (#264). */
   .sysline .sys-who { flex: none; font-weight: 650; color: var(--accent); letter-spacing: 0.1px; }
   .sysline .sys-verb {
     flex: none; display: inline-flex; align-items: center; gap: 4px;
@@ -1129,19 +1129,6 @@
     text-transform: uppercase; letter-spacing: 0.6px; line-height: 1.6;
   }
   .sysline .sys-verb .sv-dot { width: 5px; height: 5px; border-radius: 50%; flex: none; background: currentColor; }
-  /* A /command row: the typed line stays ONE object — name and arguments
-     together ("带参数的渲染好像不是很好", owner 2026-08-24). It wears the
-     rendered-markdown INLINE CODE dialect (.md code: soft --code-bg wash,
-     radius, NO border) with the composer's accent lean — drawn frames on the
-     inner atoms read as chrome, not content ("不用这种边框的", owner same
-     day, which also stripped the verb badge down to dot + word). */
-  .sysline .sys-cmd {
-    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: var(--font-mono);
-    color: color-mix(in srgb, var(--accent) 62%, var(--text));
-    background: var(--code-bg);
-    border-radius: 4px; padding: 0.1em 0.45em;
-  }
   .sysline .sys-text {
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text);
   }

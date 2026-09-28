@@ -4,6 +4,24 @@ The chat column of the Hub: bubble language, the single user-message anchor, lay
 
 ## Rules and their reasons
 
+### A sent `/command` is the sender's bubble, not a capsule (board #264, 2026-09-28)
+
+The room stores a command the person sent as `[tmm] /goal args → kiro, dev`
+(`hub_command`, unchanged, so old rooms render the same way). It used to be
+rendered by `sysParts` as a centred lifecycle capsule holding the typed line as
+ONE inline-code object on one line with an ellipsis, so a long `/goal` argument
+was cut off, and the capsule sat apart from the conversation it was part of
+(owner, 2026-09-28: "对于发 slash 指令模式，显示的效果还是很不好，不如直接还是气泡").
+Now `sentCommand` recognises that line and `feedBlocks` makes it an outgoing
+`msg` block, at every detail level: the same bubble as a chat line, its
+recipients in the leading-mention dialect (`@kiro`; a fan-out lists each target
+like a message does), the command name in the rendered inline-code dialect
+(`.md code`), the arguments as plain wrapping text, never folded and never
+parsed as markdown (they are data). The block's `body` is what the person typed
+(`@kiro /goal args`), so Copy and Raw read the command, not the room's marker.
+Lifecycle lines (spawn, stop, restart, interrupt, board moves) keep the capsule;
+the capsule's command costume (`.sys-cmd`) is deleted.
+
 ### Copy feedback belongs to a message, not its body (#167, 2026-09-12)
 
 Feed and Board use one `message-actions.ts` state model. A click captures the

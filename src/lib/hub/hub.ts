@@ -1076,6 +1076,22 @@ export function isSessionStart(text: string | null | undefined): boolean {
   return /^\[[^\]]+\]\s*\(session start\)$/.test(t) || /^\[[^\]]+\]\s*Start now:/.test(t);
 }
 
+/** A slash command the person sent (`hub_command` records `[tmm] /goal args →
+ * kiro, dev`) as the parts of an OUTGOING bubble (board #264, owner
+ * 2026-09-28: "不如直接还是气泡"): the recipients it was typed into, the
+ * command name, its arguments. `null` for any other line — lifecycle lines
+ * stay capsules. The room keeps storing the same line, so old rooms render
+ * their commands as bubbles too. */
+export interface SentCommand { to: string[]; name: string; args: string }
+export function sentCommand(body: string | null | undefined): SentCommand | null {
+  const line = systemLine(body);
+  if (line === null) return null;
+  const p = sysParts(line);
+  if (!p.cmd) return null;
+  const to = p.who ? p.who.split(',').map((n) => n.trim()).filter(Boolean) : [];
+  return { to, name: p.verb, args: p.text };
+}
+
 export function systemLine(body: string | null | undefined): string | null {
   for (const marker of ['[tmm] ', '⚡ ', '✔ ']) {
     if (body?.startsWith(marker)) return body.slice(marker.length);
@@ -1320,7 +1336,7 @@ export function draftUpdate(
  * `note` is a single observed fact, `steps` is a collapsible run of tool calls
  * (the "what it did between two replies" pane). */
 export type FeedBlock =
-  | { type: 'msg'; ts: number; msg: any; delivered: boolean }
+  | { type: 'msg'; ts: number; msg: any; delivered: boolean; command?: SentCommand }
   | { type: 'sys'; ts: number; key: string; items: string[] }
   | { type: 'prompt'; ts: number; window: string; text: string }
   | { type: 'progress'; ts: number; window: string; state: string; text: string }
@@ -1627,6 +1643,16 @@ export function feedBlocks(
     const sys = systemLine(m.body);
     if (sys === null) {
       return [{ type: 'msg' as const, ts: m.ts ?? 0, msg: m, delivered: false }];
+    }
+    // A command the person sent is THEIR message (board #264): the same
+    // outgoing bubble at every detail level, addressed like a chat line. Its
+    // `body` is what they typed, `@to /name args`, so copy/raw and the
+    // echo match read the command itself rather than the room's marker.
+    const command = sentCommand(m.body);
+    if (command) {
+      const typed = command.args ? `${command.name} ${command.args}` : command.name;
+      const body = [...command.to.map((n) => `@${n}`), typed].join(' ');
+      return [{ type: 'msg' as const, ts: m.ts ?? 0, msg: { ...m, body }, delivered: false, command }];
     }
     if (level === 'chat') return [];
     return [{ type: 'sys' as const, ts: m.ts ?? 0, key: `sys${m.id ?? m.ts}`, items: [sys] }];

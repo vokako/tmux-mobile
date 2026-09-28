@@ -153,7 +153,8 @@ completion).
 - Telegram-like bubbles: name header, floated time trailer, delivery ring on
   own messages; `[tmm status]` and historical `[tmm done]` markers render as ordinary
   bubbles with a state badge; `[tmm] ` lifecycle lines fold into one sys
-  capsule (dropped at the chat-only detail level); tool calls fold into one
+  capsule (dropped at the chat-only detail level), except a `/command` the
+  person sent, which is their own bubble at every level (board #264); tool calls fold into one
   lane per turn (configurable row cap, middle column scrolls, never
   truncated).
 - Long user messages fold at the rear (`elideTail`) with an in-bubble

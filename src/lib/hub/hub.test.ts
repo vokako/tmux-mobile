@@ -2,7 +2,7 @@ import test from 'node:test';
 import { ALL_TARGET, teamTarget } from './hub-composer.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
+import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 import { mentionPalette, rosterGroups, rosterMarker, sortAgentsForRoster } from './hub.ts';
 
@@ -1735,4 +1735,16 @@ test('mentionPalette: @ at a word start offers the room\'s addressable names (#2
   assert.equal(mentionPalette('/compact @b', names), null, 'a command line is typed verbatim; a name in it reaches nobody');
   assert.equal(mentionPalette('@alice /compact @b', names), null, 'an addressed command line likewise');
   assert.deepEqual(mentionPalette('see /tmp/x @b', names)?.items.map((i) => i.value), ['@bob'], 'a path mid-sentence is not a command');
+});
+
+test('sentCommand reads a recorded /command as a bubble; lifecycle lines stay capsules (#264)', () => {
+  assert.deepEqual(sentCommand('[tmm] /goal a → b and more → kiro'), { to: ['kiro'], name: '/goal', args: 'a → b and more' });
+  assert.deepEqual(sentCommand('[tmm] /compact → lead, dev'), { to: ['lead', 'dev'], name: '/compact', args: '' });
+  assert.deepEqual(sentCommand('[tmm] /model x'), { to: [], name: '/model', args: 'x' }, 'an old line without targets still renders');
+  assert.equal(sentCommand('[tmm] stopped dev'), null);
+  assert.equal(sentCommand('/goal typed prose'), null, 'only the recorded marker is a command');
+  // feedBlocks: the bubble body is what the person typed, for copy/raw.
+  const [b] = feedBlocks([{ id: 'c', ts: 1, from: 'human', body: '[tmm] /goal go → kiro' }], [], 'chat');
+  assert.equal(b?.type, 'msg');
+  assert.equal(b?.type === 'msg' && b.msg.body, '@kiro /goal go');
 });
