@@ -49,8 +49,10 @@ struct State {
     /// carries, in arrival order (#256: a later input JOINS the edge, it
     /// never replaces it). Parsed from the stamped input at
     /// `userPromptSubmit`; `[reply]` and legacy `[done]` envelopes
-    /// deliberately create no reverse edge.
-    reply_targets: HashMap<String, Vec<String>>,
+    /// deliberately create no reverse edge. Stamped with the turn EPOCH it
+    /// was built in (`telemetry::turn_epoch`, the window's last end fact):
+    /// a memo from an earlier epoch belongs to a turn that has ended.
+    reply_targets: HashMap<String, (u64, Vec<String>)>,
     /// Injected by the server after the team bus is ready. `None` on mobile.
     /// Box'd pointer stored here so it shares the Mutex with the rest of state.
     poster: Option<Arc<dyn RoomPoster>>,
@@ -94,36 +96,38 @@ impl AgentNotificationHub {
     /// #248 SHIP orchestrator had asked for, which then reached nobody for
     /// 3h27m (temp/stall-analysis.md).
     ///
-    /// Two questions, two sources (orchestrator, #256 review 03:07). Whether
-    /// the turn is OPEN has one answer, `telemetry::turn_busy` (`derive_from`,
-    /// the status rule). WHO the edge holds is the senders of the prompts
-    /// since the last end edge. The in-memory edge memoises that fold (parsed
-    /// from the FULL prompt; the log keeps a 1024-char copy), so it is used
-    /// only when the open turn has carried an input: a tool-only turn has no
-    /// requester yet, and a memo left by an interrupted turn (an interrupt
-    /// takes no edge) is not its members.
+    /// Two questions, two sources (orchestrator, #256 review 03:07/03:14).
+    /// Whether this input JOINS the previous edge has one answer:
+    /// `telemetry::turn_busy` — `derive_from` running or waiting, the status
+    /// rule — and nothing else. WHO the edge holds is the senders of the
+    /// prompts since the last end edge. The in-memory edge memoises that fold
+    /// (parsed from the FULL prompt; the log keeps a 1024-char copy) and is
+    /// stamped with the turn epoch (`telemetry::turn_epoch`, the last end
+    /// fact of the same record): a memo from an earlier epoch belongs to a
+    /// turn that ended — e.g. one an interrupt closed, which takes no edge —
+    /// so it is dropped and the members are re-folded from the log (a
+    /// tool-only turn has none yet).
     fn start_turn(&self, session: &str, window: &str, prompt: &str) {
         let open = turn_is_open(session, window);
-        let has_inputs = open && turn_inputs(session, window, Some(1), |_| {}) > 0;
-        let key = window_key(session, window);
-        let held = self.state.lock().unwrap().reply_targets.remove(&key);
-        let mut targets = match (has_inputs, held) {
-            (false, _) => Vec::new(),
-            (true, Some(targets)) => targets,
-            // A restart mid-turn lost the memo: rebuild it from EVERY input
-            // the turn recorded, streamed, before this one joins.
-            (true, None) => recovered_targets(session, window),
-        };
+        let epoch = turn_epoch(session, window);
+        let mut targets = if open { self.current_members(session, window, epoch) } else { Vec::new() };
         join_targets(&mut targets, reply_targets(prompt));
-        self.state.lock().unwrap().reply_targets.insert(key, targets);
+        self.state.lock().unwrap().reply_targets.insert(window_key(session, window), (epoch, targets));
     }
 
     fn take_reply_targets(&self, session: &str, window: &str) -> Vec<String> {
-        let key = window_key(session, window);
-        if let Some(targets) = self.state.lock().unwrap().reply_targets.remove(&key) {
-            return targets;
+        let epoch = turn_epoch(session, window);
+        self.current_members(session, window, epoch)
+    }
+
+    /// The open turn's members: the memo when it was built in THIS epoch,
+    /// else the fold of the prompts since the last end (a restart lost the
+    /// memo, or the memo's turn ended). Consumes the memo.
+    fn current_members(&self, session: &str, window: &str, epoch: u64) -> Vec<String> {
+        match self.state.lock().unwrap().reply_targets.remove(&window_key(session, window)) {
+            Some((built, targets)) if built == epoch => targets,
+            _ => recovered_targets(session, window),
         }
-        recovered_targets(session, window)
     }
 
     /// The agent conversation id last reported by a hook in this tmux window,
@@ -618,6 +622,19 @@ fn turn_is_open(session: &str, window: &str) -> bool {
     }
 }
 
+/// The window's turn epoch (`telemetry::turn_epoch`); 0 on mobile.
+fn turn_epoch(session: &str, window: &str) -> u64 {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        crate::projects::telemetry::turn_epoch(session, window)
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = (session, window);
+        0
+    }
+}
+
 /// The turn's recorded inputs since its last end (see
 /// `telemetry::for_each_turn_input`). Desktop-gated like every
 /// `crate::projects` reader: mobile has no telemetry store, so every input
@@ -1103,7 +1120,7 @@ mod tests {
             "prompt": line,
         }));
         hub.consume_inbox();
-        assert_eq!(hub.state.lock().unwrap().reply_targets.get(&window_key(&session, &pane.window_name)).cloned(), Some(vec!["claude".to_string()]));
+        assert_eq!(hub.state.lock().unwrap().reply_targets.get(&window_key(&session, &pane.window_name)).map(|m| m.1.clone()), Some(vec!["claude".to_string()]));
 
         // The parent briefs a child: the child's UserPromptSubmit fires on the
         // same pane, with the measured discriminator fields.
@@ -1117,7 +1134,7 @@ mod tests {
 
         let st = hub.state.lock().unwrap();
         assert_eq!(
-            st.reply_targets.get(&window_key(&session, &pane.window_name)).cloned(),
+            st.reply_targets.get(&window_key(&session, &pane.window_name)).map(|m| m.1.clone()),
             Some(vec!["claude".to_string()]),
             "the child's brief must not replace the parent's reply edge"
         );
@@ -1687,7 +1704,7 @@ mod tests {
         for i in 0..40 {
             input(&hub, &format!("[tmm chat 2026-09-28 00:04] a{i}: @validator ask {i}"));
         }
-        let live = hub.state.lock().unwrap().reply_targets.get(&window_key(&session, "v")).cloned().unwrap();
+        let live = hub.state.lock().unwrap().reply_targets.get(&window_key(&session, "v")).map(|m| m.1.clone()).unwrap();
         assert_eq!(live.len(), MAX_REPLY_TARGETS);
         assert_eq!(live[0], "orchestrator");
         let restarted = AgentNotificationHub::load_at(root.clone());

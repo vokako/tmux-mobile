@@ -95,9 +95,12 @@ WHO the edge holds is the senders of the prompts since the window's last
 `completed`/`failed`/`interrupted` (`telemetry::for_each_turn_input`). A
 tool-only turn is open but has no requester yet, so its first input starts the
 edge. The in-memory edge memoises that fold (parsed from the full prompt; the
-log keeps a 1024-char copy) and is used only when the open turn has carried an
-input, so a memo left by an interrupted turn never becomes the next turn's
-members.
+log keeps a 1024-char copy) and is stamped with the turn EPOCH
+(`telemetry::turn_epoch`: the arrival order of the window's newest end fact,
+in the same record). A memo from an earlier epoch belongs to a turn that ended
+— one an interrupt closed takes no edge — so it is dropped and the members are
+re-folded from the log. `start_turn` asks `turn_busy` alone whether to join; no
+prompt count takes part in that decision.
 Incident (2026-09-27, `temp/stall-analysis.md`): `start_turn` REPLACED the
 edge with the newest input's senders, so a `[reply]` landing mid-turn erased
 the real requester. 27 of 404 turns in 14 hours lost their requester; one was

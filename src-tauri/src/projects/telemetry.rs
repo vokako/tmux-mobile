@@ -419,6 +419,21 @@ pub fn turn_busy(session: &str, window: &str) -> bool {
     matches!(derive(session, window, 0).state.as_str(), "running" | "waiting")
 }
 
+/// The window's turn EPOCH: the arrival order of its newest end fact
+/// (`completed`/`failed`/`interrupted`) in the same record `derive_from`
+/// reads, 0 before any. It changes exactly when a turn ends, so a reply-edge
+/// memo stamped with it (#256) is known to belong to a turn that is over the
+/// moment the window's epoch moves — an interrupt included, which takes no
+/// edge. Recovery first, like `turn_busy`.
+pub fn turn_epoch(session: &str, window: &str) -> u64 {
+    recovery_mark(session);
+    store()
+        .lock()
+        .unwrap()
+        .get(&(session.to_string(), window.to_string()))
+        .map_or(0, |r| r.end_seq)
+}
+
 /// Visit every INPUT this window's turn has carried since its last end
 /// (`completed`/`failed`/`interrupted` — the same end facts
 /// `recover_open_turns` replays into `derive_from`), oldest first, streamed.
