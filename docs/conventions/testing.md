@@ -173,6 +173,12 @@ flaky wall-clock assertions in the test.
   board #216 (2026-09-20) — the live `kiro_engine = "v3"` turned three
   v2-default assertions red on every branch, and earlier the spawn tests
   had pointed the whole process at the real `state.db`.
+- Every Rust test that creates a tmux session names it for its process and
+  test (e.g. `_tmux_mobile_test_<pid>_t06`) and holds a guard that kills it
+  on drop, right after the session exists. Every cargo run on the host
+  shares one tmux server, so a fixed name let a second run kill or reuse the
+  first run's session mid-test. Reason: board #265 (t06 flaked during #264);
+  the guard rule is #251.
 
 ## Current source-contract inventory
 

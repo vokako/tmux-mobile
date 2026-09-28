@@ -18,26 +18,71 @@ mod tests {
     use std::time::Duration;
     use tmux_mobile::tmux;
 
-    const TEST_SESSION: &str = "_tmux_mobile_test";
+    /// One tmux session per test, named for this process and test (board
+    /// #265): every cargo run on the host shares ONE tmux server, so the old
+    /// fixed `_tmux_mobile_test` let a second run kill or reuse
+    /// the first run's session mid-test (t06 flaked during #264). The guard
+    /// kills its session, and removes its probe scripts, on drop — also when
+    /// an assertion panics (the #251 rule: guarded from the moment it exists).
+    struct TestSession {
+        name: String,
+        files: Vec<std::path::PathBuf>,
+    }
 
-    /// Poll the pane until `needle` is painted (or the deadline passes) and
-    /// return the last capture. Tests share the host's tmux server, so a
-    /// fixed sleep makes host load decide the verdict (board #208:
-    /// t07 waited 1 s for 100 echo lines and failed under a parallel cargo
-    /// build). Same idea as `wait_dead` in the tasks tests.
-    fn pane_shows(needle: &str, lines: usize) -> String {
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        loop {
-            let out = tmux::capture_pane(TEST_SESSION, Some(lines)).unwrap_or_default();
-            if out.contains(needle) || std::time::Instant::now() >= deadline {
-                return out;
+    impl TestSession {
+        /// A clean name; nothing is spawned yet.
+        fn new(test: &str) -> Self {
+            let name = format!("_tmux_mobile_test_{}_{}", std::process::id(), test);
+            let _ = tmux::kill_session(&name);
+            TestSession { name, files: Vec::new() }
+        }
+        /// The session with a default shell.
+        fn shell(test: &str) -> Self {
+            let s = Self::new(test);
+            tmux::new_session(&s.name, None, None).expect("Failed to create session");
+            s
+        }
+        fn name(&self) -> &str { &self.name }
+        /// Write a probe script beside this session's name; removed on drop.
+        fn probe(&mut self, body: &str) -> String {
+            let path = std::env::temp_dir().join(format!("{}_{}.py", self.name, self.files.len()));
+            std::fs::write(&path, body).unwrap();
+            self.files.push(path.clone());
+            path.display().to_string()
+        }
+        /// Start `command` as this session's only pane.
+        fn spawn(&self, command: &str) {
+            let ok = std::process::Command::new("tmux")
+                .args(["new-session", "-d", "-s", &self.name, command])
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok, "Failed to create session {}", self.name);
+        }
+        fn kill(&self) { let _ = tmux::kill_session(&self.name); }
+
+        /// Poll the pane until `needle` is painted (or the deadline passes)
+        /// and return the last capture. Tests share the host's tmux server, so
+        /// a fixed sleep makes host load decide the verdict (board #208: t07
+        /// waited 1 s for 100 echo lines and failed under a parallel cargo
+        /// build). Same idea as `wait_dead` in the tasks tests.
+        fn pane_shows(&self, needle: &str, lines: usize) -> String {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            loop {
+                let out = tmux::capture_pane(&self.name, Some(lines)).unwrap_or_default();
+                if out.contains(needle) || std::time::Instant::now() >= deadline {
+                    return out;
+                }
+                thread::sleep(Duration::from_millis(50));
             }
-            thread::sleep(Duration::from_millis(50));
         }
     }
 
-    fn cleanup() {
-        let _ = tmux::kill_session(TEST_SESSION);
+    impl Drop for TestSession {
+        fn drop(&mut self) {
+            self.kill();
+            for f in &self.files { let _ = std::fs::remove_file(f); }
+        }
     }
 
     #[test]
@@ -61,30 +106,28 @@ mod tests {
 
     #[test]
     fn t03_create_and_kill_session() {
-        cleanup();
-        tmux::new_session(TEST_SESSION, None, None).expect("Failed to create session");
+        let s = TestSession::shell("t03");
         let sessions = tmux::list_sessions().unwrap();
         assert!(
-            sessions.iter().any(|s| s.name == TEST_SESSION),
+            sessions.iter().any(|x| x.name == s.name()),
             "Test session not found"
         );
-        println!("✅ Created session: {}", TEST_SESSION);
+        println!("✅ Created session: {}", s.name());
 
-        tmux::kill_session(TEST_SESSION).expect("Failed to kill session");
+        tmux::kill_session(s.name()).expect("Failed to kill session");
         let sessions = tmux::list_sessions().unwrap();
         assert!(
-            !sessions.iter().any(|s| s.name == TEST_SESSION),
+            !sessions.iter().any(|x| x.name == s.name()),
             "Test session still exists"
         );
-        println!("✅ Killed session: {}", TEST_SESSION);
+        println!("✅ Killed session: {}", s.name());
     }
 
     #[test]
     fn t04_list_panes() {
-        cleanup();
-        tmux::new_session(TEST_SESSION, None, None).unwrap();
-        let panes = tmux::list_panes(TEST_SESSION).expect("Failed to list panes");
-        println!("✅ Session {} has {} pane(s):", TEST_SESSION, panes.len());
+        let s = TestSession::shell("t04");
+        let panes = tmux::list_panes(s.name()).expect("Failed to list panes");
+        println!("✅ Session {} has {} pane(s):", s.name(), panes.len());
         for p in &panes {
             println!(
                 "   - window:{} pane:{} ({}x{}) cmd={}",
@@ -92,61 +135,54 @@ mod tests {
             );
         }
         assert!(!panes.is_empty(), "No panes found");
-        cleanup();
     }
 
     #[test]
     fn t05_send_command_and_capture() {
-        cleanup();
-        tmux::new_session(TEST_SESSION, None, None).unwrap();
+        let s = TestSession::shell("t05");
         thread::sleep(Duration::from_millis(200));
 
         let marker = "TMUX_MOBILE_TEST_12345";
-        tmux::send_command(TEST_SESSION, &format!("echo {}", marker)).unwrap();
+        tmux::send_command(s.name(), &format!("echo {}", marker)).unwrap();
 
-        let output = pane_shows(marker, 50);
+        let output = s.pane_shows(marker, 50);
         println!("✅ Captured pane output ({} chars)", output.len());
         assert!(output.contains(marker), "Marker not found in output");
         println!("✅ Command output verified!");
-        cleanup();
     }
 
     #[test]
     fn t06_send_special_keys() {
-        cleanup();
-        tmux::new_session(TEST_SESSION, None, None).unwrap();
+        let s = TestSession::shell("t06");
         thread::sleep(Duration::from_millis(200));
 
-        tmux::send_keys(TEST_SESSION, "echo partial", true).unwrap();
+        tmux::send_keys(s.name(), "echo partial", true).unwrap();
         thread::sleep(Duration::from_millis(100));
-        tmux::send_keys(TEST_SESSION, "C-c", false).unwrap();
+        tmux::send_keys(s.name(), "C-c", false).unwrap();
         thread::sleep(Duration::from_millis(200));
 
         let marker = "AFTER_CTRL_C_OK";
-        tmux::send_command(TEST_SESSION, &format!("echo {}", marker)).unwrap();
+        tmux::send_command(s.name(), &format!("echo {}", marker)).unwrap();
 
-        let output = pane_shows(marker, 20);
+        let output = s.pane_shows(marker, 20);
         assert!(output.contains(marker), "Pane should work after Ctrl-C");
         println!("✅ Special keys (C-c) work correctly");
-        cleanup();
     }
 
     #[test]
     fn t07_capture_scrollback() {
-        cleanup();
-        tmux::new_session(TEST_SESSION, None, None).unwrap();
+        let s = TestSession::shell("t07");
         thread::sleep(Duration::from_millis(200));
 
         tmux::send_command(
-            TEST_SESSION,
+            s.name(),
             "for i in $(seq 1 100); do echo \"line_$i\"; done",
         )
         .unwrap();
 
-        let output = pane_shows("line_100", 50);
+        let output = s.pane_shows("line_100", 50);
         assert!(output.contains("line_100"), "Should capture line_100");
         println!("✅ Scrollback capture works");
-        cleanup();
     }
 
     #[test]
@@ -157,28 +193,25 @@ mod tests {
         // translate them to named keys so they survive. The probe puts its
         // tty in raw mode, enables modifyOtherKeys level 1 (tmux shows
         // `Ext 1`, same as kiro-cli), and echoes the repr of every byte read.
-        cleanup();
+        let mut s = TestSession::new("t08");
         let probe = "import sys, tty, os, time\n\
                      tty.setraw(0)\n\
                      time.sleep(0.3)\n\
                      sys.stdout.write('\\x1b[>4;1m'); sys.stdout.flush()\n\
                      sys.stdout.write('PROBE_READY\\r\\n'); sys.stdout.flush()\n\
                      [sys.stdout.write('GOT ' + repr(os.read(0, 64)) + '\\r\\n') or sys.stdout.flush() for _ in iter(int, 1)]";
-        std::fs::write("/tmp/tmm_kbprobe_test.py", probe).unwrap();
-        std::process::Command::new("tmux")
-            .args(["new-session", "-d", "-s", TEST_SESSION, "python3 /tmp/tmm_kbprobe_test.py"])
-            .status()
-            .unwrap();
+        let script = s.probe(probe);
+        s.spawn(&format!("python3 {script}"));
         thread::sleep(Duration::from_millis(1500));
 
         // Mixed literal payload: text + Ctrl-C + text, plus a lone Ctrl-F and
         // a Ctrl+Alt combo, exactly what the frontend key path produces.
-        tmux::send_keys(TEST_SESSION, "ab\x03cd", true).unwrap();
-        tmux::send_keys(TEST_SESSION, "\x06", true).unwrap();
-        tmux::send_keys(TEST_SESSION, "\x1b\x14", true).unwrap();
+        tmux::send_keys(s.name(), "ab\x03cd", true).unwrap();
+        tmux::send_keys(s.name(), "\x06", true).unwrap();
+        tmux::send_keys(s.name(), "\x1b\x14", true).unwrap();
         thread::sleep(Duration::from_millis(600));
 
-        let output = tmux::capture_pane(TEST_SESSION, Some(50)).unwrap();
+        let output = tmux::capture_pane(s.name(), Some(50)).unwrap();
         println!("probe output:\n{}", output);
         assert!(output.contains("PROBE_READY"), "probe did not start");
         assert!(output.contains("'ab'"), "leading literal text lost");
@@ -187,8 +220,6 @@ mod tests {
         assert!(output.contains("\\x06"), "Ctrl-F byte dropped by extended-keys pane");
         assert!(output.contains("\\x1b\\x14"), "Ctrl+Alt-T (ESC + C0) dropped or split");
         println!("✅ literal ctrl bytes reach an extended-keys pane");
-        cleanup();
-        let _ = std::fs::remove_file("/tmp/tmm_kbprobe_test.py");
     }
 
     #[test]
@@ -197,45 +228,37 @@ mod tests {
         // enabled bracketed paste (mode ?2004) receive \x1b[200~ … \x1b[201~
         // around the block (so pasted newlines are NOT executed line by
         // line); apps that didn't get the raw text.
-        cleanup();
+        let mut s = TestSession::new("t09");
         let probe = "import sys, tty, os, time\n\
                      tty.setraw(0)\n\
                      time.sleep(0.3)\n\
                      if os.environ.get('BRACKET'): sys.stdout.write('\\x1b[?2004h'); sys.stdout.flush()\n\
                      sys.stdout.write('PROBE_READY\\r\\n'); sys.stdout.flush()\n\
                      [sys.stdout.write('GOT ' + repr(os.read(0, 256)) + '\\r\\n') or sys.stdout.flush() for _ in iter(int, 1)]";
-        std::fs::write("/tmp/tmm_pasteprobe_test.py", probe).unwrap();
+        let script = s.probe(probe);
 
         // 1) bracketed-paste pane
-        std::process::Command::new("tmux")
-            .args(["new-session", "-d", "-s", TEST_SESSION, "BRACKET=1 python3 /tmp/tmm_pasteprobe_test.py"])
-            .status()
-            .unwrap();
+        s.spawn(&format!("BRACKET=1 python3 {script}"));
         thread::sleep(Duration::from_millis(1500));
-        tmux::paste_text(TEST_SESSION, "line1\rline2\rline3").unwrap();
+        tmux::paste_text(s.name(), "line1\rline2\rline3").unwrap();
         thread::sleep(Duration::from_millis(600));
-        let output = tmux::capture_pane(TEST_SESSION, Some(50)).unwrap();
+        let output = tmux::capture_pane(s.name(), Some(50)).unwrap();
         println!("bracketed probe:\n{}", output);
         assert!(output.contains("\\x1b[200~"), "missing bracketed paste start marker");
         assert!(output.contains("\\x1b[201~"), "missing bracketed paste end marker");
         assert!(output.contains("line1\\rline2\\rline3") || (output.contains("line1") && output.contains("line3")),
             "pasted body lost");
-        cleanup();
+        s.kill();
 
         // 2) legacy pane (no ?2004): raw text, no markers
-        std::process::Command::new("tmux")
-            .args(["new-session", "-d", "-s", TEST_SESSION, "python3 /tmp/tmm_pasteprobe_test.py"])
-            .status()
-            .unwrap();
+        s.spawn(&format!("python3 {script}"));
         thread::sleep(Duration::from_millis(1500));
-        tmux::paste_text(TEST_SESSION, "plain\rpaste").unwrap();
+        tmux::paste_text(s.name(), "plain\rpaste").unwrap();
         thread::sleep(Duration::from_millis(600));
-        let output = tmux::capture_pane(TEST_SESSION, Some(50)).unwrap();
+        let output = tmux::capture_pane(s.name(), Some(50)).unwrap();
         println!("legacy probe:\n{}", output);
         assert!(!output.contains("\\x1b[200~"), "legacy pane must not receive paste markers");
         assert!(output.contains("plain") && output.contains("paste"), "pasted body lost");
         println!("✅ paste_text brackets iff the pane requested it");
-        cleanup();
-        let _ = std::fs::remove_file("/tmp/tmm_pasteprobe_test.py");
     }
 }
