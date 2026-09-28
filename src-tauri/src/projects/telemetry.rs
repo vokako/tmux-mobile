@@ -635,6 +635,10 @@ fn turn_order() -> std::sync::MutexGuard<'static, ()> {
 /// can race another turn fact against it and prove it waits (board #264).
 #[cfg(test)]
 static IN_PROMPT_HOOK: Mutex<Option<Box<dyn FnOnce() + Send>>> = Mutex::new(None);
+/// Test-only: runs once inside the next end edge's critical section, after
+/// its had-prompt read and before its retirement.
+#[cfg(test)]
+static IN_END_HOOK: Mutex<Option<Box<dyn FnOnce() + Send>>> = Mutex::new(None);
 
 /// `turn_fact`, skipped when `same` says the record already holds exactly
 /// this fact as its newest one (read under the same lock). Returns whether it
@@ -722,6 +726,10 @@ pub fn record_notification(session: &str, window: &str, kind: &str, ts: u64) {
             r.ask = None; // a finished turn cannot still be asking
         }
     }, None);
+    #[cfg(test)]
+    if let Some(hook) = IN_END_HOOK.lock().unwrap().take() {
+        hook();
+    }
     if !kind_is_ask {
         end_commands(session, window, turn_had_prompt);
     }
@@ -843,6 +851,11 @@ pub fn record_delivery(session: &str, window: &str, line: &str, msg_id: &str) {
 pub fn record_command_delivery(session: &str, window: &str, echo: &str, msg_id: &str) -> Option<i64> {
     recovery_mark(session);
     with_rec(session, window, |_| {});
+    // Reading the turn state and inserting the row are ONE critical section
+    // under the turn-fact lock (validator 12:07): else an end could read
+    // "no prompt", this read "idle" and insert an Idle row, and that end
+    // retire the brand-new command before it was even typed.
+    let _order = turn_order();
     let running = store()
         .lock()
         .unwrap()
@@ -2701,6 +2714,32 @@ mod tests {
         racer.lock().unwrap().take().unwrap().join().unwrap();
         assert_eq!(held(&session, "kiro"), vec!["goal b"], "the end saw goal a's prompt and retired nothing");
         assert!(record_prompt(&session, "kiro", "goal b"), "and goal b's own echo settles it");
+    }
+
+    /// Validator 12:07: a command recorded while an end edge is inside its
+    /// section waits for it, and so is never the "oldest Idle" that end
+    /// retires — the new command stays owed.
+    #[test]
+    fn a_command_recorded_during_an_end_is_not_retired_by_it() {
+        crate::projects::tests::use_test_store();
+        let session = format!("cmd-end-race-{}", uuid::Uuid::new_v4());
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (s2, d2) = (session.clone(), done.clone());
+        let racer: std::sync::Arc<Mutex<Option<std::thread::JoinHandle<()>>>> = Default::default();
+        let slot = racer.clone();
+        *IN_END_HOOK.lock().unwrap() = Some(Box::new(move || {
+            *slot.lock().unwrap() = Some(std::thread::spawn(move || {
+                record_command_delivery(&s2, "kiro", "goal new", "m-new").unwrap();
+                d2.store(true, std::sync::atomic::Ordering::SeqCst);
+            }));
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }));
+        // A prompt-less end: it WILL retire the oldest Idle command it sees.
+        record_notification(&session, "kiro", "failed", now());
+        assert!(!done.load(std::sync::atomic::Ordering::SeqCst), "the insert waited for the end's section");
+        racer.lock().unwrap().take().unwrap().join().unwrap();
+        assert_eq!(held(&session, "kiro"), vec!["goal new"], "the new command was not retired by the end it raced");
+        assert!(record_prompt(&session, "kiro", "goal new"), "and its echo settles it");
     }
 
     /// A command typed into a RUNNING turn is queued by the CLI: no prompt of

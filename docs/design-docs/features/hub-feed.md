@@ -59,8 +59,9 @@ is consumed. The row's life, each rule from a review of #264:
   Idle row: its CLI ran or failed it without a hook, and a later look-alike
   must not claim it. An end after a prompt retires nothing, because that
   prompt was the previous command's turn.
-- **One critical section.** A prompt's read-match-delete-record and an end's
-  read-write-retire-promote each run whole under the turn-fact lock, the
+- **One critical section.** A prompt's read-match-delete-record, an end's
+  read-write-retire-promote and a command's read-state-insert each run whole
+  under the turn-fact lock, the
   retire and promote in one SQLite transaction, so an echo cannot land
   between an end's read and its retirement.
 - Rows go in bulk only with their window (`retain_windows`).
