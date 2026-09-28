@@ -1361,9 +1361,12 @@ mod tests {
     /// chain, through the inbox, with a real stop payload. completed → a
     /// tool-only turn (derive_from: running) → orchestrator's input → a
     /// `[reply]` mid-turn → Stop ⇒ the final answer is posted to
-    /// orchestrator. Then an interrupt's memo never leaks: orchestrator asks,
-    /// the turn is interrupted, a tool runs, a `[reply]` arrives, Stop ⇒ the
-    /// answer goes to nobody.
+    /// orchestrator. Then an interrupt's memo never leaks, on two separate
+    /// paths: (a) orchestrator 03:52 — orchestrator asks, the turn is
+    /// interrupted from outside, a tool-only turn runs and Stops with NO input
+    /// in between ⇒ reply_to [] and nothing is typed to orchestrator (the
+    /// epoch alone invalidates the memo; no start_turn runs to clear it);
+    /// (b) the same with a `[reply]` before the Stop (start_turn's path).
     #[test]
     fn a_tool_only_turn_then_a_request_then_a_reply_posts_to_the_requester() {
         crate::projects::tests::use_test_store();
@@ -1378,6 +1381,17 @@ mod tests {
             eprintln!("no tmux server — skipping");
             return;
         }
+        // Cleanup from here on, even when an assertion (or a negative control)
+        // panics: a live session left behind is adopted as a project by the
+        // server on the same tmux (#251).
+        struct KillOnDrop(String, std::path::PathBuf);
+        impl Drop for KillOnDrop {
+            fn drop(&mut self) {
+                let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &format!("={}", self.0)]).stderr(std::process::Stdio::null()).status();
+                let _ = std::fs::remove_dir_all(&self.1);
+            }
+        }
+        let _cleanup = KillOnDrop(session.clone(), ws.clone());
         let adopted = crate::projects::adopt(&session, Some("tool-turn-test")).is_ok();
         let pane_id = String::from_utf8(
             std::process::Command::new("tmux").args(["display-message", "-p", "-t", &session, "#{pane_id}"])
@@ -1415,24 +1429,31 @@ mod tests {
         feed(prompt("[tmm chat 2026-09-28 03:01] builder: [reply] fixed at HEAD"));
         feed(stop("SHIP"));
 
-        crate::projects::telemetry::record_prompt(&session, &win, "[tmm chat 2026-09-28 03:02] orchestrator: @v start X");
-        hub.start_turn(&session, &win, "[tmm chat 2026-09-28 03:02] orchestrator: @v start X");
+        // (a) NO input between the interrupt and the Stop.
+        feed(prompt("[tmm chat 2026-09-28 03:02] orchestrator: @v start X"));
         crate::projects::telemetry::record_interrupt(&session, &win);
         feed(tool());
-        feed(prompt("[tmm chat 2026-09-28 03:03] builder: [reply] fyi"));
+        let memo_left = hub.state.lock().unwrap().reply_targets.contains_key(&window_key(&session, &win));
+        assert!(memo_left, "the memo is still physically there: only the epoch can invalidate it");
+        feed(stop("stopped after the interrupt"));
+
+        // (b) a [reply] before the Stop.
+        feed(prompt("[tmm chat 2026-09-28 03:04] orchestrator: @v start Y"));
+        crate::projects::telemetry::record_interrupt(&session, &win);
+        feed(tool());
+        feed(prompt("[tmm chat 2026-09-28 03:05] builder: [reply] fyi"));
         feed(stop("noted"));
 
         if adopted {
             let posts = spy.0.lock().unwrap();
-            assert_eq!(posts.len(), 3, "{posts:?}");
+            assert_eq!(posts.len(), 4, "{posts:?}");
             assert_eq!(posts[0], vec!["lead".to_string()]);
             assert_eq!(posts[1], vec!["orchestrator".to_string()], "the requester of the tool-only turn gets the final answer");
-            assert!(posts[2].is_empty(), "an interrupted turn's requester does not leak through a tool + [reply]: {:?}", posts[2]);
+            assert!(posts[2].is_empty(), "(a) interrupt → tool-only → Stop with no input: nobody, not the interrupted requester: {:?}", posts[2]);
+            assert!(posts[3].is_empty(), "(b) interrupt → tool → [reply] → Stop: nobody: {:?}", posts[3]);
         } else {
             eprintln!("could not adopt a project — skipped the assertions");
         }
-        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
-        let _ = std::fs::remove_dir_all(&ws);
         let _ = std::fs::remove_dir_all(root);
     }
 
