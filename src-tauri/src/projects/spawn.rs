@@ -1417,8 +1417,9 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         // startup screens are answered on the launch line, as config
         // overrides — never by editing the user's config.toml (the isolated
         // home's config.toml is a symlink into it).
-        let dir = std::env::temp_dir().join(format!("tmm-spawn-codex-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
+        // Removed on drop (board #269: this one leaked per run).
+        let scratch = crate::tmux::Scratch::new("spawn-codex");
+        let dir = std::path::PathBuf::from(scratch.path());
         let d = def("codex");
         let prompt = build_prompt(&d, "tester", "proj", "", "", "");
         let cmd = render_codex(&d, "tester", &dir, Path::new("/srv/work/my-app"), &prompt, &[]).unwrap().cmd;

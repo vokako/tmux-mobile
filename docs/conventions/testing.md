@@ -184,12 +184,17 @@ flaky wall-clock assertions in the test.
     (`_tmux_mobile_test_<pid>_<test>`). The guard is taken before anything
     exists and kills and removes on drop, also on panic (the #251 rule).
   - A directory held for the whole process (the test store, the config
-    dir, the kimi/codex homes, the integration crate's config dir):
+    dir, the kimi/codex homes, the integration crate's config dir, the symlink
+    fixtures):
     `config::fresh_process_dir(prefix)`. It has no drop, so it is reclaimed
     at the door: each run first removes every `<prefix>-<pid>` whose
     process is gone, then creates its own.
   Reason: board #265 (t06 flaked during #264) and #268 (the lib tests #265
   missed; validator 15:30, the per-process store dir grew by one per run).
+  A passing full `npm run test:rust` leaves nothing in the temp dir but one
+  `fresh_process_dir` per prefix (board #269, measured by diffing `/tmp`
+  across a run: `tmm-gp-*` and `tmm-spawn-codex-*` had grown by one per run,
+  ~130 each, and the symlink fixtures used fixed names).
 
 ## Current source-contract inventory
 

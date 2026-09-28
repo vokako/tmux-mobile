@@ -9,8 +9,13 @@ use std::fs;
 use std::os::unix::fs::symlink;
 use tmux_mobile::fs as rfs;
 
+/// Under this process's own dir (board #269): the fixed
+/// `tmm-symlink-test-<name>` was shared by concurrent runs and never removed.
+/// `fresh_process_dir` reclaims a finished run's dir at the next start.
 fn fixture_dir(name: &str) -> std::path::PathBuf {
-    let p = std::env::temp_dir().join(format!("tmm-symlink-test-{}", name));
+    static ROOT: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    let root = ROOT.get_or_init(|| tmux_mobile::config::fresh_process_dir("tmm-symlink-test"));
+    let p = root.join(name);
     let _ = fs::remove_dir_all(&p);
     fs::create_dir_all(&p).unwrap();
     p

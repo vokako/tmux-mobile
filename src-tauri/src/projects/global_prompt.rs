@@ -85,13 +85,16 @@ mod tests {
     #[test]
     fn write_rejects_a_novel() {
         let big = "x".repeat(MAX_BYTES + 1);
-        let err = write_to(&std::env::temp_dir().join(format!("tmm-gp-{}", uuid::Uuid::new_v4())), &big).unwrap_err();
+        // Scratch dirs are removed on drop (board #269: this one leaked per run).
+        let scratch = crate::tmux::Scratch::new("gp-novel");
+        let err = write_to(&std::path::Path::new(&scratch.path()).join("AGENTS.md"), &big).unwrap_err();
         assert!(err.contains("limit"), "{err}");
     }
 
     #[test]
     fn empty_write_removes_the_file_so_cleared_equals_absent() {
-        let p = std::env::temp_dir().join(format!("tmm-gp-{}", uuid::Uuid::new_v4())).join("AGENTS.md");
+        let scratch = crate::tmux::Scratch::new("gp-empty");
+        let p = std::path::Path::new(&scratch.path()).join("sub").join("AGENTS.md");
         write_to(&p, "Be kind.").unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "Be kind.\n");
         write_to(&p, "   ").unwrap();
