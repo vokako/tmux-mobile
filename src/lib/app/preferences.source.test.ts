@@ -210,8 +210,8 @@ test('Settings adopts shared configuration geometry and semantic controls (#156)
   assert.match(source, /class="config-input mono shortcut-key"[\s\S]*?data-shortcut-recorder/u,
     'the native key recorder retains its own input semantics and shares field geometry');
   assert.match(source, /onGuardExit=\{registerAgentsGuard\}/u);
-  assert.match(source, /editRequest=\{tab === 'agents' \? acceptedAgentRequest : null\}/u,
-    'a queued Agent jump is never forwarded into another section');
+  assert.match(source, /editRequest=\{tab === \(acceptedAgentRequest\?\.kind === 'team' \? 'teams' : 'agents'\) \? acceptedAgentRequest : null\}/u,
+    'a queued Agent (or, #258, Team) jump is never forwarded into another section');
   assert.doesNotMatch(source, /addEventListener\(['"]popstate|pushState\(/u,
     'the local guard must not become a second browser-history controller');
   const layout = source.slice(source.indexOf('function measureLayout'), source.indexOf('let drillPushed'));

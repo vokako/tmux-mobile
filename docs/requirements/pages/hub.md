@@ -122,6 +122,11 @@ completion).
   with a 44px hit target; the full team name remains in accessible text.
   The group scrolls as one unit of the strip. Nested team members remain
   inside their root team's group, with their full path in hover/ARIA.
+- **Group verbs** (board #258): right-click or long-press on the All tab or
+  a team name opens a menu that restarts, starts the stopped, interrupts or
+  stops every member at once (counts in the labels; Stop always confirms,
+  Restart confirms only when a member is working). A team's menu also opens
+  its configuration. Removing agents stays per agent.
   The empty-room preset lists configured teams as
   one-tap starts beside the single agents, and the "Start a team" picker
   offers them above the ad-hoc pick (the brief applies to every member).

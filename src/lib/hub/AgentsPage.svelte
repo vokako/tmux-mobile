@@ -364,13 +364,21 @@
   });
 
   // The Hub's agent menu can ask for one agent's editor ("configure agent" —
-  // the model's home is here, not quoted in the menu; owner, 2026-08-25).
-  // Depends on `defs` too: the request usually arrives WITH the tab switch,
-  // before reload() has answered, so it waits for the list and fires once.
+  // the model's home is here, not quoted in the menu; owner, 2026-08-25), and
+  // a team name's menu for that team's editor (`kind: 'team'`, board #258).
+  // Depends on `defs`/`teams` too: the request usually arrives WITH the tab
+  // switch, before reload() has answered, so it waits for the list and fires once.
   let editReqDone = 0;
   $effect(() => {
     const req = editRequest;
     if (!visible || saving || removing || pendingExit || pending || !req || req.n === editReqDone) return;
+    if (req.kind === 'team') {
+      const team = teams.find((x) => x.name === req.name);
+      if (!team) return;
+      editReqDone = req.n;
+      untrack(() => startTeam(team));
+      return;
+    }
     const def = defs.find((d) => d.name === req.name);
     if (!def) return;
     editReqDone = req.n;
@@ -430,6 +438,7 @@
     if (team && editingTeam?.name === team.name && !teamIsNew) return;
     requestLeave(() => {
       closeAll();
+      if (!section) { cat = 'teams'; categoryOpen = true; try { localStorage.setItem(CAT_KEY, 'teams'); } catch {} }
       teamIsNew = !team;
       let members = [];
       if (team) { try { members = JSON.parse(team.members) ?? []; } catch { members = []; } }

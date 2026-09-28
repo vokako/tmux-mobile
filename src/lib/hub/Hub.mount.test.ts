@@ -1394,13 +1394,13 @@ test('Composer All selects once, then opens scoped Stop and record-only actions 
     assert.ok(app.document.querySelector('.ctx'), 'sibling feed output cannot dismiss an unchanged composer anchor');
     const menuButton = (label: string) => [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')]
       .find(button => button.textContent?.trim() === label)!;
-    menuButton('Interrupt').click(); await app.flush();
+    menuButton('Interrupt all').click(); await app.flush();
     assert.deepEqual(calls, [['fixture', 'alice'], ['fixture', 'carol']]);
     assert.equal(all.getAttribute('aria-pressed'), 'true');
     all.click(); await app.flush();
-    assert.ok(menuButton('Interrupt').disabled, 'pending members cannot be interrupted twice');
+    assert.ok(menuButton('Interrupt all').disabled, 'pending members cannot be interrupted twice');
     job.resolve({}); await app.flush();
-    assert.equal(menuButton('Interrupt').disabled, false, 'an open menu follows request completion');
+    assert.equal(menuButton('Interrupt all').disabled, false, 'an open menu follows request completion');
     app.window.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await app.flush();
     all.click(); await app.flush();
@@ -1419,7 +1419,7 @@ test('an open All menu follows live busy membership without reopening (#180)', {
   ];
   const app = await composerFixture(context, { hubAgents: async () => ({ agents }) });
   const interrupt = () => [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')]
-    .find(button => button.textContent?.trim() === 'Interrupt');
+    .find(button => button.textContent?.trim() === 'Interrupt all');
   try {
     const all = await allButton(app);
     all.click(); await app.flush(); all.click(); await app.flush();
@@ -2195,5 +2195,139 @@ test('a global font change re-takes the tail through the reading anchor; a histo
     for (let i = 0; i < 6; i++) await app.flush();
     assert.equal(feed.scrollTop, 3 * 120 + 30, 'the reader is back on row 3, 30 px into it — same row, same offset');
     assert.notEqual(feed.scrollTop, sh, 'and nowhere near the tail');
+  } finally { await app.close(); }
+});
+
+// ── Board #258: group verbs on All and on a team name ─────────────────────
+async function groupFixture(context: TestContext, extra: Record<string, (...args: any[]) => unknown>, openAgentConfig?: (name: string, kind?: string) => void) {
+  const { rpc } = roomFixture();
+  const app = await (await compiledHub()).mount(context, {
+    props: { visible: true, ...(openAgentConfig ? { openAgentConfig } : {}) },
+    setup(window) { window.Element.prototype.getAnimations = () => []; },
+    modules: [{
+      ...rpc,
+      projectList: async () => ({ projects: [{
+        project: { id: 'fixture', name: 'Fixture', session: 'fixture', path: '/fixture' }, live: true,
+        slots: [{ window_name: 'qa', kind: 'agent', command: 'kiro' }, { window_name: 'loner', kind: 'agent', command: 'codex' }],
+      }] }),
+      hubAgents: async () => ({
+        agents: [
+          { name: 'lead', window: 0, managed: true, agent: 'kiro', state: 'running', team: 'squad' },
+          { name: 'dev', window: 1, managed: true, agent: 'kiro', state: 'idle', team: 'squad/sub' },
+          { name: 'solo', window: 2, managed: true, agent: 'codex', state: 'idle' },
+        ],
+        stopped_teams: { qa: 'squad' },
+      }),
+      ...extra,
+    }],
+  });
+  for (let i = 0; i < 30 && !app.document.querySelector('.team-label'); i++) await app.flush();
+  const labels = () => [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')].map((b) => b.textContent?.trim());
+  const pick = async (label: string) => {
+    [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')].find((b) => b.textContent?.trim() === label)!.click();
+    await app.flush();
+  };
+  const context_ = async (el: Element) => {
+    el.dispatchEvent(new app.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+    await app.flush();
+  };
+  return { ...app, labels, pick, contextmenu: context_ };
+}
+
+test('right-click on All opens the group verbs at any time, counted, destructive last (#258)', { timeout: 60000 }, async (context) => {
+  const app = await groupFixture(context, {});
+  try {
+    const all = await allButton(app);
+    assert.notEqual(all.getAttribute('aria-pressed'), 'true', 'All is not the destination');
+    await app.contextmenu(all.closest('.all-choice')!);
+    assert.deepEqual(app.labels(), ['Message everyone', 'Interrupt all', 'Restart all (3)', 'Start stopped (2)', 'Stop all (3)']);
+    assert.ok(!app.labels().some((l) => /remove/iu.test(l ?? '')), 'remove is never a group verb');
+    await app.pick('Message everyone');
+    assert.equal(all.getAttribute('aria-pressed'), 'true');
+  } finally { await app.close(); }
+});
+
+test('a team name menu is scoped to its members, stopped ones by their recipe team, and opens its editor (#258)', { timeout: 60000 }, async (context) => {
+  const restarts: string[] = [];
+  const opened: unknown[][] = [];
+  const app = await groupFixture(context, {
+    hubAgentRestart: async (_s: string, name: string) => { restarts.push(name); return {}; },
+  }, (...args) => { opened.push(args); });
+  try {
+    const team = app.document.querySelector<HTMLButtonElement>('.roster-cluster[data-team="squad"] .team-label')!;
+    await app.contextmenu(team);
+    assert.deepEqual(app.labels(), ['Message team', 'Interrupt team', 'Restart team (2)', 'Start stopped (1)', 'Stop team (2)', 'Configure team']);
+    await app.pick('Start stopped (1)');
+    for (let i = 0; i < 10 && !restarts.length; i++) await app.flush();
+    assert.deepEqual(restarts, ['qa'], 'only the team\'s stopped member, never loner or solo');
+    await app.contextmenu(team);
+    await app.pick('Configure team');
+    assert.deepEqual(opened, [['squad', 'team']]);
+  } finally { await app.close(); }
+});
+
+test('Stop all confirms, runs every member once, and a retry runs only the ones that failed (#258)', { timeout: 60000 }, async (context) => {
+  const calls: string[] = [];
+  let failDev = true;
+  const app = await groupFixture(context, {
+    hubAgentStop: async (_s: string, name: string) => {
+      calls.push(name);
+      if (name === 'dev' && failDev) { failDev = false; throw new Error('boom'); }
+      return {};
+    },
+  });
+  try {
+    await app.contextmenu((await allButton(app)).closest('.all-choice')!);
+    await app.pick('Stop all (3)');
+    assert.equal(calls.length, 0, 'a stop asks first');
+    assert.match(app.document.querySelector('.dlg.confirm h2')?.textContent ?? '', /Stop 3 agents \(everyone\)/u);
+    app.document.querySelector<HTMLButtonElement>('.dlg.confirm .primary')!.click();
+    for (let i = 0; i < 10 && !app.document.querySelector('.dlg-error'); i++) await app.flush();
+    assert.deepEqual([...calls].sort(), ['dev', 'lead', 'solo']);
+    assert.match(app.document.querySelector('.dlg-error')?.textContent ?? '', /dev/u, 'the failure names who failed');
+    app.document.querySelector<HTMLButtonElement>('.dlg.confirm .primary')!.click();
+    for (let i = 0; i < 10 && app.document.querySelector('.dlg.confirm'); i++) await app.flush();
+    assert.deepEqual(calls.slice(3), ['dev'], 'the retry runs only the failed member');
+    assert.equal(app.document.querySelector('.dlg.confirm'), null);
+  } finally { await app.close(); }
+});
+
+test('Restart all confirms only when it would cut a turn; an idle group restarts at once and names failures (#258)', { timeout: 60000 }, async (context) => {
+  const restarts: string[] = [];
+  let busy = true;
+  const app = await groupFixture(context, {
+    hubAgents: async () => ({
+      agents: [
+        { name: 'lead', window: 0, managed: true, agent: 'kiro', state: busy ? 'running' : 'idle', team: 'squad' },
+        { name: 'solo', window: 2, managed: true, agent: 'codex', state: 'idle' },
+      ],
+      stopped_teams: { qa: 'squad' },
+    }),
+    hubAgentRestart: async (_s: string, name: string) => { restarts.push(name); if (name === 'solo') throw new Error('x'); return {}; },
+  });
+  try {
+    const all = () => allButton(app).then((b) => b.closest('.all-choice')!);
+    await app.contextmenu(await all());
+    await app.pick('Restart all (2)');
+    assert.ok(app.document.querySelector('.dlg.confirm'), 'lead is running: the restart asks');
+    assert.equal(restarts.length, 0);
+    [...app.document.querySelectorAll<HTMLButtonElement>('.dlg.confirm button')].find((b) => !b.classList.contains('primary'))!.click();
+    await app.flush();
+
+    busy = false;
+    await app.advance(5000);
+    await app.contextmenu(await all());
+    await app.pick('Restart all (2)');
+    assert.equal(app.document.querySelector('.dlg.confirm'), null, 'nobody is working: no confirm');
+    for (let i = 0; i < 10 && !app.document.querySelector('.operation-feedback'); i++) await app.flush();
+    assert.deepEqual([...restarts].sort(), ['lead', 'solo'], 'every live member once');
+    assert.match(app.document.querySelector('.operation-feedback')?.textContent ?? '', /Restart failed for: solo/u,
+      'the partial failure names who failed; lead is not retried');
+    assert.equal(restarts.length, 2);
+
+    await app.contextmenu(await all());
+    await app.pick('Start stopped (2)');
+    for (let i = 0; i < 10 && restarts.length < 4; i++) await app.flush();
+    assert.deepEqual(restarts.slice(2).sort(), ['loner', 'qa'], 'Start stopped runs at once, on the stopped identities only');
   } finally { await app.close(); }
 });

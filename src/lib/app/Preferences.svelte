@@ -84,7 +84,7 @@
      *  its own Agents page, so this stays false there. */
     showAgents?: boolean;
     /** Forwarded to the embedded AgentsPage: the Hub's "configure agent" jump. */
-    agentsEditRequest?: { name: string; n: number } | null;
+    agentsEditRequest?: { name: string; kind?: 'agent' | 'team'; n: number } | null;
     /** A one-shot "open this category" request — `{ tab, n }`, the same shape
      *  the Files/Agents deep links use. Restoring a saved `agents` page on a
      *  phone lands here. */
@@ -364,7 +364,7 @@
   let agentsDrilled = $state(false);
   let agentsGuard: ((action: () => void) => void) | null = null;
   let navigation = 0;
-  let acceptedAgentRequest = $state<{ name: string; n: number } | null>(null);
+  let acceptedAgentRequest = $state<{ name: string; kind?: 'agent' | 'team'; n: number } | null>(null);
   function registerAgentsGuard(guard: (action: () => void) => void) {
     agentsGuard = guard;
     return () => { if (agentsGuard === guard) agentsGuard = null; };
@@ -396,7 +396,7 @@
     const edit = agentsEditRequest;
     if (tabs.some((x) => x.id === req.tab)) untrack(() => selectTab(req.tab, () => {
       openedRequest = req.n;
-      acceptedAgentRequest = req.tab === 'agents' ? edit : null;
+      acceptedAgentRequest = req.tab === (edit?.kind === 'team' ? 'teams' : 'agents') ? edit : null;
     }, () => openRequest?.n === req.n && openRequest.tab === req.tab));
   });
 
@@ -574,7 +574,7 @@
         <AgentsPage
           section={tab}
           visible={AGENT_TABS.includes(tab)}
-          editRequest={tab === 'agents' ? acceptedAgentRequest : null}
+          editRequest={tab === (acceptedAgentRequest?.kind === 'team' ? 'teams' : 'agents') ? acceptedAgentRequest : null}
           onGuardExit={registerAgentsGuard}
           onGoBack={(fn: () => boolean) => agentsBack = fn}
           onDrilled={(d: boolean) => agentsDrilled = d}

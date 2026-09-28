@@ -24,6 +24,7 @@
     onselect: setRecipient = () => {}, oninterrupt: interrupt = () => {}, onfilter = () => {},
     expanded = false, onexpand = () => {}, onadd = () => {}, oncontext = () => {},
     allMenuOpen = false, onall = (_event) => {},
+    onallcontext = (_at) => {}, onteamcontext = (_at, _team) => {},
   } = $props();
 
   const cardsId = $props.id();
@@ -244,7 +245,9 @@
            never a card — no data-agent, no Stop, no meter). -->
       <span class="all-choice acard" class:sel={recipient === ALL_TARGET} role="presentation"
         onpointerenter={(e) => { if (e.pointerType !== 'touch') allPreview = true; }} onpointerleave={() => { allPreview = false; }}
-        onfocusin={() => { allPreview = true; }} onfocusout={() => { allPreview = false; }}>
+        onfocusin={() => { allPreview = true; }} onfocusout={() => { allPreview = false; }}
+        oncontextmenu={(e) => { e.preventDefault(); if (selected && roomReady) onallcontext(cardAnchor(e.currentTarget)); }}
+        use:longpress={{ onlongpress: (at) => { if (selected && roomReady) onallcontext(at); } }}>
         <CommandButton variant="icon" icon="bots" label={t('hubEveryone')} pressed={recipient === ALL_TARGET} bare
           hasPopup={recipient === ALL_TARGET ? 'menu' : undefined}
           expanded={recipient === ALL_TARGET ? allMenuOpen : undefined}
@@ -259,8 +262,11 @@
           <button type="button" class="team-label"
             aria-pressed={recipient === teamTarget(group.team)}
             aria-label={t('hubToTeamLong').replace('{name}', group.team)}
+            aria-haspopup="menu"
             use:hoverInfo={() => ({ title: group.team })}
-            onclick={() => setRecipient(teamTarget(group.team))}>
+            onclick={() => setRecipient(teamTarget(group.team))}
+            oncontextmenu={(e) => { e.preventDefault(); onteamcontext(pointOf(e), group.team); }}
+            use:longpress={{ onlongpress: (at) => onteamcontext(at, group.team) }}>
             <span class="team-name">{group.team}</span>
           </button>
         {/if}

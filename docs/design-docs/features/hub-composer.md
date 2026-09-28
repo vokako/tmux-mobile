@@ -392,6 +392,17 @@ temporary row hold restores the 61px tail gap; removing that override
 returns to zero. Browser coverage uses controlled RPC and synthetic IME;
 native WebView/IME and owner-client acceptance remain separate.
 
+### Group verbs on All and on a team name (board #258, 2026-09-28)
+
+Owner, 2026-09-28 03:08: "右键点击 所有 agent 按钮或者 team 名字，应该也有选项卡，比如可以一键重启全部，停止全部等等功能". Right-click (desktop) or long-press (phone) on the All tab, or on a team name, opens the ONE Hub ContextMenu with the group's verbs; All's click behaviour (#180: select, then a second click opens the menu) is unchanged, and right-click opens the same menu whether or not All is the destination.
+
+- **All** (every managed agent in this room): `Record only` while All is the destination, else `Message everyone`; `Interrupt all` (only while any member is busy, disabled during an in-flight interrupt); `Restart all (N)`; `Start stopped (N)` (only when some are stopped); `Stop all (N)`.
+- **A team name** (that team's members, nested sub-teams included): `Record only` / `Message team`, `Interrupt team`, `Restart team (N)`, `Start stopped (N)`, `Stop team (N)`, then `Configure team`, which opens the Teams editor on that team through the same device-aware entry as `Configure agent` (the Agents page on desktop, Settings → Teams on a phone). A stopped member belongs to a team by its launch recipe: `hub_agents` returns `stopped_teams` (window name → team path) for every agent home whose window is not live, since a stopped identity has no row of its own.
+- **Order and weight**: rising consequence, destructive last (the agent menu's rule). A verb with nobody to act on is not offered. Remove is never a group verb; it deletes homes and stays per agent.
+- **Confirm**: `Stop …` always asks (ConfirmDialog: "Stop N agents (group)?"); `Restart …` asks only when a member is busy, because a restart cuts the running turn; `Start stopped` and `Interrupt` run at once.
+- **Mechanism**: a group verb is the per-agent RPC (`hub_agent_restart` / `stop` / `interrupt`) run once per member, captured when the menu is built — no new server route, and `tmm agent restart|stop|interrupt <name>` already gives an agent the same reach (CLI parity). Every member is tried once in parallel; a failure never stops the others and a success is never retried. A partial failure names who failed: in the confirm dialog for a confirmed verb (whose retry runs only the failed members), in the composer's feedback slot for an unconfirmed one. The pure decisions live in `hub/group-actions.ts` (`groupScope`, `groupActions`, `runGroup`) with unit tests; `Hub.mount.test.ts` covers the menus, the team scope, confirm rules and partial failure.
+- The orchestrator's own window is included: the owner chooses from the UI.
+
 ### Comparable avatar meters and content-sized cards (#180, 2026-09-12)
 
 Owner, 12:13, requested a narrower card and a meter integrated with it:

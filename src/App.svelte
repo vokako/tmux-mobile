@@ -1175,10 +1175,10 @@
    *  (nav-state's agentsLivesInSettings). Every caller — the Hub's "configure
    *  agent" item and the restore path — goes through here, so the two devices
    *  cannot drift apart. */
-  function openAgentsConfig(name = null) {
-    if (name) agentsEditReq = { name, n: (agentsEditReq?.n ?? 0) + 1 };
+  function openAgentsConfig(name = null, kind = 'agent') {
+    if (name) agentsEditReq = { name, kind, n: (agentsEditReq?.n ?? 0) + 1 };
     if (agentsLivesInSettings(layout.isTouchDevice)) {
-      prefsOpenReq = { tab: 'agents', n: ++prefsOpenSeq };
+      prefsOpenReq = { tab: kind === 'team' ? 'teams' : 'agents', n: ++prefsOpenSeq };
       if (page !== 'prefs') togglePrefs();
     } else {
       switchTab('agents');
@@ -1741,7 +1741,7 @@
            switches. Desktop-eligible only (needs width + the desktop server):
            mobile keeps the tab layout untouched. -->
       <div class="page-layer" class:hidden={page !== 'hub'}>
-        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} onReselect={(fn) => { pageReselect.hub = fn; }} openAgentConfig={(name) => openAgentsConfig(name)} openFilesTab={(s, path, file) => { if (s) filesSession = s; if (path || file) filesNavReq = { path, file, n: (filesNavReq?.n ?? 0) + 1 }; switchTab('files'); jumpedFrom = 'hub'; }} openBoardTab={(s, issue) => { if (s) filesSession = s; if (issue) boardIssueReq = { session: s, id: issue, n: (boardIssueReq?.n ?? 0) + 1 }; switchTab('board'); jumpedFrom = 'hub'; }} />
+        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} onReselect={(fn) => { pageReselect.hub = fn; }} openAgentConfig={(name, kind) => openAgentsConfig(name, kind)} openFilesTab={(s, path, file) => { if (s) filesSession = s; if (path || file) filesNavReq = { path, file, n: (filesNavReq?.n ?? 0) + 1 }; switchTab('files'); jumpedFrom = 'hub'; }} openBoardTab={(s, issue) => { if (s) filesSession = s; if (issue) boardIssueReq = { session: s, id: issue, n: (boardIssueReq?.n ?? 0) + 1 }; switchTab('board'); jumpedFrom = 'hub'; }} />
       </div>
     {/if}
     <!-- The Agents PAGE exists where Agents is a page: the desktop rail. On

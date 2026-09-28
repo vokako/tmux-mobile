@@ -14,11 +14,14 @@ test('Chat header hit targets occupy layout instead of overlapping neighbors (#1
 
 test('All menu actions keep their opening identity while items follow live state (#180)', () => {
   const actions = source.slice(source.indexOf('function allItems('), source.indexOf('const visibleCtxItems'));
-  assert.match(actions, /selected === session && recipient === ALL_TARGET && ctxAt\?\.allMenuId === menuId/u,
-    'a stale callback cannot affect a new room, destination or reopened menu');
+  assert.match(actions, /const current = \(\) => selected === session && ctxAt\?\.allMenuId === menuId;/u,
+    'a stale callback cannot affect a new room or a reopened menu');
+  assert.match(actions, /if \(current\(\) && recipient === ALL_TARGET\) setRecipient\(''\)/u,
+    'Record only still requires All to be the destination (#258: the menu also opens by right-click)');
+  assert.match(source, /recipient !== ctxAt\.allFor\)\) closeCtx\(\)/u, 'the menu closes when the destination it opened under changes');
   assert.match(source, /const allMenuId = Symbol\('all-menu'\)/u);
-  assert.match(source, /const visibleCtxItems = \$derived\(ctxAt\?\.allSession \? allItems\(ctxAt\.allSession, ctxAt\.allMenuId\) : ctxItems\)/u,
-    'normal menus keep their captured lists; All follows current busy/pending inputs');
+  assert.match(source, /const visibleCtxItems = \$derived\(ctxAt\?\.allSession \? allItems\(ctxAt\.allSession, ctxAt\.allMenuId\)\s*: ctxAt\?\.teamSession \? teamItems\(ctxAt\.teamSession, ctxAt\.team, ctxAt\.teamMenuId\) : ctxItems\)/u,
+    'normal menus keep their captured lists; All and a team (#258) follow current busy/pending inputs');
   assert.match(source, /<ContextMenu at=\{ctxAt\} items=\{visibleCtxItems\}/u);
 });
 const rule = (selector: string) =>
@@ -595,7 +598,7 @@ test('a failed attachment is a chip that blocks send, never a console line', () 
 });
 
 test('composer calculations use the pure helpers without moving send or its gates (#117)', () => {
-  assert.match(source, /import \{ ALL_TARGET, attachmentBody, attachToken, busyTargetsFor, targetMembers, targetTeam \} from '\.\/hub-composer\.ts';/u);
+  assert.match(source, /import \{ ALL_TARGET, attachmentBody, attachToken, busyTargetsFor, targetMembers, targetTeam, teamTarget \} from '\.\/hub-composer\.ts';/u);
   const send = /async function send\(\) \{[\s\S]*?\n  \}/u.exec(source)?.[0] ?? '';
   const interpolation = send.indexOf('const body = attachmentBody(raw, atts);');
   assert.ok(interpolation > send.indexOf('if (attaching) return;'));
@@ -638,7 +641,7 @@ test('the title caret expands the NAME — left-aligned on its real rect (board 
   const opens = [...source.matchAll(/openCtx\((?!at, who)/g)].length; // call sites, not the definition
   const leftAligned = [...source.matchAll(/openCtx\(\{ anchor:[^}]*align: 'left'/g)].length;
   assert.equal(leftAligned, 1, 'ONE explicitly left-aligned entry');
-  assert.equal(opens - leftAligned, 3, '#180 adds the captured All trigger to Sidebar and Roster context entries');
+  assert.equal(opens - leftAligned, 4, '#180 the captured All trigger, #258 the team menu, beside Sidebar and Roster context entries');
   assert.ok(!/getBoundingClientRect\(\)[^]{0,80}openCtx/u.test(source),
     'no raw client rect reaches openCtx — anchorOf owns the zoom correction');
   // #166 replaces the 20px private caret with the shared command's centered

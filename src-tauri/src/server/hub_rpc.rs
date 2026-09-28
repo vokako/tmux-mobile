@@ -1243,7 +1243,25 @@ fn agent_states(session: &str) -> serde_json::Value {
             })
         })
         .collect();
-    serde_json::json!({ "session": session, "agents": rows })
+    let stopped_teams = stopped_teams(ws.as_deref(), &live);
+    serde_json::json!({ "session": session, "agents": rows, "stopped_teams": stopped_teams })
+}
+
+/// The team of every agent home whose window is NOT live (board #258): a
+/// stopped card carries no row in `hub_agents`, and a team's "Start stopped"
+/// needs to know which stopped identities are its members. Read off each
+/// home's launch recipe — the same `team_of` a live row uses; a solo agent,
+/// or a home without a recipe, is simply absent.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn stopped_teams(ws: Option<&str>, live: &[String]) -> serde_json::Map<String, serde_json::Value> {
+    ws.and_then(|w| std::fs::read_dir(std::path::Path::new(w).join(".tmm").join("agents")).ok())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| !live.contains(name))
+        .filter_map(|name| crate::projects::team_of(ws, &name).map(|team| (name, team.into())))
+        .collect()
 }
 
 #[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
@@ -1266,6 +1284,24 @@ mod tests {
     /// The assignee-notification decision (owner, 2026-08-30): pure, so the
     /// skips are pinned without tmux. The delivery half reuses the same
     /// `deliver_chat_line` the review handoff and done-summary edges use.
+    /// Board #258: stopped members are named with their recipe team; live
+    /// windows and solo agents are not in the map.
+    #[test]
+    fn stopped_teams_names_each_stopped_member_by_its_recipe_team() {
+        let ws = std::env::temp_dir().join(format!("tmm-stopped-teams-{}", uuid::Uuid::new_v4()));
+        for (name, team) in [("qa", "squad"), ("sub", "squad/inner"), ("solo", ""), ("lead", "squad")] {
+            let home = ws.join(".tmm/agents").join(name);
+            std::fs::create_dir_all(&home).unwrap();
+            std::fs::write(home.join("launch.json"), serde_json::json!({ "team": team }).to_string()).unwrap();
+        }
+        let map = super::stopped_teams(ws.to_str(), &["lead".to_string()]);
+        let mut got: Vec<(String, String)> = map.into_iter().map(|(k, v)| (k, v.as_str().unwrap().to_string())).collect();
+        got.sort();
+        assert_eq!(got, vec![("qa".into(), "squad".into()), ("sub".into(), "squad/inner".into())]);
+        assert!(super::stopped_teams(None, &[]).is_empty());
+        let _ = std::fs::remove_dir_all(ws);
+    }
+
     #[test]
     fn board_change_notice_decides_who_hears() {
         let prev = serde_json::json!({

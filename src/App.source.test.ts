@@ -275,10 +275,11 @@ test('every route into the agent config goes through ONE device-aware entry', ()
   // call openAgentsConfig, which asks nav-state where Agents lives.
   assert.match(
     source,
-    /function openAgentsConfig\(name = null\) \{[\s\S]*?if \(agentsLivesInSettings\(layout\.isTouchDevice\)\) \{[\s\S]*?prefsOpenReq = \{ tab: 'agents'[\s\S]*?if \(page !== 'prefs'\) togglePrefs\(\);[\s\S]*?\} else \{\s*switchTab\('agents'\);/u,
+    /function openAgentsConfig\(name = null, kind = 'agent'\) \{[\s\S]*?if \(agentsLivesInSettings\(layout\.isTouchDevice\)\) \{[\s\S]*?prefsOpenReq = \{ tab: kind === 'team' \? 'teams' : 'agents'[\s\S]*?if \(page !== 'prefs'\) togglePrefs\(\);[\s\S]*?\} else \{\s*switchTab\('agents'\);/u,
   );
   // The Hub's "configure agent" item: Settings on a phone, the page on a desktop.
-  assert.match(source, /openAgentConfig=\{\(name\) => openAgentsConfig\(name\)\}/u);
+  // #258: a team name's menu asks for its team editor through the same entry.
+  assert.match(source, /openAgentConfig=\{\(name, kind\) => openAgentsConfig\(name, kind\)\}/u);
   assert.doesNotMatch(source, /openAgentConfig=\{\(name\) => \{[^}]*switchTab\('agents'\)/u,
     'it must not switch straight to a page that does not exist on touch');
 });

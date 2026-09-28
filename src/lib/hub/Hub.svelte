@@ -38,13 +38,14 @@
   import { sortRows } from '../projects/projects.ts';
   import { stateDotColor, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, pickDrawerAgent, addressed, addressedTeam, mentionedAgents, unreadSenders, stoppedAgents, slashCommand, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
   import { resolvePathRef } from '../core/path-links.ts';
-  import { ALL_TARGET, attachmentBody, attachToken, busyTargetsFor, targetMembers, targetTeam } from './hub-composer.ts';
+  import { ALL_TARGET, attachmentBody, attachToken, busyTargetsFor, targetMembers, targetTeam, teamTarget } from './hub-composer.ts';
   import { walkFeedGap } from './hub-history.ts';
   import { createHubBackRegistry } from './hub-back.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
   import { backendIcon } from '../core/agents.ts';
   import { anchorOf } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
+  import { groupActions, groupScope, runGroup } from './group-actions.ts';
   import { revealMs } from '../ui/motion.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { pinTrack, moveTrack } from './reveal.ts';
@@ -80,6 +81,9 @@
   let selectionGeneration = 0, alive = true;
   onDestroy(() => { alive = false; selectionGeneration++; });
   let agents = $state([]);          // HubAgent[] for selected session (all windows)
+  // Stopped managed agent → its team path (hub_agents, board #258), so a
+  // team's "Start stopped" knows which stopped identities are its members.
+  let stoppedTeams = $state({});
   let feed = $state([]);            // chat messages, oldest first
   let activity = $state([]);        // telemetry events (in-memory ring on the server)
   let lastActivityTs = 0;
@@ -464,12 +468,14 @@
     const s = selected;
     const request = ++rosterReadSequence;
     try {
-      const got = (await hubAgents(s)).agents ?? [];
+      const r = await hubAgents(s);
+      const got = r.agents ?? [];
       // A stale success is as wrong as a stale feed: the OLD project's roster
       // must not dress the NEW project (and then re-pick its recipient).
       if (selected !== s) return;
       if (!alive || request !== rosterReadSequence) return;
       agents = got;
+      stoppedTeams = r.stopped_teams ?? {};
       // The sidebar chips share this truth (board #8): the roster is the
       // freshest reading for THIS project, so its states overwrite the
       // 20s-cadence snapshot's keys instead of disagreeing beside them.
@@ -1131,6 +1137,10 @@
     remove: { title: 'hubRemoveTitle',     note: 'hubRemoveNote',     go: 'hubRemove', icon: 'trash' },
     down:   { title: 'projectDownTitle',   note: 'projectDownNote',   go: 'projectDown', icon: 'stop' },
     delete: { title: 'projectDeleteTitle', note: 'projectDeleteNote', go: 'projectDelete', icon: 'trash' },
+    // Group verbs (board #258): {name} is the group (everyone / the team),
+    // {n} how many agents the confirm covers.
+    groupStop:    { title: 'hubGroupStopTitle',    note: 'hubGroupStopNote',    go: 'hubStop',    icon: 'stop' },
+    groupRestart: { title: 'hubGroupRestartTitle', note: 'hubGroupRestartNote', go: 'hubRestart', icon: 'refresh' },
   };
   let pendingAct = $state(null);   // { kind: keyof ACT_COPY, name, session }
   let acting = $state(false);
@@ -1187,6 +1197,15 @@
         }
       } else if (kind === 'remove') {
         await hubAgentRemove(session, name);
+      } else if (kind === 'groupStop' || kind === 'groupRestart') {
+        // Every member once; a retry after a partial failure runs only the
+        // ones that failed — a success is never repeated (board #258).
+        const one = kind === 'groupStop' ? hubAgentStop : hubAgentRestart;
+        const failed = await runGroup(act.names, (member) => one(session, member));
+        if (failed.length) {
+          act.names = failed;
+          throw new Error(t('hubGroupFailedNames').replace('{names}', failed.join(', ')));
+        }
       } else {
         await hubAgentStop(session, name);
       }
@@ -1247,6 +1266,57 @@
     }
   }
   const startAgent = (name) => restartAgent(name, 'start failed');
+
+  /** A group verb (board #258) — the per-agent RPC once per member, captured
+   * when the menu was built. Stop always confirms and a restart confirms when
+   * it would cut a running turn: both go through the one ConfirmDialog. The
+   * rest run at once; a partial failure names who failed, in the composer's
+   * feedback slot, and nothing that succeeded is retried. */
+  async function groupVerb(action, target, label, session = selected) {
+    if (!session || session !== selected || acting || !action.names.length) return;
+    if (action.verb === 'interrupt') return interrupt(target, session);
+    if (action.confirm) {
+      if (purging) return;
+      actionError = '';
+      pendingAct = { kind: action.verb === 'stop' ? 'groupStop' : 'groupRestart', name: label, session, names: [...action.names] };
+      return;
+    }
+    const feedbackToken = commandFeedbackLifetime.begin();
+    commandFeedbackAnchor = composer?.feedbackAnchor() ?? null;
+    acting = true;
+    try {
+      const failed = await runGroup(action.names, (member) => hubAgentRestart(session, member));
+      if (failed.length && selected === session) commandFeedbackLifetime.update(feedbackToken, {
+        kind: 'error',
+        message: t('hubGroupFailed').replace('{action}', t(action.verb === 'start' ? 'hubStartAgain' : 'hubRestart')).replace('{names}', failed.join(', ')),
+      });
+      if (selected === session) await Promise.all([reload(), loadAgents(), loadFeed()]);
+    } finally {
+      acting = false;
+    }
+  }
+
+  /** The group verbs as menu rows, in groupActions' order. `scope` is 'all'
+   * or 'team' — the only difference is the words. */
+  function groupItems(target, scope, label, session = selected) {
+    const words = {
+      interrupt: scope === 'all' ? 'hubAllInterrupt' : 'hubTeamInterrupt',
+      restart: scope === 'all' ? 'hubAllRestart' : 'hubTeamRestart',
+      start: 'hubGroupStart',
+      stop: scope === 'all' ? 'hubAllStop' : 'hubTeamStop',
+    };
+    const icons = { interrupt: 'stop', restart: 'refresh', start: 'refresh', stop: 'stop' };
+    return groupActions(groupScope(target, agents, stopped, stoppedTeams)).map((action) => ({
+      label: t(words[action.verb]).replace('{n}', String(action.names.length)),
+      icon: icons[action.verb],
+      warn: action.verb === 'interrupt',
+      danger: action.danger,
+      disabled: action.verb === 'interrupt'
+        ? busyTargetsFor(target, agents).some((name) => interrupting.includes(name))
+        : acting,
+      onselect: () => groupVerb(action, target, label, session),
+    }));
+  }
 
   // Live pushes + polling while visible.
   const onPush = (m) => {
@@ -1347,26 +1417,57 @@
     if (recipient !== ALL_TARGET) { setRecipient(ALL_TARGET); return; }
     if (ctxAt?.allSession === session) { closeCtx(); return; }
     const trigger = event.currentTarget;
+    openAllMenu({ anchor: anchorOf(trigger), trigger, keepTriggerClear: true });
+  }
+  /** Right-click / long-press on All (board #258) opens the same menu at any
+   * time; a click opens it only while All is the recipient. `allFor` is the
+   * recipient it opened under: the menu closes if that changes. */
+  function openAllMenu(at) {
+    const session = selected;
+    if (!session) return;
     const allMenuId = Symbol('all-menu');
-    openCtx({ anchor: anchorOf(trigger), trigger, keepTriggerClear: true, allSession: session, allMenuId },
-      t('hubEveryone'), allItems(session, allMenuId));
+    openCtx({ ...at, allSession: session, allMenuId, allFor: recipient }, t('hubEveryone'), allItems(session, allMenuId));
   }
   function allItems(session, menuId) {
-    const current = () => selected === session && recipient === ALL_TARGET && ctxAt?.allMenuId === menuId;
+    const current = () => selected === session && ctxAt?.allMenuId === menuId;
     return [
-      { label: t('hubRecordOnly'), icon: 'chat', onselect: () => {
-        if (current()) setRecipient('');
-      } },
-      ...(busyNames.length ? [{
-        label: t('hubInterrupt'), icon: 'stop', warn: true, disabled: !interruptible,
-        onselect: () => { if (current()) return interrupt(ALL_TARGET, session); },
-      }] : []),
+      recipient === ALL_TARGET
+        ? { label: t('hubRecordOnly'), icon: 'chat', onselect: () => { if (current() && recipient === ALL_TARGET) setRecipient(''); } }
+        : { label: t('hubTalkToAll'), icon: 'chat', onselect: () => { if (current()) setRecipient(ALL_TARGET); } },
+      ...groupItems(ALL_TARGET, 'all', t('hubEveryone'), session).map((item) => ({
+        ...item, onselect: () => { if (current()) return item.onselect(); },
+      })),
     ];
   }
-  const visibleCtxItems = $derived(ctxAt?.allSession ? allItems(ctxAt.allSession, ctxAt.allMenuId) : ctxItems);
+  const visibleCtxItems = $derived(ctxAt?.allSession ? allItems(ctxAt.allSession, ctxAt.allMenuId)
+    : ctxAt?.teamSession ? teamItems(ctxAt.teamSession, ctxAt.team, ctxAt.teamMenuId) : ctxItems);
   $effect(() => {
-    if (ctxAt?.allSession && (ctxAt.allSession !== selected || recipient !== ALL_TARGET)) closeCtx();
+    if (ctxAt?.allSession && (ctxAt.allSession !== selected || recipient !== ctxAt.allFor)) closeCtx();
+    if (ctxAt?.teamSession && ctxAt.teamSession !== selected) closeCtx();
   });
+
+  /** A team name's menu (board #258): the group verbs scoped to that team's
+   * members in this room, plus its configuration. Built live like All's, so
+   * counts and busy state follow the roster while it is open. */
+  function openTeamMenu(at, team) {
+    const session = selected;
+    if (!session || !team) return;
+    const teamMenuId = Symbol('team-menu');
+    openCtx({ ...at, teamSession: session, team, teamMenuId }, team, teamItems(session, team, teamMenuId));
+  }
+  function teamItems(session, team, menuId) {
+    const target = teamTarget(team);
+    const current = () => selected === session && ctxAt?.teamMenuId === menuId;
+    return [
+      recipient === target
+        ? { label: t('hubRecordOnly'), icon: 'chat', onselect: () => { if (current() && recipient === target) setRecipient(''); } }
+        : { label: t('hubTalkToTeam'), icon: 'chat', onselect: () => { if (current()) setRecipient(target); } },
+      ...groupItems(target, 'team', team, session).map((item) => ({
+        ...item, onselect: () => { if (current()) return item.onselect(); },
+      })),
+      ...(openAgentConfig ? [{ label: t('hubTeamConfig'), icon: 'gear', onselect: () => openAgentConfig(team, 'team') }] : []),
+    ];
+  }
 
   // ── The phone's BACK GESTURE, the Files page's contract (owner, 2026-08-24:
   // "chat…对于返回手势适配不太好 像是网页刷新了。像文件管理页面就很好"): App
@@ -1788,6 +1889,7 @@
         {unread} {acting} {tick} {roomReady} {justLoaded} {rosterBase}
         expanded={rosterExpanded} onexpand={toggleRoster}
         allMenuOpen={!!ctxAt?.allSession && ctxAt.allSession === selected} onall={activateAll}
+        onallcontext={openAllMenu} onteamcontext={openTeamMenu}
         {stateLabel} {stateTone} onselect={setRecipient} oninterrupt={interrupt}
         onfilter={(name) => { closeCtx(); toggleFilter(name); }}
         onadd={() => openPicker('add')}
@@ -1835,7 +1937,7 @@
        good version of it, so it was lifted out rather than copied. -->
   <ConfirmDialog open={!!pendingAct} busy={acting} compact={compact}
     error={actionError} confirmIcon={pendingAct ? ACT_COPY[pendingAct.kind].icon : 'check'}
-    title={pendingAct ? t(ACT_COPY[pendingAct.kind].title).replace('{name}', pendingAct.name) : ''}
+    title={pendingAct ? t(ACT_COPY[pendingAct.kind].title).replace('{name}', pendingAct.name).replace('{n}', String(pendingAct.names?.length ?? '')) : ''}
     note={pendingAct ? t(ACT_COPY[pendingAct.kind].note) : ''}
     confirmLabel={pendingAct ? t(ACT_COPY[pendingAct.kind].go) : ''}
     onconfirm={runAction} oncancel={() => (pendingAct = null)} />
