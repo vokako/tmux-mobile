@@ -411,7 +411,8 @@ pub fn recent_events(session: &str, since_ts: u64) -> Vec<ActivityEvent> {
 
 /// Is this window's turn open right now — `running` or `waiting` by
 /// `derive_from`, the one turn rule (board #249), on the same record the
-/// status reads? Never pane activity, never a second query. Reads the
+/// status reads? Asked by the reply edge (#256) and before typing at a
+/// queue-mode agent (#257). Never pane activity, never a second query. Reads the
 /// recovery mark first, so the first question after a restart is asked of
 /// the turn the log replays (`recover_open_turns`), not an empty record.
 pub fn turn_busy(session: &str, window: &str) -> bool {
@@ -748,16 +749,6 @@ pub fn record_delivery(session: &str, window: &str, line: &str, msg_id: &str) {
     // sees it and drops its queue when the window goes.
     with_rec(session, window, |_| {});
     let _ = queue(|s| s.insert_delivery(session, window, line, now(), msg_id));
-}
-
-/// Is this window's turn open right now — `running` or `waiting` by
-/// `derive_from`, the one turn rule (board #249), never pane activity? The
-/// question board #257 asks before typing at a queue-mode agent. Reads the
-/// recovery mark first, so the first question after a restart sees the turn
-/// the log replays instead of an empty record.
-pub fn turn_busy(session: &str, window: &str) -> bool {
-    recovery_mark(session);
-    matches!(derive(session, window, 0).state.as_str(), "running" | "waiting")
 }
 
 /// A line for a busy queue-mode agent (board #257): a row in the ONE
