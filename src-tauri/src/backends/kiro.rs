@@ -799,12 +799,11 @@ pub(crate) fn launch_engine_is_v3(cmd: &str) -> bool {
 /// knowledge, the template form serves adopted/hand-started windows.
 /// What this CLI's prompt hook reports after the slash command `name` (with
 /// `args`, may be empty) — measured 2026-09-28 (board #264) on kiro-cli 2.22.1
-/// v3: a command that becomes a turn (`/goal`) is echoed WITHOUT its slash,
-/// `goal <args>`; one that does not (`/effort`) fires no hook, and its row is
-/// retired by the next prompt or turn end.
+/// v3: `/goal <args>` is echoed WITHOUT its slash, `goal <args>`. Declared per
+/// command, only where a prompt hook was measured: `/effort` and the other
+/// settings commands fire none, so they get no receipt row (validator, #264).
 pub(crate) fn command_echo(name: &str, args: &str) -> Option<String> {
-    let bare = name.strip_prefix('/')?;
-    Some(if args.is_empty() { bare.to_string() } else { format!("{bare} {args}") })
+    (name == "/goal" && !args.is_empty()).then(|| format!("goal {args}"))
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

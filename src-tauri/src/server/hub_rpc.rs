@@ -2005,15 +2005,19 @@ mod tests {
         assert!(chat.error.is_none(), "{:?}", chat.error.map(|e| e.message));
         let cmd = handle_hub_request(&req("hub_command", serde_json::json!({ "session": session, "agent": "lead", "text": "/goal next step" })), None);
         assert!(cmd.error.is_none(), "{:?}", cmd.error.map(|e| e.message));
+        // A command with no measured prompt hook: typed, and no row at all.
+        let effort = handle_hub_request(&req("hub_command", serde_json::json!({ "session": session, "agent": "lead", "text": "/effort medium" })), None);
+        assert!(effort.error.is_none(), "{:?}", effort.error.map(|e| e.message));
         std::thread::sleep(std::time::Duration::from_millis(400));
         let text = crate::tmux::capture_pane_plain(&format!("{session}:lead"), Some(0)).unwrap_or_default();
         let held: Vec<String> = crate::projects::telemetry::held_rows(&session, "lead").into_iter().map(|r| r.line).collect();
         let owed = crate::projects::telemetry::owed_rows(&session, "lead");
         assert!(text.contains("/goal next step"), "the command is typed at once, whole: {text:?}");
+        assert!(text.contains("/effort medium"), "{text:?}");
         assert!(!text.contains("read this later"), "the chat line waits for the turn's end: {text:?}");
         assert_eq!(held.len(), 1, "{held:?}");
         assert!(held[0].contains("read this later") && !held[0].contains("/goal"), "the command is never in the held batch: {held:?}");
-        assert_eq!(owed.len(), 1, "only the command's receipt is a typed row: {owed:?}");
+        assert_eq!(owed.len(), 1, "only the /goal receipt is a typed row; /effort has none: {owed:?}");
         assert_eq!(owed[0].line, "goal next step", "kiro's declared echo");
         assert_eq!(owed[0].command, Some(crate::projects::store::CommandLife::Queued), "typed into a running turn");
     }

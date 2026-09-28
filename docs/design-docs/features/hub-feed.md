@@ -30,17 +30,24 @@ CLI's own shape — kiro 2.22.1 `goal <args>` (slash stripped), Claude Code
 2.1.283 `/goal <args>`, omp 18.2.10 and kimi 2.0.2 the arguments alone, codex
 0.154.0 nothing (tool and stop only), grok 1.0.41 its own planner prompt ("You
 are the Goal Plan Writer…"), which stays an INPUT row because it is not what was
-typed. Each backend declares its shape in its own file
-(`Backend::command_echo`); where it has one, `hub_command` records a delivery
-row (v28 `deliveries.command`) carrying the room line's id, BEFORE typing, and
-the #249 matcher settles it — the bubble gets the check, the echo is consumed.
-A command row is never swept: an "unconfirmed" warn about a command that
-echoes nothing would be a lie. It lives until the window's next prompt (settled
-if it carries it, dropped otherwise) or, if typed into an idle window, the next
-turn end; one typed into a running turn is queued by the CLI, so that turn's
-end only promotes it and the following end retires it. A command bubble shows
-the check or nothing — never a hollow ring, which would promise an echo most
-commands never send.
+typed. Each backend declares, PER COMMAND and only where a prompt hook was
+measured, the shape of its echo (`Backend::command_echo`: today `/goal <args>`
+on kiro, claude, omp and kimi; every other `/name` is `None` — validator,
+#264: a row for `/effort` would wait for an echo that never comes and could be
+settled by an unrelated later prompt). Where it has one, `hub_command` records
+a delivery row (v28 `deliveries.command`) carrying the room line's id, BEFORE
+typing, and the #249 matcher settles it — the bubble gets the check, the echo
+is consumed. A command row is never swept: an "unconfirmed" warn about a
+command would be a lie. A prompt takes AT MOST ONE command row, the window's
+oldest Idle one (a CLI runs commands in the order typed): settled if it carries
+it, dropped if the prompt was neither it nor one of our chat lines; the rows
+behind it stay owed (validator, #264: two `/goal` queued at one busy pane used
+to lose the second to the first echo). A command typed into a running turn is
+Queued — untouchable by that turn's prompts — until the turn's end promotes it.
+Rows go in bulk only with their window (`retain_windows`). A command bubble
+shows the check or nothing — never a hollow ring, which would promise an echo
+most commands never send. A `/command` is typed by `hub_command` directly and
+never passes through #257 holding, so it always reaches the CLI as a whole line.
 
 ### Copy feedback belongs to a message, not its body (#167, 2026-09-12)
 

@@ -61,20 +61,21 @@ pub struct DeliveryRow {
     /// real echo still settles it — but is never reported twice.
     pub warned: bool,
     /// A slash command's expected echo (board #264, v28) rather than a chat
-    /// line: never swept, settled by the window's next prompt if it carries
-    /// it and dropped otherwise. `None` for a chat line.
+    /// line: never swept; a prompt takes at most one, the window's oldest
+    /// Idle row, settling it if it carries it and dropping it otherwise.
+    /// `None` for a chat line.
     pub command: Option<CommandLife>,
 }
 
-/// How long a command row waits (board #264). Stored as `deliveries.command`
-/// 1 / 2; 0 is a chat line.
+/// Whether a command row can be taken by a prompt yet (board #264). Stored
+/// as `deliveries.command` 1 / 2; 0 is a chat line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandLife {
-    /// Typed into an IDLE window: gone at its next prompt or turn end — an
-    /// end with no prompt of its own means the command started no turn.
+    /// Its CLI runs it next: the window's next prompt not already claimed by
+    /// a chat line is its echo or proof there is none.
     Idle,
-    /// Typed into a RUNNING turn, so the CLI queued it and the current turn
-    /// ends before it runs: gone at the next prompt only.
+    /// Typed into a RUNNING turn, so the CLI queued it behind that turn: no
+    /// prompt may take it until the turn ends (`promote_queued_commands`).
     Queued,
 }
 
@@ -382,26 +383,16 @@ impl Store {
             .map_err(|e| format!("insert command delivery: {e}"))
     }
 
-    /// Retire a window's command rows (board #264): a prompt retires every
-    /// one it did not carry; a turn end (`at_end`) retires those typed while
-    /// the window was idle and turns the queued ones idle.
-    pub fn delete_command_deliveries(&self, session: &str, window: &str, at_end: bool) -> Result<usize, String> {
-        if !at_end {
-            return self
-                .conn
-                .execute("DELETE FROM deliveries WHERE session = ?1 AND win = ?2 AND command > 0", rusqlite::params![session, window])
-                .map_err(|e| format!("delete command deliveries: {e}"));
-        }
-        // At an end: the idle-typed rows go, and what the ending turn had
-        // queued becomes idle — it runs now, and the NEXT end retires it.
-        let gone = self
-            .conn
-            .execute("DELETE FROM deliveries WHERE session = ?1 AND win = ?2 AND command = 1", rusqlite::params![session, window])
-            .map_err(|e| format!("delete command deliveries: {e}"))?;
+    /// The turn that queued a window's commands has ended: they run from
+    /// here, so each becomes Idle and the prompts that follow may take it
+    /// (board #264). Nothing is deleted — rows retire one per prompt.
+    pub fn promote_queued_commands(&self, session: &str, window: &str) -> Result<usize, String> {
         self.conn
-            .execute("UPDATE deliveries SET command = 1 WHERE session = ?1 AND win = ?2 AND command = 2", rusqlite::params![session, window])
-            .map(|_| gone)
-            .map_err(|e| format!("delete command deliveries: {e}"))
+            .execute(
+                "UPDATE deliveries SET command = 1 WHERE session = ?1 AND win = ?2 AND command = 2",
+                rusqlite::params![session, window],
+            )
+            .map_err(|e| format!("promote queued commands: {e}"))
     }
 
     /// A line for a busy queue-mode agent, stored but NOT typed yet (board

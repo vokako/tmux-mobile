@@ -396,10 +396,10 @@ pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
 /// `--resume <id>` exact. The recipe dialect is `resume_command` above.
 /// What this CLI's prompt hook reports after the slash command `name` (with
 /// `args`, may be empty) — measured 2026-09-28 (board #264) on Claude Code
-/// 2.1.283: a command that becomes a turn (`/goal`) is echoed VERBATIM,
-/// `/goal <args>`; `/effort` and friends fire no hook.
+/// 2.1.283: `/goal <args>` is echoed VERBATIM. Declared per command, only
+/// where a prompt hook was measured: `/effort` and friends fire none.
 pub(crate) fn command_echo(name: &str, args: &str) -> Option<String> {
-    Some(if args.is_empty() { name.to_string() } else { format!("{name} {args}") })
+    (name == "/goal" && !args.is_empty()).then(|| format!("/goal {args}"))
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

@@ -360,9 +360,12 @@ mod tests {
         assert_eq!(Backend::Claude.command_echo("/goal", "do x").as_deref(), Some("/goal do x"), "claude echoes verbatim");
         assert_eq!(Backend::Omp.command_echo("/goal", "do x").as_deref(), Some("do x"), "omp echoes the arguments");
         assert_eq!(Backend::Kimi.command_echo("/goal", "do x").as_deref(), Some("do x"), "kimi echoes the arguments");
-        for b in [Backend::Omp, Backend::Kimi] {
-            assert_eq!(b.command_echo("/model", "k3"), None, "an args-only echo is declared for /goal alone");
-            assert_eq!(b.command_echo("/goal", ""), None);
+        // Per command, only what was measured to fire a prompt hook (validator,
+        // #264): every other /name has no receipt row on any backend.
+        for b in Backend::ALL {
+            for (name, args) in [("/effort", "medium"), ("/model", "k3"), ("/status", ""), ("/usage", ""), ("/goal", "")] {
+                assert_eq!(b.command_echo(name, args), None, "{b:?} {name} {args}");
+            }
         }
         assert_eq!(Backend::Codex.command_echo("/goal", "do x"), None, "codex fires no prompt hook for a command");
         assert_eq!(Backend::Grok.command_echo("/goal", "do x"), None, "grok submits its own planner text");
