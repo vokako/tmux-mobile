@@ -11,8 +11,10 @@ interface RowAgent {
   state: string;
 }
 
-/** Live rows show active agent windows; closed rows show declared agent slots.
- * The four-chip cap is presentation, not the full roster count. */
+/** Live rows show every active agent window; closed rows show every declared
+ * agent slot. No cap (board #261): the chips wrap, and a row that hid its
+ * fifth agent behind a hover count read as if that agent were not there
+ * (owner, 2026-09-28: tmux-mobile's archivist, blog's two last members). */
 export function rowAgents(row: ProjectRow, panes: readonly SidebarPane[], agentStates: Readonly<Record<string, string>>): RowAgent[] {
   if (row.live) {
     const out: RowAgent[] = [];
@@ -27,15 +29,14 @@ export function rowAgents(row: ProjectRow, panes: readonly SidebarPane[], agentS
         state: agentStates[`${row.project.session}:${p.window_name}`] ?? 'idle',
       });
     }
-    return out.slice(0, 4);
+    return out;
   }
   return (row.slots ?? [])
     .filter((s) => s.kind === 'agent')
-    .slice(0, 4)
     .map((s) => ({ icon: backendIcon(s.command), name: s.window_name, state: '' }));
 }
 
-/** Hover counts the whole roster, not the four visible chips. */
+/** Hover counts the roster split into live and stopped. */
 export function rowAgentCounts(row: ProjectRow, panes: readonly SidebarPane[]) {
   const declared = (row.slots ?? []).filter((x) => String(x.kind ?? '').toLowerCase() === 'agent').map((x) => x.window_name);
   if (!row.live) return { live: 0, stopped: declared.length };

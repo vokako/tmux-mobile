@@ -22,7 +22,7 @@ const pane = (name: string, window: number, overrides: Partial<SidebarPane> = {}
 });
 const live = row.slots.slice(0, 5).map((s) => pane(s.window_name, s.ord));
 
-test('live chips keep active windows in input order, exclude shells and stop at four', () => {
+test('live chips keep every active agent window in input order and exclude shells (#261)', () => {
   const panes = [
     pane('other', 10, { session: 'elsewhere' }),
     pane('inactive', 11, { active: false }),
@@ -31,7 +31,7 @@ test('live chips keep active windows in input order, exclude shells and stop at 
   ];
   const chips = rowAgents(row, panes, { 'alpha:alice': 'working', 'alpha:bob': 'waiting' });
   assert.deepEqual(chips.map((a) => [a.name, a.state]), [
-    ['alice', 'working'], ['bob', 'waiting'], ['carol', 'idle'], ['dave', 'idle'],
+    ['alice', 'working'], ['bob', 'waiting'], ['carol', 'idle'], ['dave', 'idle'], ['erin', 'idle'],
   ]);
   assert.ok(chips.every((a) => a.icon === '/assets/kiro.svg'));
 });
@@ -44,7 +44,7 @@ test('renumbering windows does not change name-keyed chip states (#120)', () => 
   assert.equal(after[0]!.state, 'working');
 });
 
-test('closed chips use declared backends, no live state, and the same four-chip cap', () => {
+test('closed chips list every declared agent with its backend and no live state (#261)', () => {
   const closed = {
     ...row, live: false,
     slots: [
@@ -58,15 +58,16 @@ test('closed chips use declared backends, no live state, and the same four-chip 
     { name: 'unknown', icon: null, state: '' },
     { name: 'carol', icon: '/assets/kiro.svg', state: '' },
     { name: 'dave', icon: '/assets/kiro.svg', state: '' },
+    { name: 'erin', icon: '/assets/kiro.svg', state: '' },
   ]);
 });
 
-test('hover counts all live names and missing slots, independently of the chip cap', () => {
+test('hover counts all live names and missing slots; the chips show every live one', () => {
   const panes = [
     ...live, live[0]!, pane('shell', 90, { current_command: 'bash' }),
     pane('frank', 5, { active: false }), pane('elsewhere', 0, { session: 'other' }),
   ];
-  assert.equal(rowAgents(row, panes, {}).length, 4);
+  assert.equal(rowAgents(row, panes, {}).length, 5);
   assert.deepEqual(rowAgentCounts(row, panes), { live: 5, stopped: 1 });
   assert.deepEqual(rowAgentCounts(row, [...panes, pane('ad-hoc', 91)]), { live: 6, stopped: 1 });
 });

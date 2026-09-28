@@ -432,9 +432,12 @@ have no menu, reserve nothing. The Terminal's dense rows follow the same rule.
 
 **Sidebar summary ownership** (board #121, 2026-09-09): `sidebar.ts` owns
 `rowAgents` and `rowAgentCounts`, with explicit row, pane and state-map inputs.
-The four-chip cap and full hover count retain their distinct existing rules;
-closed projects read declared slots, and live chip states use the window-name
-keys introduced by #120. Agent detection/icons and conversation-first time
+A row lists EVERY agent — live windows for a live project, declared agent
+slots for a closed one — wrapping in `.side-wins`; the hover card adds the
+live/stopped split. There is no chip cap: the four-chip cap it had hid a
+project's fifth agent behind a hover count, so tmux-mobile's archivist and
+blog's last two members read as absent (owner, 2026-09-28, board #261). Live
+chip states use the window-name keys introduced by #120. Agent detection/icons and conversation-first time
 still use the shared helpers, not another formatter or backend table.
 `Sidebar.svelte` owns the unchanged aside/scrim/rows/trash markup and private
 styles. It stays mounted with Hub, so its private trash-fold state survives

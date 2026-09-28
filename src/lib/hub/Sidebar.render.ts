@@ -42,7 +42,7 @@ test('Sidebar renders live/closed rows and the compact sheet without another wra
   assert.ok(alpha.classList.contains('open'));
   assert.equal(alpha.querySelector('.side-age')?.textContent, '5m',
     'the conversation timestamp wins over the newer tmux observation');
-  assert.equal(alpha.querySelectorAll('.side-win').length, 4);
+  assert.equal(alpha.querySelectorAll('.side-win').length, 5, 'every live agent, no four-chip cap (#261)');
   assert.ok(alpha.querySelector('.side-win-dot.live-dot'));
   const closed = desktop.querySelector('.proj-row[aria-label="closed"]')!;
   assert.equal(closed.querySelector('.side-win-name')?.textContent, 'paused');
