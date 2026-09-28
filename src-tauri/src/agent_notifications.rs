@@ -1340,6 +1340,85 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// #256 review (validator 03:11, orchestrator 03:05/03:07): the FULL hook
+    /// chain, through the inbox, with a real stop payload. completed → a
+    /// tool-only turn (derive_from: running) → orchestrator's input → a
+    /// `[reply]` mid-turn → Stop ⇒ the final answer is posted to
+    /// orchestrator. Then an interrupt's memo never leaks: orchestrator asks,
+    /// the turn is interrupted, a tool runs, a `[reply]` arrives, Stop ⇒ the
+    /// answer goes to nobody.
+    #[test]
+    fn a_tool_only_turn_then_a_request_then_a_reply_posts_to_the_requester() {
+        crate::projects::tests::use_test_store();
+        let session = format!("tmm-tool-turn-{}", uuid::Uuid::new_v4());
+        let ws = std::env::temp_dir().join(format!("tmm-tool-turn-ws-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(ws.join(".tmm/agents/v")).unwrap();
+        std::fs::write(ws.join(".tmm/agents/v/launch.json"), "{}").unwrap();
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "-n", "v", "-c", &ws.to_string_lossy(), "sleep 60"])
+            .status().map(|s| s.success()).unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        let adopted = crate::projects::adopt(&session, Some("tool-turn-test")).is_ok();
+        let pane_id = String::from_utf8(
+            std::process::Command::new("tmux").args(["display-message", "-p", "-t", &session, "#{pane_id}"])
+                .output().unwrap().stdout,
+        ).unwrap().trim().to_string();
+        struct Spy(std::sync::Mutex<Vec<Vec<String>>>);
+        impl RoomPoster for Spy {
+            fn post_final(&self, _s: &str, _a: &str, _b: &str, reply_to: &[String]) {
+                self.0.lock().unwrap().push(reply_to.to_vec());
+            }
+        }
+        let spy = std::sync::Arc::new(Spy(std::sync::Mutex::new(Vec::new())));
+        let root = std::env::temp_dir().join(format!("tmm-tool-turn-hub-{}", uuid::Uuid::new_v4()));
+        let hub = AgentNotificationHub::load_at(root.clone());
+        hub.set_room_poster(spy.clone());
+        std::fs::create_dir_all(root.join("inbox")).unwrap();
+        let mut seq = 0;
+        let mut feed = |payload: Value| {
+            seq += 1;
+            let envelope = json!({ "backend": "kiro", "pane_id": pane_id, "payload": payload });
+            std::fs::write(root.join("inbox").join(format!("{seq:03}.json")), serde_json::to_vec(&envelope).unwrap()).unwrap();
+            hub.consume_inbox();
+        };
+        let prompt = |text: &str| json!({ "hook_event_name": "userPromptSubmit", "cwd": ws.to_string_lossy(), "session_id": "c", "prompt": text });
+        let tool = || json!({ "hook_event_name": "preToolUse", "cwd": ws.to_string_lossy(), "session_id": "c",
+                             "tool_name": "execute_bash", "tool_input": { "command": "ls" } });
+        let stop = |text: &str| json!({ "hook_event_name": "stop", "cwd": ws.to_string_lossy(), "session_id": "c", "assistant_response": text });
+        let (_, win, _) = crate::tmux::resolve_pane_id(&pane_id).expect("pane resolves");
+
+        feed(prompt("[tmm chat 2026-09-28 03:00] lead: @v warm up"));
+        feed(stop("warmed"));
+        feed(tool());
+        assert_eq!(crate::projects::telemetry::derive(&session, &win, 0).state, "running", "a tool-only turn is open");
+        feed(prompt("[tmm chat 2026-09-28 03:01] orchestrator: @v final review please"));
+        feed(prompt("[tmm chat 2026-09-28 03:01] builder: [reply] fixed at HEAD"));
+        feed(stop("SHIP"));
+
+        crate::projects::telemetry::record_prompt(&session, &win, "[tmm chat 2026-09-28 03:02] orchestrator: @v start X");
+        hub.start_turn(&session, &win, "[tmm chat 2026-09-28 03:02] orchestrator: @v start X");
+        crate::projects::telemetry::record_interrupt(&session, &win);
+        feed(tool());
+        feed(prompt("[tmm chat 2026-09-28 03:03] builder: [reply] fyi"));
+        feed(stop("noted"));
+
+        if adopted {
+            let posts = spy.0.lock().unwrap();
+            assert_eq!(posts.len(), 3, "{posts:?}");
+            assert_eq!(posts[0], vec!["lead".to_string()]);
+            assert_eq!(posts[1], vec!["orchestrator".to_string()], "the requester of the tool-only turn gets the final answer");
+            assert!(posts[2].is_empty(), "an interrupted turn's requester does not leak through a tool + [reply]: {:?}", posts[2]);
+        } else {
+            eprintln!("could not adopt a project — skipped the assertions");
+        }
+        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
+        let _ = std::fs::remove_dir_all(&ws);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// kimi end to end (board #224), the three edges claude's review asked
     /// to see pinned rather than described: (1) a turn-start whose `prompt`
     /// is an ARRAY of parts opens the same turn — the same reply targets — as
