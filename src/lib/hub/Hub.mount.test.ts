@@ -2331,3 +2331,28 @@ test('Restart all confirms only when it would cut a turn; an idle group restarts
     assert.deepEqual(restarts.slice(2).sort(), ['loner', 'qa'], 'Start stopped runs at once, on the stopped identities only');
   } finally { await app.close(); }
 });
+
+test('a group Interrupt names the member whose interrupt failed; the others are not retried (#258 review)', { timeout: 60000 }, async (context) => {
+  const calls: string[] = [];
+  const app = await groupFixture(context, {
+    hubAgents: async () => ({
+      agents: [
+        { name: 'lead', window: 0, managed: true, agent: 'kiro', state: 'running', team: 'squad' },
+        { name: 'dev', window: 1, managed: true, agent: 'kiro', state: 'waiting', team: 'squad' },
+        { name: 'solo', window: 2, managed: true, agent: 'codex', state: 'idle' },
+      ],
+      stopped_teams: {},
+    }),
+    hubAgentInterrupt: async (_s: string, name: string) => { calls.push(name); if (name === 'dev') throw new Error('gone'); return {}; },
+  });
+  try {
+    const team = app.document.querySelector<HTMLButtonElement>('.roster-cluster[data-team="squad"] .team-label')!;
+    await app.contextmenu(team);
+    await app.pick('Interrupt team');
+    for (let i = 0; i < 10 && !app.document.querySelector('.operation-feedback'); i++) await app.flush();
+    assert.deepEqual([...calls].sort(), ['dev', 'lead'], 'every busy member once; the idle solo is not in the team');
+    assert.match(app.document.querySelector('.operation-feedback')?.textContent ?? '', /Interrupt failed for: dev/u);
+    assert.doesNotMatch(app.document.querySelector('.operation-feedback')?.textContent ?? '', /lead/u, 'a success is not named');
+    assert.equal(calls.length, 2, 'nothing is retried by itself');
+  } finally { await app.close(); }
+});

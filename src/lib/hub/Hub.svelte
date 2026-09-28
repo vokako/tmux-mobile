@@ -900,23 +900,28 @@
     });
   }
 
+  /** Returns the members whose interrupt failed (board #258: a group verb
+   * names them); single-card callers ignore it. */
   async function interrupt(target, session = selected) {
-    if (!session || session !== selected) return;
+    if (!session || session !== selected) return [];
     // Snapshot before the first await. A peer Stop never selects its card,
     // changes the reading anchor, or reaches an idle/unmanaged window.
     const targets = busyTargetsFor(target, agents);
-    if (targets.some((name) => interruptJobs.some((job) => job.session === session && job.name === name))) return;
+    if (targets.some((name) => interruptJobs.some((job) => job.session === session && job.name === name))) return [];
     const jobs = targets.map((name) => ({ session, name }));
     interruptJobs = [...interruptJobs, ...jobs];
+    const failed = [];
     await Promise.all(jobs.map(async (job) => {
       try {
         await hubAgentInterrupt(job.session, job.name);
       } catch (e) {
         console.warn('interrupt failed', job.name, e);
+        failed.push(job.name);
       } finally {
         interruptJobs = interruptJobs.filter((pending) => pending !== job);
       }
     }));
+    return targets.filter((name) => failed.includes(name));
     // The existing push/poll path reads the server's reset-first status and
     // [tmm] interrupted line; acknowledging a request does not invent either.
   }
@@ -1274,7 +1279,18 @@
    * feedback slot, and nothing that succeeded is retried. */
   async function groupVerb(action, target, label, session = selected) {
     if (!session || session !== selected || acting || !action.names.length) return;
-    if (action.verb === 'interrupt') return interrupt(target, session);
+    if (action.verb === 'interrupt') {
+      // The same visible failure list as the other group verbs (validator,
+      // orchestrator 04:17): a member whose interrupt failed is named.
+      const feedbackToken = commandFeedbackLifetime.begin();
+      commandFeedbackAnchor = composer?.feedbackAnchor() ?? null;
+      const failed = await interrupt(target, session);
+      if (failed.length && selected === session) commandFeedbackLifetime.update(feedbackToken, {
+        kind: 'error',
+        message: t('hubGroupFailed').replace('{action}', t('hubInterrupt')).replace('{names}', failed.join(', ')),
+      });
+      return;
+    }
     if (action.confirm) {
       if (purging) return;
       actionError = '';
