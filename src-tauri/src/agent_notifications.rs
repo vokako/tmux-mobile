@@ -115,6 +115,30 @@ impl AgentNotificationHub {
         self.state.lock().unwrap().reply_targets.insert(window_key(session, window), (epoch, targets));
     }
 
+    /// A turn ENDED without a stop hook (an interrupt, #256 orchestrator
+    /// 03:50): its reply edge is dropped at the end edge itself, in the same
+    /// place the end is recorded. The epoch stamp stays as the second line of
+    /// defence for an end this call does not see (a persisted end replayed
+    /// after a restart).
+    pub fn end_turn(&self, session: &str, window: &str) {
+        self.state.lock().unwrap().reply_targets.remove(&window_key(session, window));
+    }
+
+    /// Test-only: a hub in a scratch directory whose current turn on `window`
+    /// was opened by `prompt` (the call-site test in hub_rpc).
+    #[cfg(test)]
+    pub(crate) fn scratch_with_turn(session: &str, window: &str, prompt: &str) -> (Self, PathBuf) {
+        let root = std::env::temp_dir().join(format!("tmm-scratch-hub-{}", uuid::Uuid::new_v4()));
+        let hub = Self::load_at(root.clone());
+        hub.start_turn(session, window, prompt);
+        (hub, root)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn holds_edge(&self, session: &str, window: &str) -> bool {
+        self.state.lock().unwrap().reply_targets.contains_key(&window_key(session, window))
+    }
+
     fn take_reply_targets(&self, session: &str, window: &str) -> Vec<String> {
         let epoch = turn_epoch(session, window);
         self.current_members(session, window, epoch)
@@ -1429,13 +1453,23 @@ mod tests {
         feed(prompt("[tmm chat 2026-09-28 03:01] builder: [reply] fixed at HEAD"));
         feed(stop("SHIP"));
 
-        // (a) NO input between the interrupt and the Stop.
+        // (a) NO input between the interrupt and the Stop. The interrupt is
+        // what hub_agent_interrupt does: record the end, then drop the edge.
         feed(prompt("[tmm chat 2026-09-28 03:02] orchestrator: @v start X"));
         crate::projects::telemetry::record_interrupt(&session, &win);
+        hub.end_turn(&session, &win);
+        assert!(!hub.state.lock().unwrap().reply_targets.contains_key(&window_key(&session, &win)),
+            "the end edge cleared the interrupted turn's edge");
         feed(tool());
-        let memo_left = hub.state.lock().unwrap().reply_targets.contains_key(&window_key(&session, &win));
-        assert!(memo_left, "the memo is still physically there: only the epoch can invalidate it");
         feed(stop("stopped after the interrupt"));
+
+        // (a') the same, when an end is recorded but nobody called end_turn
+        // (a persisted interrupt replayed after a restart): the epoch still
+        // keeps the memo from answering the old requester.
+        feed(prompt("[tmm chat 2026-09-28 03:03] orchestrator: @v start W"));
+        crate::projects::telemetry::record_interrupt(&session, &win);
+        feed(tool());
+        feed(stop("stopped after an unseen interrupt"));
 
         // (b) a [reply] before the Stop.
         feed(prompt("[tmm chat 2026-09-28 03:04] orchestrator: @v start Y"));
@@ -1446,11 +1480,12 @@ mod tests {
 
         if adopted {
             let posts = spy.0.lock().unwrap();
-            assert_eq!(posts.len(), 4, "{posts:?}");
+            assert_eq!(posts.len(), 5, "{posts:?}");
             assert_eq!(posts[0], vec!["lead".to_string()]);
             assert_eq!(posts[1], vec!["orchestrator".to_string()], "the requester of the tool-only turn gets the final answer");
             assert!(posts[2].is_empty(), "(a) interrupt → tool-only → Stop with no input: nobody, not the interrupted requester: {:?}", posts[2]);
-            assert!(posts[3].is_empty(), "(b) interrupt → tool → [reply] → Stop: nobody: {:?}", posts[3]);
+            assert!(posts[3].is_empty(), "(a') an end end_turn never saw: the epoch still answers nobody: {:?}", posts[3]);
+            assert!(posts[4].is_empty(), "(b) interrupt → tool → [reply] → Stop: nobody: {:?}", posts[4]);
         } else {
             eprintln!("could not adopt a project — skipped the assertions");
         }

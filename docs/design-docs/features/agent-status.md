@@ -100,7 +100,12 @@ log keeps a 1024-char copy) and is stamped with the turn EPOCH
 in the same record). A memo from an earlier epoch belongs to a turn that ended
 — one an interrupt closed takes no edge — so it is dropped and the members are
 re-folded from the log. `start_turn` asks `turn_busy` alone whether to join; no
-prompt count takes part in that decision.
+prompt count takes part in that decision. Every END edge closes the reply edge,
+not only a Stop (orchestrator 03:50): `hub_agent_interrupt` drops the window's
+edge (`AgentNotificationHub::end_turn`) where it records the interrupt, so a
+tool-only turn that follows cannot answer the interrupted requester; the epoch
+covers an end that call never sees (a persisted interrupt replayed after a
+restart).
 Incident (2026-09-27, `temp/stall-analysis.md`): `start_turn` REPLACED the
 edge with the newest input's senders, so a `[reply]` landing mid-turn erased
 the real requester. 27 of 404 turns in 14 hours lost their requester; one was

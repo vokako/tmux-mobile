@@ -36,7 +36,7 @@ pub(super) fn project_room(session: &str) -> String {
 /// `Response` is built (`Response::from_outcome`). Arm order and every message are exactly what the
 /// inline `match … return Response::err` shape produced.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notifications::AgentNotificationHub>) -> Result<serde_json::Value, RpcError> {
+fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications::AgentNotificationHub>) -> Result<serde_json::Value, RpcError> {
     use crate::projects::rooms;
     use crate::projects::telemetry;
 
@@ -563,6 +563,13 @@ fn dispatch_hub(req: &Request, _notifications: Option<&crate::agent_notification
             // indistinguishable from no reset at all, i.e. an interrupt that
             // looked like it never landed (owner, 2026-08-29).
             telemetry::record_interrupt(session, agent);
+            // Every END edge closes the reply edge, not only a Stop (#256,
+            // orchestrator 03:50): the interrupted turn's requesters are
+            // dropped here, where its end is recorded, so a tool-only turn
+            // that follows cannot answer them.
+            if let Some(hub) = notifications {
+                hub.end_turn(session, agent);
+            }
             crate::tmux::send_keys(&format!("{session}:{window}"), "Escape", false).map_err(RpcError::Internal)?;
             // The room records what the app did on a person's behalf —
             // same rule as stop/restart/remove. The client's sys
@@ -2207,15 +2214,22 @@ mod tests {
             eprintln!("no tmux server — skipping");
             return;
         }
+        // Cleanup even when an assertion panics (#251).
+        let _cleanup = KillOnDrop(session.clone(), ws.clone());
         let created_project = crate::projects::adopt(&session, Some("int-test")).is_ok();
-        // A turn is OPEN on that window: the state we are interrupting.
+        // A turn is OPEN on that window: the state we are interrupting, with
+        // a requester on its reply edge.
+        let (hub, hub_root) = crate::agent_notifications::AgentNotificationHub::scratch_with_turn(
+            &session, "dev", "[tmm chat 2026-09-28 03:50] lead: @dev do the long thing");
         telemetry::record_prompt(&session, "dev", "do the long thing");
         assert_eq!(telemetry::derive(&session, "dev", 0).state, "running");
+        assert!(hub.holds_edge(&session, "dev"));
 
         let r = handle_hub_request(
             &req("hub_agent_interrupt", serde_json::json!({ "session": session, "agent": "dev" })),
-            None,
+            Some(&hub),
         );
+        let _ = std::fs::remove_dir_all(hub_root);
         if !created_project {
             eprintln!("could not adopt a project — skipping the positive half");
         } else {
@@ -2227,6 +2241,8 @@ mod tests {
                 "idle",
                 "the cancelled turn is closed by the interrupt itself — no stop hook is coming"
             );
+            assert!(!hub.holds_edge(&session, "dev"),
+                "#256: the interrupt's end edge drops the turn's reply edge at the call site");
             let msgs = rooms::history_page(&project_room(&session), None, 10);
             let msgs = msgs["messages"].as_array().unwrap();
             assert!(
@@ -2234,8 +2250,6 @@ mod tests {
                 "the room records it: {msgs:?}"
             );
         }
-        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
-        let _ = std::fs::remove_dir_all(&ws);
     }
 
     #[test]
