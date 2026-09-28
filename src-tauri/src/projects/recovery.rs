@@ -92,33 +92,39 @@ const TRANSIENT: [&str; 3] = [
 const MODEL_UNAVAILABLE: &str = "themodelyouveselectedistemporarilyunavailable";
 /// Third kiro shape (kiro-cli 2.22.1, `--agent-engine v3`, board #267,
 /// 2026-09-28): `● <model> is experiencing high traffic. Try again, or select
-/// another model. (Request ID: …)`, hard-wrapped under the `●` bullet head
-/// that v3 also gives its prose and tool calls. It has no header of its own
-/// and the model name varies, so the block must be EXACTLY the error: the
-/// bullet, a short model name (letters, digits, spaces, `.`, `-`, `(`, `)`;
-/// at most `MODEL_NAME_WORDS` words), the fixed sentence, and its request id
-/// closing the block. A tool head (`● Shell …╰ output:`), a chat stamp or
-/// prose around the sentence all break that shape.
-const HIGH_TRAFFIC: &str = "is experiencing high traffic";
-const HIGH_TRAFFIC_REST: &str = "tryagainorselectanothermodelrequestid";
+/// another model. (Request ID: <uuid>)`, hard-wrapped under the `●` bullet
+/// head that v3 also gives its prose and tool calls. It has no header of its
+/// own, so the block must be EXACTLY the error, punctuation included, with
+/// only whitespace collapsed (a hard wrap is a space): the bullet, a short
+/// model name, this sentence, a canonical 8-4-4-4-12 uuid and the closing
+/// `)` at block end. Letters alone are not enough (validator 15:04): a
+/// rewording without the parenthesis, the colon or the close paren is prose
+/// ABOUT the error, and a false hit types `continue` into a working agent.
+const HIGH_TRAFFIC: &str = " is experiencing high traffic. Try again, or select another model. (Request ID: ";
 /// "Claude Opus 4.1 (1M context)" is five.
 const MODEL_NAME_WORDS: usize = 5;
+
+/// `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`, hex digits only.
+fn is_uuid(id: &str) -> bool {
+    let parts: Vec<&str> = id.split('-').collect();
+    parts.len() == 5
+        && parts.iter().zip([8, 4, 4, 4, 12]).all(|(p, n)| p.len() == n && p.chars().all(|c| c.is_ascii_hexdigit()))
+}
 
 /// Is this block, its lines joined with spaces, exactly the high-traffic error?
 fn high_traffic(spaced: &str) -> bool {
     let flat = spaced.split_whitespace().collect::<Vec<_>>().join(" ");
-    let Some(name) = flat.strip_prefix("● ") else { return false };
-    let Some(at) = name.to_ascii_lowercase().find(HIGH_TRAFFIC) else { return false };
-    let (name, rest) = (name[..at].trim(), &name[at + HIGH_TRAFFIC.len()..]);
-    let words = name.split(' ').filter(|w| !w.is_empty()).count();
-    if words == 0
+    let Some(body) = flat.strip_prefix("● ") else { return false };
+    let Some(at) = body.find(HIGH_TRAFFIC) else { return false };
+    let name = &body[..at];
+    let words = name.split(' ').count();
+    if name.is_empty()
         || words > MODEL_NAME_WORDS
         || !name.chars().all(|c| c.is_ascii_alphanumeric() || " .-()".contains(c))
     {
         return false;
     }
-    let Some(id) = canonical(rest).strip_prefix(HIGH_TRAFFIC_REST).map(str::to_string) else { return false };
-    id.len() >= 8 && id.chars().all(|c| c.is_ascii_hexdigit())
+    body[at + HIGH_TRAFFIC.len()..].strip_suffix(')').is_some_and(is_uuid)
 }
 
 /// Lowercase alphanumerics only: the pane wraps the error blob at arbitrary
@@ -540,9 +546,9 @@ mod tests {
             "the v3 high-traffic paint is an incident, identified by its Request ID"
         );
         // Another model, and a narrow pane that wraps inside the name.
-        assert!(scan_tail("● Claude Sonnet 4.6 is\n  experiencing high traffic. Try again, or select\n  another model. (Request ID: 0a1b2c3d-4e5f)\n"));
+        assert!(scan_tail("● Claude Sonnet 4.6 is\n  experiencing high traffic. Try again, or select\n  another model. (Request ID: 0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9)\n"));
         // Unwrapped, as a wide pane paints it.
-        assert!(scan_tail("● Auto is experiencing high traffic. Try again, or select another model. (Request ID: deadbeef-0001)\n"));
+        assert!(scan_tail("● Auto is experiencing high traffic. Try again, or select another model. (Request ID: deadbeef-0001-4abc-8def-0123456789ab)\n"));
     }
 
     #[test]
@@ -557,12 +563,26 @@ mod tests {
         let tool = format!("● Shell tmm board show 267\n    ╰ output:\n{}\n", paint.lines().map(|l| format!("        {l}")).collect::<Vec<_>>().join("\n"));
         assert!(!scan_tail(&tool), "tool output must not trigger");
         // The agent's own prose about it: words around the sentence.
-        assert!(!scan_tail("● The pane shows Claude Opus 5.5 is experiencing high traffic. Try again, or select another model. (Request ID: ef8dd12f)\n"),
+        assert!(!scan_tail("● The pane shows Claude Opus 5.5 is experiencing high traffic. Try again, or select another model. (Request ID: ef8dd12f-668e-4cdb-a8a7-7ecc7baa4146)\n"),
             "a long lead-in is not a model name");
-        assert!(!scan_tail("● Claude Opus 5.5 is experiencing high traffic. Try again, or select another model. (Request ID: ef8dd12f) — I will retry.\n"),
+        assert!(!scan_tail("● Claude Opus 5.5 is experiencing high traffic. Try again, or select another model. (Request ID: ef8dd12f-668e-4cdb-a8a7-7ecc7baa4146) — I will retry.\n"),
             "text after the id is prose");
         assert!(!scan_tail("● Claude Opus 5.5 is experiencing high traffic. Try again, or select another model.\n"),
             "without its Request ID the sentence is a mention");
+        // Validator 15:04: letters right, punctuation wrong — each is prose,
+        // not kiro's paint, and each used to hit.
+        let id = "ef8dd12f-668e-4cdb-a8a7-7ecc7baa4146";
+        for (text, why) in [
+            (format!("● Claude Opus 5.5 is experiencing high traffic. Try again, or select another model. (Request ID: {id}"), "no closing paren"),
+            (format!("● Claude Opus 5.5 is experiencing high traffic. Try again, or select another model. Request ID {id}"), "no parenthesis or colon"),
+            (format!("● Claude Opus 5.5 is experiencing high traffic Try again or select another model (Request ID: {id})"), "no period or comma"),
+            (format!("● Claude Opus 5.5 is experiencing high traffic. Try again, or select another model. (Request ID {id})"), "no colon"),
+            (format!("● Claude Opus 5.5 is experiencing high traffic. Try again, or select another model. (Request ID: {id}))"), "extra text after the close"),
+            ("● Claude Opus 5.5 is experiencing high traffic. Try again, or select another model. (Request ID: ef8dd12f)".to_string(), "not a uuid"),
+            (format!("● Claude Opus 5.5 is experiencing high traffic. Try again, or select another model. (Request ID: {}x)", &id[..35]), "non-hex in the uuid"),
+        ] {
+            assert!(!scan_tail(&format!("{text}\n")), "{why}");
+        }
     }
 
     #[test]
