@@ -13,7 +13,10 @@
     <!-- The page glyphs carry `glyph-*` PARTS that move only inside a chosen
          `.tab-glyph` (board #240, app.css): the prompt steps forward and the
          cursor shortens; the chat bubble starts typing; the gear turns; the
-         page tilts up; the board flips; the crew rises behind the front bot.
+         page gains its title line; a card drops into the board's left column;
+         the crew rises behind the front bot. Upright end poses that differ
+         from rest (#262: a tilted page read as crooked, and a mirrored board
+         is the same board).
          Outside the atom every part rests, so the drawing reads as before. -->
     <polyline class="glyph-step" points="4 17 10 11 4 5"/><line class="glyph-cursor" x1="12" y1="19" x2="20" y2="19"/>
   {:else if name === 'chat'}
@@ -143,7 +146,7 @@
   {:else if name === 'info'}
     <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
   {:else if name === 'files'}
-    <g class="glyph-tilt"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></g>
+    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line class="glyph-write" x1="8" y1="9" x2="11" y2="9"/>
   {:else if name === 'eye'}
     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
   {:else if name === 'eye-off'}
@@ -183,7 +186,7 @@
   {:else if name === 'menu'}
     <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
   {:else if name === 'layout'}
-    <g class="glyph-flip"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></g>
+    <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/><rect class="glyph-card" x="5.5" y="6" width="4" height="4" rx="1" fill="currentColor" stroke="none"/>
   {/if}
 </svg>
 

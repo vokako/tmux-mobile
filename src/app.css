@@ -842,19 +842,24 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
    glyph. Transform/opacity only, in the icon's own 24-unit space. */
 .tab-glyph { display: inline-flex; flex: none; }
 .glyph-talk { opacity: 0; transform: scale(0.4); }
-.glyph-step, .glyph-cursor, .glyph-talk, .glyph-spin, .glyph-tilt, .glyph-flip, .glyph-crew { transform-box: fill-box; transform-origin: center; }
+/* Parts that ENTER rest hidden, so the plain glyph outside the atom is the
+   drawing it always was (#262). */
+.glyph-write { opacity: 0; transform: translateX(-3px); }
+.glyph-card { opacity: 0; transform: translateY(-3px); }
+.glyph-step, .glyph-cursor, .glyph-talk, .glyph-spin, .glyph-write, .glyph-card, .glyph-crew { transform-box: fill-box; transform-origin: center; }
 .glyph-cursor { transform-origin: right center; }
-.tab-glyph :is(.glyph-step, .glyph-cursor, .glyph-talk, .glyph-spin, .glyph-tilt, .glyph-flip, .glyph-crew) {
+.tab-glyph :is(.glyph-step, .glyph-cursor, .glyph-talk, .glyph-spin, .glyph-write, .glyph-card, .glyph-crew) {
   transition: transform var(--t-move) ease-out, opacity var(--t-move) ease-out;
 }
 .tab-glyph .glyph-talk:nth-of-type(2) { transition-delay: 40ms; }
 .tab-glyph .glyph-talk:nth-of-type(3) { transition-delay: 80ms; }
+.tab-glyph .glyph-write { transition-delay: 40ms; }
 .tab-glyph.on .glyph-step { transform: translateX(2.5px); }
 .tab-glyph.on .glyph-cursor { transform: scaleX(0.5); }
 .tab-glyph.on .glyph-talk { opacity: 1; transform: none; }
 .tab-glyph.on .glyph-spin { transform: rotate(90deg); }
-.tab-glyph.on .glyph-tilt { transform: rotate(-10deg); }
-.tab-glyph.on .glyph-flip { transform: scaleX(-1); }
+.tab-glyph.on .glyph-write { opacity: 1; transform: none; }
+.tab-glyph.on .glyph-card { opacity: 1; transform: none; }
 .tab-glyph.on .glyph-crew { transform: translateY(-2px); }
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes rise-in { from { opacity: 0; transform: translateY(6px); } }
@@ -978,7 +983,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 .skel-wrap { animation: fade-in var(--t-fast) ease-out backwards; animation-delay: 150ms; }
 @media (prefers-reduced-motion: reduce) {
   .chev, .flip, .flip .turn, .quarter-turn, .state-ctl,
-  .tab-glyph :is(.glyph-step, .glyph-cursor, .glyph-talk, .glyph-spin, .glyph-tilt, .glyph-flip, .glyph-crew),
+  .tab-glyph :is(.glyph-step, .glyph-cursor, .glyph-talk, .glyph-spin, .glyph-write, .glyph-card, .glyph-crew),
   .pop-layer.ready, .slide-pill.ready { transition: none; }
   .appear, .appear-rise, .appear-pop, .side-scrim, .to-tail, .to-tail.news::after,
   .reveal > *, .reveal-tail > *, .skel::after, .skel-wrap { animation: none; }

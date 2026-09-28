@@ -88,13 +88,24 @@ test('every placed popover wears .pop-layer and no component keeps a private opa
 test('a navigation tab glyph settles into a chosen pose and back (#240)', () => {
   assert.match(appCss, /\.tab-glyph :is\([^)]*\)\s*\{\s*transition:\s*transform var\(--t-move\) ease-out, opacity var\(--t-move\) ease-out;/u,
     'one held transition on --t-move, so leaving moves back the way it came');
-  for (const [part, pose] of [['step', 'translateX'], ['cursor', 'scaleX'], ['spin', 'rotate\\(90deg\\)'], ['tilt', 'rotate'], ['flip', 'scaleX\\(-1\\)'], ['crew', 'translateY']]) {
+  for (const [part, pose] of [['step', 'translateX'], ['cursor', 'scaleX'], ['spin', 'rotate\\(90deg\\)'], ['crew', 'translateY']]) {
     assert.match(appCss, new RegExp(`\\.tab-glyph\\.on \\.glyph-${part} \\{ transform: ${pose}`, 'u'), `.glyph-${part} has a chosen pose`);
   }
   assert.match(appCss, /\.glyph-talk \{ opacity: 0; transform: scale\(0\.4\); \}/u, 'the chat dots rest hidden outside the atom');
+  // #262: Files and Board END upright and different — a part appears (files'
+  // title line slides in from the left, a card drops into the board's left
+  // column). No rotation or mirror: a tilted page read as crooked, a mirrored
+  // board as the same board.
+  assert.match(appCss, /\.glyph-write \{ opacity: 0; transform: translateX\(-3px\); \}/u, 'the files title line rests hidden, left');
+  assert.match(appCss, /\.glyph-card \{ opacity: 0; transform: translateY\(-3px\); \}/u, 'the board card rests hidden, above');
+  for (const part of ['write', 'card']) {
+    assert.match(appCss, new RegExp(`\\.tab-glyph\\.on \\.glyph-${part} \\{ opacity: 1; transform: none; \\}`, 'u'), `.glyph-${part} settles in upright`);
+  }
+  assert.match(appCss, /\.tab-glyph \.glyph-write \{ transition-delay: 40ms; \}/u, 'the line is written after the page, on the chat dots\' 40ms step');
+  assert.doesNotMatch(appCss, /glyph-(tilt|flip)/u, 'the replaced tilt and flip poses are gone whole');
   assert.match(appCss, /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[^}]*\.tab-glyph :is\([^)]*\)[^{]*\{\s*transition:\s*none;/u, 'stilled under reduced motion');
   const icon = readFileSync(join(root, 'src/lib/ui/Icon.svelte'), 'utf8');
-  for (const part of ['step', 'cursor', 'talk', 'spin', 'tilt', 'flip', 'crew']) {
+  for (const part of ['step', 'cursor', 'talk', 'spin', 'write', 'card', 'crew']) {
     assert.match(icon, new RegExp(`class="glyph-${part}"`, 'u'), `Icon names the .glyph-${part} part`);
   }
   const app = readFileSync(join(root, 'src/App.svelte'), 'utf8');
