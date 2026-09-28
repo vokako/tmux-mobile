@@ -29,8 +29,9 @@ duplication there (owner: "左侧侧边栏不要显示"; the terminal already ha
 window bar and the rows sit right below), and search moves to the bottom
 bar. The component still carries the page dialect (`chips`, default true):
 a single top row combining up to 5 MRU chips of recently opened **AI
-sessions** (the shared detection table in `core/agents.ts`, not a list kept
-here) with a round search button that swaps the row into a full-width input
+sessions** (a pane is AI when the server's process-derived pane `agent`
+says so, read through `core/agents.ts` `paneAgent` — board #260; not a list
+kept here) with a round search button that swaps the row into a full-width input
 (× or Escape closes). No host mounts that dialect since the list became
 Terminal's sidebar on 2026-08-18; the chip strip hides while searching, and
 one tap on a chip opens that session at its primary AI pane, never toggling
