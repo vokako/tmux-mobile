@@ -9,7 +9,7 @@ use super::registry::{DEFAULT_KIMI_SYSTEM, DEFAULT_OMP_MODEL, DEFAULT_OMP_SYSTEM
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 27;
+const SCHEMA_VERSION: i64 = 28;
 
 impl Store {
     /// Ensure the durable half of Board editability exists, then
@@ -686,6 +686,30 @@ impl Store {
             // the FULL prompt, beside its display-truncated text. NULL for
             // older rows, which recovery parses from their text as before.
             self.ensure_activity_requesters()?;
+        }
+        if version < 28 {
+            // v28 (board #264): a delivery row can be a slash command's
+            // expected echo, with its own lifetime. Existing rows are lines: 0.
+            self.ensure_delivery_command()?;
+        }
+        Ok(())
+    }
+
+    /// The v28 shape (also a heal floor): `deliveries.command`, added only
+    /// when absent.
+    pub(super) fn ensure_delivery_command(&self) -> Result<(), String> {
+        let has: bool = self
+            .conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('deliveries') WHERE name = 'command')",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("inspect deliveries.command: {e}"))?;
+        if !has {
+            self.conn
+                .execute_batch("ALTER TABLE deliveries ADD COLUMN command INTEGER NOT NULL DEFAULT 0;")
+                .map_err(|e| format!("add deliveries.command: {e}"))?;
         }
         Ok(())
     }

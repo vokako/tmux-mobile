@@ -22,6 +22,26 @@ parsed as markdown (they are data). The block's `body` is what the person typed
 Lifecycle lines (spawn, stop, restart, interrupt, board moves) keep the capsule;
 the capsule's command costume (`.sys-cmd`) is deleted.
 
+**Its echo is its receipt, never an INPUT row.** Measured 2026-09-28 on this
+host with the composer's own door (`hub_command` into managed agents of a
+scratch stack): most commands fire NO prompt hook on any backend (`/effort`,
+`/status`, `/usage`); a command that becomes a turn (`/goal`) is echoed in each
+CLI's own shape — kiro 2.22.1 `goal <args>` (slash stripped), Claude Code
+2.1.283 `/goal <args>`, omp 18.2.10 and kimi 2.0.2 the arguments alone, codex
+0.154.0 nothing (tool and stop only), grok 1.0.41 its own planner prompt ("You
+are the Goal Plan Writer…"), which stays an INPUT row because it is not what was
+typed. Each backend declares its shape in its own file
+(`Backend::command_echo`); where it has one, `hub_command` records a delivery
+row (v28 `deliveries.command`) carrying the room line's id, BEFORE typing, and
+the #249 matcher settles it — the bubble gets the check, the echo is consumed.
+A command row is never swept: an "unconfirmed" warn about a command that
+echoes nothing would be a lie. It lives until the window's next prompt (settled
+if it carries it, dropped otherwise) or, if typed into an idle window, the next
+turn end; one typed into a running turn is queued by the CLI, so that turn's
+end only promotes it and the following end retires it. A command bubble shows
+the check or nothing — never a hollow ring, which would promise an echo most
+commands never send.
+
 ### Copy feedback belongs to a message, not its body (#167, 2026-09-12)
 
 Feed and Board use one `message-actions.ts` state model. A click captures the

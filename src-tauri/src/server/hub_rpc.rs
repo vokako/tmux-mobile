@@ -103,6 +103,13 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
             }
             let ws = crate::projects::project_for_session(session).ok().flatten().map(|pr| pr.path);
             let panes = crate::tmux::list_panes(session).unwrap_or_default();
+            // The room line's id exists before the typing (board #264): each
+            // receipt row carries it, and an echo can race the post.
+            let msg_id = uuid::Uuid::new_v4().to_string();
+            let (name, args) = match text.split_once(char::is_whitespace) {
+                Some((n, a)) => (n, a.trim()),
+                None => (text, ""),
+            };
             let mut sent: Vec<String> = Vec::new();
             let mut refused: Vec<String> = Vec::new();
             let mut seen = std::collections::HashSet::new();
@@ -120,6 +127,15 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
                     continue;
                 }
                 let target = format!("{}:{}.{}", session, pane.window, pane.pane);
+                // The receipt, recorded BEFORE typing like every delivery:
+                // only where this backend declares what its prompt hook
+                // echoes for a command (`Backend::command_echo`).
+                let receipt = crate::projects::agents::detect_pane(ws.as_deref(), pane)
+                    .and_then(|a| crate::backends::Backend::parse(a.backend))
+                    .and_then(|b| b.command_echo(name, args))
+                    .and_then(|echo| {
+                        crate::projects::telemetry::record_command_delivery(session, &pane.window_name, &echo, &msg_id)
+                    });
                 match crate::tmux::send_command(&target, text) {
                     Ok(()) => sent.push(pane.window_name.clone()),
                     // Board #250: a pane in copy-mode refuses. The same plain
@@ -127,6 +143,9 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
                     // others did: an `all` where one pane took it answers
                     // success, and the refused one must not vanish with it.
                     Err(e) => {
+                        if let Some(id) = receipt {
+                            crate::projects::telemetry::forget_delivery(id);
+                        }
                         crate::projects::telemetry::record_undelivered(session, &pane.window_name, text, e.trim());
                         refused.push(format!("{}: {}", pane.window_name, e.trim()));
                     }
@@ -138,7 +157,7 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
             if sent.is_empty() {
                 return Err(RpcError::InvalidParams(format!("no managed agent named '{agent}' in session '{session}'")));
             }
-            let _ = rooms::post(&room, "human", &format!("[tmm] {} → {}", text, sent.join(", ")));
+            let _ = rooms::post_routed_as(&room, &msg_id, "human", &format!("[tmm] {} → {}", text, sent.join(", ")), &[]);
             Ok(serde_json::json!({ "sent": sent, "command": text }))
         }
 

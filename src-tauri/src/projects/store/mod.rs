@@ -26,7 +26,7 @@ mod projects;
 mod registry;
 mod rooms;
 mod schema;
-pub use activity::{ActivityRow, DeliveryRow, TurnFact, TurnFacts};
+pub use activity::{ActivityRow, CommandLife, DeliveryRow, TurnFact, TurnFacts};
 pub use projects::{Project, Slot, SlotKind};
 pub use registry::{RegAgent, RegMcp, RegSkill, RegTeam};
 pub use rooms::HubMsg;
@@ -125,7 +125,8 @@ impl Store {
         self.ensure_delivery_msg_ids()?;
         self.ensure_input_mode()?;
         self.ensure_delivery_held()?;
-        self.ensure_activity_requesters()
+        self.ensure_activity_requesters()?;
+        self.ensure_delivery_command()
     }
 
     // ---- archived messages ----------------------------------------------

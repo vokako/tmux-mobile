@@ -797,6 +797,16 @@ pub(crate) fn launch_engine_is_v3(cmd: &str) -> bool {
 /// conversation from this directory"; `--resume-id <SESSION_ID>` exact.
 /// The recipe-based resume dialect lives in `resume_command` above — same
 /// knowledge, the template form serves adopted/hand-started windows.
+/// What this CLI's prompt hook reports after the slash command `name` (with
+/// `args`, may be empty) — measured 2026-09-28 (board #264) on kiro-cli 2.22.1
+/// v3: a command that becomes a turn (`/goal`) is echoed WITHOUT its slash,
+/// `goal <args>`; one that does not (`/effort`) fires no hook, and its row is
+/// retired by the next prompt or turn end.
+pub(crate) fn command_echo(name: &str, args: &str) -> Option<String> {
+    let bare = name.strip_prefix('/')?;
+    Some(if args.is_empty() { bare.to_string() } else { format!("{bare} {args}") })
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn known() -> crate::projects::agents::KnownAgent {
     crate::projects::agents::KnownAgent {

@@ -60,6 +60,38 @@ pub struct DeliveryRow {
     /// Already reported unconfirmed. A reported row stays OUTSTANDING — a late
     /// real echo still settles it — but is never reported twice.
     pub warned: bool,
+    /// A slash command's expected echo (board #264, v28) rather than a chat
+    /// line: never swept, settled by the window's next prompt if it carries
+    /// it and dropped otherwise. `None` for a chat line.
+    pub command: Option<CommandLife>,
+}
+
+/// How long a command row waits (board #264). Stored as `deliveries.command`
+/// 1 / 2; 0 is a chat line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandLife {
+    /// Typed into an IDLE window: gone at its next prompt or turn end — an
+    /// end with no prompt of its own means the command started no turn.
+    Idle,
+    /// Typed into a RUNNING turn, so the CLI queued it and the current turn
+    /// ends before it runs: gone at the next prompt only.
+    Queued,
+}
+
+impl CommandLife {
+    fn code(self) -> i64 {
+        match self {
+            CommandLife::Idle => 1,
+            CommandLife::Queued => 2,
+        }
+    }
+    fn from_code(code: i64) -> Option<Self> {
+        match code {
+            1 => Some(CommandLife::Idle),
+            2 => Some(CommandLife::Queued),
+            _ => None,
+        }
+    }
 }
 
 impl Store {
@@ -338,6 +370,40 @@ impl Store {
             .map_err(|e| format!("insert delivery: {e}"))
     }
 
+    /// A slash command's expected echo, about to be typed (board #264). Its
+    /// id comes back so a pane that refuses the typing can take it away.
+    pub fn insert_command_delivery(&self, session: &str, window: &str, line: &str, ts: u64, msg_id: &str, life: CommandLife) -> Result<i64, String> {
+        self.conn
+            .execute(
+                "INSERT INTO deliveries (session, win, line, ts, msg_id, command) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![session, window, line, ts as i64, msg_id, life.code()],
+            )
+            .map(|_| self.conn.last_insert_rowid())
+            .map_err(|e| format!("insert command delivery: {e}"))
+    }
+
+    /// Retire a window's command rows (board #264): a prompt retires every
+    /// one it did not carry; a turn end (`at_end`) retires those typed while
+    /// the window was idle and turns the queued ones idle.
+    pub fn delete_command_deliveries(&self, session: &str, window: &str, at_end: bool) -> Result<usize, String> {
+        if !at_end {
+            return self
+                .conn
+                .execute("DELETE FROM deliveries WHERE session = ?1 AND win = ?2 AND command > 0", rusqlite::params![session, window])
+                .map_err(|e| format!("delete command deliveries: {e}"));
+        }
+        // At an end: the idle-typed rows go, and what the ending turn had
+        // queued becomes idle — it runs now, and the NEXT end retires it.
+        let gone = self
+            .conn
+            .execute("DELETE FROM deliveries WHERE session = ?1 AND win = ?2 AND command = 1", rusqlite::params![session, window])
+            .map_err(|e| format!("delete command deliveries: {e}"))?;
+        self.conn
+            .execute("UPDATE deliveries SET command = 1 WHERE session = ?1 AND win = ?2 AND command = 2", rusqlite::params![session, window])
+            .map(|_| gone)
+            .map_err(|e| format!("delete command deliveries: {e}"))
+    }
+
     /// A line for a busy queue-mode agent, stored but NOT typed yet (board
     /// #257). Invisible to the echo match and the sweep until
     /// `set_deliveries_held(…, false, …)` marks it typed.
@@ -357,7 +423,7 @@ impl Store {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, win, line, ts, msg_id, warned FROM deliveries
+                "SELECT id, win, line, ts, msg_id, warned, command FROM deliveries
                  WHERE session = ?1 AND win = ?2 AND held = 1 ORDER BY id",
             )
             .map_err(|e| format!("prepare held deliveries: {e}"))?;
@@ -370,6 +436,7 @@ impl Store {
                     ts: r.get::<_, i64>(3)? as u64,
                     msg_id: r.get(4)?,
                     warned: r.get::<_, i64>(5)? != 0,
+                    command: CommandLife::from_code(r.get::<_, i64>(6)?),
                 })
             })
             .map_err(|e| format!("query held deliveries: {e}"))?;
@@ -436,12 +503,12 @@ impl Store {
     ) -> Result<Vec<DeliveryRow>, String> {
         let (sql, args): (&str, Vec<Box<dyn rusqlite::ToSql>>) = match window {
             Some(w) => (
-                "SELECT id, win, line, ts, msg_id, warned FROM deliveries
+                "SELECT id, win, line, ts, msg_id, warned, command FROM deliveries
                  WHERE session = ?1 AND win = ?2 AND held = 0 ORDER BY id",
                 vec![Box::new(session.to_string()), Box::new(w.to_string())],
             ),
             None => (
-                "SELECT id, win, line, ts, msg_id, warned FROM deliveries WHERE session = ?1 AND held = 0 ORDER BY id",
+                "SELECT id, win, line, ts, msg_id, warned, command FROM deliveries WHERE session = ?1 AND held = 0 ORDER BY id",
                 vec![Box::new(session.to_string())],
             ),
         };
@@ -458,6 +525,7 @@ impl Store {
                     ts: r.get::<_, i64>(3)? as u64,
                     msg_id: r.get(4)?,
                     warned: r.get::<_, i64>(5)? != 0,
+                    command: CommandLife::from_code(r.get::<_, i64>(6)?),
                 })
             })
             .map_err(|e| format!("query deliveries: {e}"))?;

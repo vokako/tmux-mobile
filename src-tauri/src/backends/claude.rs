@@ -394,6 +394,14 @@ pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
 /// This backend's detection/relaunch row (board #129). `claude --help`:
 /// `-c/--continue` — most recent conversation in this directory;
 /// `--resume <id>` exact. The recipe dialect is `resume_command` above.
+/// What this CLI's prompt hook reports after the slash command `name` (with
+/// `args`, may be empty) — measured 2026-09-28 (board #264) on Claude Code
+/// 2.1.283: a command that becomes a turn (`/goal`) is echoed VERBATIM,
+/// `/goal <args>`; `/effort` and friends fire no hook.
+pub(crate) fn command_echo(name: &str, args: &str) -> Option<String> {
+    Some(if args.is_empty() { name.to_string() } else { format!("{name} {args}") })
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn known() -> crate::projects::agents::KnownAgent {
     crate::projects::agents::KnownAgent {

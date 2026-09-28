@@ -126,6 +126,21 @@ impl Backend {
     /// as its own turn (ack + reply edge). Each backend file says why it is or
     /// is not one. A backend that cannot switch runs `queue` semantics or its
     /// CLI's own behaviour, and the editor does not offer the choice.
+    /// The prompt-hook echo of the slash command `name args` on this CLI, or
+    /// `None` when it reports none we can match (board #264). One shape per
+    /// backend, declared in its own file; `hub_command` records a receipt row
+    /// only when there is one.
+    pub fn command_echo(self, name: &str, args: &str) -> Option<String> {
+        match self {
+            Backend::Kiro => kiro::command_echo(name, args),
+            Backend::Claude => claude::command_echo(name, args),
+            Backend::Codex => codex::command_echo(name, args),
+            Backend::Grok => grok::command_echo(name, args),
+            Backend::Omp => omp::command_echo(name, args),
+            Backend::Kimi => kimi::command_echo(name, args),
+        }
+    }
+
     pub fn switches_input_mode(self) -> bool {
         match self {
             Backend::Kiro => kiro::SWITCHES_INPUT_MODE,
@@ -337,6 +352,22 @@ impl Backend {
 
 #[cfg(test)]
 mod tests {
+    /// Board #264, measured 2026-09-28: what each CLI's prompt hook reports
+    /// after a slash command, one shape per backend file.
+    #[test]
+    fn each_backend_declares_its_command_echo() {
+        assert_eq!(Backend::Kiro.command_echo("/goal", "do x").as_deref(), Some("goal do x"), "kiro strips the slash");
+        assert_eq!(Backend::Claude.command_echo("/goal", "do x").as_deref(), Some("/goal do x"), "claude echoes verbatim");
+        assert_eq!(Backend::Omp.command_echo("/goal", "do x").as_deref(), Some("do x"), "omp echoes the arguments");
+        assert_eq!(Backend::Kimi.command_echo("/goal", "do x").as_deref(), Some("do x"), "kimi echoes the arguments");
+        for b in [Backend::Omp, Backend::Kimi] {
+            assert_eq!(b.command_echo("/model", "k3"), None, "an args-only echo is declared for /goal alone");
+            assert_eq!(b.command_echo("/goal", ""), None);
+        }
+        assert_eq!(Backend::Codex.command_echo("/goal", "do x"), None, "codex fires no prompt hook for a command");
+        assert_eq!(Backend::Grok.command_echo("/goal", "do x"), None, "grok submits its own planner text");
+    }
+
     use super::{Backend, FirstPrompt};
 
     #[test]

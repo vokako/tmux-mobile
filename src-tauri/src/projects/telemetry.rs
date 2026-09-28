@@ -689,6 +689,7 @@ fn turn_fact_unless_row(
 /// permission/input prompt means the agent is blocked on the human while the
 /// turn stays open.
 pub fn record_notification(session: &str, window: &str, kind: &str, ts: u64) {
+    let kind_is_ask = matches!(kind, "permission_required" | "input_required");
     let event = ("notif", kind.to_string(), String::new(), String::new(), Vec::new());
     let kind = kind.to_string();
     turn_fact(session, window, ts, Some(event), |r, ts, seq| match kind.as_str() {
@@ -702,6 +703,11 @@ pub fn record_notification(session: &str, window: &str, kind: &str, ts: u64) {
             r.ask = None; // a finished turn cannot still be asking
         }
     });
+    if !kind_is_ask {
+        // A command typed into an idle window that ends a turn without a
+        // prompt of its own started nothing (board #264): its row goes.
+        let _ = queue(|s| s.delete_command_deliveries(session, window, true));
+    }
 }
 
 /// A human interrupted the turn (`hub_agent_interrupt` / `tmm agent
@@ -799,6 +805,33 @@ pub fn record_delivery(session: &str, window: &str, line: &str, msg_id: &str) {
     // sees it and drops its queue when the window goes.
     with_rec(session, window, |_| {});
     let _ = queue(|s| s.insert_delivery(session, window, line, now(), msg_id));
+}
+
+/// A slash command about to be typed whose backend declares what its
+/// prompt hook will echo (board #264, `Backend::command_echo`): a row in the
+/// ONE deliveries table, so that echo settles the command's bubble like any
+/// delivery. It is never swept (most commands start no turn and echo
+/// nothing, and "unconfirmed" would be a lie about a command); it lives until
+/// the window's next prompt — settled if it carries `echo`, dropped
+/// otherwise — or, when typed into an idle window, until the next turn end.
+/// Returns the row id, `None` when it could not be written (fail-soft: the
+/// bubble simply keeps no mark).
+pub fn record_command_delivery(session: &str, window: &str, echo: &str, msg_id: &str) -> Option<i64> {
+    recovery_mark(session);
+    with_rec(session, window, |_| {});
+    let running = store()
+        .lock()
+        .unwrap()
+        .get(&(session.to_string(), window.to_string()))
+        .is_some_and(|r| matches!(derive_from(r, 0, now()).state.as_str(), "running" | "waiting"));
+    let life = if running { super::store::CommandLife::Queued } else { super::store::CommandLife::Idle };
+    queue(|s| s.insert_command_delivery(session, window, echo, now(), msg_id, life)).ok()
+}
+
+/// The pane refused the command (copy mode, #250): nothing was typed, so
+/// its row is no promise.
+pub fn forget_delivery(id: i64) {
+    let _ = queue(|s| s.delete_delivery_id(id));
 }
 
 /// A line for a busy queue-mode agent (board #257): a row in the ONE
@@ -905,6 +938,9 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
         .collect();
     let acked = !won.is_empty();
     let refs: Vec<DeliveryRef> = won.iter().map(|row| DeliveryRef::of(row)).collect();
+    // A command's echo is this window's NEXT prompt or none (board #264):
+    // whatever command rows this prompt did not carry started no turn.
+    let _ = queue(|s| s.delete_command_deliveries(session, window, false));
     // A turn just opened. This is the ONE honest "it started working" signal:
     // pane activity cannot be it, because an agent TUI repaints its prompt
     // (spinner, status line, cursor) long after it finished.
@@ -1007,7 +1043,7 @@ fn overdue_rows(rec: &Rec, rows: &[super::store::DeliveryRow], mark: (i64, u64),
     }
     let turn_end = rec.end.as_ref().map(|(_, t)| *t).unwrap_or(0);
     rows.iter()
-        .filter(|row| !row.warned)
+        .filter(|row| !row.warned && row.command.is_none())
         .filter(|row| {
             let listened = if row.id <= mark.0 { mark.1 } else { 0 };
             let reference = row.ts.max(listened).max(turn_end.min(now));
@@ -1254,7 +1290,7 @@ mod tests {
     /// An outstanding row as the store returns it: typed at `ts`, by this
     /// process unless `id` is at or below the recovery mark.
     fn row(id: i64, line: &str, ts: u64) -> crate::projects::store::DeliveryRow {
-        crate::projects::store::DeliveryRow { id, window: "w".into(), line: line.into(), ts, msg_id: String::new(), warned: false }
+        crate::projects::store::DeliveryRow { id, window: "w".into(), line: line.into(), ts, msg_id: String::new(), warned: false, command: None }
     }
     const MARK: (i64, u64) = (0, 0);
 
@@ -2490,5 +2526,90 @@ mod tests {
         assert_eq!(ids("a b\na b"), vec![1, 2]);
         assert_eq!(ids("a very long line cut"), vec![4], "a truncated echo settles the longer line");
         assert_eq!(ids("nothing of ours"), Vec::<i64>::new());
+    }
+
+    // ── Board #264: a slash command's receipt row ──────────────────────────
+
+    /// kiro 2.22.1 echoes `/goal <args>` as `goal <args>`: that echo settles
+    /// the command's row by the one matcher, names the room message, and so
+    /// is a receipt (`via: app`), not an INPUT row.
+    #[test]
+    fn a_kiro_goal_echo_settles_the_command_bubble() {
+        crate::projects::tests::use_test_store();
+        let session = format!("cmd-goal-{}", uuid::Uuid::new_v4());
+        let echo = crate::backends::Backend::Kiro.command_echo("/goal", "看一下 ../eks 集群").unwrap();
+        assert_eq!(echo, "goal 看一下 ../eks 集群");
+        assert!(record_command_delivery(&session, "kiro", &echo, "m-goal").is_some());
+        assert!(record_prompt(&session, "kiro", "goal 看一下 ../eks 集群"), "the echo is the command's receipt");
+        let e = recent_events(&session, 0).into_iter().last().unwrap();
+        assert_eq!((e.kind.as_str(), e.via.as_str()), ("prompt", "app"));
+        assert_eq!(e.deliveries.iter().map(|d| d.msg.as_str()).collect::<Vec<_>>(), vec!["m-goal"], "the bubble is named");
+        assert!(held(&session, "kiro").is_empty());
+    }
+
+    /// Most commands fire no prompt hook (`/effort`): the row is never
+    /// reported unconfirmed however old, and the next turn end retires it.
+    #[test]
+    fn a_command_that_echoes_nothing_is_never_unconfirmed() {
+        crate::projects::tests::use_test_store();
+        let session = format!("cmd-effort-{}", uuid::Uuid::new_v4());
+        let echo = crate::backends::Backend::Kiro.command_echo("/effort", "medium").unwrap();
+        record_command_delivery(&session, "kiro", &echo, "m-effort").unwrap();
+        backdate(&session);
+        sweep_deliveries(&session);
+        assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 0, "no warn after 45 s");
+        record_notification(&session, "kiro", "completed", now());
+        assert!(held(&session, "kiro").is_empty(), "an end with no prompt of its own retires it");
+    }
+
+    /// The window's next prompt is the command's echo or nothing: a prompt
+    /// that does not carry it drops the row and renders as itself.
+    #[test]
+    fn a_non_matching_next_prompt_drops_the_command_row() {
+        crate::projects::tests::use_test_store();
+        let session = format!("cmd-miss-{}", uuid::Uuid::new_v4());
+        record_command_delivery(&session, "claude", "/effort medium", "m-x").unwrap();
+        assert!(!record_prompt(&session, "claude", "fix the flaky test"), "not ours");
+        let e = recent_events(&session, 0).into_iter().last().unwrap();
+        assert_eq!((e.kind.as_str(), e.via.as_str(), e.text.as_str()), ("prompt", "local", "fix the flaky test"));
+        assert!(held(&session, "claude").is_empty(), "the command row is gone");
+        // …and a later prompt that happens to contain it cannot claim it.
+        assert!(!record_prompt(&session, "claude", "/effort medium"));
+    }
+
+    /// A command typed into a RUNNING turn is queued by the CLI: the current
+    /// turn's end must not retire it before it runs; the next prompt settles.
+    #[test]
+    fn a_queued_command_survives_the_running_turns_end() {
+        crate::projects::tests::use_test_store();
+        let session = format!("cmd-queued-{}", uuid::Uuid::new_v4());
+        assert!(!record_prompt(&session, "kiro", "a long task"), "a turn opens");
+        record_command_delivery(&session, "kiro", "goal next", "m-q").unwrap();
+        record_notification(&session, "kiro", "completed", now());
+        assert_eq!(held(&session, "kiro"), vec!["goal next"], "the queued command outlives the end it waited for");
+        assert!(record_prompt(&session, "kiro", "goal next"), "then its echo settles it");
+        // The /goal turn itself runs now; a command queued behind it is
+        // promoted to idle at ITS end and retired by the end after that.
+        record_command_delivery(&session, "kiro", "effort x", "m-e").unwrap();
+        record_notification(&session, "kiro", "completed", now());
+        assert_eq!(held(&session, "kiro"), vec!["effort x"], "queued behind the /goal turn, promoted at its end");
+        record_notification(&session, "kiro", "completed", now());
+        assert!(held(&session, "kiro").is_empty(), "an idle command row goes at the next end");
+    }
+
+    /// A chat line keeps today's rules beside a command row: the command's
+    /// retirement never takes a chat line, and the sweep still reports it.
+    #[test]
+    fn command_rows_leave_chat_lines_alone() {
+        crate::projects::tests::use_test_store();
+        let session = format!("cmd-mixed-{}", uuid::Uuid::new_v4());
+        record_delivery(&session, "kiro", "[tmm chat] human: @kiro hello", "m-chat");
+        record_command_delivery(&session, "kiro", "effort x", "m-cmd").unwrap();
+        // An end older than the ack window, so the chat line is overdue.
+        record_notification(&session, "kiro", "completed", now() - DELIVERY_ACK_SECS - 5);
+        assert_eq!(held(&session, "kiro"), vec!["[tmm chat] human: @kiro hello"]);
+        backdate(&session);
+        sweep_deliveries(&session);
+        assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 1, "the chat line is still swept");
     }
 }

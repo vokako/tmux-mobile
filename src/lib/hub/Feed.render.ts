@@ -110,4 +110,19 @@ test('a sent /command renders as the sender bubble, whole, name in inline code (
   const fan = bubbles[1]!.querySelector('.m-body p')!;
   assert.deepEqual([...fan.querySelectorAll('.m-to')].map((n) => n.textContent), ['@lead', '@dev'], 'fan-out lists every target like a message does');
   assert.equal(fan.querySelector('code')?.textContent, '/compact');
+  // No receipt → no ring: a hollow ring would promise an echo most commands
+  // never send.
+  assert.equal(bubbles[1]!.querySelector('.m-state'), null);
+  // The echo names the command's message (the server's receipt row): the
+  // bubble is delivered and the echo is not an INPUT row.
+  const acked = feedBlocks(messages, [
+    { id: 1, ts: 5, window: 'kiro', kind: 'prompt', via: 'app', text: `goal ${args}`, deliveries: [{ id: 9, msg: 'g' }] },
+  ], 'tools', (n) => n);
+  const ackTree = h.fragment(render(Feed, { props: {
+    selected: 'fixture', roomReady: true, blocks: acked, agents: [], managedNames: ['kiro', 'lead', 'dev'],
+    stepsRows: 5, following: false, newBelow: false,
+    emptyFeed: createRawSnippet(() => ({ render: () => '<div></div>' })),
+  } }).body as string);
+  assert.ok(ackTree.querySelectorAll('.msg.me')[0]!.querySelector('.m-state.ok'), 'the settled command wears the check');
+  assert.equal(ackTree.querySelector('.prompt'), null, 'its echo is consumed, not a duplicate INPUT row');
 });

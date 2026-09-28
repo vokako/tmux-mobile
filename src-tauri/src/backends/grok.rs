@@ -314,6 +314,16 @@ pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
 /// `-c/--continue` — "Continue the most recent session for the current
 /// working directory" (cwd-scoped, so safe, unlike codex's machine-wide
 /// --last); `--resume <id>` exact. Recipe dialect: `resume_command` above.
+/// What this CLI's prompt hook reports after the slash command `name` (with
+/// `args`, may be empty) — measured 2026-09-28 (board #264) on grok 1.0.41:
+/// no echo of OUR text. `/goal` submits grok's own planner prompt ("You are
+/// the Goal Plan Writer for the xAI Grok Build harness…"), which stays an
+/// INPUT row — it is not what was typed and has no stable shape; `/effort`
+/// fires nothing.
+pub(crate) fn command_echo(_name: &str, _args: &str) -> Option<String> {
+    None
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn known() -> crate::projects::agents::KnownAgent {
     crate::projects::agents::KnownAgent {

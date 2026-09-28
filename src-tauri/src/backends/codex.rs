@@ -396,6 +396,15 @@ pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
 /// The managed-home dialect (`resume_command` above) DOES use `--last`:
 /// an isolated CODEX_HOME is this one agent's and codex cwd-filters it.
 /// One file, both halves of the same fact (todo §D2).
+/// What this CLI's prompt hook reports after the slash command `name` (with
+/// `args`, may be empty) — measured 2026-09-28 (board #264) on codex-cli
+/// 0.154.0: none. Even `/goal`, which runs a turn, fires no `UserPromptSubmit`
+/// (only its tool and stop), and `/status` fires nothing — so a command gets
+/// no receipt row at all.
+pub(crate) fn command_echo(_name: &str, _args: &str) -> Option<String> {
+    None
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn known() -> crate::projects::agents::KnownAgent {
     crate::projects::agents::KnownAgent {

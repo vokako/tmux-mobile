@@ -355,6 +355,15 @@ pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
 /// docker-compose and every other word containing "omp" stay shells. `--continue` is
 /// cwd-scoped (sessions live under `~/.omp/agent/sessions/<encoded-cwd>/`),
 /// `--resume <id>` takes an id prefix. Recipe dialect: `resume_command`.
+/// What this CLI's prompt hook reports after the slash command `name` (with
+/// `args`, may be empty) — measured 2026-09-28 (board #264) on omp 18.2.10:
+/// `/goal <args>` is echoed as the ARGUMENTS alone; `/usage` fires nothing.
+/// Only `/goal` is declared: an args-only echo of any other command would be
+/// a bare word that ordinary prose could contain.
+pub(crate) fn command_echo(name: &str, args: &str) -> Option<String> {
+    (name == "/goal" && !args.is_empty()).then(|| args.to_string())
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn known() -> crate::projects::agents::KnownAgent {
     crate::projects::agents::KnownAgent {

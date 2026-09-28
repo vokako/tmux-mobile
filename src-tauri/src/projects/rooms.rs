@@ -71,9 +71,20 @@ pub fn post_routed(
     body: &str,
     to: &[String],
 ) -> Result<serde_json::Value, String> {
-    let id = uuid::Uuid::new_v4().to_string();
+    post_routed_as(room, &uuid::Uuid::new_v4().to_string(), from, body, to)
+}
+
+/// `post_routed` under an id the caller chose — for a record whose id must
+/// exist before the message does (a command's receipt rows, board #264).
+pub fn post_routed_as(
+    room: &str,
+    id: &str,
+    from: &str,
+    body: &str,
+    to: &[String],
+) -> Result<serde_json::Value, String> {
     let to_json = serde_json::to_string(to).unwrap_or_else(|_| "[]".into());
-    let stored = with_store(|s| s.hub_append(room, &id, now_ms(), from, &to_json, "msg", body))?;
+    let stored = with_store(|s| s.hub_append(room, id, now_ms(), from, &to_json, "msg", body))?;
     let json = message_json(&stored);
     let _ = channel().send(json.to_string());
     Ok(json)

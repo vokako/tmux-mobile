@@ -383,6 +383,15 @@ pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
 /// `kimi` binary (`pane_current_command` says "kimi"); `-c` is cwd-scoped
 /// ("Continue the previous session for the working directory"), `-S <id>`
 /// exact. Recipe dialect: `resume_command` above.
+/// What this CLI's prompt hook reports after the slash command `name` (with
+/// `args`, may be empty) — measured 2026-09-28 (board #264) on kimi 2.0.2:
+/// `/goal <args>` is echoed as the ARGUMENTS alone; `/usage` fires nothing.
+/// Only `/goal` is declared: an args-only echo of any other command would be
+/// a bare word that ordinary prose could contain.
+pub(crate) fn command_echo(name: &str, args: &str) -> Option<String> {
+    (name == "/goal" && !args.is_empty()).then(|| args.to_string())
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn known() -> crate::projects::agents::KnownAgent {
     crate::projects::agents::KnownAgent {
