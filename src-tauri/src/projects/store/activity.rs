@@ -75,7 +75,7 @@ pub enum CommandLife {
     /// a chat line is its echo or proof there is none.
     Idle,
     /// Typed into a RUNNING turn, so the CLI queued it behind that turn: no
-    /// prompt may take it until the turn ends (`promote_queued_commands`).
+    /// prompt may take it until the turn ends (`end_command_turn`).
     Queued,
 }
 
@@ -383,16 +383,29 @@ impl Store {
             .map_err(|e| format!("insert command delivery: {e}"))
     }
 
-    /// Retire the window's OLDEST Idle command row — one row, never the rows
-    /// behind it (board #264, validator 11:50). Returns whether one went.
-    pub fn retire_oldest_idle_command(&self, session: &str, window: &str) -> Result<bool, String> {
-        self.conn
-            .execute(
+    /// A turn end's step on a window's command rows, ONE transaction
+    /// (board #264, orchestrator 11:51): when `retire`, the oldest Idle
+    /// command row goes (one row, never the rows behind it); THEN every
+    /// Queued row becomes Idle. Returns whether a row was retired.
+    pub fn end_command_turn(&mut self, session: &str, window: &str, retire: bool) -> Result<bool, String> {
+        let tx = self.conn.transaction().map_err(|e| format!("command end transaction: {e}"))?;
+        let retired = if retire {
+            tx.execute(
                 "DELETE FROM deliveries WHERE id = (SELECT MIN(id) FROM deliveries WHERE session = ?1 AND win = ?2 AND command = 1)",
                 rusqlite::params![session, window],
             )
-            .map(|n| n > 0)
-            .map_err(|e| format!("retire idle command: {e}"))
+            .map_err(|e| format!("retire idle command: {e}"))?
+                > 0
+        } else {
+            false
+        };
+        tx.execute(
+            "UPDATE deliveries SET command = 1 WHERE session = ?1 AND win = ?2 AND command = 2",
+            rusqlite::params![session, window],
+        )
+        .map_err(|e| format!("promote queued commands: {e}"))?;
+        tx.commit().map_err(|e| format!("commit command end: {e}"))?;
+        Ok(retired)
     }
 
     /// Put one command row back behind the turn that just opened (board #264).
@@ -401,18 +414,6 @@ impl Store {
             .execute("UPDATE deliveries SET command = 2 WHERE id = ?1 AND command = 1", rusqlite::params![id])
             .map(|n| n > 0)
             .map_err(|e| format!("requeue command: {e}"))
-    }
-
-    /// The turn that queued a window's commands has ended: they run from
-    /// here, so each becomes Idle and the prompts that follow may take it
-    /// (board #264). Nothing is deleted — rows retire one per prompt.
-    pub fn promote_queued_commands(&self, session: &str, window: &str) -> Result<usize, String> {
-        self.conn
-            .execute(
-                "UPDATE deliveries SET command = 1 WHERE session = ?1 AND win = ?2 AND command = 2",
-                rusqlite::params![session, window],
-            )
-            .map_err(|e| format!("promote queued commands: {e}"))
     }
 
     /// A line for a busy queue-mode agent, stored but NOT typed yet (board

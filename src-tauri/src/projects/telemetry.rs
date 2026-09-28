@@ -838,19 +838,18 @@ pub fn record_command_delivery(session: &str, window: &str, echo: &str, msg_id: 
     queue(|s| s.insert_command_delivery(session, window, echo, now(), msg_id, life)).ok()
 }
 
-/// A turn end's effect on a window's command rows (board #264). An end that
-/// closes a turn with NO prompt of its own proves the oldest Idle command
-/// echoed nothing (the CLI ran it, or failed it, without a hook): that ONE
-/// row retires (validator 11:50 — else a later look-alike prompt could claim
-/// it). An end after a prompt retires nothing: that prompt was the turn of
-/// the command before it, and the next one runs now. Either way the rows the
-/// ending turn queued become Idle — after the retirement, so a row promoted
-/// here is never retired by the same end.
+/// A turn end's effect on a window's command rows (board #264), one
+/// transaction (`Store::end_command_turn`): retire the oldest Idle command,
+/// THEN promote Queued to Idle, so a row promoted here is never retired by
+/// the same end. The retirement applies only to an end that closes a turn
+/// with NO prompt of its own — that proves the oldest Idle command echoed
+/// nothing (the CLI ran or failed it without a hook; validator 11:50). An end
+/// after a prompt retires nothing: that prompt was the PREVIOUS command's
+/// turn, and the oldest Idle row is the next command, which runs now — two
+/// /goal queued at one pane would otherwise lose the second at the first's
+/// end (the FIFO regression).
 fn end_commands(session: &str, window: &str, turn_had_prompt: bool) {
-    if !turn_had_prompt {
-        let _ = queue(|s| s.retire_oldest_idle_command(session, window));
-    }
-    let _ = queue(|s| s.promote_queued_commands(session, window));
+    let _ = queue(|s| s.end_command_turn(session, window, !turn_had_prompt));
 }
 
 /// The pane refused the command (copy mode, #250): nothing was typed, so
