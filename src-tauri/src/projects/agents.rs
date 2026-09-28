@@ -173,11 +173,35 @@ fn recipe_agent(workspace: Option<&str>, window_name: &str) -> Option<&'static K
     known().iter().find(|a| a.backend == backend)
 }
 
+/// Interpreters whose SCRIPT is the program: the npm codex is `node
+/// …/bin/codex`, a Python CLI can be `python3 …/bin/kimi-code`.
+fn is_interpreter(base: &str) -> bool {
+    matches!(base, "node" | "nodejs" | "bun" | "deno" | "python" | "python3")
+        || base.strip_prefix("python3.").is_some_and(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// What one process RUNS, from its argv: the executable path (argv[0]) and,
+/// when that is an interpreter, the script it was given (first non-flag
+/// argument). Never the other arguments — `rg grok`, `vim kiro.md` and
+/// `uvx kiro-web-search` name an agent in an argument while running
+/// something else (validator, board #260).
+fn program_of(argv: &str) -> String {
+    let mut args = argv.split_whitespace();
+    let Some(exe) = args.next() else { return String::new() };
+    let base = exe.rsplit('/').next().unwrap_or(exe);
+    match is_interpreter(base).then(|| args.find(|a| !a.starts_with('-'))).flatten() {
+        Some(script) => format!("{exe} {script}"),
+        None => exe.to_string(),
+    }
+}
+
 /// The agent a pane's PROCESSES run, shallow → deep (board #260): the
-/// process tmux reports in the foreground (`pane_current_command`), the pane
-/// process's own argv, then the argv chain below it (`descendant_cmd`) —
-/// where an interpreter-launched CLI such as the npm codex (`node`) or Claude
-/// Code (a version-named binary) finally says its own name.
+/// process tmux reports in the foreground (`pane_current_command`), then,
+/// per process on the chain from the pane process down (`argvs`), the
+/// program it runs (`program_of`) — where an interpreter-launched CLI such
+/// as the npm codex (`node …/bin/codex`) or Claude Code (a version-named
+/// binary under `…/claude/versions/`) finally says its own name. Each level
+/// is read on its own: an argument is data, not the program.
 ///
 /// Labels are NOT evidence. `pane_title` is whatever the last CLI wrote with
 /// an OSC title sequence and nothing resets it when that CLI exits: the
@@ -187,8 +211,13 @@ fn recipe_agent(workspace: Option<&str>, window_name: &str) -> Option<&'static K
 /// after the kirocrew project is not kiro. ONE function, called once per pane
 /// in the listing (`tmux::parse_pane_lines`), so the server and the client
 /// read the same verdict off `TmuxPane::agent` instead of each re-deriving it.
-pub fn detect_processes(current_command: &str, pane_argv: &str, child_argv: &str) -> Option<&'static KnownAgent> {
-    detect(&format!("{current_command} {pane_argv} {child_argv}"))
+pub fn detect_processes(current_command: &str, argvs: &[&str]) -> Option<&'static KnownAgent> {
+    let mut programs = current_command.to_string();
+    for argv in argvs {
+        programs.push(' ');
+        programs.push_str(&program_of(argv));
+    }
+    detect(&programs)
 }
 
 /// The agent in `pane`: its launch recipe first (managed windows), its
@@ -276,7 +305,7 @@ mod tests {
             current_path: "/w".into(),
             active: true,
             child_cmd: child.into(),
-            agent: detect_processes(cmd, "-zsh", child).map(|a| a.backend),
+            agent: detect_processes(cmd, &["-zsh", child]).map(|a| a.backend),
         }
     }
 
@@ -313,9 +342,31 @@ mod tests {
         }
         // The pane process itself is evidence too: a window created with the
         // CLI as its command has no shell above it (`node codex.js` is root).
-        assert_eq!(detect_processes("node", "node /x/@openai/codex/bin/codex.js", "").map(|a| a.backend), Some("codex"));
+        assert_eq!(detect_processes("node", &["node /x/@openai/codex/bin/codex.js"]).map(|a| a.backend), Some("codex"));
+        assert_eq!(detect_processes("node", &["-zsh", "node --no-warnings /x/codex.js resume abc"]).map(|a| a.backend), Some("codex"));
+        assert_eq!(detect_processes("python3", &["-zsh", "/usr/bin/python3.12 /home/u/.local/bin/kimi-code"]).map(|a| a.backend), Some("kimi"));
         // Shallow beats deep: the process tmux started wins over a subprocess.
-        assert_eq!(detect_processes("kiro-cli", "-zsh", "node kiro-web-search").map(|a| a.backend), Some("kiro"));
+        assert_eq!(detect_processes("kiro-cli", &["-zsh", "kiro-cli chat", "node kiro-web-search"]).map(|a| a.backend), Some("kiro"));
+    }
+
+    /// Validator on board #260: an agent's name in an ARGUMENT is not an
+    /// agent. Only each process's executable (and an interpreter's script)
+    /// counts, level by level.
+    #[test]
+    fn an_agent_named_in_an_argument_is_not_an_agent() {
+        for argv in [
+            "rg grok",
+            "vim notes/kiro.md",
+            "git log --grep codex",
+            "uvx kiro-web-search",
+            "/local/home/u/.local/bin/uv tool uvx kiro-web-search",
+            "tail -f /tmp/claude.log",
+            "node server.js --name omp",
+            "python3 -m http.server --bind kimi",
+        ] {
+            let cmd = argv.split_whitespace().next().unwrap().rsplit('/').next().unwrap();
+            assert!(detect_processes(cmd, &["-zsh", argv]).is_none(), "{argv}");
+        }
     }
 
     #[test]

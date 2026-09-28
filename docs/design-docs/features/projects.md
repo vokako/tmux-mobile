@@ -217,9 +217,11 @@ decision rather than a special case in the reconciler.
 `agents.rs` is one table used for **both** detection and relaunch, so the two
 can never disagree; a detector that recognises "codex" but relaunches something
 else would quietly rebuild the wrong workspace. Detection reads the pane's
-PROCESSES only — `pane_current_command`, the pane process's own argv, then the
-argv chain below it (`agents::detect_processes`) — and takes the EARLIEST
-match: a later match is a subprocess the agent spawned (a real case was codex
+PROCESSES only — `pane_current_command`, then for the pane process and each
+process below it the PROGRAM it runs: argv[0], plus the script when argv[0] is
+an interpreter (`node …/bin/codex`) (`agents::detect_processes`). Other
+arguments are data: `rg grok` runs rg (validator, board #260). It takes the
+EARLIEST match: a later match is a subprocess the agent spawned (a real case was codex
 spawning a `kiro-web-search` helper and being labelled Kiro). Claude Code needs
 no special case even though its process name can be a bare version number,
 because its argv says `claude` or `.../claude/versions/<v>`. Labels are not

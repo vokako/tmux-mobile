@@ -340,40 +340,44 @@ fn read_process_table() -> ProcessTable {
     map
 }
 
-/// Concatenated argv of the first-child chain under `root` (the pane's
-/// shell), up to 4 levels deep. Agent CLIs sit directly under the shell or
-/// behind one wrapper level (script launcher → node), but they also spawn
-/// their own subprocesses (tool executions) — so we keep EVERY level's
-/// argv, not just the deepest, and let the caller's substring matching
-/// find the agent's name anywhere in the chain. Each level is capped so a
-/// pathological argv doesn't bloat every pane listing.
-fn descendant_cmd(table: &ProcessTable, root: u32) -> String {
+/// The argv of each process on the first-child chain under `root` (the
+/// pane's shell), shallow → deep, up to 4 levels. Agent CLIs sit directly
+/// under the shell or behind one wrapper level (script launcher → node), but
+/// they also spawn their own subprocesses (tool executions) — so EVERY
+/// level is kept, and `agents::detect_processes` reads each level's
+/// executable on its own (board #260: joined into one string, `rg grok`'s
+/// ARGUMENT read as the grok CLI). Each level is capped so a pathological
+/// argv doesn't bloat every pane listing.
+fn descendant_argvs(table: &ProcessTable, root: u32) -> Vec<String> {
     const MAX_ARGS_PER_LEVEL: usize = 160;
     let mut children: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
     for (&pid, &(ppid, _)) in table.iter() {
         children.entry(ppid).or_default().push(pid);
     }
     let mut cur = root;
-    let mut acc = String::new();
+    let mut acc = Vec::new();
     for _ in 0..4 {
         let Some(kids) = children.get(&cur) else { break };
         // Lowest pid = first-spawned ≈ the foreground job.
         let Some(&next) = kids.iter().min() else { break };
         if let Some((_, args)) = table.get(&next) {
             if !args.is_empty() {
-                if !acc.is_empty() {
-                    acc.push(' ');
-                }
                 let mut end = MAX_ARGS_PER_LEVEL.min(args.len());
                 while end < args.len() && !args.is_char_boundary(end) {
                     end += 1;
                 }
-                acc.push_str(&args[..end]);
+                acc.push(args[..end].to_string());
             }
         }
         cur = next;
     }
     acc
+}
+
+/// The chain as one display string (`TmuxPane::child_cmd`).
+#[cfg(test)]
+fn descendant_cmd(table: &ProcessTable, root: u32) -> String {
+    descendant_argvs(table, root).join(" ")
 }
 
 fn parse_pane_lines(output: &str) -> Vec<TmuxPane> {
@@ -403,24 +407,22 @@ fn parse_pane_lines(output: &str) -> Vec<TmuxPane> {
     // Single ps snapshot serves every pane in this listing.
     let table = panes.iter().any(|(_, pid)| *pid > 0).then(process_table);
     for (pane, pid) in panes.iter_mut() {
-        let root = table.as_deref().filter(|_| *pid > 0).map(|t| {
-            pane.child_cmd = descendant_cmd(t, *pid);
-            t.get(pid).map(|(_, args)| args.as_str()).unwrap_or("")
+        // Shallow → deep: the pane process's own argv, then its descendants'.
+        let argvs: Vec<String> = table.as_deref().filter(|_| *pid > 0).map_or_else(Vec::new, |t| {
+            let chain = descendant_argvs(t, *pid);
+            pane.child_cmd = chain.join(" ");
+            t.get(pid).map(|(_, args)| args.clone()).into_iter().chain(chain).collect()
         });
         // The detection table lives with the projects (desktop-only, like the
         // store): a phone is a client of a desktop server, never a server
         // whose panes run agents, so its listing simply carries no verdict.
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
-            pane.agent = crate::projects::agents::detect_processes(
-                &pane.current_command,
-                root.unwrap_or(""),
-                &pane.child_cmd,
-            )
-            .map(|a| a.backend);
+            let argvs: Vec<&str> = argvs.iter().map(String::as_str).collect();
+            pane.agent = crate::projects::agents::detect_processes(&pane.current_command, &argvs).map(|a| a.backend);
         }
         #[cfg(any(target_os = "android", target_os = "ios"))]
-        let _ = root;
+        let _ = argvs;
     }
     panes.into_iter().map(|(p, _)| p).collect()
 }
@@ -1496,11 +1498,20 @@ mod tests {
         // `exec -a` sets argv[0]: the process is `sleep`, its argv says kiro-cli.
         run_tmux(&["new-window", "-d", "-t", &format!("={session}:"), "bash -c 'exec -a kiro-cli sleep 300'"])
             .expect("agent-argv window");
+        // …and an ordinary program with an agent's name in an ARGUMENT
+        // (validator, #260: `rg grok` read as grok): a process whose argv is
+        // `rg -c sleep 301; true grok` (bash renamed; `; true` keeps it alive
+        // as the parent of `sleep`, so `grok` stays in a live argv).
+        run_tmux(&["new-window", "-d", "-t", &format!("={session}:"), "bash -c 'exec -a rg bash -c \"sleep 301; true\" grok'"])
+            .expect("argument window");
         std::thread::sleep(std::time::Duration::from_millis(300));
         let panes = list_panes(&session).expect("list");
+        assert_eq!(panes.len(), 3);
         let stale = panes.iter().find(|p| p.pane_title == "grok").expect("the stale-title pane");
         assert_eq!(stale.agent, None, "a title is not a process: {stale:?}");
-        let agent = panes.iter().find(|p| p.pane_title != "grok").expect("the argv pane");
+        let arg = panes.iter().find(|p| p.window == panes.iter().map(|p| p.window).max().unwrap()).unwrap();
+        assert_eq!(arg.agent, None, "an argument is not a program: {arg:?}");
+        let agent = panes.iter().find(|p| p.pane_title != "grok" && p.window != arg.window).expect("the argv pane");
         assert_eq!(agent.agent, Some("kiro"), "{agent:?}");
         let target = |p: &TmuxPane| format!("{}:{}.{}", p.session, p.window, p.pane);
         assert_eq!(pane_agent(&target(stale)), None);
