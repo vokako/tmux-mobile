@@ -226,7 +226,7 @@ history as containing a live signing key.
   | kiro | `Co-authored-by: Kiro Agent <244629292+kiro-agent@users.noreply.github.com>` | the public Kiro Agent GitHub identity — attributable |
   | claude | `Co-Authored-By: Claude <model> <noreply@anthropic.com>` as the CLI emits it (e.g. `Claude Fable 5.1`, `Claude Opus 4.8 (1M context)`) | Anthropic's noreply — not project-controlled |
   | codex | `Co-authored-by: Codex <noreply@openai.com>` | OpenAI's noreply — not project-controlled |
-  | kimi | `Co-authored-by: Kimi Agent <kimi-agent@users.noreply.github.com>` | **a plain-text marker, NOT a GitHub account** (GitHub's noreply carries a numeric user id; this has none). Born 2026-09-20 with the first kimi session (#222); kept for consistency with the commits that carry it |
+  | kimi | `Co-authored-by: Kimi Agent <kimi-agent@users.noreply.github.com>` | **a historical plain-text marker**: a GitHub user `kimi-agent` does exist (id 263675458), but its ownership is unverified, and this address is not that account's canonical noreply (accounts created after 2017-07-18 get `ID+USERNAME@users.noreply.github.com`) — so it is not an attributable identity. Born 2026-09-20 with the first kimi session (#222); kept for consistency with the commits that carry it |
   | grok / omp | none assigned | no trailer until the owner assigns one |
 
 ## Testing
