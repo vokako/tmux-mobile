@@ -114,7 +114,10 @@ The managed-home gate excludes hand-started agents, final text is capped at
 server restarts mid-turn, the edge is rebuilt by STREAMING every prompt newer
 than the previous turn end and keeping only the distinct senders: a newest-N
 page dropped the turn's first requester once it held more than N inputs (#256
-review), and a never-ending turn (grok, #252) must not be loaded whole. An
+review), and a never-ending turn (grok, #252) must not be loaded whole. Memory
+is bounded by people, not inputs: an edge holds at most `MAX_REPLY_TARGETS`
+(32) distinct requesters, keeping the earliest, so the requester who opened
+the turn is never the one dropped. An
 input after the restart joins the rebuilt edge. `tmm send` does not suppress the final response:
 it starts a separate question or handoff.
 

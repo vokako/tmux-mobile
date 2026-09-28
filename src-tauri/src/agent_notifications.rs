@@ -626,8 +626,19 @@ fn recovered_targets(session: &str, window: &str) -> Vec<String> {
     targets
 }
 
+/// The most distinct requesters one turn's reply edge holds. Memory is
+/// bounded by PEOPLE, never by inputs (orchestrator, #256 review: cap the
+/// deduplicated requesters, not the prompts). A turn keeps its EARLIEST
+/// requesters when it hits the cap, so the one who opened it is never the
+/// one dropped; a project has at most `SPAWN_CAP` agents, so real turns sit
+/// far below it.
+const MAX_REPLY_TARGETS: usize = 32;
+
 fn join_targets(targets: &mut Vec<String>, more: Vec<String>) {
     for sender in more {
+        if targets.len() >= MAX_REPLY_TARGETS {
+            return;
+        }
         if !targets.contains(&sender) {
             targets.push(sender);
         }
@@ -1546,6 +1557,19 @@ mod tests {
         record_tool(&session, "v", "memory", "capture");
         input(&hub, "[tmm chat 2026-09-28 00:02] lead: @validator go");
         assert_eq!(hub.take_reply_targets(&session, "v"), vec!["lead"]);
+        record_notification(&session, "v", "completed", unix_seconds());
+
+        // The cap counts distinct requesters and keeps the earliest — live
+        // and after a restart alike.
+        input(&hub, "[tmm chat 2026-09-28 00:03] orchestrator: @validator first");
+        for i in 0..40 {
+            input(&hub, &format!("[tmm chat 2026-09-28 00:04] a{i}: @validator ask {i}"));
+        }
+        let live = hub.state.lock().unwrap().reply_targets.get(&window_key(&session, "v")).cloned().unwrap();
+        assert_eq!(live.len(), MAX_REPLY_TARGETS);
+        assert_eq!(live[0], "orchestrator");
+        let restarted = AgentNotificationHub::load_at(root.clone());
+        assert_eq!(restarted.take_reply_targets(&session, "v"), live, "recovery folds to the same capped edge");
         let _ = std::fs::remove_dir_all(root);
     }
 }
