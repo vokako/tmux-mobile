@@ -111,17 +111,26 @@ impl Store {
     /// memory; the caller keeps only what it folds (distinct senders).
     /// `Some(n)` stops after n rows (the per-input "has this turn any input
     /// yet?" question asks for one).
+    /// The requesters of a prompt row (board #257, schema v27): a JSON array
+    /// parsed from the FULL prompt, beside the display-truncated text.
+    pub fn set_activity_requesters(&self, id: i64, requesters: &str) -> Result<(), String> {
+        self.conn
+            .execute("UPDATE activity SET requesters = ?2 WHERE id = ?1", rusqlite::params![id, requesters])
+            .map(|_| ())
+            .map_err(|e| format!("set activity requesters: {e}"))
+    }
+
     pub fn for_each_open_turn_prompt(
         &self,
         session: &str,
         window: &str,
         limit: Option<usize>,
-        mut visit: impl FnMut(&str),
+        mut visit: impl FnMut(&str, Option<&str>),
     ) -> Result<usize, String> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT text FROM activity
+                "SELECT text, requesters FROM activity
                  WHERE session = ?1 AND COALESCE(NULLIF(win, ''), CAST(window AS TEXT)) = ?2 AND kind = 'prompt'
                    AND id > COALESCE((
                      SELECT MAX(id) FROM activity
@@ -138,7 +147,8 @@ impl Store {
         let mut seen = 0;
         while let Some(row) = rows.next().map_err(|e| format!("read open turn prompts: {e}"))? {
             let text: String = row.get(0).map_err(|e| format!("read open turn prompt: {e}"))?;
-            visit(&text);
+            let stored: Option<String> = row.get(1).map_err(|e| format!("read open turn requesters: {e}"))?;
+            visit(&text, stored.as_deref());
             seen += 1;
         }
         Ok(seen)
@@ -364,25 +374,28 @@ impl Store {
         Ok(rows.filter_map(Result::ok).collect())
     }
 
-    /// Mark rows typed (`held = false`: their ack clock starts at `ts`, and a
-    /// copy-mode report made while they were held is cleared) or back to held
-    /// (the typing failed). One statement per row, same transaction-free
-    /// fail-soft as the rest of the queue.
-    pub fn set_deliveries_held(&self, ids: &[i64], held: bool, ts: u64) -> Result<(), String> {
+    /// Mark a batch typed (`held = false`: its ack clock starts at `ts`, and
+    /// a copy-mode report made while it was held is cleared) or back to held
+    /// (the typing failed). ONE transaction for the whole batch (validator /
+    /// orchestrator 04:49): either every row flips or none does, so a batch
+    /// is never half pending and half held — the held half would be typed
+    /// again at the next trigger while the echo could not settle it. A row
+    /// that no longer exists (settled or pruned meanwhile) is an error too:
+    /// the caller then types nothing.
+    pub fn set_deliveries_held(&mut self, ids: &[i64], held: bool, ts: u64) -> Result<(), String> {
+        let tx = self.conn.transaction().map_err(|e| format!("delivery batch transaction: {e}"))?;
         for id in ids {
-            let sql = if held {
-                "UPDATE deliveries SET held = 1 WHERE id = ?1"
-            } else {
-                "UPDATE deliveries SET held = 0, warned = 0, ts = ?2 WHERE id = ?1"
-            };
             let n = if held {
-                self.conn.execute(sql, rusqlite::params![id])
+                tx.execute("UPDATE deliveries SET held = 1 WHERE id = ?1 AND held = 0", rusqlite::params![id])
             } else {
-                self.conn.execute(sql, rusqlite::params![id, ts as i64])
-            };
-            n.map_err(|e| format!("set delivery held: {e}"))?;
+                tx.execute("UPDATE deliveries SET held = 0, warned = 0, ts = ?2 WHERE id = ?1 AND held = 1", rusqlite::params![id, ts as i64])
+            }
+            .map_err(|e| format!("set delivery held: {e}"))?;
+            if n != 1 {
+                return Err(format!("delivery {id} is not {}", if held { "pending" } else { "held" }));
+            }
         }
-        Ok(())
+        tx.commit().map_err(|e| format!("commit delivery batch: {e}"))
     }
 
     /// Outstanding TYPED lines, in the order they were typed (row id). Held
@@ -509,15 +522,31 @@ impl Store {
     /// Drop lines typed before `cutoff`. A delivery nobody ever acked is not
     /// worth resurrecting days later — the agent that would have echoed it is
     /// long gone — and this keeps the table bounded without a sweep of its own.
+    /// A HELD line (board #257) was never typed: its `ts` is when it was held,
+    /// and it is still owed, so the prune never touches it (validator: a 24 h
+    /// copy-mode stretch or turn would otherwise drop it silently).
     pub fn prune_deliveries(&self, cutoff: u64) -> Result<usize, String> {
         self.conn
-            .execute("DELETE FROM deliveries WHERE ts < ?1", rusqlite::params![cutoff as i64])
+            .execute("DELETE FROM deliveries WHERE ts < ?1 AND held = 0", rusqlite::params![cutoff as i64])
             .map_err(|e| format!("prune deliveries: {e}"))
     }
 }
 
 #[cfg(test)]
 mod tests {
+
+    /// Board #257 review: the 24 h prune drops stale TYPED lines and never a
+    /// HELD one, however old.
+    #[test]
+    fn the_prune_never_drops_a_held_line() {
+        let store = Store::open_memory().unwrap();
+        store.insert_delivery("s", "w", "old typed", 100, "").unwrap();
+        store.insert_held_delivery("s", "w", "old held", 100, "").unwrap();
+        store.insert_delivery("s", "w", "new typed", 10_000, "").unwrap();
+        assert_eq!(store.prune_deliveries(5_000).unwrap(), 1);
+        assert_eq!(store.held_deliveries("s", "w").unwrap().iter().map(|r| r.line.as_str()).collect::<Vec<_>>(), vec!["old held"]);
+        assert_eq!(store.pending_deliveries("s", Some("w")).unwrap().iter().map(|r| r.line.as_str()).collect::<Vec<_>>(), vec!["new typed"]);
+    }
     use super::*;
 
     /// The durable half of the delivery receipt (board #5). The rows outlive the
@@ -641,7 +670,7 @@ mod tests {
         let store = Store::open_memory().unwrap();
         let all = |limit: Option<usize>| {
             let mut out = Vec::new();
-            let n = store.for_each_open_turn_prompt("s", "w2", limit, |t| out.push(t.to_string())).unwrap();
+            let n = store.for_each_open_turn_prompt("s", "w2", limit, |t, _| out.push(t.to_string())).unwrap();
             assert_eq!(n, out.len());
             out
         };

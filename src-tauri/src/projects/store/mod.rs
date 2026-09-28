@@ -124,7 +124,8 @@ impl Store {
         self.ensure_delivery_duplicates()?;
         self.ensure_delivery_msg_ids()?;
         self.ensure_input_mode()?;
-        self.ensure_delivery_held()
+        self.ensure_delivery_held()?;
+        self.ensure_activity_requesters()
     }
 
     // ---- archived messages ----------------------------------------------

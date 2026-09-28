@@ -93,20 +93,22 @@ fn deliver_as(session: &str, window: &str, target: &str, line: &str, msg_id: &st
     let lock = window_lock(session, window);
     let _guard = lock.lock().unwrap();
     let held = telemetry::held_rows(session, window);
-    if coalesce && telemetry::turn_busy(session, window) {
-        telemetry::record_held(session, window, line, msg_id);
-        if overdue(&held) {
-            flush_locked(session, window, target);
-        }
-        return true;
-    }
-    if held.is_empty() {
+    let busy = coalesce && telemetry::turn_busy(session, window);
+    if !busy && held.is_empty() {
         return type_now(session, window, target, line, msg_id);
     }
-    // Idle, but earlier lines are still held (a copy-mode refusal, a
-    // restart): this one goes BEHIND them, never ahead.
-    telemetry::record_held(session, window, line, msg_id);
-    flush_locked(session, window, target);
+    // Held — for the busy turn's end, or (idle) BEHIND lines still held from a
+    // copy-mode refusal or a restart, never ahead of them. A hold that could
+    // not be written is today's behaviour, never a silent loss (orchestrator
+    // 04:49): type it now, as an ordinary delivery; if that fails too, the
+    // existing `undelivered` warn says so.
+    if let Err(e) = telemetry::record_held(session, window, line, msg_id) {
+        eprintln!("⚠️  could not hold a delivery for {session}:{window} ({e}); typing it now");
+        return type_now(session, window, target, line, msg_id);
+    }
+    if !busy || overdue(&held) {
+        flush_locked(session, window, target);
+    }
     true
 }
 
@@ -187,11 +189,18 @@ fn flush_locked(session: &str, window: &str, target: &str) {
     let batch = &rows[..take];
     let ids: Vec<i64> = batch.iter().map(|r| r.id).collect();
     let text = batch.iter().map(|r| r.line.as_str()).collect::<Vec<_>>().join(SEPARATOR);
-    telemetry::release_held(&ids);
+    // The batch flips as ONE transaction; if it cannot, nothing is typed and
+    // every row stays held for the next trigger (orchestrator 04:49).
+    if let Err(e) = telemetry::release_held(&ids) {
+        eprintln!("⚠️  could not release held deliveries for {session}:{window} ({e}); kept held");
+        return;
+    }
     match type_text(target, &text) {
         Ok(()) => super::vitals::sniff_window_soon(session, window),
         Err(e) => {
-            telemetry::rehold(&ids);
+            if let Err(err) = telemetry::rehold(&ids) {
+                eprintln!("⚠️  could not re-hold deliveries for {session}:{window} ({err})");
+            }
             let reason = if e.trim() == crate::tmux::PANE_IN_MODE { "pane in copy mode".to_string() } else { e.trim().to_string() };
             telemetry::record_held_blocked(session, window, &rows, &reason);
         }
@@ -466,6 +475,61 @@ mod tests {
         assert_eq!(typed().len(), 2);
         assert_eq!(typed()[1], "[tmm chat 03:10] lead: @dev b\n\n[tmm chat 03:11] lead: @dev c");
         assert_eq!((held(&s, "dev"), pending(&s, "dev")), (0, 3));
+    }
+
+    fn sql(stmt: &str) {
+        crate::projects::with_store(|st| st.exec_test_sql(stmt)).unwrap();
+    }
+
+    /// Review blocker 1 (real SQLite fault, a TEMP trigger as in #249): a
+    /// hold that cannot be written is typed NOW as an ordinary delivery —
+    /// never reported queued while stored nowhere; if typing fails too, the
+    /// existing `undelivered` warn says so.
+    #[test]
+    fn a_hold_that_cannot_be_written_is_typed_now() {
+        let s = setup("hold-fault");
+        busy(&s, "dev");
+        sql("CREATE TEMP TRIGGER hold_fault BEFORE INSERT ON deliveries
+             WHEN NEW.held = 1 AND NEW.line LIKE '%hold-fault%'
+             BEGIN SELECT RAISE(ABORT, 'disk full'); END;");
+        let line = "[tmm chat 03:00] lead: @dev hold-fault one";
+        assert!(deliver_as(&s, "dev", "t", line, "m1", true));
+        assert_eq!(typed(), vec![line.to_string()], "typed at once, today's behaviour");
+        assert_eq!((held(&s, "dev"), pending(&s, "dev")), (0, 1), "an ordinary pending delivery its echo settles");
+
+        refuse(Some(crate::tmux::PANE_IN_MODE));
+        assert!(!deliver_as(&s, "dev", "t", "[tmm chat 03:01] lead: @dev hold-fault two", "", true));
+        assert!(warns(&s).iter().any(|w| w.starts_with("undelivered (pane is in copy mode): ") && w.contains("hold-fault two")),
+            "neither stored nor typed is SAID: {:?}", warns(&s));
+        sql("DROP TRIGGER hold_fault;");
+    }
+
+    /// Review blocker 2: the release is ONE transaction. A failure on the
+    /// second row's UPDATE leaves the WHOLE batch held and types nothing;
+    /// after recovery the batch is typed exactly once.
+    #[test]
+    fn a_release_that_fails_mid_batch_types_nothing_and_keeps_all_held() {
+        let s = setup("release-fault");
+        busy(&s, "dev");
+        for tag in ["a", "release-fault-b", "c"] {
+            deliver_as(&s, "dev", "t", &format!("[tmm chat 03:00] lead: @dev {tag}"), "", true);
+        }
+        end(&s, "dev");
+        sql("CREATE TEMP TRIGGER release_fault BEFORE UPDATE ON deliveries
+             WHEN OLD.line LIKE '%release-fault-b%' AND NEW.held = 0
+             BEGIN SELECT RAISE(ABORT, 'locked'); END;");
+        flush_at(&s, "dev", "t");
+        assert!(typed().is_empty(), "nothing is typed when the release fails");
+        assert_eq!((held(&s, "dev"), pending(&s, "dev")), (3, 0), "the first row's UPDATE was rolled back too");
+        flush_at(&s, "dev", "t");
+        assert!(typed().is_empty(), "still failing: still nothing");
+        sql("DROP TRIGGER release_fault;");
+        flush_at(&s, "dev", "t");
+        assert_eq!(typed().len(), 1, "recovered: one prompt");
+        assert!(typed()[0].contains("@dev a") && typed()[0].contains("release-fault-b") && typed()[0].contains("@dev c"));
+        assert_eq!((held(&s, "dev"), pending(&s, "dev")), (0, 3));
+        flush_at(&s, "dev", "t");
+        assert_eq!(typed().len(), 1, "exactly once");
     }
 
     /// The bound: whole lines, oldest first, the rest wait for the next end;

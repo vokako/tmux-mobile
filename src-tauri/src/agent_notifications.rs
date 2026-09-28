@@ -670,7 +670,7 @@ fn turn_epoch(session: &str, window: &str) -> u64 {
 /// `crate::projects` reader: mobile has no telemetry store, so every input
 /// opens a fresh edge and a missing edge is empty — the same fail-soft
 /// answer a missing turn gives on desktop.
-fn turn_inputs(session: &str, window: &str, limit: Option<usize>, visit: impl FnMut(&str)) -> usize {
+fn turn_inputs(session: &str, window: &str, limit: Option<usize>, visit: impl FnMut(&[String])) -> usize {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         crate::projects::telemetry::for_each_turn_input(session, window, limit, visit)
@@ -687,7 +687,7 @@ fn turn_inputs(session: &str, window: &str, limit: Option<usize>, visit: impl Fn
 /// never the turn's inputs.
 fn recovered_targets(session: &str, window: &str) -> Vec<String> {
     let mut targets = Vec::new();
-    turn_inputs(session, window, None, |prompt| join_targets(&mut targets, reply_targets(prompt)));
+    turn_inputs(session, window, None, |senders| join_targets(&mut targets, senders.to_vec()));
     targets
 }
 
@@ -710,31 +710,10 @@ fn join_targets(targets: &mut Vec<String>, more: Vec<String>) {
     }
 }
 
-/// Senders of stamped chat requests in a submitted prompt. Automatic
-/// `[reply]` and legacy `[done]` deliveries are results, not new requests.
+/// Senders of stamped chat requests in a submitted prompt: the one parser,
+/// `address::requesters`, shared with the activity log's stored column.
 fn reply_targets(prompt: &str) -> Vec<String> {
-    let mut targets = Vec::new();
-    for line in prompt.lines() {
-        let Some(after_stamp) = line
-            .strip_prefix("[tmm chat] ")
-            .or_else(|| line.strip_prefix("[tmm chat ").and_then(|s| s.split_once("] ").map(|(_, rest)| rest)))
-        else {
-            continue;
-        };
-        let Some((sender, body)) = after_stamp.split_once(": ") else { continue };
-        let sender = sender.trim();
-        let body = body.trim_start();
-        if sender.is_empty()
-            || sender == "human"
-            || body.starts_with("[reply]")
-            || body.starts_with("[done]")
-            || targets.iter().any(|s| s == sender)
-        {
-            continue;
-        }
-        targets.push(sender.to_string());
-    }
-    targets
+    crate::address::requesters(prompt)
 }
 
 fn truncate(input: &str, max: usize) -> String {
@@ -1175,8 +1154,8 @@ mod tests {
         assert_eq!(prompts.len(), 1, "one keyboard/delivery prompt, not two: {events:?}");
         assert_eq!(prompts[0].text, line);
         let mut inputs = Vec::new();
-        crate::projects::telemetry::for_each_turn_input(&session, &pane.window_name, None, |t| inputs.push(t.to_string()));
-        assert_eq!(inputs, vec![line.to_string()], "the window's prompt is still the human's line");
+        crate::projects::telemetry::for_each_turn_input(&session, &pane.window_name, None, |senders| inputs.push(senders.to_vec()));
+        assert_eq!(inputs, vec![vec!["claude".to_string()]], "the window's one input is still that line, from claude");
         let tool = events.iter().find(|e| e.kind == "tool" && e.tool == "Subagent").expect("the brief lands in the tool lane");
         assert!(tool.text.contains("adversarial-review"), "{}", tool.text);
 
@@ -1649,6 +1628,43 @@ mod tests {
         ]
         .join("\n\n");
         assert_eq!(reply_targets(&combined), vec!["lead", "validator"]);
+    }
+
+    /// #257 review (validator 04:48, orchestrator 04:49 item 4): a combined
+    /// prompt of held lines whose FIRST line carries a multi-KB team context
+    /// puts the second requester past the activity text's 1024-char cut.
+    /// Held → one combined prompt → submitted → server restart before Stop
+    /// → Stop: BOTH requesters get the reply, once each, because the row
+    /// stores its requesters parsed from the full prompt. Through the real
+    /// database (PERSIST_IN_TEST), the path a restart actually reads.
+    #[test]
+    fn a_restart_after_a_long_combined_prompt_still_replies_to_every_requester() {
+        use crate::projects::telemetry::{record_prompt, PERSIST_IN_TEST};
+        crate::projects::tests::use_test_store();
+        PERSIST_IN_TEST.with(|p| p.set(true));
+        let session = format!("combined-restart-{}", uuid::Uuid::new_v4());
+        let context = format!("[tmm team context — background]\n{}\n[/tmm team context]", "room row ".repeat(400));
+        let combined = [
+            format!("[tmm chat 2026-09-28 04:40] lead: @v first ask\n\n{context}"),
+            "[tmm chat 2026-09-28 04:41] validator: @v second ask".to_string(),
+        ]
+        .join("\n\n");
+        assert!(combined.find("validator:").unwrap() > 1024, "the second requester sits past the text cut");
+        let root = std::env::temp_dir().join(format!("tmm-combined-{}", uuid::Uuid::new_v4()));
+        let hub = AgentNotificationHub::load_at(root.clone());
+        hub.start_turn(&session, "v", &combined);
+        record_prompt(&session, "v", &combined);
+        let mut texts = Vec::new();
+        crate::projects::telemetry::recent_events(&session, 0).into_iter().filter(|e| e.kind == "prompt").for_each(|e| texts.push(e.text));
+        assert!(!texts[0].contains("validator:"), "the stored display text really is cut before the second sender");
+
+        // Restart before the Stop: a fresh hub, and a fresh turn record.
+        crate::projects::telemetry::forget_process_state(&session);
+        let restarted = AgentNotificationHub::load_at(root.clone());
+        let got = restarted.take_reply_targets(&session, "v");
+        PERSIST_IN_TEST.with(|p| p.set(false));
+        assert_eq!(got, vec!["lead".to_string(), "validator".to_string()], "both, once each, in order");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

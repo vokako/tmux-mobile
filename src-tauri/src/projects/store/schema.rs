@@ -9,7 +9,7 @@ use super::registry::{DEFAULT_KIMI_SYSTEM, DEFAULT_OMP_MODEL, DEFAULT_OMP_SYSTEM
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 26;
+const SCHEMA_VERSION: i64 = 27;
 
 impl Store {
     /// Ensure the durable half of Board editability exists, then
@@ -680,6 +680,31 @@ impl Store {
             // and typed with the others at the turn's end. Existing rows
             // were all typed: 0.
             self.ensure_delivery_held()?;
+        }
+        if version < 27 {
+            // v27 (board #257 review): a prompt row's requesters, parsed from
+            // the FULL prompt, beside its display-truncated text. NULL for
+            // older rows, which recovery parses from their text as before.
+            self.ensure_activity_requesters()?;
+        }
+        Ok(())
+    }
+
+    /// The v27 shape (also a heal floor): `activity.requesters`, added only
+    /// when absent.
+    pub(super) fn ensure_activity_requesters(&self) -> Result<(), String> {
+        let has: bool = self
+            .conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('activity') WHERE name = 'requesters')",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("inspect activity.requesters: {e}"))?;
+        if !has {
+            self.conn
+                .execute_batch("ALTER TABLE activity ADD COLUMN requesters TEXT;")
+                .map_err(|e| format!("add activity.requesters: {e}"))?;
         }
         Ok(())
     }

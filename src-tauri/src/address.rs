@@ -56,6 +56,39 @@ pub fn mention_names(body: &str) -> Vec<String> {
     out
 }
 
+/// Senders of stamped chat REQUESTS in a submitted prompt — the ONE reading
+/// of whom a turn's final reply is owed to (#256, #257). Every stamped line
+/// `[tmm chat …] sender: body` counts once, in order; the human, automatic
+/// `[reply]` and legacy `[done]` deliveries are results, not requests. The
+/// reply edge parses a live prompt with it, and the activity log stores its
+/// answer beside the (display-truncated) prompt text, so recovery after a
+/// restart reads the same senders even when a combined prompt of held lines
+/// runs past the log's text limit.
+pub fn requesters(prompt: &str) -> Vec<String> {
+    let mut targets = Vec::new();
+    for line in prompt.lines() {
+        let Some(after_stamp) = line
+            .strip_prefix("[tmm chat] ")
+            .or_else(|| line.strip_prefix("[tmm chat ").and_then(|s| s.split_once("] ").map(|(_, rest)| rest)))
+        else {
+            continue;
+        };
+        let Some((sender, body)) = after_stamp.split_once(": ") else { continue };
+        let sender = sender.trim();
+        let body = body.trim_start();
+        if sender.is_empty()
+            || sender == "human"
+            || body.starts_with("[reply]")
+            || body.starts_with("[done]")
+            || targets.iter().any(|s| s == sender)
+        {
+            continue;
+        }
+        targets.push(sender.to_string());
+    }
+    targets
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

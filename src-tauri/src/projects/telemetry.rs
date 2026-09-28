@@ -303,6 +303,10 @@ fn persist(session: &str, ev: &ActivityEvent) -> Option<i64> {
 
 #[cfg(test)]
 thread_local! {
+    pub(crate) static PERSIST_IN_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+#[cfg(not(test))]
+thread_local! {
     static PERSIST_IN_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -441,11 +445,20 @@ pub fn turn_epoch(session: &str, window: &str) -> u64 {
 /// Returns how many. This answers "whose requests is this turn carrying?"
 /// (the reply edge's MEMBERS), never "is the turn open?" — that is
 /// `turn_busy` alone (orchestrator, #256 review 03:07). A tool-only turn is
-/// open and carries no input here: it has no requester yet. Fail-soft: an
-/// unreadable store visits nothing.
-pub fn for_each_turn_input(session: &str, window: &str, limit: Option<usize>, mut visit: impl FnMut(&str)) -> usize {
-    if !cfg!(test) {
-        return super::with_store(|s| s.for_each_open_turn_prompt(session, window, limit, visit)).unwrap_or(0);
+/// open and carries no input here: it has no requester yet. Each input is
+/// visited as its SENDERS: the row's stored `requesters` (parsed from the
+/// full prompt at record time, #257), or — for a row from before v27, or
+/// the in-memory ring — its text parsed by the same `address::requesters`.
+/// Fail-soft: an unreadable store visits nothing.
+pub fn for_each_turn_input(session: &str, window: &str, limit: Option<usize>, mut visit: impl FnMut(&[String])) -> usize {
+    if !cfg!(test) || PERSIST_IN_TEST.with(|p| p.get()) {
+        return super::with_store(|s| s.for_each_open_turn_prompt(session, window, limit, |text, stored| {
+            let senders = stored
+                .and_then(|j| serde_json::from_str::<Vec<String>>(j).ok())
+                .unwrap_or_else(|| crate::address::requesters(text));
+            visit(&senders);
+        }))
+        .unwrap_or(0);
     }
     let map = events().lock().unwrap();
     let Some(rows) = map.get(session) else { return 0 };
@@ -457,7 +470,7 @@ pub fn for_each_turn_input(session: &str, window: &str, limit: Option<usize>, mu
     let mut seen = 0;
     for event in &rows[start..] {
         if event.kind == "prompt" && limit.is_none_or(|n| seen < n) {
-            visit(&event.text);
+            visit(&crate::address::requesters(&event.text));
             seen += 1;
         }
     }
@@ -600,7 +613,21 @@ fn turn_fact(
     event: Option<(&str, String, String, String, Vec<DeliveryRef>)>,
     apply: impl FnOnce(&mut Rec, u64, u64),
 ) {
-    turn_fact_unless(session, window, ts, |_| false, event, apply);
+    turn_fact_row(session, window, ts, event, apply);
+}
+
+/// `turn_fact`, returning the activity row id it was written as (None: not
+/// persisted — tests, or a failed write).
+fn turn_fact_row(
+    session: &str,
+    window: &str,
+    ts: u64,
+    event: Option<(&str, String, String, String, Vec<DeliveryRef>)>,
+    apply: impl FnOnce(&mut Rec, u64, u64),
+) -> Option<i64> {
+    let mut row = None;
+    turn_fact_unless_row(session, window, ts, |_| false, event, apply, &mut row);
+    row
 }
 
 /// `turn_fact`, skipped when `same` says the record already holds exactly
@@ -613,6 +640,18 @@ fn turn_fact_unless(
     same: impl FnOnce(&Rec) -> bool,
     event: Option<(&str, String, String, String, Vec<DeliveryRef>)>,
     apply: impl FnOnce(&mut Rec, u64, u64),
+) -> bool {
+    turn_fact_unless_row(session, window, ts, same, event, apply, &mut None)
+}
+
+fn turn_fact_unless_row(
+    session: &str,
+    window: &str,
+    ts: u64,
+    same: impl FnOnce(&Rec) -> bool,
+    event: Option<(&str, String, String, String, Vec<DeliveryRef>)>,
+    apply: impl FnOnce(&mut Rec, u64, u64),
+    row_out: &mut Option<i64>,
 ) -> bool {
     static ORDER: Mutex<()> = Mutex::new(());
     let _order = ORDER.lock().unwrap_or_else(|e| e.into_inner());
@@ -628,7 +667,7 @@ fn turn_fact_unless(
     #[cfg(test)]
     std::thread::sleep(std::time::Duration::from_micros(30));
     // The order comes from the one counter, after the insert, under the lock.
-    let _ = row;
+    *row_out = row;
     let seq = order_of();
     with_rec(session, window, |r| apply(r, ts, seq));
     true
@@ -755,10 +794,12 @@ pub fn record_delivery(session: &str, window: &str, line: &str, msg_id: &str) {
 /// deliveries table, persisted like every other, but not typed yet. It is
 /// invisible to the echo match and the sweep until `release_held` marks it
 /// typed at the turn's end.
-pub fn record_held(session: &str, window: &str, line: &str, msg_id: &str) {
+/// `Err` when the row could not be written: the caller must not report the
+/// line as queued (it falls back to typing it now, board #257 review).
+pub fn record_held(session: &str, window: &str, line: &str, msg_id: &str) -> Result<(), String> {
     recovery_mark(session);
     with_rec(session, window, |_| {});
-    let _ = queue(|s| s.insert_held_delivery(session, window, line, now(), msg_id));
+    queue(|s| s.insert_held_delivery(session, window, line, now(), msg_id))
 }
 
 /// The window's held lines, oldest first.
@@ -779,14 +820,16 @@ pub fn held_windows(session: &str) -> Vec<String> {
 /// The rows are about to be typed: they become ordinary pending deliveries
 /// whose ack clock starts now. Called BEFORE the typing, like
 /// `record_delivery` is the record of a promise — an echo racing the end
-/// of `send_command` must already find them.
-pub fn release_held(ids: &[i64]) {
-    let _ = queue(|s| s.set_deliveries_held(ids, false, now()));
+/// of `send_command` must already find them. All or nothing (one
+/// transaction); on `Err` nothing flipped and the caller must type nothing.
+pub fn release_held(ids: &[i64]) -> Result<(), String> {
+    queue(|s| s.set_deliveries_held(ids, false, now()))
 }
 
-/// The typing failed: the rows go back to held, still owed.
-pub fn rehold(ids: &[i64]) {
-    let _ = queue(|s| s.set_deliveries_held(ids, true, now()));
+/// The typing failed: the batch goes back to held, still owed. All or
+/// nothing, like the release.
+pub fn rehold(ids: &[i64]) -> Result<(), String> {
+    queue(|s| s.set_deliveries_held(ids, true, now()))
 }
 
 /// Held lines could not be typed at the turn's end (board #257 decision 2:
@@ -855,10 +898,18 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
     // pane activity cannot be it, because an agent TUI repaints its prompt
     // (spinner, status line, cursor) long after it finished.
     let via = if acked { "app" } else { "local" };
-    turn_fact(session, window, ts, Some(("prompt", text, String::new(), via.to_string(), refs)), |r, ts, seq| {
+    // Who this prompt asks, parsed ONCE from the FULL prompt (#257 review):
+    // the row's text is cut at MAX_PROMPT_CHARS for display, and a combined
+    // prompt of held lines can put its second requester past that cut.
+    let requesters = crate::address::requesters(prompt);
+    let row = turn_fact_row(session, window, ts, Some(("prompt", text, String::new(), via.to_string(), refs)), |r, ts, seq| {
         r.prompt = Some(ts);
         r.prompt_seq = seq;
     });
+    if let Some(id) = row {
+        let stored = serde_json::to_string(&requesters).unwrap_or_default();
+        let _ = super::with_store(|s| s.set_activity_requesters(id, &stored));
+    }
     acked
 }
 
@@ -2082,7 +2133,7 @@ mod tests {
         backdate(&session);
         sweep_deliveries(&session);
         assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 1, "the held line's clock ran");
-        assert_eq!(for_each_turn_input(&session, "w1", None, |_| {}), 0, "no reply edge recovered for a cancelled turn");
+        assert_eq!(for_each_turn_input(&session, "w1", None, |_: &[String]| {}), 0, "no reply edge recovered for a cancelled turn");
     }
 
     /// Orchestrator 15:44 (validator 15:42-15:43): tool dedupe may collapse a

@@ -105,7 +105,11 @@ not only a Stop (orchestrator 03:50): `hub_agent_interrupt` drops the window's
 edge (`AgentNotificationHub::end_turn`) where it records the interrupt, so a
 tool-only turn that follows cannot answer the interrupted requester; the epoch
 covers an end that call never sees (a persisted interrupt replayed after a
-restart).
+restart). Recovery reads each prompt row's stored requesters
+(`activity.requesters`, v27, parsed from the full prompt by
+`address::requesters`, #257), and parses the display text only for rows from
+before that column — the text is cut at 1024 characters, and a combined prompt
+of held lines can put a requester past the cut.
 Incident (2026-09-27, `temp/stall-analysis.md`): `start_turn` REPLACED the
 edge with the newest input's senders, so a `[reply]` landing mid-turn erased
 the real requester. 27 of 404 turns in 14 hours lost their requester; one was
