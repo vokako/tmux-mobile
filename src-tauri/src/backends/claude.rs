@@ -402,6 +402,10 @@ pub(crate) fn known() -> crate::projects::agents::KnownAgent {
         launch: "claude",
         resume_recent: Some("claude --continue"),
         resume_id: Some("claude --resume {id}"),
+        // The native installer's layout: the binary is
+        // ~/.local/share/claude/versions/<version>, so the process is named
+        // after the version (board #260).
+        versioned_binary_dir: Some("claude/versions"),
     }
 }
 

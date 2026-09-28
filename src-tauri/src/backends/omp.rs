@@ -363,6 +363,7 @@ pub(crate) fn known() -> crate::projects::agents::KnownAgent {
         launch: "omp",
         resume_recent: Some("omp --continue"),
         resume_id: Some("omp --resume {id}"),
+        versioned_binary_dir: None,
     }
 }
 

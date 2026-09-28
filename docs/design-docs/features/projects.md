@@ -218,13 +218,16 @@ decision rather than a special case in the reconciler.
 can never disagree; a detector that recognises "codex" but relaunches something
 else would quietly rebuild the wrong workspace. Detection reads the pane's
 PROCESSES only — `pane_current_command`, then for the pane process and each
-process below it the PROGRAM it runs: argv[0], plus the script when argv[0] is
-an interpreter (`node …/bin/codex`) (`agents::detect_processes`). Other
-arguments are data: `rg grok` runs rg (validator, board #260). It takes the
+process below it the NAME of the program it runs: argv[0]'s file name, plus the script's file
+name when argv[0] is an interpreter (`node …/bin/codex`)
+(`agents::detect_processes`). Other arguments are data — `rg grok` runs rg
+(validator, board #260) — and directories are labels:
+`~/work/kiro-tools/bin/deploy` is not kiro (orchestrator, #260). It takes the
 EARLIEST match: a later match is a subprocess the agent spawned (a real case was codex
-spawning a `kiro-web-search` helper and being labelled Kiro). Claude Code needs
-no special case even though its process name can be a bare version number,
-because its argv says `claude` or `.../claude/versions/<v>`. Labels are not
+spawning a `kiro-web-search` helper and being labelled Kiro). Claude Code is the
+one install shape read from a path: its binary can be
+`…/claude/versions/<version>`, whose name is a bare version number, so exactly
+that layout counts as claude (`versioned_binary`, `claude.rs`). Labels are not
 evidence: `pane_title` is whatever the last CLI wrote and nothing resets it on
 exit, so a zsh where grok had quit still read "grok" and wore its icon
 (owner, 2026-09-28, board #260); the window name is a label too. The verdict

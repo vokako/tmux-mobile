@@ -20,6 +20,11 @@ pub struct KnownAgent {
     pub resume_recent: Option<&'static str>,
     /// Resume one exact conversation; `{id}` is substituted.
     pub resume_id: Option<&'static str>,
+    /// The CLI's ONE documented install layout whose binary name does not
+    /// say what it is: `Some("claude/versions")` means a binary at
+    /// `…/claude/versions/<version>` is this CLI (board #260). Detection reads
+    /// no other directory — a path is a label.
+    pub versioned_binary_dir: Option<&'static str>,
 }
 
 use crate::tmux::TmuxPane;
@@ -41,6 +46,7 @@ fn known() -> &'static [KnownAgent] {
                 launch: "openclaw",
                 resume_recent: None,
                 resume_id: None,
+                versioned_binary_dir: None,
             },
         ];
         rows.extend(crate::backends::Backend::ALL.into_iter().map(|b| b.known()));
@@ -180,18 +186,46 @@ fn is_interpreter(base: &str) -> bool {
         || base.strip_prefix("python3.").is_some_and(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()))
 }
 
-/// What one process RUNS, from its argv: the executable path (argv[0]) and,
-/// when that is an interpreter, the script it was given (first non-flag
-/// argument). Never the other arguments — `rg grok`, `vim kiro.md` and
+/// The last path component: what a process is CALLED, not where it lives.
+fn file_name(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
+/// The CLI whose documented versioned layout `path` is
+/// (`KnownAgent::versioned_binary_dir`): `…/<dir>/<version>`, version made
+/// of digits and dots. Claude Code installs this way (projects.md), so its
+/// process name is a bare version and only the directories above say what it
+/// is. The ONE path shape detection reads (orchestrator, #260) — every other
+/// directory is a label (`~/work/kiro-tools/bin/deploy` is not kiro).
+fn versioned_binary(path: &str) -> Option<&'static KnownAgent> {
+    let (parent, version) = path.rsplit_once('/')?;
+    let is_version = version.bytes().any(|b| b.is_ascii_digit())
+        && version.bytes().all(|b| b.is_ascii_digit() || b == b'.');
+    if !is_version {
+        return None;
+    }
+    known().iter().find(|a| {
+        a.versioned_binary_dir
+            .is_some_and(|dir| parent.strip_suffix(dir).is_some_and(|rest| rest.is_empty() || rest.ends_with('/')))
+    })
+}
+
+/// What one process RUNS, from its argv, by NAME only: argv[0]'s file name
+/// and, when that is an interpreter, its script's file name (first non-flag
+/// argument). Never another argument — `rg grok`, `vim kiro.md` and
 /// `uvx kiro-web-search` name an agent in an argument while running
-/// something else (validator, board #260).
+/// something else (validator, board #260) — and never a directory, except
+/// a CLI's documented versioned layout (`versioned_binary`).
 fn program_of(argv: &str) -> String {
     let mut args = argv.split_whitespace();
     let Some(exe) = args.next() else { return String::new() };
-    let base = exe.rsplit('/').next().unwrap_or(exe);
-    match is_interpreter(base).then(|| args.find(|a| !a.starts_with('-'))).flatten() {
-        Some(script) => format!("{exe} {script}"),
-        None => exe.to_string(),
+    if let Some(agent) = versioned_binary(exe) {
+        return agent.needle.to_string();
+    }
+    let name = file_name(exe);
+    match is_interpreter(name).then(|| args.find(|a| !a.starts_with('-'))).flatten() {
+        Some(script) => format!("{name} {}", file_name(script)),
+        None => name.to_string(),
     }
 }
 
@@ -363,6 +397,13 @@ mod tests {
             "tail -f /tmp/claude.log",
             "node server.js --name omp",
             "python3 -m http.server --bind kimi",
+            // A directory is a label (orchestrator, #260).
+            "/home/u/work/kiro-tools/bin/deploy",
+            "/home/u/claude-notes/run --fast",
+            "node /home/u/codex-scratch/server.js",
+            "/opt/grok/bin/python3 /srv/app/main.py",
+            "/home/u/.local/share/claude/versions/latest-notes",
+            "/home/u/tools/versions/2.1.141",
         ] {
             let cmd = argv.split_whitespace().next().unwrap().rsplit('/').next().unwrap();
             assert!(detect_processes(cmd, &["-zsh", argv]).is_none(), "{argv}");

@@ -404,6 +404,7 @@ pub(crate) fn known() -> crate::projects::agents::KnownAgent {
         launch: "codex",
         resume_recent: None,
         resume_id: Some("codex resume {id}"),
+        versioned_binary_dir: None,
     }
 }
 

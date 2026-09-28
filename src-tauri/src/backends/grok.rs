@@ -322,6 +322,7 @@ pub(crate) fn known() -> crate::projects::agents::KnownAgent {
         launch: "grok",
         resume_recent: Some("grok --continue"),
         resume_id: Some("grok --resume {id}"),
+        versioned_binary_dir: None,
     }
 }
 

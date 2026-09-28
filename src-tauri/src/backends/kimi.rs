@@ -391,6 +391,7 @@ pub(crate) fn known() -> crate::projects::agents::KnownAgent {
         launch: "kimi",
         resume_recent: Some("kimi -c"),
         resume_id: Some("kimi -S {id}"),
+        versioned_binary_dir: None,
     }
 }
 

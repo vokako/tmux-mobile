@@ -805,6 +805,7 @@ pub(crate) fn known() -> crate::projects::agents::KnownAgent {
         launch: "kiro-cli chat",
         resume_recent: Some("kiro-cli chat --resume"),
         resume_id: Some("kiro-cli chat --resume-id {id}"),
+        versioned_binary_dir: None,
     }
 }
 
