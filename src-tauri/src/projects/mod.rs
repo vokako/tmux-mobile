@@ -20,6 +20,7 @@
 pub mod agents;
 pub mod board;
 pub mod capture;
+pub mod delivery;
 pub mod global_prompt;
 pub mod managed;
 pub mod models;

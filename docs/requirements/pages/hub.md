@@ -48,7 +48,8 @@ completion).
   arrives via hooks (turn open, tool calls, ask, stop) and status is
   **derived** (`running | waiting | idle | failed`).
 - **Messages move four ways** (taught to every agent): stamped prompts enter
-  its pane; the captured final reply is recorded and returned once to each
+  its pane (a busy queue-mode agent receives the lines sent meanwhile as one
+  combined prompt when its turn ends); the captured final reply is recorded and returned once to each
   agent whose request the turn carried; addressed sends (`@name`) start a new question
   or handoff; `send --status` records ambient progress. `tmm log` is the room
   memory. When the addressed recipient belongs to an agent team, its prompt

@@ -281,6 +281,11 @@ closed; kept as the record of what the scattering looked like.
   fixable on our side: the extension would have to report follow-ups (its
   `input` event, unverified). See agents-overview.md § The input mode.
 
+- An Escape pressed in a kiro pane (not through the hub) fires no hook
+  (kiro-cli 2.22.1), so the window reads `running` until its next turn and
+  lines held for it (board #257) wait up to `HOLD_MAX_SECS` (300 s) before
+  they are typed anyway. See hub-composer.md § A busy queue-mode agent.
+
 - Emoji width: tmux measures 2 cells, xterm's UnicodeV6 table 1 — a joined
   (`capture -J`) line with emoji can re-wrap differently and shear pane rows.
   Fix = `@xterm/addon-unicode11` AND the same table in

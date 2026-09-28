@@ -750,6 +750,79 @@ pub fn record_delivery(session: &str, window: &str, line: &str, msg_id: &str) {
     let _ = queue(|s| s.insert_delivery(session, window, line, now(), msg_id));
 }
 
+/// Is this window's turn open right now — `running` or `waiting` by
+/// `derive_from`, the one turn rule (board #249), never pane activity? The
+/// question board #257 asks before typing at a queue-mode agent. Reads the
+/// recovery mark first, so the first question after a restart sees the turn
+/// the log replays instead of an empty record.
+pub fn turn_busy(session: &str, window: &str) -> bool {
+    recovery_mark(session);
+    matches!(derive(session, window, 0).state.as_str(), "running" | "waiting")
+}
+
+/// A line for a busy queue-mode agent (board #257): a row in the ONE
+/// deliveries table, persisted like every other, but not typed yet. It is
+/// invisible to the echo match and the sweep until `release_held` marks it
+/// typed at the turn's end.
+pub fn record_held(session: &str, window: &str, line: &str, msg_id: &str) {
+    recovery_mark(session);
+    with_rec(session, window, |_| {});
+    let _ = queue(|s| s.insert_held_delivery(session, window, line, now(), msg_id));
+}
+
+/// The window's held lines, oldest first.
+pub fn held_rows(session: &str, window: &str) -> Vec<super::store::DeliveryRow> {
+    queue(|s| s.held_deliveries(session, window)).unwrap_or_default()
+}
+
+/// Windows of a session with held lines.
+pub fn held_windows(session: &str) -> Vec<String> {
+    queue(|s| s.held_windows(session)).unwrap_or_default()
+}
+
+/// The rows are about to be typed: they become ordinary pending deliveries
+/// whose ack clock starts now. Called BEFORE the typing, like
+/// `record_delivery` is the record of a promise — an echo racing the end
+/// of `send_command` must already find them.
+pub fn release_held(ids: &[i64]) {
+    let _ = queue(|s| s.set_deliveries_held(ids, false, now()));
+}
+
+/// The typing failed: the rows go back to held, still owed.
+pub fn rehold(ids: &[i64]) {
+    let _ = queue(|s| s.set_deliveries_held(ids, true, now()));
+}
+
+/// Held lines could not be typed at the turn's end (board #257 decision 2:
+/// the pane was in copy mode). They stay held and are retried at the next
+/// trigger; this reports it ONCE per row — the `warned` mark — so a person
+/// reading scrollback for ten minutes gets one line, not one per poll.
+pub fn record_held_blocked(session: &str, window: &str, rows: &[super::store::DeliveryRow], reason: &str) {
+    let fresh: Vec<i64> = rows
+        .iter()
+        .filter(|r| !r.warned)
+        .map(|r| r.id)
+        .filter(|id| queue(|s| s.mark_delivery_warned(*id)).unwrap_or(false))
+        .collect();
+    if !fresh.is_empty() {
+        let n = rows.len();
+        let noun = if n == 1 { "line" } else { "lines" };
+        push_event(session, window, "warn", format!("held ({reason}): {n} {noun} will be typed when it clears"));
+    }
+}
+
+/// An interrupt drops the window's held lines (board #257 decision 1: the
+/// person asked the agent to stop, and kiro's own Escape clears its queue
+/// the same way). Each is said once as `undelivered (interrupted)` — no row
+/// id, no retry, exactly like a copy-mode refusal (#250): senders resend.
+pub fn drop_held(session: &str, window: &str) {
+    for row in held_rows(session, window) {
+        if queue(|s| s.delete_delivery_id(row.id)).unwrap_or(false) {
+            record_undelivered(session, window, &row.line, "interrupted");
+        }
+    }
+}
+
 /// A line `send_command` refused to type (board #250: the pane was in
 /// copy-mode). It was never typed, so it is not a pending delivery and no echo
 /// can ever settle it: no row, and so no `deliveries` reference — that field

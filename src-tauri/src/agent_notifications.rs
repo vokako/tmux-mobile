@@ -339,6 +339,12 @@ impl AgentNotificationHub {
         if normalized.kind == "completed" {
             self.maybe_auto_post(&session, &window, &normalized, &reply_to);
         }
+        // The turn's end edge is the first flush trigger (board #257): lines
+        // held for this busy queue-mode agent are typed now, as one prompt.
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        if matches!(normalized.kind.as_str(), "completed" | "failed") {
+            crate::projects::delivery::flush(&session, &window);
+        }
 
         // Remember the agent's own conversation id (even across duplicate
         // events): this map is how a restored window resumes the exact
@@ -1629,6 +1635,20 @@ mod tests {
         assert!(reply_targets("[tmm chat 2026-09-08 08:03] human: @dev ship it").is_empty());
         assert!(reply_targets("[tmm chat 2026-09-08 08:04] lead: [reply] looks good").is_empty());
         assert!(reply_targets("[tmm chat 2026-09-08 08:05] worker: [done] old completion").is_empty());
+    }
+
+    /// Board #257: one combined prompt of held lines replies to each distinct
+    /// requester once; `[reply]` lines in it add nobody.
+    #[test]
+    fn a_combined_prompt_replies_once_to_each_requester() {
+        let combined = [
+            "[tmm chat 2026-09-28 03:00] lead: @dev one",
+            "[tmm chat 2026-09-28 03:01] validator: @dev two\nwith a second line",
+            "[tmm chat 2026-09-28 03:02] lead: @dev three",
+            "[tmm chat 2026-09-28 03:03] builder: [reply] fyi",
+        ]
+        .join("\n\n");
+        assert_eq!(reply_targets(&combined), vec!["lead", "validator"]);
     }
 
     #[test]

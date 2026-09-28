@@ -302,7 +302,80 @@ impl Store {
             .map_err(|e| format!("insert delivery: {e}"))
     }
 
-    /// Outstanding lines, in the order they were typed (row id). `window`
+    /// A line for a busy queue-mode agent, stored but NOT typed yet (board
+    /// #257). Invisible to the echo match and the sweep until
+    /// `set_deliveries_held(…, false, …)` marks it typed.
+    pub fn insert_held_delivery(&self, session: &str, window: &str, line: &str, ts: u64, msg_id: &str) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO deliveries (session, win, line, ts, msg_id, held) VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+                rusqlite::params![session, window, line, ts as i64, msg_id],
+            )
+            .map(|_| ())
+            .map_err(|e| format!("insert held delivery: {e}"))
+    }
+
+    /// A window's held lines, oldest first. `warned` here means the one
+    /// "held (pane in copy mode)" report was already made for the row.
+    pub fn held_deliveries(&self, session: &str, window: &str) -> Result<Vec<DeliveryRow>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, win, line, ts, msg_id, warned FROM deliveries
+                 WHERE session = ?1 AND win = ?2 AND held = 1 ORDER BY id",
+            )
+            .map_err(|e| format!("prepare held deliveries: {e}"))?;
+        let rows = stmt
+            .query_map(rusqlite::params![session, window], |r| {
+                Ok(DeliveryRow {
+                    id: r.get(0)?,
+                    window: r.get(1)?,
+                    line: r.get(2)?,
+                    ts: r.get::<_, i64>(3)? as u64,
+                    msg_id: r.get(4)?,
+                    warned: r.get::<_, i64>(5)? != 0,
+                })
+            })
+            .map_err(|e| format!("query held deliveries: {e}"))?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    /// Windows of a session that hold at least one untyped line.
+    pub fn held_windows(&self, session: &str) -> Result<Vec<String>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT DISTINCT win FROM deliveries WHERE session = ?1 AND held = 1 ORDER BY win")
+            .map_err(|e| format!("prepare held windows: {e}"))?;
+        let rows = stmt
+            .query_map(rusqlite::params![session], |r| r.get(0))
+            .map_err(|e| format!("query held windows: {e}"))?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    /// Mark rows typed (`held = false`: their ack clock starts at `ts`, and a
+    /// copy-mode report made while they were held is cleared) or back to held
+    /// (the typing failed). One statement per row, same transaction-free
+    /// fail-soft as the rest of the queue.
+    pub fn set_deliveries_held(&self, ids: &[i64], held: bool, ts: u64) -> Result<(), String> {
+        for id in ids {
+            let sql = if held {
+                "UPDATE deliveries SET held = 1 WHERE id = ?1"
+            } else {
+                "UPDATE deliveries SET held = 0, warned = 0, ts = ?2 WHERE id = ?1"
+            };
+            let n = if held {
+                self.conn.execute(sql, rusqlite::params![id])
+            } else {
+                self.conn.execute(sql, rusqlite::params![id, ts as i64])
+            };
+            n.map_err(|e| format!("set delivery held: {e}"))?;
+        }
+        Ok(())
+    }
+
+    /// Outstanding TYPED lines, in the order they were typed (row id). Held
+    /// lines (board #257) are not outstanding yet: nothing was typed, so no
+    /// echo can carry them and the sweep has nothing to report. `window`
     /// narrows it to one window; `None` is the whole session, which is what
     /// the sweep asks for.
     pub fn pending_deliveries(
@@ -313,11 +386,11 @@ impl Store {
         let (sql, args): (&str, Vec<Box<dyn rusqlite::ToSql>>) = match window {
             Some(w) => (
                 "SELECT id, win, line, ts, msg_id, warned FROM deliveries
-                 WHERE session = ?1 AND win = ?2 ORDER BY id",
+                 WHERE session = ?1 AND win = ?2 AND held = 0 ORDER BY id",
                 vec![Box::new(session.to_string()), Box::new(w.to_string())],
             ),
             None => (
-                "SELECT id, win, line, ts, msg_id, warned FROM deliveries WHERE session = ?1 ORDER BY id",
+                "SELECT id, win, line, ts, msg_id, warned FROM deliveries WHERE session = ?1 AND held = 0 ORDER BY id",
                 vec![Box::new(session.to_string())],
             ),
         };

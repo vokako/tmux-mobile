@@ -393,6 +393,7 @@ mod tests {
                 team: None,
                 agent_def: "",
                 member: "",
+                input_mode: "",
             }
             .write(&home)
             .unwrap();

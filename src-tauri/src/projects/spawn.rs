@@ -262,7 +262,7 @@ fn materialize(
     // replays it). Written here, before the window exists, so a write failure
     // is a spawn failure with nothing left running — not a live agent that
     // restarts deaf on the generic launch path.
-    LaunchRecipe { backend: &def.backend, env: &env, cmd: &prepared.cmd, spawned_by: by, team, agent_def, member }.write(&home)?;
+    LaunchRecipe { backend: &def.backend, env: &env, cmd: &prepared.cmd, spawned_by: by, team, agent_def, member, input_mode: &def.input_mode }.write(&home)?;
     Ok(Materialized { home, cmd: prepared.cmd, env, confirmation: prepared.confirmation })
 }
 
@@ -477,6 +477,10 @@ pub(crate) struct LaunchRecipe<'a> {
     /// column — the recipe is the declaration, one place (tenet 7).
     pub agent_def: &'a str,
     pub member: &'a str,
+    /// `queue` | `steer` — the input mode THIS process was started with
+    /// (board #257: whether a line for it is held while it is busy). ''
+    /// for a backfilled recipe, which the reader takes as `queue`.
+    pub input_mode: &'a str,
 }
 
 impl LaunchRecipe<'_> {
@@ -493,6 +497,7 @@ impl LaunchRecipe<'_> {
             "team": self.team.unwrap_or(""),
             "agent_def": self.agent_def,
             "member": self.member,
+            "input_mode": self.input_mode,
         });
         std::fs::write(
             home.join("launch.json"),
@@ -618,7 +623,7 @@ mod relaunch_tests {
         let ws = std::env::temp_dir().join(format!("tmm-relaunch-{}", uuid::Uuid::new_v4()));
         let home = agent_home(ws.to_str().unwrap(), "lead");
         std::fs::create_dir_all(&home).unwrap();
-        LaunchRecipe { backend: "kiro", env: &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())], cmd: "command kiro-cli chat --agent lead --model m --trust-all-tools", spawned_by: "", team: None, agent_def: "", member: "" }
+        LaunchRecipe { backend: "kiro", env: &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())], cmd: "command kiro-cli chat --agent lead --model m --trust-all-tools", spawned_by: "", team: None, agent_def: "", member: "", input_mode: "" }
             .write(&home)
             .unwrap();
         let line = relaunch_line(ws.to_str().unwrap(), "lead", Some("id-1")).unwrap();
@@ -650,7 +655,7 @@ mod relaunch_tests {
         ] {
             let ahome = agent_home(ws.to_str().unwrap(), name);
             std::fs::create_dir_all(&ahome).unwrap();
-            LaunchRecipe { backend: backend, env: &[], cmd: cmd, spawned_by: "", team: None, agent_def: "", member: "" }.write(&ahome).unwrap();
+            LaunchRecipe { backend: backend, env: &[], cmd: cmd, spawned_by: "", team: None, agent_def: "", member: "", input_mode: "" }.write(&ahome).unwrap();
             let exact = relaunch_line(ws.to_str().unwrap(), name, Some("conv-1")).unwrap();
             assert!(exact.ends_with("--resume conv-1"), "{backend} exact resume: {exact}");
             let recent = relaunch_line(ws.to_str().unwrap(), name, None).unwrap();
@@ -663,7 +668,7 @@ mod relaunch_tests {
         // would hand `resume` to the interactive CLI as a prompt.
         let chome = agent_home(ws.to_str().unwrap(), "cx");
         std::fs::create_dir_all(&chome).unwrap();
-        LaunchRecipe { backend: "codex", env: &[("CODEX_HOME".to_string(), chome.to_string_lossy().to_string())], cmd: "command codex -c a=b --dangerously-bypass-approvals-and-sandbox", spawned_by: "", team: None, agent_def: "", member: "" }
+        LaunchRecipe { backend: "codex", env: &[("CODEX_HOME".to_string(), chome.to_string_lossy().to_string())], cmd: "command codex -c a=b --dangerously-bypass-approvals-and-sandbox", spawned_by: "", team: None, agent_def: "", member: "", input_mode: "" }
             .write(&chome)
             .unwrap();
         let cx = relaunch_line(ws.to_str().unwrap(), "cx", Some("01a0-abc")).unwrap();
@@ -975,7 +980,7 @@ mod tests {
         // A restart must replay the FULL identity, not the bare backend line:
         // the user-space config's hooks never fire (measured), so losing
         // KIRO_HOME/--agent makes a restarted agent observably deaf.
-        LaunchRecipe { backend: "kiro", env: &r.env, cmd: &r.cmd, spawned_by: "", team: None, agent_def: "", member: "" }.write(&dir).unwrap();
+        LaunchRecipe { backend: "kiro", env: &r.env, cmd: &r.cmd, spawned_by: "", team: None, agent_def: "", member: "", input_mode: "" }.write(&dir).unwrap();
         let line = relaunch_line(
             dir.parent().unwrap().parent().unwrap().to_str().unwrap(),
             "tester", Some("abc-123"),
@@ -1286,7 +1291,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
             "prompt": "You are dev.",
             "hooks": {}
         })).unwrap()).unwrap();
-        LaunchRecipe { backend: "kiro", env: &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())], cmd: "command kiro-cli chat --agent dev --model claude-haiku-4.5 --trust-all-tools", spawned_by: "", team: None, agent_def: "", member: "" }
+        LaunchRecipe { backend: "kiro", env: &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())], cmd: "command kiro-cli chat --agent dev --model claude-haiku-4.5 --trust-all-tools", spawned_by: "", team: None, agent_def: "", member: "", input_mode: "" }
             .write(&home)
             .unwrap();
 
@@ -1319,7 +1324,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         let cfg = home.join("agents").join("dev.json");
         std::fs::write(&cfg, serde_json::to_string_pretty(&json!({ "name": "dev", "hooks": {} })).unwrap()).unwrap();
         LaunchRecipe { backend: "kiro", env: &[], cmd: // The owner's real value: one character off `claude-sonnet-4.5`.
-            "command kiro-cli chat --agent dev --model claude-sonnet-4-5 --trust-all-tools", spawned_by: "", team: None, agent_def: "", member: "" }.write(&home).unwrap();
+            "command kiro-cli chat --agent dev --model claude-sonnet-4-5 --trust-all-tools", spawned_by: "", team: None, agent_def: "", member: "", input_mode: "" }.write(&home).unwrap();
 
         refresh_hooks(&ws.to_string_lossy(), "dev");
         let after: Value = serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
@@ -1686,7 +1691,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         let ws = std::env::temp_dir().join(format!("tmm-spawnedby-{}", std::process::id()));
         let home = ws.join(".tmm").join("agents").join("b");
         std::fs::create_dir_all(&home).unwrap();
-        LaunchRecipe { backend: "kiro", env: &[], cmd: "command kiro-cli chat --agent b", spawned_by: "lead", team: None, agent_def: "", member: "" }.write(&home).unwrap();
+        LaunchRecipe { backend: "kiro", env: &[], cmd: "command kiro-cli chat --agent b", spawned_by: "lead", team: None, agent_def: "", member: "", input_mode: "" }.write(&home).unwrap();
         let recipe: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(home.join("launch.json")).unwrap()).unwrap();
         assert_eq!(recipe["spawned_by"], "lead");

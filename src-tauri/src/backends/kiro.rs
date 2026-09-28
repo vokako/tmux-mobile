@@ -737,6 +737,7 @@ pub(crate) fn refresh(home: &Path, window_name: &str, workspace: &Path, notify: 
                 team: None,
                 agent_def: "",
                 member: "",
+                input_mode: "",
             }
             .write(home)
             .is_ok();

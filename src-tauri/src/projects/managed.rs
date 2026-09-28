@@ -134,41 +134,19 @@ pub fn spawned_by(workspace: Option<&str>, window_name: &str) -> Option<String> 
 
 /// Type ONE stamped chat line into ONE named agent's pane — the targeted
 /// sibling of `deliver_mentions` (same gates: live window, managed, never a
-/// shell; same `record_delivery` bookkeeping, so the agent's turn-start echo
-/// acks it and the reply edge names the line's sender). Quiet on every miss:
+/// shell; same `delivery::deliver` path, so a busy queue-mode agent gets it
+/// combined at its turn's end (board #257), the agent's turn-start echo acks
+/// it and the reply edge names the line's sender). Quiet on every miss:
 /// a dead window or an unmanaged name simply has nobody to wake. Used by the
 /// done-summary feedback edge, the board's review handoff, the `[reply]`
 /// return and — since board #224 — a spawn whose backend takes its first
 /// prompt TYPED (kimi): all DELIVERIES the server decides on, never mention
 /// scans, so the record-only invariant of hook-sourced posts stays intact.
 pub fn deliver_chat_line(session: &str, target_name: &str, line: &str) -> bool {
-    use crate::projects::agents;
-
-    let ws = crate::projects::project_for_session(session).ok().flatten().map(|p| p.path);
-    let Ok(panes) = crate::tmux::list_panes(session) else { return false };
-    for p in &panes {
-        if !p.active || p.window_name != target_name {
-            continue;
-        }
-        let is_agent = agents::detect_pane(ws.as_deref(), p).is_some();
-        if !is_agent || !crate::projects::is_managed_in(ws.as_deref(), &p.window_name) {
-            return false;
-        }
-        let target = format!("{}:{}.{}", session, p.window, p.pane);
-        return match crate::tmux::send_command(&target, line) {
-            Ok(()) => {
-                crate::projects::telemetry::record_delivery(session, &p.window_name, line, "");
-                crate::projects::vitals::sniff_window_soon(session, &p.window_name);
-                true
-            }
-            // Same as deliver_mentions (board #250): an untyped line is said.
-            Err(e) => {
-                crate::projects::telemetry::record_undelivered(session, &p.window_name, line, e.trim());
-                false
-            }
-        };
+    match crate::projects::delivery::agent_target(session, target_name) {
+        Some(target) => crate::projects::delivery::deliver(session, target_name, &target, line, ""),
+        None => false,
     }
-    false
 }
 
 #[cfg(test)]

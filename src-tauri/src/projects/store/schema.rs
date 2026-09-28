@@ -9,7 +9,7 @@ use super::registry::{DEFAULT_KIMI_SYSTEM, DEFAULT_OMP_MODEL, DEFAULT_OMP_SYSTEM
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 25;
+const SCHEMA_VERSION: i64 = 26;
 
 impl Store {
     /// Ensure the durable half of Board editability exists, then
@@ -673,6 +673,32 @@ impl Store {
             // pinned to; a codex agent moves from its CLI's steer to queue at
             // its next restart.
             self.ensure_input_mode()?;
+        }
+        if version < 26 {
+            // v26 (board #257): a line for a busy queue-mode agent is HELD —
+            // a row in the one deliveries table that was not typed yet —
+            // and typed with the others at the turn's end. Existing rows
+            // were all typed: 0.
+            self.ensure_delivery_held()?;
+        }
+        Ok(())
+    }
+
+    /// The v26 shape (also a heal floor): `deliveries.held`, added only when
+    /// absent.
+    pub(super) fn ensure_delivery_held(&self) -> Result<(), String> {
+        let has: bool = self
+            .conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('deliveries') WHERE name = 'held')",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("inspect deliveries.held: {e}"))?;
+        if !has {
+            self.conn
+                .execute_batch("ALTER TABLE deliveries ADD COLUMN held INTEGER NOT NULL DEFAULT 0;")
+                .map_err(|e| format!("add deliveries.held: {e}"))?;
         }
         Ok(())
     }

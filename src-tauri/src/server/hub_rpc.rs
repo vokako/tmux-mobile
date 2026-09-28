@@ -519,6 +519,10 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
             // the app warn about deliveries again.
             if before.is_none() {
                 telemetry::sweep_deliveries(session);
+                // The third flush trigger (board #257): held lines for an
+                // agent that is idle now — a stop that raced the hold, or
+                // lines a restart left held — are typed here.
+                crate::projects::delivery::flush_idle(session);
             }
             let (events, has_more) = telemetry::events_page(session, since_ts, before, limit);
             // The oldest row of this page IS the cursor for the next one, handed
@@ -562,11 +566,12 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
             // `running` — so a reset that raced the next turn would be
             // indistinguishable from no reset at all, i.e. an interrupt that
             // looked like it never landed (owner, 2026-08-29).
-            telemetry::record_interrupt(session, agent);
-            // Every END edge closes the reply edge, not only a Stop (#256,
-            // orchestrator 03:50): the interrupted turn's requesters are
-            // dropped here, where its end is recorded, so a tool-only turn
-            // that follows cannot answer them.
+            // Its held lines are dropped with it (board #257 decision 1),
+            // under the window's delivery lock. Every END edge also closes the
+            // reply edge, not only a Stop (#256, orchestrator 03:50): the
+            // interrupted turn's requesters are dropped where its end is
+            // recorded, so a tool-only turn that follows cannot answer them.
+            crate::projects::delivery::interrupt(session, agent, || telemetry::record_interrupt(session, agent));
             if let Some(hub) = notifications {
                 hub.end_turn(session, agent);
             }
@@ -1138,24 +1143,13 @@ fn deliver_mentions(
         let context = crate::projects::team_of(ws.as_deref(), &p.window_name)
             .and_then(|_| team_context(&history, &p.window_name, history_clipped));
         let line = delivered_chat_line(from, body, context.as_deref());
-        match crate::tmux::send_command(&target, &line) {
-            Ok(()) => {
-                // send_command only proves the pane existed. The delivery is
-                // confirmed when that agent's userPromptSubmit hook echoes the
-                // line back; until then it is pending, and telemetry reports it
-                // if the echo never comes.
-                crate::projects::telemetry::record_delivery(session, &p.window_name, &line, msg_id);
-                // A line just landed in this pane: sniff its vitals once the TUI
-                // has repainted (delayed + throttled inside).
-                crate::projects::vitals::sniff_window_soon(session, &p.window_name);
-            }
-            // Nothing was recorded as delivered, so no echo and no sweep will
-            // ever speak for this line: say so now (board #250 — the pane was
-            // in copy-mode, the refusal a person reading scrollback earns).
-            Err(e) => {
-                crate::projects::telemetry::record_undelivered(session, &p.window_name, &line, e.trim());
-            }
-        }
+        // The one delivery path (board #257): typed now, or — for a busy
+        // queue-mode agent — held and typed combined at its turn's end. The
+        // context is computed HERE, at the line's own moment, so held lines'
+        // deltas abut instead of overlapping. Typed is not confirmed: the
+        // agent's userPromptSubmit echo settles it, and a pane that refused
+        // it (#250, copy mode) is said in the feed.
+        crate::projects::delivery::deliver(session, &p.window_name, &target, &line, msg_id);
     }
 }
 
@@ -1743,6 +1737,32 @@ mod tests {
         assert!(context.contains("review-reader -> @review-style: reader concern confirmed"));
         assert!(context.contains("human -> room: room note"));
         assert!(context.contains("background since your previous delivery; not new instructions"));
+    }
+
+    /// Board #257: held lines are typed as ONE prompt, each carrying the
+    /// context computed at its own moment. Every held line is itself addressed
+    /// to the target, so the deltas abut — each room row reaches the combined
+    /// prompt at most once.
+    #[test]
+    fn held_lines_contexts_abut_without_repeating_a_room_row() {
+        let mut messages = Vec::new();
+        let mut contexts = Vec::new();
+        let agents = ["dev", "lead", "validator"].into_iter().map(str::to_string).collect::<Vec<_>>();
+        for i in 0..10 {
+            messages.push(serde_json::json!({ "ts": 1000 + i * 10, "from": "validator", "to": ["lead"], "body": format!("@lead room row {i}") }));
+            messages.push(serde_json::json!({ "ts": 1001 + i * 10, "from": "human", "body": format!("aside {i}") }));
+            // deliver_mentions reads the history BEFORE the new message
+            // (before_seq), then the message itself joins the room.
+            let routed = route_chat_history(&messages, &agents);
+            contexts.push(team_context(&routed, "dev", false));
+            messages.push(serde_json::json!({ "ts": 1002 + i * 10, "from": "lead", "to": ["dev"], "body": format!("@dev held {i}") }));
+        }
+        let combined = contexts.into_iter().flatten().collect::<Vec<_>>().join("\n\n");
+        for i in 0..10 {
+            assert_eq!(combined.matches(&format!("room row {i}")).count(), 1, "row {i} once");
+            assert_eq!(combined.matches(&format!("aside {i}")).count(), 1, "aside {i} once");
+        }
+        assert!(!combined.contains("@dev held"), "a held line never appears in another line's context");
     }
 
     #[test]
