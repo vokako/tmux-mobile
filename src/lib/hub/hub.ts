@@ -558,6 +558,14 @@ export function foldLines(compact: boolean, basis: number, lineHeight: number): 
  * perLine itself: a line off makes the bubble a line taller, nothing is
  * lost, and the unfold control shows the whole message either way. */
 export function elideTail(text: string, maxLines: number, perLine = 80): string {
+  const cut = cutTail(text, maxLines, perLine);
+  return cut === null ? text : closeFences(cut);
+}
+
+/** `elideTail`'s cut without its markdown fence repair: `null` when the text
+ * fits, else the kept start with `ELIDE` glued on. Plain-text callers (a
+ * command's arguments) use this so no ``` is ever added to them. */
+function cutTail(text: string, maxLines: number, perLine: number): string | null {
   const t = text ?? '';
   const budget = Math.max(1, Math.floor(maxLines));
   const lines = t.split('\n');
@@ -569,7 +577,7 @@ export function elideTail(text: string, maxLines: number, perLine = 80): string 
     if (used + rows <= budget) {
       used += rows;
       kept.push(line);
-      if (i === lines.length - 1) return text; // everything fits: identity, the caller skips re-rendering
+      if (i === lines.length - 1) return null; // everything fits: the caller keeps the text itself
       continue;
     }
     // This line exhausts the budget: keep what the remaining rows can show.
@@ -577,8 +585,7 @@ export function elideTail(text: string, maxLines: number, perLine = 80): string 
     if (remain > 0) kept.push(cutUnits(line, remain));
     break;
   }
-  const out = kept.join('\n').trimEnd();
-  return closeFences(`${out}${ELIDE}`);
+  return `${kept.join('\n').trimEnd()}${ELIDE}`;
 }
 
 /** Rendered width of a line in perLine units: CJK and other fullwidth
@@ -1090,6 +1097,21 @@ export function sentCommand(body: string | null | undefined): SentCommand | null
   if (!p.cmd) return null;
   const to = p.who ? p.who.split(',').map((n) => n.trim()).filter(Boolean) : [];
   return { to, name: p.verb, args: p.text };
+}
+
+/** The ARGUMENTS a folded command bubble shows, or `null` when the whole
+ * command fits (owner, 2026-09-28 16:35: "消息怎么好像没有折叠，一个气泡就把我的
+ * 手机屏幕占满了"). A command folds through the SAME budget as any long user
+ * message: `elideTail` over the line as the bubble lays it out (`@to /name
+ * args`), so the recipients and the name always stay and only the arguments
+ * are cut. The arguments are plain text, not markdown, so the fold is cut
+ * straight from them — never `elideTail`'s fence repair, which would add a
+ * visible ``` to a command. */
+export function foldedCommandArgs(cmd: SentCommand, maxLines: number, perLine = 80): string | null {
+  const head = `${cmd.to.map((n) => `@${n} `).join('')}${cmd.name} `;
+  const cut = cutTail(`${head}${cmd.args}`, maxLines, perLine);
+  if (cut === null) return null;
+  return cut.startsWith(head) ? cut.slice(head.length) : ELIDE;
 }
 
 export function systemLine(body: string | null | undefined): string | null {

@@ -86,7 +86,8 @@ test('a sent /command renders as the sender bubble, whole, name in inline code (
   const { render } = h;
   const { createRawSnippet } = await h.load('svelte');
   // The owner's case (2026-09-28): a long /goal that the capsule cut off.
-  const args = '你看一下 ../260928-eks-gpu-training 这里有可用的 gpu eks 集群，你准备好数据后，可以在 eks 上进行数据处理，以及先跑通一个 初始的实验，注意用验证集验证效果 *not bold* <b>x</b>';
+  const args = '你看一下 ../260928-eks-gpu-training 这里有可用的 gpu eks 集群，你准备好数据后，可以在 eks 上进行数据处理，以及先跑通一个 初始的实验，注意用验证集验证效果 *not bold* ' + '然后把结果整理成报告，'.repeat(12) + '<b>x</b>';
+  // (Long enough to exceed the render tier's default budget, 3 lines × 80 units.)
   const messages = [
     { id: 'g', ts: 1, from: 'human', body: `[tmm] /goal ${args} → kiro` },
     { id: 'm', ts: 2, from: 'human', body: '[tmm] /compact → lead, dev' },
@@ -104,12 +105,19 @@ test('a sent /command renders as the sender bubble, whole, name in inline code (
   const goal = bubbles[0]!.querySelector('.m-body p')!;
   assert.equal(goal.querySelector('.m-to')?.textContent, '@kiro');
   assert.equal(goal.querySelector('code')?.textContent, '/goal');
-  assert.ok(goal.textContent!.includes(args), 'the arguments render whole, as text');
+  // A long command folds like a long message (owner, 2026-09-28 16:35: one
+  // /goal filled the phone screen): recipients and name stay, the arguments
+  // are cut at the budget, and the unfold control is the way to the rest.
+  assert.ok(goal.textContent!.endsWith('……'), 'the arguments are folded');
+  assert.ok(args.startsWith(goal.textContent!.replace(/^@kiro \/goal /u, '').replace(/……$/u, '')), 'the start of the arguments, as text');
+  assert.ok(!goal.textContent!.includes('<b>x</b>'), 'the tail is cut');
   assert.equal(goal.querySelector('b,em'), null, 'arguments are data, not markdown or HTML');
-  assert.equal(bubbles[0]!.querySelector('.m-unfold'), null, 'a command never folds');
+  assert.ok(bubbles[0]!.querySelector('.m-unfold'), 'a long command folds');
+  assert.ok(!goal.textContent!.includes('```'), 'no markdown fence repair on plain arguments');
   const fan = bubbles[1]!.querySelector('.m-body p')!;
   assert.deepEqual([...fan.querySelectorAll('.m-to')].map((n) => n.textContent), ['@lead', '@dev'], 'fan-out lists every target like a message does');
   assert.equal(fan.querySelector('code')?.textContent, '/compact');
+  assert.equal(bubbles[1]!.querySelector('.m-unfold'), null, 'a short command has nothing to unfold');
   // No receipt → no ring: a hollow ring would promise an echo most commands
   // never send.
   assert.equal(bubbles[1]!.querySelector('.m-state'), null);

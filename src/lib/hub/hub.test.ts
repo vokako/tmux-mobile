@@ -2,7 +2,7 @@ import test from 'node:test';
 import { ALL_TARGET, teamTarget } from './hub-composer.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand } from './hub.ts';
+import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand, foldedCommandArgs } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 import { mentionPalette, rosterGroups, rosterMarker, sortAgentsForRoster } from './hub.ts';
 
@@ -1747,4 +1747,25 @@ test('sentCommand reads a recorded /command as a bubble; lifecycle lines stay ca
   const [b] = feedBlocks([{ id: 'c', ts: 1, from: 'human', body: '[tmm] /goal go → kiro' }], [], 'chat');
   assert.equal(b?.type, 'msg');
   assert.equal(b?.type === 'msg' && b.msg.body, '@kiro /goal go');
+});
+
+test('a long command folds its arguments through the message budget; short ones stay whole', () => {
+  const cmd = { to: ['kiro'], name: '/goal', args: 'a'.repeat(300) };
+  // 3 lines x 40 units = 120; the head `@kiro /goal ` (12) stays, 108 of the args remain.
+  assert.equal(foldedCommandArgs(cmd, 3, 40), `${'a'.repeat(108)}${ELIDE}`);
+  assert.equal(foldedCommandArgs({ ...cmd, args: 'short' }, 3, 40), null, 'fits: nothing to fold');
+  assert.equal(foldedCommandArgs({ to: [], name: '/compact', args: '' }, 3, 40), null);
+  // A fan-out's recipients are part of the laid-out line.
+  const fan = foldedCommandArgs({ to: ['lead', 'dev'], name: '/goal', args: 'b'.repeat(300) }, 3, 40);
+  assert.equal(fan, `${'b'.repeat(120 - '@lead @dev /goal '.length)}${ELIDE}`);
+  // CJK is priced at two units, as in elideTail.
+  assert.equal(foldedCommandArgs({ to: ['kiro'], name: '/goal', args: '中'.repeat(100) }, 3, 40), `${'中'.repeat(54)}${ELIDE}`);
+  // Plain text: an odd ``` is never "repaired" with a closing fence.
+  const fenced = foldedCommandArgs({ to: ['kiro'], name: '/goal', args: `\`\`\`\n${'c'.repeat(300)}` }, 3, 40)!;
+  assert.ok(!fenced.includes('\n```'), fenced);
+  // A budget narrower than the head still shows the marker, never a sliced name.
+  assert.equal(foldedCommandArgs(cmd, 1, 8), ELIDE);
+  // elideTail itself is unchanged by the shared cut: fits → identity, cut → fence repaired.
+  assert.equal(elideTail('x', 3, 40), 'x');
+  assert.ok(elideTail(`\`\`\`\n${'c'.repeat(300)}`, 3, 40).endsWith('\n```'));
 });

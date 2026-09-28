@@ -16,8 +16,14 @@ Now `sentCommand` recognises that line and `feedBlocks` makes it an outgoing
 `msg` block, at every detail level: the same bubble as a chat line, its
 recipients in the leading-mention dialect (`@kiro`; a fan-out lists each target
 like a message does), the command name in the rendered inline-code dialect
-(`.md code`), the arguments as plain wrapping text, never folded and never
-parsed as markdown (they are data). The block's `body` is what the person typed
+(`.md code`), the arguments as plain wrapping text, never parsed as markdown (they are
+data). A long command FOLDS like any long user message (owner, 2026-09-28
+16:35: "这个消息怎么好像没有折叠，一个气泡就把我的手机屏幕占满了" — the first cut
+never folded it): `foldedCommandArgs` runs the same budget and tail cut as
+`elideTail` over the line as laid out (`@to /name args`), so the recipients
+and the name stay, the arguments end in `……`, and the same unfold control
+shows them whole. It skips `elideTail`'s fence repair: a plain argument never
+gains a ```. The block's `body` is what the person typed
 (`@kiro /goal args`), so Copy and Raw read the command, not the room's marker.
 Lifecycle lines (spawn, stop, restart, interrupt, board moves) keep the capsule;
 the capsule's command costume (`.sys-cmd`) is deleted.

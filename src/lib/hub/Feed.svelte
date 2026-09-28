@@ -16,7 +16,7 @@
   import { boxFromOffsets } from '../ui/indicator.ts';
   import { heldAnchor, readingDirection, refoldEligible, sameReadingSize } from './hub-reading.ts';
   import { FONT_CHANGE_EVENT } from '../app/fonts.svelte.ts';
-  import { TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, mentionedAgents, splitImages, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, perLineOf, STEPS_ROWS, stateIsLive } from './hub.ts';
+  import { TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, mentionedAgents, splitImages, toolColor, pickAnchor, toolEventParts, elideTail, foldedCommandArgs, foldLines, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, perLineOf, STEPS_ROWS, stateIsLive } from './hub.ts';
 
   let {
     blocks = [], agents = [], managedNames = [], selected = '', visible = false, compact = false,
@@ -303,6 +303,8 @@
    * 2026-08-27: "直接后截断的形式 … 中间不要了，默认用户消息都截断"). Identity
    * when it already fits, so the common case re-renders nothing. */
   const foldBody = (text) => elideTail(text, heldLines, heldPerLine);
+  /** A sent /command folds through the same budget; `null` when it fits. */
+  const foldCmd = (cmd) => foldedCommandArgs(cmd, heldLines, heldPerLine);
   /** Messages the reader unfolded by hand, by key. Folding is the DEFAULT for
    * every long user message, so an unfold is a choice that stays until the
    * project changes — resetting it whenever the anchor moved would re-fold a
@@ -687,9 +689,12 @@
              long user message (owner, 2026-08-27: "默认用户消息都截断 不要
              显示太多"): the bubble renders a rear-truncated body until the
              reader unfolds it by hand. -->
-        <!-- A sent /command (board #264) is never folded: it is one short
-             instruction, and cutting it was the capsule's failure. -->
-        {@const foldable = isAsk && !b.command && foldBody(parts.text) !== parts.text}
+        <!-- A sent /command folds like any long user message (owner,
+             2026-09-28 16:35: one /goal filled the phone screen): its
+             recipients and name stay, its arguments are cut, and the same
+             unfold control shows them whole. -->
+        {@const cmdFold = isAsk && b.command ? foldCmd(b.command) : null}
+        {@const foldable = isAsk && (b.command ? cmdFold !== null : foldBody(parts.text) !== parts.text)}
         {@const folded = foldable && !expanded[key]}
         <!-- An EXPANDED message is never pinned: sticky ignores the feed's
              scrolling, so a pinned screen-tall message had an unreachable
@@ -745,7 +750,7 @@
                      markdown: arguments are data): the recipients in the
                      leading-mention dialect, the name in the rendered inline-
                      code dialect, the arguments wrapping in full. -->
-                <p>{#each b.command.to as n, k (n)}<span class="m-to">@{n}</span>{k < b.command.to.length - 1 ? ' ' : ''}{/each}{b.command.to.length ? ' ' : ''}<code>{b.command.name}</code>{#if b.command.args}{' '}{b.command.args}{/if}</p>
+                <p>{#each b.command.to as n, k (n)}<span class="m-to">@{n}</span>{k < b.command.to.length - 1 ? ' ' : ''}{/each}{b.command.to.length ? ' ' : ''}<code>{b.command.name}</code>{#if b.command.args}{' '}{folded ? cmdFold : b.command.args}{/if}</p>
               {:else if parts.text}
                 {#if rawOpen === key}
                   <pre class="raw">{m.body}</pre>
@@ -755,8 +760,9 @@
                        Raw view and agent messages render in full. -->
                   {@html markLeadingMention(renderMarkdown(folded ? foldBody(parts.text) : parts.text))}
                 {/if}
-                {#if foldable}{@render unfold(key, folded)}{/if}
               {/if}
+              <!-- One unfold control for a folded command and a folded text. -->
+              {#if foldable}{@render unfold(key, folded)}{/if}
               {#if parts.images.length}
                 <!-- Inside the bubble (owner, 2026-08-26): part of the
                      message, clipped by the bubble's own radius. The
