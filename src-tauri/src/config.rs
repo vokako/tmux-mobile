@@ -100,13 +100,48 @@ fn dirs_next() -> PathBuf {
 #[cfg(test)]
 fn dirs_next() -> PathBuf {
     static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    DIR.get_or_init(|| {
-        let dir = std::env::temp_dir().join(format!("tmm-config-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("create the test config dir");
-        dir
-    })
-    .clone()
+    DIR.get_or_init(|| fresh_process_dir("tmm-config-test")).clone()
+}
+
+/// Test support, shared by the lib tests and the integration crate (boards
+/// #216, #268): a fresh, empty `<temp>/<prefix>-<pid>` for THIS process. The
+/// name is per process so concurrent cargo runs never share (or wipe) one;
+/// but a process-wide directory is held for the whole run and has no drop to
+/// remove it, so it is reclaimed at the door instead: every
+/// `<prefix>-<n>` sibling whose process `n` is gone is removed first. A live
+/// process's directory is never touched; a reused pid only keeps an old
+/// directory one run longer.
+#[doc(hidden)]
+pub fn fresh_process_dir(prefix: &str) -> PathBuf {
+    let tmp = std::env::temp_dir();
+    if let Ok(entries) = std::fs::read_dir(&tmp) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let pid = name
+                .to_str()
+                .and_then(|n| n.strip_prefix(prefix))
+                .and_then(|n| n.strip_prefix('-'))
+                .and_then(|n| n.parse::<libc::pid_t>().ok());
+            if pid.is_some_and(|pid| !process_alive(pid)) {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+    let dir = tmp.join(format!("{prefix}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("create the per-process test dir");
+    dir
+}
+
+/// `kill(pid, 0)`: alive, or alive but not ours (EPERM). Nonsense pids count
+/// as alive so they are never reclaimed.
+fn process_alive(pid: libc::pid_t) -> bool {
+    if pid <= 0 {
+        return true;
+    }
+    // SAFETY: signal 0 performs only the existence and permission check.
+    let found = unsafe { libc::kill(pid, 0) } == 0;
+    found || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 fn optional_env_override(value: Option<String>, fallback: Option<String>) -> Option<String> {
@@ -266,6 +301,33 @@ mod tests {
         let m = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
         assert_eq!(m, 0o600);
         let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn a_dead_process_dir_is_reclaimed_and_a_live_one_kept() {
+        let prefix = "tmm-reclaim-test";
+        let mut dead = std::process::Command::new("true").spawn().unwrap();
+        let dead_pid = dead.id();
+        dead.wait().unwrap(); // exited and reaped: kill(pid, 0) says ESRCH
+        let mut live = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let tmp = std::env::temp_dir();
+        let dead_dir = tmp.join(format!("{prefix}-{dead_pid}"));
+        let live_dir = tmp.join(format!("{prefix}-{}", live.id()));
+        let other = tmp.join(format!("{prefix}-notapid"));
+        for d in [&dead_dir, &live_dir, &other] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let own = fresh_process_dir(prefix);
+        assert_eq!(own, tmp.join(format!("{prefix}-{}", std::process::id())));
+        assert!(own.is_dir() && std::fs::read_dir(&own).unwrap().next().is_none(), "own dir is fresh and empty");
+        assert!(!dead_dir.exists(), "a dead process's dir is reclaimed");
+        assert!(live_dir.exists(), "a live process's dir is never touched");
+        assert!(other.exists(), "a non-pid suffix is not ours to judge");
+        let _ = live.kill();
+        let _ = live.wait();
+        for d in [&own, &live_dir, &other] {
+            let _ = std::fs::remove_dir_all(d);
+        }
     }
 
     #[test]

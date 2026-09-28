@@ -1066,10 +1066,8 @@ mod tests {
     /// children, which a naive `DROP TABLE projects` would cascade away.
     #[test]
     fn migrating_a_v1_database_keeps_its_rows_and_moves_the_unique_constraint() {
-        let dir = std::env::temp_dir().join(format!("tmm-store-migrate-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("state.db");
+        let scratch = crate::tmux::Scratch::new("store-migrate");
+        let path = std::path::PathBuf::from(scratch.path()).join("state.db");
 
         let v1 = Connection::open(&path).unwrap();
         v1.execute_batch(
@@ -1116,7 +1114,6 @@ mod tests {
             "two projects must not fight over one tmux session"
         );
 
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// v18: an already-seeded registry (any pre-omp install) gains the `omp`

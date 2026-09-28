@@ -173,17 +173,23 @@ flaky wall-clock assertions in the test.
   board #216 (2026-09-20) — the live `kiro_engine = "v3"` turned three
   v2-default assertions red on every branch, and earlier the spawn tests
   had pointed the whole process at the real `state.db`.
-- Every Rust test that creates a tmux session or a scratch directory names
-  it for its process: `tmux::Scratch::new(tag)` in the lib (sessions
-  `tmm-test-<tag>-<pid>-<part>`, directory `<temp>/tmm-test-<tag>-<pid>`),
-  `TestSession` in `main.rs` (`_tmux_mobile_test_<pid>_<test>`), a pid or
-  uuid suffix elsewhere. The guard is taken before anything exists and kills
-  and removes on drop, also on panic. Every cargo run on the host shares one
-  tmux server and one temp dir, so a fixed name let a second run kill,
-  reuse or delete the first run's session or directory mid-test, and a
-  leaked `tmm-test-share-a` was auto-adopted by the live server as a
-  project. Reason: board #265 (t06 flaked during #264) and #268 (the lib
-  tests #265 missed); the guard rule is #251.
+- A Rust test's tmux sessions and scratch paths are named for its process,
+  because every cargo run on the host shares one tmux server and one temp
+  dir: a fixed name let a second run kill, reuse or delete the first run's
+  session or directory mid-test, and a leaked `tmm-test-share-a` was
+  auto-adopted by the live server as a project. Two mechanisms, by lifetime:
+  - One test's session or directory: `tmux::Scratch::new(tag)` in the lib
+    (sessions `tmm-test-<tag>-<pid>-<part>`, directory
+    `<temp>/tmm-test-<tag>-<pid>`), `TestSession` in `main.rs`
+    (`_tmux_mobile_test_<pid>_<test>`). The guard is taken before anything
+    exists and kills and removes on drop, also on panic (the #251 rule).
+  - A directory held for the whole process (the test store, the config
+    dir, the kimi/codex homes, the integration crate's config dir):
+    `config::fresh_process_dir(prefix)`. It has no drop, so it is reclaimed
+    at the door: each run first removes every `<prefix>-<pid>` whose
+    process is gone, then creates its own.
+  Reason: board #265 (t06 flaked during #264) and #268 (the lib tests #265
+  missed; validator 15:30, the per-process store dir grew by one per run).
 
 ## Current source-contract inventory
 

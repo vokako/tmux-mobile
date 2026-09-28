@@ -87,13 +87,8 @@ pub(crate) fn codex_user_home() -> std::path::PathBuf {
 #[cfg(test)]
 pub(crate) fn codex_user_home() -> std::path::PathBuf {
     static DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
-    DIR.get_or_init(|| {
-        let dir = std::env::temp_dir().join(format!("tmm-codex-user-home-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("create the test codex home");
-        dir
-    })
-    .clone()
+    // Earlier runs' homes are reclaimed at the door (board #268).
+    DIR.get_or_init(|| crate::config::fresh_process_dir("tmm-codex-user-home")).clone()
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

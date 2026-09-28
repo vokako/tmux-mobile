@@ -46,8 +46,8 @@ use tmux_mobile::server::{
 fn isolate_config_dir() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        let dir = std::env::temp_dir().join(format!("tmm-itest-config-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        // Per process, earlier runs' dirs reclaimed (board #268).
+        let dir = tmux_mobile::config::fresh_process_dir("tmm-itest-config");
         std::env::set_var("XDG_CONFIG_HOME", &dir);
     });
 }
@@ -384,7 +384,9 @@ async fn slow_rpc_does_not_block_fast_rpc() {
 
     // Create a ~4 MB temp file — big enough that base64 + write takes
     // measurable time, small enough to stay under fs::MAX_READ_SIZE.
-    let tmp = std::env::temp_dir().join(format!("tmux_mobile_slow_rpc_test-{}.bin", std::process::id()));
+    // Inside this process's config dir, so a panic leaves it for the next
+    // run's reclaim rather than in the shared temp root.
+    let tmp = std::path::PathBuf::from(std::env::var_os("XDG_CONFIG_HOME").unwrap()).join("slow_rpc_test.bin");
     {
         let mut f = tokio::fs::File::create(&tmp).await.unwrap();
         let chunk = vec![0u8; 64 * 1024];
