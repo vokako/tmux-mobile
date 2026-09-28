@@ -1099,19 +1099,17 @@ export function sentCommand(body: string | null | undefined): SentCommand | null
   return { to, name: p.verb, args: p.text };
 }
 
-/** The ARGUMENTS a folded command bubble shows, or `null` when the whole
- * command fits (owner, 2026-09-28 16:35: "消息怎么好像没有折叠，一个气泡就把我的
- * 手机屏幕占满了"). A command folds through the SAME budget as any long user
- * message: `elideTail` over the line as the bubble lays it out (`@to /name
- * args`), so the recipients and the name always stay and only the arguments
- * are cut. The arguments are plain text, not markdown, so the fold is cut
- * straight from them — never `elideTail`'s fence repair, which would add a
- * visible ``` to a command. */
+/** The ARGUMENTS a folded command bubble shows, or `null` when they fit
+ * (owner, 2026-09-28 16:35: "消息怎么好像没有折叠，一个气泡就把我的手机屏幕占满
+ * 了"). Only the arguments fold, through the SAME budget and tail cut as a
+ * long user message (`cutTail`, `elideTail`'s cut); the recipients and the
+ * name are never counted against it or cut (orchestrator 16:50), so an
+ * argument-less command never folds and never offers an Expand that would
+ * change nothing (validator 16:49: eight long recipients + `/compact`). The
+ * arguments are plain text, so `elideTail`'s fence repair is skipped: a
+ * command never gains a visible ```. */
 export function foldedCommandArgs(cmd: SentCommand, maxLines: number, perLine = 80): string | null {
-  const head = `${cmd.to.map((n) => `@${n} `).join('')}${cmd.name} `;
-  const cut = cutTail(`${head}${cmd.args}`, maxLines, perLine);
-  if (cut === null) return null;
-  return cut.startsWith(head) ? cut.slice(head.length) : ELIDE;
+  return cmd.args ? cutTail(cmd.args, maxLines, perLine) : null;
 }
 
 export function systemLine(body: string | null | undefined): string | null {

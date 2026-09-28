@@ -118,6 +118,18 @@ test('a sent /command renders as the sender bubble, whole, name in inline code (
   assert.deepEqual([...fan.querySelectorAll('.m-to')].map((n) => n.textContent), ['@lead', '@dev'], 'fan-out lists every target like a message does');
   assert.equal(fan.querySelector('code')?.textContent, '/compact');
   assert.equal(bubbles[1]!.querySelector('.m-unfold'), null, 'a short command has nothing to unfold');
+  // Validator 16:49: an argument-less command to many long recipients has
+  // nothing to unfold — its recipients and name are never folded.
+  const eight = Array.from({ length: 8 }, (_, k) => `agent${k}1234567890`);
+  const bare = h.fragment(render(Feed, { props: {
+    selected: 'fixture', roomReady: true, agents: [], managedNames: eight,
+    blocks: feedBlocks([{ id: 'c', ts: 1, from: 'human', body: `[tmm] /compact → ${eight.join(', ')}` }], [], 'chat', (n) => n),
+    stepsRows: 5, following: false, newBelow: false,
+    emptyFeed: createRawSnippet(() => ({ render: () => '<div></div>' })),
+  } }).body as string);
+  assert.equal(bare.querySelectorAll('.msg.me .m-to').length, 8, 'every recipient shows');
+  assert.equal(bare.querySelector('.msg.me .m-unfold'), null, 'no Expand that would change nothing');
+  assert.ok(!bare.querySelector('.msg.me .m-body p')!.textContent!.includes('……'));
   // No receipt → no ring: a hollow ring would promise an echo most commands
   // never send.
   assert.equal(bubbles[1]!.querySelector('.m-state'), null);

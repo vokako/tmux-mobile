@@ -1751,20 +1751,20 @@ test('sentCommand reads a recorded /command as a bubble; lifecycle lines stay ca
 
 test('a long command folds its arguments through the message budget; short ones stay whole', () => {
   const cmd = { to: ['kiro'], name: '/goal', args: 'a'.repeat(300) };
-  // 3 lines x 40 units = 120; the head `@kiro /goal ` (12) stays, 108 of the args remain.
-  assert.equal(foldedCommandArgs(cmd, 3, 40), `${'a'.repeat(108)}${ELIDE}`);
+  // 3 lines x 40 units = 120, spent on the ARGUMENTS alone.
+  assert.equal(foldedCommandArgs(cmd, 3, 40), `${'a'.repeat(120)}${ELIDE}`);
   assert.equal(foldedCommandArgs({ ...cmd, args: 'short' }, 3, 40), null, 'fits: nothing to fold');
-  assert.equal(foldedCommandArgs({ to: [], name: '/compact', args: '' }, 3, 40), null);
-  // A fan-out's recipients are part of the laid-out line.
-  const fan = foldedCommandArgs({ to: ['lead', 'dev'], name: '/goal', args: 'b'.repeat(300) }, 3, 40);
-  assert.equal(fan, `${'b'.repeat(120 - '@lead @dev /goal '.length)}${ELIDE}`);
+  assert.equal(foldedCommandArgs({ ...cmd, args: 'a'.repeat(120) }, 3, 40), null, 'exactly the budget fits');
+  // Validator 16:49: eight long recipients and no arguments offered an Expand
+  // that changed nothing. The head is never budgeted or cut.
+  const eight = Array.from({ length: 8 }, (_, k) => `agent${k}1234567890`);
+  assert.equal(foldedCommandArgs({ to: eight, name: '/compact', args: '' }, 3, 40), null, 'no arguments: never folds');
+  assert.equal(foldedCommandArgs({ to: eight, name: '/goal', args: 'short' }, 3, 40), null, 'a long head does not fold short arguments');
   // CJK is priced at two units, as in elideTail.
-  assert.equal(foldedCommandArgs({ to: ['kiro'], name: '/goal', args: '中'.repeat(100) }, 3, 40), `${'中'.repeat(54)}${ELIDE}`);
+  assert.equal(foldedCommandArgs({ to: ['kiro'], name: '/goal', args: '中'.repeat(100) }, 3, 40), `${'中'.repeat(60)}${ELIDE}`);
   // Plain text: an odd ``` is never "repaired" with a closing fence.
   const fenced = foldedCommandArgs({ to: ['kiro'], name: '/goal', args: `\`\`\`\n${'c'.repeat(300)}` }, 3, 40)!;
   assert.ok(!fenced.includes('\n```'), fenced);
-  // A budget narrower than the head still shows the marker, never a sliced name.
-  assert.equal(foldedCommandArgs(cmd, 1, 8), ELIDE);
   // elideTail itself is unchanged by the shared cut: fits → identity, cut → fence repaired.
   assert.equal(elideTail('x', 3, 40), 'x');
   assert.ok(elideTail(`\`\`\`\n${'c'.repeat(300)}`, 3, 40).endsWith('\n```'));

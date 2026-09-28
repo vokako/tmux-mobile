@@ -20,9 +20,10 @@ like a message does), the command name in the rendered inline-code dialect
 data). A long command FOLDS like any long user message (owner, 2026-09-28
 16:35: "这个消息怎么好像没有折叠，一个气泡就把我的手机屏幕占满了" — the first cut
 never folded it): `foldedCommandArgs` runs the same budget and tail cut as
-`elideTail` over the line as laid out (`@to /name args`), so the recipients
-and the name stay, the arguments end in `……`, and the same unfold control
-shows them whole. It skips `elideTail`'s fence repair: a plain argument never
+`elideTail` over the ARGUMENTS alone: the recipients and the name are never
+counted or cut, so an argument-less command never folds (validator 16:49:
+eight long recipients + `/compact` offered an Expand that changed nothing);
+the arguments end in `……`, and the same unfold control shows them whole. It skips `elideTail`'s fence repair: a plain argument never
 gains a ```. The block's `body` is what the person typed
 (`@kiro /goal args`), so Copy and Raw read the command, not the room's marker.
 Lifecycle lines (spawn, stop, restart, interrupt, board moves) keep the capsule;
