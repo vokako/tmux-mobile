@@ -11,8 +11,9 @@
 pub struct KnownAgent {
     /// Stable name we store in the slot.
     pub backend: &'static str,
-    /// Lowercase substring searched in the pane's command text.
-    pub needle: &'static str,
+    /// The executable file names this CLI runs as (`kiro-cli`, `codex` or
+    /// `codex.js` under node), matched EXACTLY by `by_program` (board #260).
+    pub programs: &'static [&'static str],
     /// What `up` runs when there is no conversation to go back to.
     pub launch: &'static str,
     /// Resume the newest conversation **of this directory**. `None` where the
@@ -42,7 +43,7 @@ fn known() -> &'static [KnownAgent] {
         let mut rows = vec![
             KnownAgent {
                 backend: "openclaw",
-                needle: "openclaw",
+                programs: &["openclaw"],
                 launch: "openclaw",
                 resume_recent: None,
                 resume_id: None,
@@ -116,50 +117,6 @@ pub fn home_dir(workspace: &str, name: &str) -> Option<std::path::PathBuf> {
     Some(std::path::Path::new(workspace).join(".tmm").join("agents").join(name))
 }
 
-/// The first WORD occurrence of `needle` in `haystack`: both neighbours must
-/// be non-word bytes (`-`, `.`, `/`, space … all count as boundaries, so
-/// `kiro-cli-chat`, `codex.js` and `/bin/omp` match). Substring matching
-/// painted plain shells as agents — "omp" lives inside docker-compose, and a
-/// window named after the kirocrew project contained "kiro". `_` is a word
-/// character, as in a regex `\b`.
-fn find_word(haystack: &str, needle: &str) -> Option<usize> {
-    let bytes = haystack.as_bytes();
-    let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
-    let mut from = 0;
-    while let Some(rel) = haystack[from..].find(needle) {
-        let idx = from + rel;
-        let end = idx + needle.len();
-        let before_ok = idx == 0 || !is_word(bytes[idx - 1]);
-        let after_ok = end >= bytes.len() || !is_word(bytes[end]);
-        if before_ok && after_ok {
-            return Some(idx);
-        }
-        from = idx + 1;
-    }
-    None
-}
-
-/// The agent running in a pane, or `None` for an ordinary shell.
-///
-/// `text` must be ordered shallow → deep (`detect_processes`: the process
-/// name, the pane process's argv, then its descendants' argv) because the
-/// EARLIEST match wins: a late match is a subprocess the agent spawned, not
-/// what the user launched. Claude Code needs no special case even though its
-/// process name can be a bare version number — its argv says `claude`
-/// (invoked by name) or `.../claude/versions/<v>` (by path).
-pub fn detect(text: &str) -> Option<&'static KnownAgent> {
-    let lower = text.to_lowercase();
-    let mut best: Option<(usize, &'static KnownAgent)> = None;
-    for agent in known() {
-        if let Some(idx) = find_word(&lower, agent.needle) {
-            if best.is_none_or(|(prev, _)| idx < prev) {
-                best = Some((idx, agent));
-            }
-        }
-    }
-    best.map(|(_, a)| a)
-}
-
 /// The agent in a MANAGED window: the launch recipe's recorded backend first,
 /// the pane's process-derived agent (`TmuxPane::agent`) as the fallback for
 /// windows we did not create.
@@ -210,29 +167,42 @@ fn versioned_binary(path: &str) -> Option<&'static KnownAgent> {
     })
 }
 
-/// What one process RUNS, from its argv, by NAME only: argv[0]'s file name
-/// and, when that is an interpreter, its script's file name (first non-flag
-/// argument). Never another argument — `rg grok`, `vim kiro.md` and
-/// `uvx kiro-web-search` name an agent in an argument while running
+/// The CLI a program NAME is: exactly one of a backend's `programs`, after
+/// dropping a script extension (`codex.js`). Exact, not a word match: the
+/// helper `kiro-web-search` is not the `kiro-cli` CLI, and `docker-compose`
+/// is not `omp` (validator, board #260).
+fn by_program(name: &str) -> Option<&'static KnownAgent> {
+    let name = [".js", ".mjs", ".cjs", ".py"]
+        .iter()
+        .find_map(|ext| name.strip_suffix(ext))
+        .unwrap_or(name);
+    known().iter().find(|a| a.programs.iter().any(|p| p.eq_ignore_ascii_case(name)))
+}
+
+/// The CLI one process RUNS, from its argv, by NAME only: argv[0]'s file
+/// name and, when that is an interpreter, its script's file name (first
+/// non-flag argument). Never another argument — `rg grok`, `vim kiro.md`
+/// and `uvx kiro-web-search` name an agent in an argument while running
 /// something else (validator, board #260) — and never a directory, except
 /// a CLI's documented versioned layout (`versioned_binary`).
-fn program_of(argv: &str) -> String {
+fn process_agent(argv: &str) -> Option<&'static KnownAgent> {
     let mut args = argv.split_whitespace();
-    let Some(exe) = args.next() else { return String::new() };
+    let exe = args.next()?;
     if let Some(agent) = versioned_binary(exe) {
-        return agent.needle.to_string();
+        return Some(agent);
     }
     let name = file_name(exe);
-    match is_interpreter(name).then(|| args.find(|a| !a.starts_with('-'))).flatten() {
-        Some(script) => format!("{name} {}", file_name(script)),
-        None => name.to_string(),
+    if is_interpreter(name) {
+        return args.find(|a| !a.starts_with('-')).and_then(|script| by_program(file_name(script)));
     }
+    by_program(name)
 }
 
 /// The agent a pane's PROCESSES run, shallow → deep (board #260): the
 /// process tmux reports in the foreground (`pane_current_command`), then,
 /// per process on the chain from the pane process down (`argvs`), the
-/// program it runs (`program_of`) — where an interpreter-launched CLI such
+/// program it runs (`process_agent`); the shallowest match wins, since a
+/// deeper one is a subprocess the agent spawned — where an interpreter-launched CLI such
 /// as the npm codex (`node …/bin/codex`) or Claude Code (a version-named
 /// binary under `…/claude/versions/`) finally says its own name. Each level
 /// is read on its own: an argument is data, not the program.
@@ -246,12 +216,7 @@ fn program_of(argv: &str) -> String {
 /// in the listing (`tmux::parse_pane_lines`), so the server and the client
 /// read the same verdict off `TmuxPane::agent` instead of each re-deriving it.
 pub fn detect_processes(current_command: &str, argvs: &[&str]) -> Option<&'static KnownAgent> {
-    let mut programs = current_command.to_string();
-    for argv in argvs {
-        programs.push(' ');
-        programs.push_str(&program_of(argv));
-    }
-    detect(&programs)
+    by_program(current_command).or_else(|| argvs.iter().find_map(|argv| process_agent(argv)))
 }
 
 /// The agent in `pane`: its launch recipe first (managed windows), its
@@ -302,8 +267,8 @@ mod tests {
 
     #[test]
     fn detects_the_shallowest_agent_not_the_first_listed() {
-        // codex spawning a kiro-web-search MCP tool: "kiro" sits deeper.
-        let a = detect("node codex /Users/me/.codex/bin kiro-web-search").unwrap();
+        // codex spawning a kiro-cli subprocess: the deeper kiro loses.
+        let a = detect_processes("node", &["-zsh", "node /Users/me/.codex/bin/codex", "kiro-cli chat"]).unwrap();
         assert_eq!(a.backend, "codex");
     }
 
@@ -420,21 +385,27 @@ mod tests {
         );
     }
 
+    /// Validator on #260: a program is its EXACT name, not a word inside
+    /// it. `kiro-web-search` (this project's live MCP helper) and
+    /// `docker-compose` contain agent words at hyphen boundaries; run
+    /// directly, or as the child uvx starts, they are not agents.
     #[test]
-    fn kimi_wins_over_its_kiro_helper() {
-        let a = detect("kimi-code kiro-web-search").unwrap();
-        assert_eq!(a.backend, "kimi");
-    }
-
-    /// "omp" is a substring of everyday process text; only the WORD is the
-    /// agent. `-`, `.` and `/` are boundaries, so the real launch spellings
-    /// keep matching.
-    #[test]
-    fn omp_matches_as_a_word_never_inside_compose() {
-        assert_eq!(detect("omp").map(|a| a.backend), Some("omp"));
-        assert_eq!(detect("sh title /home/u/.local/bin/omp --continue").map(|a| a.backend), Some("omp"));
-        assert!(detect("docker-compose up").is_none());
-        assert!(detect("node component-lab").is_none());
+    fn a_program_is_its_exact_name_not_a_word_in_it() {
+        for chain in [
+            &["-zsh", "kiro-web-search --help"][..],
+            &["-zsh", "/home/u/.local/bin/uv tool uvx kiro-web-search", "/home/u/.cache/uv/archive-v0/x/bin/python /home/u/.cache/uv/archive-v0/x/bin/kiro-web-search"],
+            &["-zsh", "docker-compose up"],
+            &["-zsh", "node component-lab"],
+            &["-zsh", "kirocrew-in-agentcore"],
+            &["-zsh", "claude-code-router start"],
+            &["-zsh", "/usr/bin/grok-tools"],
+        ] {
+            let cmd = file_name(chain.last().unwrap().split_whitespace().next().unwrap());
+            assert!(detect_processes(cmd, chain).is_none(), "{chain:?}");
+        }
+        // kimi-code keeps its identity over the kiro-web-search helper it runs.
+        assert_eq!(detect_processes("kimi-code", &["-zsh", "kimi-code", "uvx kiro-web-search"]).map(|a| a.backend), Some("kimi"));
+        assert_eq!(detect_processes("omp", &["-zsh"]).map(|a| a.backend), Some("omp"));
     }
 
     /// Every spawnable backend must also be detectable/relaunchable: the
@@ -446,27 +417,33 @@ mod tests {
         }
     }
 
-    /// The boundary rule protects every short needle: a window named after
-    /// the kirocrew project is not a Kiro agent.
+    /// Every spelling each CLI runs under on this host, by current_command
+    /// alone and by argv alone.
     #[test]
-    fn needles_are_word_bounded_on_every_backend() {
-        assert!(detect("bash kirocrew-in-agentcore").is_none());
-        assert_eq!(detect("kiro-cli-chat").map(|a| a.backend), Some("kiro"));
-        assert_eq!(detect("node x node_modules/codex/bin/codex.js").map(|a| a.backend), Some("codex"));
+    fn each_backend_program_name_is_recognised() {
+        for (name, want) in [
+            ("kiro-cli", "kiro"), ("kiro-cli-chat", "kiro"), ("claude", "claude"), ("codex", "codex"),
+            ("codex.js", "codex"), ("grok", "grok"), ("omp", "omp"), ("kimi", "kimi"), ("kimi-code", "kimi"),
+            ("openclaw", "openclaw"),
+        ] {
+            assert_eq!(by_program(name).map(|a| a.backend), Some(want), "{name}");
+            let argv = format!("/x/bin/{name} --flag");
+            assert_eq!(detect_processes("zsh", &["-zsh", &argv]).map(|a| a.backend), Some(want), "{name}");
+        }
     }
 
     #[test]
     fn claude_is_found_through_its_version_named_binary_path() {
-        let a = detect("2.1.141  /Users/me/.local/share/claude/versions/2.1.141").unwrap();
+        let a = detect_processes("2.1.141", &["-zsh", "/Users/me/.local/share/claude/versions/2.1.141"]).unwrap();
         assert_eq!(a.backend, "claude");
         assert_eq!(a.launch, "claude");
     }
 
     #[test]
     fn a_plain_shell_is_not_an_agent() {
-        assert!(detect("zsh").is_none());
-        assert!(detect("npm run dev").is_none());
-        assert!(detect("").is_none());
+        assert!(detect_processes("zsh", &["-zsh"]).is_none());
+        assert!(detect_processes("npm", &["-zsh", "npm run dev"]).is_none());
+        assert!(detect_processes("", &[]).is_none());
     }
 
     #[test]

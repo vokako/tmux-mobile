@@ -400,7 +400,7 @@ pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
 pub(crate) fn known() -> crate::projects::agents::KnownAgent {
     crate::projects::agents::KnownAgent {
         backend: "codex",
-        needle: "codex",
+        programs: &["codex"],
         launch: "codex",
         resume_recent: None,
         resume_id: Some("codex resume {id}"),

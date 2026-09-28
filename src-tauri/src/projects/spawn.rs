@@ -258,7 +258,7 @@ fn materialize(
     ));
 
     // Record before acting: the recipe is what makes this window OURS on
-    // restart (`detect_managed` reads the backend off it, `relaunch_line`
+    // restart (`agents::detect_pane` reads the backend off it, `relaunch_line`
     // replays it). Written here, before the window exists, so a write failure
     // is a spawn failure with nothing left running — not a live agent that
     // restarts deaf on the generic launch path.

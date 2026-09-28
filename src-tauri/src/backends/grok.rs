@@ -318,7 +318,7 @@ pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
 pub(crate) fn known() -> crate::projects::agents::KnownAgent {
     crate::projects::agents::KnownAgent {
         backend: "grok",
-        needle: "grok",
+        programs: &["grok"],
         launch: "grok",
         resume_recent: Some("grok --continue"),
         resume_id: Some("grok --resume {id}"),

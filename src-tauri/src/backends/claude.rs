@@ -398,7 +398,7 @@ pub(crate) fn resume_command(cmd: &str, id: Option<&str>) -> String {
 pub(crate) fn known() -> crate::projects::agents::KnownAgent {
     crate::projects::agents::KnownAgent {
         backend: "claude",
-        needle: "claude",
+        programs: &["claude"],
         launch: "claude",
         resume_recent: Some("claude --continue"),
         resume_id: Some("claude --resume {id}"),

@@ -801,7 +801,7 @@ pub(crate) fn launch_engine_is_v3(cmd: &str) -> bool {
 pub(crate) fn known() -> crate::projects::agents::KnownAgent {
     crate::projects::agents::KnownAgent {
         backend: "kiro",
-        needle: "kiro",
+        programs: &["kiro-cli", "kiro-cli-chat"],
         launch: "kiro-cli chat",
         resume_recent: Some("kiro-cli chat --resume"),
         resume_id: Some("kiro-cli chat --resume-id {id}"),

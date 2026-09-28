@@ -251,7 +251,8 @@ closed; kept as the record of what the scattering looked like.
 1. No `Backend` type; one backend's knowledge spread across at least twelve
    match/if branches. Adding omp on 2026-09-07 missed `registry_save`.
 2. Two tables for the same fact: resume dialects in `agents.rs::KNOWN` and
-   `spawn.rs::resume_command`; frontend regexes mirror `find_word`.
+   `spawn.rs::resume_command`; frontend regexes mirrored the server matcher
+   (gone with board #260: the client reads the server's pane `agent`).
 3. Each hook contract spans two files: installation in spawn.rs and reading
    in agent_notifications.rs.
 4. `refresh_hooks` detects backend-specific paths even though `launch.json`
