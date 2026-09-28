@@ -3,7 +3,8 @@
 //!
 //! A backend occasionally aborts a turn with a load-shedding error — kiro
 //! paints `An unexpected error occurred during the response stream …
-//! ModelTemporarilyUnavailable … please try again` and then sits at its prompt.
+//! ModelTemporarilyUnavailable … please try again` (or, on kiro v3, `● <model>
+//! is experiencing high traffic …`) and then sits at its prompt.
 //! The agent is fine, the turn is lost, and until a human types something the
 //! window is dead weight. This module watches managed agent panes from the
 //! capture tick and types `continue` at one that shows such an error.
@@ -89,6 +90,36 @@ const TRANSIENT: [&str; 3] = [
 /// self-contains the transient reason ("temporarily unavailable"), so a block
 /// opening with it needs no second marker.
 const MODEL_UNAVAILABLE: &str = "themodelyouveselectedistemporarilyunavailable";
+/// Third kiro shape (kiro-cli 2.22.1, `--agent-engine v3`, board #267,
+/// 2026-09-28): `● <model> is experiencing high traffic. Try again, or select
+/// another model. (Request ID: …)`, hard-wrapped under the `●` bullet head
+/// that v3 also gives its prose and tool calls. It has no header of its own
+/// and the model name varies, so the block must be EXACTLY the error: the
+/// bullet, a short model name (letters, digits, spaces, `.`, `-`, `(`, `)`;
+/// at most `MODEL_NAME_WORDS` words), the fixed sentence, and its request id
+/// closing the block. A tool head (`● Shell …╰ output:`), a chat stamp or
+/// prose around the sentence all break that shape.
+const HIGH_TRAFFIC: &str = "is experiencing high traffic";
+const HIGH_TRAFFIC_REST: &str = "tryagainorselectanothermodelrequestid";
+/// "Claude Opus 4.1 (1M context)" is five.
+const MODEL_NAME_WORDS: usize = 5;
+
+/// Is this block, its lines joined with spaces, exactly the high-traffic error?
+fn high_traffic(spaced: &str) -> bool {
+    let flat = spaced.split_whitespace().collect::<Vec<_>>().join(" ");
+    let Some(name) = flat.strip_prefix("● ") else { return false };
+    let Some(at) = name.to_ascii_lowercase().find(HIGH_TRAFFIC) else { return false };
+    let (name, rest) = (name[..at].trim(), &name[at + HIGH_TRAFFIC.len()..]);
+    let words = name.split(' ').filter(|w| !w.is_empty()).count();
+    if words == 0
+        || words > MODEL_NAME_WORDS
+        || !name.chars().all(|c| c.is_ascii_alphanumeric() || " .-()".contains(c))
+    {
+        return false;
+    }
+    let Some(id) = canonical(rest).strip_prefix(HIGH_TRAFFIC_REST).map(str::to_string) else { return false };
+    id.len() >= 8 && id.chars().all(|c| c.is_ascii_hexdigit())
+}
 
 /// Lowercase alphanumerics only: the pane wraps the error blob at arbitrary
 /// points (and pads with box furniture), so whitespace and punctuation carry
@@ -144,7 +175,9 @@ fn signature_within(text: &str, window: usize) -> Option<String> {
     // block above it — the head scrolled off the capture, or a blank sat
     // between them — is dropped, never guessed at: the invisible head is a
     // `[tmm chat …]` stamp as easily as a real error header.
-    let mut blocks: Vec<String> = Vec::new();
+    // Each block is also kept with its lines joined by a space: the
+    // high-traffic shape reads its model name as words (#267).
+    let mut blocks: Vec<(String, String)> = Vec::new();
     let mut open = false;
     for line in &lines {
         if line.trim().is_empty() {
@@ -153,16 +186,19 @@ fn signature_within(text: &str, window: usize) -> Option<String> {
         }
         if line.starts_with(' ') {
             if open {
-                blocks.last_mut().expect("open implies a block").push_str(line.trim());
+                let (glued, spaced) = blocks.last_mut().expect("open implies a block");
+                glued.push_str(line.trim());
+                spaced.push(' ');
+                spaced.push_str(line.trim());
             }
         } else {
-            blocks.push(line.trim_end().to_string());
+            blocks.push((line.trim_end().to_string(), line.trim_end().to_string()));
             open = true;
         }
     }
     let mut hits = 0u32;
     let mut ids: Vec<String> = Vec::new();
-    for block in &blocks {
+    for (block, spaced) in &blocks {
         let c = canonical(block);
         // A block QUOTING the error (a chat delivery typed into the pane, or
         // its echo in the conversation) is not the agent having one — and a
@@ -171,7 +207,8 @@ fn signature_within(text: &str, window: usize) -> Option<String> {
             continue;
         }
         let hit = (c.starts_with(HEADER) && TRANSIENT.iter().any(|m| c.contains(m)))
-            || c.starts_with(MODEL_UNAVAILABLE);
+            || c.starts_with(MODEL_UNAVAILABLE)
+            || high_traffic(spaced);
         if !hit {
             continue;
         }
@@ -188,10 +225,13 @@ fn signature_within(text: &str, window: usize) -> Option<String> {
     Some(format!("{}|{}", hits, ids.join(",")))
 }
 
-/// `… (request_id: 30010907-33c4-…)` → the id token.
+/// `… (request_id: 30010907-33c4-…)` or v3's `(Request ID: …)` → the id token.
 fn extract_request_id(line: &str) -> Option<String> {
-    let idx = line.find("request_id")?;
-    let rest = &line[idx + "request_id".len()..];
+    let lower = line.to_ascii_lowercase(); // same byte offsets as `line`
+    let (idx, key) = ["request_id", "request id"]
+        .iter()
+        .find_map(|k| lower.find(k).map(|i| (i, k.len())))?;
+    let rest = &line[idx + key..];
     let id: String = rest
         .chars()
         .skip_while(|c| !c.is_ascii_alphanumeric())
@@ -234,7 +274,8 @@ pub fn headless_error_tail(text: &str) -> bool {
     if c.contains("tmmchat") {
         return false;
     }
-    TRANSIENT.iter().any(|m| c.contains(m)) || orphan.contains("request_id")
+    // `requestid` covers both `request_id` and v3's `Request ID` (#267).
+    TRANSIENT.iter().any(|m| c.contains(m)) || c.contains("requestid")
 }
 
 #[derive(Default)]
@@ -483,6 +524,54 @@ mod tests {
     /// The second shape, exactly as kiro painted it (2026-08-26): its own
     /// hard-wrapped lines, first sentence whole on the first line.
     const MODEL_ERR: &str = "The model you've selected is temporarily unavailable.\n  Please use '/model' to select a different model and try\n  again. (request_id: db05d310-a189-497d-a6f2-b53410863243)";
+
+    /// The third shape, verbatim from the owner's stuck pane (#267:
+    /// lingting:kiro, 55×38, kiro-cli 2.22.1 `--agent-engine v3`, captured
+    /// with `capture-pane -p -J` as `check_once` reads it, 2026-09-28): the
+    /// chat delivery above it, the blank lines are a single space, and the
+    /// prompt furniture below.
+    const HIGH_TRAFFIC_SCREEN: &str = "  › [tmm chat 2026-09-28 13:55] human: @kiro\n    你现在什么阶段 在处理数据吗还是在训练了\n \n● Claude Opus 5.5 is experiencing high traffic. Try\n  again, or select another model. (Request ID:\n  ef8dd12f-668e-4cdb-a8a7-7ecc7baa4146)\n \n▸ Credits: 121.98 • Time: 129m 30s\n\n ◐ 7 tasks remaining · ctrl+x expand\n───────────────────────────────────────────────────────\n Trust All Tools active, confirmations are off · /quit\n to exit\n───────────────────────────────────────────────────────\nkiro · Claude Opus 5.5 · high · ◑ 35% · Midway: 10h 53m\n/local/home/cfu/work/projects/lingting · (main)\n\n›  ask a question or describe a task ↵\n              /sessions to resume · /copy to clipboard\n";
+
+    #[test]
+    fn the_high_traffic_error_is_detected() {
+        assert_eq!(
+            error_signature(HIGH_TRAFFIC_SCREEN),
+            Some("1|ef8dd12f-668e-4cdb-a8a7-7ecc7baa4146".into()),
+            "the v3 high-traffic paint is an incident, identified by its Request ID"
+        );
+        // Another model, and a narrow pane that wraps inside the name.
+        assert!(scan_tail("● Claude Sonnet 4.6 is\n  experiencing high traffic. Try again, or select\n  another model. (Request ID: 0a1b2c3d-4e5f)\n"));
+        // Unwrapped, as a wide pane paints it.
+        assert!(scan_tail("● Auto is experiencing high traffic. Try again, or select another model. (Request ID: deadbeef-0001)\n"));
+    }
+
+    #[test]
+    fn quoting_the_high_traffic_error_is_not_having_it() {
+        let paint = "● Claude Opus 5.5 is experiencing high traffic. Try\n  again, or select another model. (Request ID:\n  ef8dd12f-668e-4cdb-a8a7-7ecc7baa4146)";
+        // A chat delivery quoting it: indented under the `›` stamp line.
+        let chat = format!("  › [tmm chat 2026-09-28 14:37] human: @orchestrator 有报这个错误\n{}\n", paint.lines().map(|l| format!("    {l}")).collect::<Vec<_>>().join("\n"));
+        assert!(!scan_tail(&chat), "a stamped quote must not trigger");
+        // The same with the stamp on the pane's column zero (v2 paint).
+        assert!(!scan_tail(&format!("[tmm chat 2026-09-28 14:37] human: @kiro {}", paint.replace('\n', " "))));
+        // Tool output reading it (board show, capture-pane): under a `●` Shell head.
+        let tool = format!("● Shell tmm board show 267\n    ╰ output:\n{}\n", paint.lines().map(|l| format!("        {l}")).collect::<Vec<_>>().join("\n"));
+        assert!(!scan_tail(&tool), "tool output must not trigger");
+        // The agent's own prose about it: words around the sentence.
+        assert!(!scan_tail("● The pane shows Claude Opus 5.5 is experiencing high traffic. Try again, or select another model. (Request ID: ef8dd12f)\n"),
+            "a long lead-in is not a model name");
+        assert!(!scan_tail("● Claude Opus 5.5 is experiencing high traffic. Try again, or select another model. (Request ID: ef8dd12f) — I will retry.\n"),
+            "text after the id is prose");
+        assert!(!scan_tail("● Claude Opus 5.5 is experiencing high traffic. Try again, or select another model.\n"),
+            "without its Request ID the sentence is a mention");
+    }
+
+    #[test]
+    fn a_headless_high_traffic_tail_asks_for_the_deep_look() {
+        let tail = "  again, or select another model. (Request ID:\n  ef8dd12f-668e-4cdb-a8a7-7ecc7baa4146)\n \n▸ Credits: 1\n";
+        assert_eq!(error_signature(tail), None);
+        assert!(headless_error_tail(tail), "v3's `Request ID` earns the deeper capture like `request_id`");
+        assert!(deep_error_signature(&format!("● Claude Opus 5.5 is experiencing high traffic. Try\n{tail}")).is_some());
+    }
 
     #[test]
     fn the_model_unavailable_error_is_detected() {
