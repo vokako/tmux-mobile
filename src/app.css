@@ -853,10 +853,6 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 }
 .tab-glyph .glyph-talk:nth-of-type(2) { transition-delay: 40ms; }
 .tab-glyph .glyph-talk:nth-of-type(3) { transition-delay: 80ms; }
-/* The line waits one step only on the way IN: a delay on the base rule also
-   delayed the way out, so a deselect mid-entry kept rising for 40ms before it
-   turned back (validator, #262). Leaving starts at once. */
-.tab-glyph.on .glyph-write { transition-delay: 40ms; }
 .tab-glyph.on .glyph-step { transform: translateX(2.5px); }
 .tab-glyph.on .glyph-cursor { transform: scaleX(0.5); }
 .tab-glyph.on .glyph-talk { opacity: 1; transform: none; }

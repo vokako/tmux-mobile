@@ -101,10 +101,12 @@ test('a navigation tab glyph settles into a chosen pose and back (#240)', () => 
   for (const part of ['write', 'card']) {
     assert.match(appCss, new RegExp(`\\.tab-glyph\\.on \\.glyph-${part} \\{ opacity: 1; transform: none; \\}`, 'u'), `.glyph-${part} settles in upright`);
   }
-  assert.match(appCss, /\.tab-glyph\.on \.glyph-write \{ transition-delay: 40ms; \}/u, 'the line is written after the page, on the chat dots\' 40ms step');
-  // …on the way IN only: a delay without `.on` also holds the way out, so a
-  // deselect mid-entry kept rising for 40ms before reversing (validator, #262).
-  assert.doesNotMatch(appCss, /\.tab-glyph \.glyph-write \{[^}]*transition-delay/u, 'leaving the Files tab reverses at once');
+  // No delay on the Files line in EITHER direction (orchestrator, #262): a
+  // delay on either side stalls a reversal that interrupts the other one
+  // (deselect mid-entry, or re-select mid-exit), and staggering one moving
+  // part against lines that stay still buys nothing. Chat keeps its stagger:
+  // three dots move together.
+  assert.doesNotMatch(appCss, /glyph-write[^{]*\{[^}]*transition-delay/u, 'the Files line reverses at once both ways');
   assert.doesNotMatch(appCss, /glyph-(tilt|flip)/u, 'the replaced tilt and flip poses are gone whole');
   assert.match(appCss, /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[^}]*\.tab-glyph :is\([^)]*\)[^{]*\{\s*transition:\s*none;/u, 'stilled under reduced motion');
   const icon = readFileSync(join(root, 'src/lib/ui/Icon.svelte'), 'utf8');
