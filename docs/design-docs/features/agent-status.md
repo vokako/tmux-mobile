@@ -86,15 +86,18 @@ an automatic `[reply]` or legacy `[done]` envelope does not.
 **The edge accumulates within a turn** (#256). An input that arrives while the
 window's turn is open (codex steer, anything typed mid-turn) ADDS its senders,
 deduplicated and in arrival order; only the turn's end consumes the edge.
-An input "joins" when the turn log already holds an input since the window's
-last `completed`/`failed`/`interrupted` (`telemetry::for_each_turn_input`,
-the same end facts `recover_open_turns` replays into `derive_from`). This is
-not a second status rule: it answers whose requests the turn carries, never
-whether the window is working, so a tool-only stretch that `derive_from`
-reads as running carries no requester. The in-memory edge caches the fold
-(parsed from the full prompt; the log keeps a 1024-char copy) and is trusted
-only while the log says its turn is open, so an interrupted turn's cache never
-leaks into the next one.
+Two questions, two sources (orchestrator, #256 review 03:07). Whether the turn
+is OPEN has ONE answer, `telemetry::turn_busy`: `derive_from` (`running` or
+`waiting`) on the same recovered record the status reads, never a second query
+(validator's counterexample: completed, then a tool call, is a tool-only turn
+that `derive_from` reads as running; a prompt-only query called it closed).
+WHO the edge holds is the senders of the prompts since the window's last
+`completed`/`failed`/`interrupted` (`telemetry::for_each_turn_input`). A
+tool-only turn is open but has no requester yet, so its first input starts the
+edge. The in-memory edge memoises that fold (parsed from the full prompt; the
+log keeps a 1024-char copy) and is used only when the open turn has carried an
+input, so a memo left by an interrupted turn never becomes the next turn's
+members.
 Incident (2026-09-27, `temp/stall-analysis.md`): `start_turn` REPLACED the
 edge with the newest input's senders, so a `[reply]` landing mid-turn erased
 the real requester. 27 of 404 turns in 14 hours lost their requester; one was

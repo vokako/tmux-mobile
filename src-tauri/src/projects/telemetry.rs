@@ -409,14 +409,24 @@ pub fn recent_events(session: &str, since_ts: u64) -> Vec<ActivityEvent> {
     events_page(session, since_ts, None, LOAD_EVENTS).0
 }
 
+/// Is this window's turn open right now — `running` or `waiting` by
+/// `derive_from`, the one turn rule (board #249), on the same record the
+/// status reads? Never pane activity, never a second query. Reads the
+/// recovery mark first, so the first question after a restart is asked of
+/// the turn the log replays (`recover_open_turns`), not an empty record.
+pub fn turn_busy(session: &str, window: &str) -> bool {
+    recovery_mark(session);
+    matches!(derive(session, window, 0).state.as_str(), "running" | "waiting")
+}
+
 /// Visit every INPUT this window's turn has carried since its last end
 /// (`completed`/`failed`/`interrupted` — the same end facts
 /// `recover_open_turns` replays into `derive_from`), oldest first, streamed.
-/// Returns how many. This answers "whose requests is this turn carrying?",
-/// never "is the window working?": a tool-only stretch (kiro housekeeping,
-/// a turn opened by keyboard before hooks) is running to `derive_from` and
-/// carries no input here, which is exactly right for a reply edge — nobody
-/// asked. Fail-soft: an unreadable store visits nothing (#256).
+/// Returns how many. This answers "whose requests is this turn carrying?"
+/// (the reply edge's MEMBERS), never "is the turn open?" — that is
+/// `turn_busy` alone (orchestrator, #256 review 03:07). A tool-only turn is
+/// open and carries no input here: it has no requester yet. Fail-soft: an
+/// unreadable store visits nothing.
 pub fn for_each_turn_input(session: &str, window: &str, limit: Option<usize>, mut visit: impl FnMut(&str)) -> usize {
     if !cfg!(test) {
         return super::with_store(|s| s.for_each_open_turn_prompt(session, window, limit, visit)).unwrap_or(0);

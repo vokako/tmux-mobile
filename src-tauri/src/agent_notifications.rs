@@ -92,22 +92,26 @@ impl AgentNotificationHub {
     /// replaced by the newest input, so a `[reply]` landing mid-turn erased
     /// the real requester — 27 of 404 turns on 2026-09-27, among them the
     /// #248 SHIP orchestrator had asked for, which then reached nobody for
-    /// 3h27m (temp/stall-analysis.md). "Joins" means the turn has already
-    /// carried an input since its last end in the turn log — not a second
-    /// status rule (see `telemetry::for_each_turn_input`). The in-memory
-    /// edge is a cache of that fold, parsed from the FULL prompt (the log
-    /// keeps a truncated copy); it is trusted only while the log says the
-    /// turn it belongs to is still open, so an interrupted turn's cache
-    /// (an interrupt takes no edge) never leaks into the next turn.
+    /// 3h27m (temp/stall-analysis.md).
+    ///
+    /// Two questions, two sources (orchestrator, #256 review 03:07). Whether
+    /// the turn is OPEN has one answer, `telemetry::turn_busy` (`derive_from`,
+    /// the status rule). WHO the edge holds is the senders of the prompts
+    /// since the last end edge. The in-memory edge memoises that fold (parsed
+    /// from the FULL prompt; the log keeps a 1024-char copy), so it is used
+    /// only when the open turn has carried an input: a tool-only turn has no
+    /// requester yet, and a memo left by an interrupted turn (an interrupt
+    /// takes no edge) is not its members.
     fn start_turn(&self, session: &str, window: &str, prompt: &str) {
-        let joins = turn_inputs(session, window, Some(1), |_| {}) > 0;
+        let open = turn_is_open(session, window);
+        let has_inputs = open && turn_inputs(session, window, Some(1), |_| {}) > 0;
         let key = window_key(session, window);
         let held = self.state.lock().unwrap().reply_targets.remove(&key);
-        let mut targets = match (joins, held) {
+        let mut targets = match (has_inputs, held) {
             (false, _) => Vec::new(),
             (true, Some(targets)) => targets,
-            // A restart mid-turn lost the in-memory edge: rebuild it from
-            // EVERY input the turn recorded, streamed, before this one joins.
+            // A restart mid-turn lost the memo: rebuild it from EVERY input
+            // the turn recorded, streamed, before this one joins.
             (true, None) => recovered_targets(session, window),
         };
         join_targets(&mut targets, reply_targets(prompt));
@@ -598,6 +602,20 @@ pub(crate) fn string_field(
             .filter(|s| !s.is_empty())
             .map(str::to_owned)
     })
+}
+
+/// Is this window's turn open (`telemetry::turn_busy`, the one turn rule)?
+/// Mobile has no telemetry store: every input opens a fresh edge there.
+fn turn_is_open(session: &str, window: &str) -> bool {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        crate::projects::telemetry::turn_busy(session, window)
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = (session, window);
+        false
+    }
 }
 
 /// The turn's recorded inputs since its last end (see
@@ -1543,11 +1561,10 @@ mod tests {
         assert_eq!(restarted.take_reply_targets(&session, "v"), vec!["orchestrator", "lead"], "recovered at the next input");
         record_notification(&session, "v", "completed", unix_seconds());
 
-        // Tool-only stretches (validator: derive_from calls them running):
-        // a tool after an END carries no input, so the next input still
-        // opens a fresh edge — even after an interrupt, whose in-memory
-        // cache nobody took.
-        use crate::projects::telemetry::record_tool;
+        // Tool-only turns (validator, orchestrator 03:07): the turn is OPEN
+        // by derive_from, but it carries no requester yet, so the next input
+        // starts the edge — even after an interrupt, whose memo nobody took.
+        use crate::projects::telemetry::{derive, record_tool, turn_busy};
         input(&hub, "[tmm chat 2026-09-28 00:00] orchestrator: @validator start Y");
         record_interrupt(&session, "v");
         record_tool(&session, "v", "memory", "capture");
@@ -1557,6 +1574,32 @@ mod tests {
         record_tool(&session, "v", "memory", "capture");
         input(&hub, "[tmm chat 2026-09-28 00:02] lead: @validator go");
         assert_eq!(hub.take_reply_targets(&session, "v"), vec!["lead"]);
+        record_notification(&session, "v", "completed", unix_seconds());
+
+        // Orchestrator's regression: completed → tool (same second; a
+        // tool-only turn, derive = running) → orchestrator input → [reply] →
+        // Stop ⇒ the reply reaches orchestrator. `turn_busy` IS derive.
+        record_tool(&session, "v", "memory", "capture");
+        assert_eq!(derive(&session, "v", 0).state, "running");
+        assert!(turn_busy(&session, "v"));
+        input(&hub, "[tmm chat 2026-09-28 00:02] orchestrator: @validator review");
+        input(&hub, "[tmm chat 2026-09-28 00:02] builder: [reply] fixed");
+        assert_eq!(hub.take_reply_targets(&session, "v"), vec!["orchestrator"]);
+        record_notification(&session, "v", "completed", unix_seconds());
+        // ... and completed → a new input with no later tool: idle, fresh.
+        assert!(!turn_busy(&session, "v"));
+        input(&hub, "[tmm chat 2026-09-28 00:03] lead: @validator next");
+        assert_eq!(hub.take_reply_targets(&session, "v"), vec!["lead"]);
+        record_notification(&session, "v", "completed", unix_seconds());
+        // A restart in a tool-only turn: whatever the recovered record says,
+        // turn_busy is derive's verdict, and the first input starts the edge
+        // (the durable replay itself is pinned in telemetry's #249 tests).
+        record_tool(&session, "v", "memory", "capture");
+        crate::projects::telemetry::forget_process_state(&session);
+        assert_eq!(turn_busy(&session, "v"), matches!(derive(&session, "v", 0).state.as_str(), "running" | "waiting"));
+        let restarted = AgentNotificationHub::load_at(root.clone());
+        input(&restarted, "[tmm chat 2026-09-28 00:04] orchestrator: @validator after restart");
+        assert_eq!(restarted.take_reply_targets(&session, "v"), vec!["orchestrator"]);
         record_notification(&session, "v", "completed", unix_seconds());
 
         // The cap counts distinct requesters and keeps the earliest — live
