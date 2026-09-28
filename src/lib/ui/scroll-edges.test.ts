@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { horizontalEdges, scrollEdges } from './scroll-edges.ts';
+import { horizontalEdges, rowOverflows, scrollEdges } from './scroll-edges.ts';
 
 test('only real hidden horizontal content gets an edge cue (#176)', () => {
   const edges = (scrollLeft: number, scrollWidth = 600, clientWidth = 300) =>
@@ -53,10 +53,32 @@ test('edge cues follow scroll, resized content and child replacement, and clear 
   assert.equal(classes.size, 0);
   node.scrollWidth = 500; resizeCallbacks[0]!();
   assert.ok(classes.has('edge-after'));
-  action.update(false); assert.equal(classes.size, 0);
+  action.update({ active: false }); assert.equal(classes.size, 0);
   resizeCallbacks[0]!(); assert.equal(classes.size, 0);
-  action.update(true); assert.ok(classes.has('edge-after'));
+  action.update({ active: true }); assert.ok(classes.has('edge-after'));
   action.destroy();
   assert.equal(handlers.size, 0); assert.equal(classes.size, 0);
   assert.ok(disconnected >= 2);
+});
+
+test('the single row is measured in its single-row form, even while wrapped (#266)', () => {
+  const classes = new Set(['cards', 'expanded']);
+  const seen: boolean[] = [];
+  const node = {
+    get scrollWidth() { seen.push(classes.has('expanded')); return classes.has('expanded') ? 300 : 640; },
+    clientWidth: 300,
+    classList: {
+      contains: (name: string) => classes.has(name),
+      add: (name: string) => { classes.add(name); },
+      remove: (name: string) => { classes.delete(name); },
+    },
+  };
+  assert.equal(rowOverflows(node, 'expanded'), true, 'the wrapped class is lifted for the read');
+  assert.deepEqual(seen, [false]);
+  assert.ok(classes.has('expanded'), 'and restored in the same block');
+  assert.equal(rowOverflows(node), false, 'without a wrapped class the current form is read');
+  assert.equal(rowOverflows({ ...node, clientWidth: 0, scrollWidth: 640 }), false, 'an unlaid-out strip does not overflow');
+  classes.delete('expanded');
+  assert.equal(rowOverflows({ ...node, scrollWidth: 301 }, 'expanded'), false, 'a subpixel remainder is not overflow');
+  assert.equal(classes.has('expanded'), false, 'a strip not wrapped is not wrapped by the probe');
 });

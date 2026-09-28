@@ -86,7 +86,10 @@ land beside another at a fractional scale. The feet take no pointer and reach in
 corner; tab gaps stay `--roster-gap`. The band's top edge is the strip's
 floor line: a full-width `--bubble-line` pixel painted as the strip's
 background, which each lit enclosure breaks and its feet turn into.
-Expanded list cards keep their closed row radius and no feet. In the
+Expanded list cards keep their closed row radius and no feet; a row that
+fits has nothing to expand, so it offers no chevron and keeps the strip's
+tab whatever the remembered preference (#266,
+[reason](hub-composer.md#expanding-exists-only-when-the-row-overflows-board-266-2026-09-28)). In the
 collapsed row the tab chain stretches to the strip's height: a tab is
 attached to the floor, so its box reaches it however tall the strip is.
 The lit enclosure is ONE travelling marker (`.slide-pill.tab`, placed by

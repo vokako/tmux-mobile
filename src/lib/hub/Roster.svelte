@@ -22,12 +22,23 @@
     composerText = '', managedNames = [], busyNames = [], interrupting = [],
     stateLabel = (state) => state, stateTone = () => undefined,
     onselect: setRecipient = () => {}, oninterrupt: interrupt = () => {}, onfilter = () => {},
-    expanded = false, onexpand = () => {}, onadd = () => {}, oncontext = () => {},
+    expanded: expandPref = false, onexpand = () => {}, onadd = () => {}, oncontext = () => {},
     allMenuOpen = false, onall = (_event) => {},
     onallcontext = (_at) => {}, onteamcontext = (_at, _team) => {},
   } = $props();
 
   const cardsId = $props.id();
+  /* Expanding is only meaningful when the single row OVERFLOWS (#266, ruling
+     2026-09-28): a room whose cards all fit has nothing to expand, so it gets
+     no chevron and keeps the strip's lit tab with its feet, whatever the
+     remembered preference says. The preference is kept and applies again once
+     the row overflows. Measured by `scrollEdges` in the single-row form;
+     until the first measurement the preference stands. The chevron's grid
+     column stays reserved when it is not offered: the row's width must not
+     depend on the answer, or a room in between would stay whichever way it
+     arrived. */
+  let overflowing = $state(true);
+  const expanded = $derived(expandPref && overflowing);
   let cardsEl = $state(null);
   let hovering = $state(false);
   let focused = $state(false);
@@ -207,7 +218,7 @@
 
 {#if selected}
   <div class="roster" class:compact>
-    <div class="cards edge-fade" class:expanded class:filtering={!!filterAgent} class:reveal={justLoaded} id={cardsId} bind:this={cardsEl} use:scrollEdges={!expanded}
+    <div class="cards edge-fade" class:expanded class:filtering={!!filterAgent} class:reveal={justLoaded} id={cardsId} bind:this={cardsEl} use:scrollEdges={{ active: !expanded, wrapped: 'expanded', onoverflow: (over) => { overflowing = over; }, key: markerKey }}
       role="group" aria-label={t('agentsTitle')}
       onpointerenter={(e) => { hovering = e.pointerType !== 'touch'; }}
       onpointerleave={() => { hovering = false; clearPress(); }}
@@ -359,10 +370,12 @@
         <CommandButton icon="plus" variant="icon" label={t('hubSpawn')} onclick={onadd} />
       </div>
     </div>
+    {#if overflowing}
     <div class="roster-toggle">
       <CommandButton icon="chevron-up" variant="icon" label={expanded ? t('hubRosterCollapse') : t('hubRosterExpand')}
         {expanded} controls={cardsId} disabled={!roomReady} onclick={onexpand} />
     </div>
+    {/if}
   </div>
 {/if}
 
@@ -658,6 +671,9 @@
   .avatar-slot { position: relative; width: var(--roster-ring-size); height: var(--roster-ring-size); display: grid; place-items: center; flex: none; }
   .ava { width: var(--roster-avatar-size); height: var(--roster-avatar-size); flex: none; border-radius: 50%; object-fit: contain; display: grid; place-items: center; }
   .ctx-value { width: 4ch; flex: none; text-align: right; font: var(--fs-meta)/1 var(--font-mono); color: var(--text2); white-space: nowrap; }
+  /* The overflow probe reads the single row with the list's figures still in
+     the DOM: they belong to the wrapped list only (#266). */
+  .cards:not(.expanded) .ctx-value { display: none; }
   .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--status-danger); flex: none; }
   .off { color: var(--text2); }
   .ava.dim { background: var(--surface2); color: var(--text3); }

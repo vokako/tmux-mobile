@@ -53,7 +53,7 @@ test('card paint keeps its inset and the single measured scrolling edge (#180)',
   // The tab strip has only its scrollport inset; the field retains its inset.
   assert.match(rule('.roster'), /padding: 0 var\(--composer-inset\) 0 0/u);
   assert.match(rule('.roster'), /gap: 0/u);
-  assert.match(source, /class="cards edge-fade"[^>]*use:scrollEdges=\{!expanded\}/u);
+  assert.match(source, /class="cards edge-fade"[^>]*use:scrollEdges=\{\{ active: !expanded, wrapped: 'expanded', onoverflow: \(over\) => \{ overflowing = over; \}, key: markerKey \}\}/u);
 });
 
 test('no invisible action slots widen the card; Stop stands ON the dot instead (#180 → #205)', () => {
@@ -397,4 +397,15 @@ test('one outward foot joins every lit enclosure to the floor line (#238 owner c
     'the translucent floor line lies on band fill: over the frame it read a third dimmer and thinner than the tab edge');
   assert.match(rule('.cards:not(.expanded) .roster-cluster.team::before'), /inset: auto var\(--roster-gap\) 0/u,
     'the group baseline stays the group\'s own');
+});
+
+test('expanding exists only while the single row overflows (#266)', () => {
+  assert.match(source, /expanded: expandPref = false, onexpand/u, 'the prop is the remembered preference');
+  assert.match(source, /const expanded = \$derived\(expandPref && overflowing\);/u,
+    'a row that fits renders its single-row form, the lit tab with feet');
+  assert.match(source, /\{#if overflowing\}\n\s*<div class="roster-toggle">/u, 'no chevron when there is nothing to expand');
+  assert.match(rule('.roster'), /grid-template-columns: minmax\(0, 1fr\) var\(--control-height\)/u,
+    'the chevron column stays reserved: the row width must not depend on the answer');
+  assert.match(source, /\.cards:not\(\.expanded\) \.ctx-value \{ display: none; \}/u,
+    'the probe reads the single row without the wrapped list\'s figures');
 });

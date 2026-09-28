@@ -140,6 +140,30 @@ recorded separately as #189: changing the UI font to DejaVu Sans Mono leaves
 a 457px tail gap on the 390px fixture in both main `23e090fb` and #186,
 while desktop remains at zero. It is not repaired by the composer change.
 
+### Expanding exists only when the row overflows (board #266, 2026-09-28)
+
+Owner, 13:44 (phone, LingTing, one agent): "为什么这个agent卡片 下边缘的圆角给反了，
+其他会话我看到是正常的". The tab geometry was right. That room's roster had been
+EXPANDED once on the device, and the wrapped list closes a lit card as a
+rounded box with no feet — correct for a list, but with one agent the list is
+one row and reads as the strip with its feet turned inside out. Orchestrator
+ruling 13:59: expanding is only meaningful when the single row overflows.
+`Roster` renders `expanded = expandPref && overflowing`: a room whose cards
+all fit gets no chevron and keeps the strip's lit tab, whatever the remembered
+preference says; the preference is kept and applies again once the row
+overflows. `overflowing` is measured by the strip's one observer
+(`ui/scroll-edges.ts` `rowOverflows`), always in the SINGLE-ROW form: while
+wrapped, the `expanded` class is lifted, the row read and the class restored
+in one synchronous block, so no frame paints the probe; the list's `%`
+figures are hidden outside the wrapped form so the probe reads exactly the
+strip. The chevron's grid column stays reserved when it is not offered: with
+the column collapsing, a room between the two widths (574 vs 602px on desktop
+at 900px) stayed whichever way it had arrived. Measured on the live server
+in Chromium (agent-browser), 390px dark and 1440px light: LingTing with the
+pref set draws the one-path tab with feet and no chevron; tmux-mobile at
+390px still wraps under the pref; a 1440 → 380 → 1440 viewport sweep gives the
+same answer at each width in both directions.
+
 ### One roster centre line (#186, 2026-09-12)
 
 Owner, 15:39: "agent 卡片和展开按钮不在上下居中的线上。"

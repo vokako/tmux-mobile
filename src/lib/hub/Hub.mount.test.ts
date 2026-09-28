@@ -740,7 +740,10 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-async function composerFixture(context: TestContext, extra: Record<string, (...args: any[]) => unknown> = {}, mobile = false, storage: Record<string, string> = {}) {
+// jsdom has no layout. `overflowing` gives the roster strip a single row that
+// needs more than its width — measured, as a browser does, only in the
+// single-row form (#266: the disclosure exists only then).
+async function composerFixture(context: TestContext, extra: Record<string, (...args: any[]) => unknown> = {}, mobile = false, storage: Record<string, string> = {}, overflowing = false) {
   const fixture = await compiledHub();
   const { rpc } = roomFixture();
   const app = await fixture.mount(context, {
@@ -749,6 +752,12 @@ async function composerFixture(context: TestContext, extra: Record<string, (...a
       window.Element.prototype.getAnimations = () => [];
       Object.defineProperty(window.performance, 'now', { value: () => window.Date.now() });
       for (const [key, value] of Object.entries(storage)) window.localStorage.setItem(key, value);
+      if (overflowing) {
+        const width = (el: Element, single: number) =>
+          el.classList.contains('cards') ? (el.classList.contains('expanded') ? 300 : single) : 0;
+        Object.defineProperty(window.HTMLElement.prototype, 'clientWidth', { get() { return width(this, 300); } });
+        Object.defineProperty(window.HTMLElement.prototype, 'scrollWidth', { get() { return width(this, 640); } });
+      }
     },
     modules: [{
       ...rpc,
@@ -1194,7 +1203,7 @@ test('roster disclosure keeps its cards, remembers each room, and holds order du
   const app = await composerFixture(context, {
     hubAgents: async () => ({ agents }),
     hubAgentInterrupt: async (_session: string, name: string) => { interrupts.push(name); return {}; },
-  });
+  }, false, {}, true);
   const order = () => [...app.document.querySelectorAll<HTMLElement>('.acard[data-agent]')].map((node) => node.dataset.agent);
   const toggle = () => app.document.querySelector<HTMLButtonElement>('.roster-toggle button')!;
   try {
@@ -1270,7 +1279,7 @@ test('a restored expanded roster reorders live unless a pointer or focus holds i
     { name: 'bob', window: 1, managed: true, agent: 'codex', state: 'running', since: 20 },
   ];
   const app = await composerFixture(context, { hubAgents: async () => ({ agents }) }, false,
-    { tmux_hub_roster_expanded: JSON.stringify({ fixture: true }) });
+    { tmux_hub_roster_expanded: JSON.stringify({ fixture: true }) }, true);
   const order = () => [...app.document.querySelectorAll<HTMLElement>('.acard[data-agent]')].map((node) => node.dataset.agent);
   try {
     assert.equal(app.document.querySelector('.roster-toggle button')!.getAttribute('aria-expanded'), 'true');
