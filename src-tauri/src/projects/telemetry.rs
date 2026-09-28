@@ -775,6 +775,11 @@ pub fn held_rows(session: &str, window: &str) -> Vec<super::store::DeliveryRow> 
     queue(|s| s.held_deliveries(session, window)).unwrap_or_default()
 }
 
+/// Sessions with held lines.
+pub fn held_sessions() -> Vec<String> {
+    queue(|s| s.held_sessions()).unwrap_or_default()
+}
+
 /// Windows of a session with held lines.
 pub fn held_windows(session: &str) -> Vec<String> {
     queue(|s| s.held_windows(session)).unwrap_or_default()

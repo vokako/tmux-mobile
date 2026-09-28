@@ -152,6 +152,18 @@ pub fn flush_idle(session: &str) {
     }
 }
 
+/// The fourth trigger (orchestrator, #257 decision 3): at server start, every
+/// window that holds lines and is idle once its turn is RECOVERED is flushed
+/// at once, so held lines never wait for a client to read the feed. The
+/// recovery is `turn_busy`'s own first step (`recovery_mark` →
+/// `recover_open_turns`), per session, before the question is asked; a window
+/// still running keeps its lines for its stop.
+pub fn flush_on_start() {
+    for session in telemetry::held_sessions() {
+        flush_idle(&session);
+    }
+}
+
 fn flush_at(session: &str, window: &str, target: &str) {
     let lock = window_lock(session, window);
     let _guard = lock.lock().unwrap();
@@ -400,6 +412,32 @@ mod tests {
         end(&s, "dev");
         flush_at(&s, "dev", "t");
         assert_eq!(typed().len(), 1);
+    }
+
+    /// Decision 3: the server-start trigger flushes every idle window with
+    /// held lines after its turn is recovered, across sessions, and leaves a
+    /// recovered running turn alone.
+    #[test]
+    fn the_server_start_flushes_recovered_idle_windows_only() {
+        let s = setup("start-idle");
+        let r = setup("start-running");
+        crate::projects::with_store(|st| {
+            st.insert_held_delivery(&s, "dev", "[tmm chat 03:00] lead: @dev idle one", crate::projects::now(), "")?;
+            st.insert_activity(&r, "dev", crate::projects::now() * 1000, "prompt", "long turn", "", "app", "", "")?;
+            st.insert_held_delivery(&r, "dev", "[tmm chat 03:00] lead: @dev running one", crate::projects::now(), "")
+        })
+        .unwrap();
+        telemetry::forget_process_state(&s);
+        telemetry::forget_process_state(&r);
+        assert!(telemetry::held_sessions().contains(&s) && telemetry::held_sessions().contains(&r));
+        // flush_on_start's per-window step, with the test's fake pane.
+        for session in [&s, &r] {
+            for w in telemetry::held_windows(session) {
+                flush_at(session, &w, "t");
+            }
+        }
+        assert_eq!(typed(), vec!["[tmm chat 03:00] lead: @dev idle one".to_string()]);
+        assert_eq!((held(&s, "dev"), held(&r, "dev")), (0, 1), "the recovered running turn keeps its line");
     }
 
     /// kiro-cli 2.22.1 measured: an Escape typed IN the pane cancels the turn

@@ -163,6 +163,9 @@ pub async fn start_with_socket(
         // longer depends on a team bus being configured.
         let poster: Arc<dyn crate::agent_notifications::RoomPoster> = Arc::new(HubRoomPoster);
         notifications.set_room_poster(poster);
+        // Lines held for a busy queue-mode agent (board #257) whose turn a
+        // restart finds over are typed now, not at the first feed read.
+        tokio::task::spawn_blocking(crate::projects::delivery::flush_on_start);
     }
 
     // Load TLS config if cert+key provided

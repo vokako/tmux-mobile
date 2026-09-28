@@ -340,6 +340,18 @@ impl Store {
         Ok(rows.filter_map(Result::ok).collect())
     }
 
+    /// Sessions that hold at least one untyped line (the server-start flush).
+    pub fn held_sessions(&self) -> Result<Vec<String>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT DISTINCT session FROM deliveries WHERE held = 1 ORDER BY session")
+            .map_err(|e| format!("prepare held sessions: {e}"))?;
+        let rows = stmt
+            .query_map([], |r| r.get(0))
+            .map_err(|e| format!("query held sessions: {e}"))?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
     /// Windows of a session that hold at least one untyped line.
     pub fn held_windows(&self, session: &str) -> Result<Vec<String>, String> {
         let mut stmt = self
