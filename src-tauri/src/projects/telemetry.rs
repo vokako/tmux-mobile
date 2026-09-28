@@ -409,16 +409,24 @@ pub fn recent_events(session: &str, since_ts: u64) -> Vec<ActivityEvent> {
     events_page(session, since_ts, None, LOAD_EVENTS).0
 }
 
-/// How many inputs of one open turn the durable read returns (newest kept).
-const TURN_PROMPTS: usize = 64;
-
 /// Every prompt newer than this window's last turn end, oldest first; empty
-/// when the window has no open turn. The durable path tells a new prompt
-/// whether it joins an open turn and lets a stop hook recover its reply edge
-/// after the server restarted mid-turn (#256).
+/// when the window has no open turn. The durable path lets a restarted
+/// server rebuild the open turn's reply edge (#256). Unbounded on purpose:
+/// the edge is every requester the turn carried, and the read runs once per
+/// window per restart (the rebuilt edge then lives in memory).
 pub fn current_turn_prompts(session: &str, window: &str) -> Vec<String> {
+    turn_prompts(session, window, None)
+}
+
+/// Is this window's turn open (a prompt newer than its last end)? Asked on
+/// every input, so it reads one row, never the whole turn.
+pub fn turn_open(session: &str, window: &str) -> bool {
+    !turn_prompts(session, window, Some(1)).is_empty()
+}
+
+fn turn_prompts(session: &str, window: &str, limit: Option<usize>) -> Vec<String> {
     if !cfg!(test) {
-        return super::with_store(|s| s.current_turn_prompts(session, window, TURN_PROMPTS)).unwrap_or_default();
+        return super::with_store(|s| s.current_turn_prompts(session, window, limit)).unwrap_or_default();
     }
     let map = events().lock().unwrap();
     let Some(rows) = map.get(session) else { return Vec::new() };
@@ -427,7 +435,7 @@ pub fn current_turn_prompts(session: &str, window: &str) -> Vec<String> {
         if event.kind == "notif" && matches!(event.text.as_str(), "completed" | "failed" | "interrupted") {
             break;
         }
-        if event.kind == "prompt" && prompts.len() < TURN_PROMPTS {
+        if event.kind == "prompt" && limit.is_none_or(|n| prompts.len() < n) {
             prompts.push(event.text.clone());
         }
     }

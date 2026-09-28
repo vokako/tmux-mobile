@@ -95,16 +95,18 @@ impl AgentNotificationHub {
     /// 3h27m (temp/stall-analysis.md). The open/closed question is the turn
     /// log's, the one turn record, not a second flag kept here.
     fn start_turn(&self, session: &str, window: &str, prompt: &str) {
-        let earlier = open_turn_prompts(session, window);
+        let open = turn_is_open(session, window);
         let key = window_key(session, window);
-        let mut st = self.state.lock().unwrap();
-        let mut targets = if earlier.is_empty() {
-            Vec::new()
-        } else {
-            // A restart mid-turn lost the in-memory edge: rebuild it from the
-            // turn's recorded inputs before this one joins.
-            st.reply_targets.remove(&key).unwrap_or_else(|| targets_of(&earlier))
+        let held = self.state.lock().unwrap().reply_targets.remove(&key);
+        let mut targets = match (open, held) {
+            (false, _) => Vec::new(),
+            (true, Some(targets)) => targets,
+            // A restart mid-turn lost the in-memory edge: rebuild it from
+            // EVERY input the turn recorded (read once, then held in memory)
+            // before this one joins.
+            (true, None) => targets_of(&open_turn_prompts(session, window)),
         };
+        let mut st = self.state.lock().unwrap();
         join_targets(&mut targets, reply_targets(prompt));
         st.reply_targets.insert(key, targets);
     }
@@ -595,10 +597,24 @@ pub(crate) fn string_field(
     })
 }
 
+/// Is this window's turn open? Mobile has no telemetry store: every input
+/// opens a fresh edge there.
+fn turn_is_open(session: &str, window: &str) -> bool {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        crate::projects::telemetry::turn_open(session, window)
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = (session, window);
+        false
+    }
+}
+
 /// The inputs of this window's open turn, oldest first (empty: no open
 /// turn). Desktop-gated like every `crate::projects` reader: the telemetry
-/// store does not exist on mobile, where every input opens a fresh edge and
-/// an empty route is the same fail-soft answer a missing turn gives here.
+/// store does not exist on mobile, where an empty route is the same
+/// fail-soft answer a missing turn gives here.
 fn open_turn_prompts(session: &str, window: &str) -> Vec<String> {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -1509,6 +1525,23 @@ mod tests {
         let restarted = AgentNotificationHub::load_at(root.clone());
         input(&restarted, "[tmm chat 2026-09-27 22:01] builder: [reply] pushed a fix");
         assert_eq!(restarted.take_reply_targets(&session, "v"), vec!["orchestrator"]);
+        record_notification(&session, "v", "completed", unix_seconds());
+
+        // Validator's review repro: the requester is the FIRST of more than
+        // 64 inputs in one open turn, and the server restarts right before
+        // the Stop. Recovery reads the whole open turn, not a newest-N page.
+        // 71 inputs: past the old 64 bound, inside the test ring's 120 events
+        // (the durable SQL read is pinned in store/activity.rs).
+        input(&hub, "[tmm chat 2026-09-27 23:00] orchestrator: @validator request");
+        for i in 0..35 {
+            input(&hub, &format!("[tmm chat 2026-09-27 23:01] builder: [reply] update {i}"));
+            input(&hub, &format!("[tmm chat 2026-09-27 23:01] human: @validator note {i}"));
+        }
+        let restarted = AgentNotificationHub::load_at(root.clone());
+        assert_eq!(restarted.take_reply_targets(&session, "v"), vec!["orchestrator"], "recovered at the stop");
+        let restarted = AgentNotificationHub::load_at(root.clone());
+        input(&restarted, "[tmm chat 2026-09-27 23:02] lead: @validator one more");
+        assert_eq!(restarted.take_reply_targets(&session, "v"), vec!["orchestrator", "lead"], "recovered at the next input");
         let _ = std::fs::remove_dir_all(root);
     }
 }

@@ -106,7 +106,9 @@ one hop, so two stop hooks cannot ping-pong.
 The managed-home gate excludes hand-started agents, final text is capped at
 `MAX_REPLY_CHARS = 6144`, and reply targets are removed when used. If the
 server restarts mid-turn, the durable activity log recovers every prompt newer
-than the previous turn end (bounded to the newest 64), and an input after the
+than the previous turn end — all of them, unbounded, because a newest-N page
+dropped the turn's first requester once it held more inputs than N (#256
+review) — and an input after the
 restart joins them. `tmm send` does not suppress the final response:
 it starts a separate question or handoff.
 

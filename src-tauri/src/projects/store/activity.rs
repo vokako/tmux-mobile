@@ -102,12 +102,13 @@ impl Store {
         self.activity_page(session, since_ts, None, limit).map(|(rows, _)| rows)
     }
 
-    /// Every prompt newer than this window's last turn end, oldest first —
-    /// empty when no turn is open. Used to decide whether a new prompt joins
-    /// an open turn and to recover the turn's reply edge after a server
-    /// restart (#256). Bounded to the newest `limit` so a window whose turn
-    /// never closes (grok, #252) cannot make this read grow for ever.
-    pub fn current_turn_prompts(&self, session: &str, window: &str, limit: usize) -> Result<Vec<String>, String> {
+    /// Prompts newer than this window's last turn end, oldest first — empty
+    /// when no turn is open. `Some(n)` keeps the newest n (the per-input
+    /// "is a turn open?" question asks for one); `None` returns the whole
+    /// open turn, which is what rebuilding its reply edge after a restart
+    /// needs: a bound there dropped the EARLIEST requester once a turn held
+    /// more inputs than the bound (#256 review).
+    pub fn current_turn_prompts(&self, session: &str, window: &str, limit: Option<usize>) -> Result<Vec<String>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -122,7 +123,8 @@ impl Store {
             )
             .map_err(|e| format!("prepare current turn prompts: {e}"))?;
         let mut rows: Vec<String> = stmt
-            .query_map(rusqlite::params![session, window, limit as i64], |r| r.get(0))
+            // SQLite: a negative LIMIT is no limit.
+            .query_map(rusqlite::params![session, window, limit.map_or(-1, |n| n as i64)], |r| r.get(0))
             .map_err(|e| format!("query current turn prompts: {e}"))?
             .collect::<Result<_, _>>()
             .map_err(|e| format!("read current turn prompts: {e}"))?;
@@ -547,13 +549,24 @@ mod tests {
         store.insert_activity("s", "w2", 1250, "prompt", "[tmm chat] peer: [reply] fyi", "", "app", "", "").unwrap();
         // Every input of the OPEN turn, oldest first; the closed turn's is not.
         assert_eq!(
-            store.current_turn_prompts("s", "w2", 64).unwrap(),
+            store.current_turn_prompts("s", "w2", None).unwrap(),
             vec!["[tmm chat] lead: work".to_string(), "[tmm chat] peer: [reply] fyi".to_string()]
         );
         // The bound keeps the NEWEST.
-        assert_eq!(store.current_turn_prompts("s", "w2", 1).unwrap(), vec!["[tmm chat] peer: [reply] fyi".to_string()]);
+        assert_eq!(store.current_turn_prompts("s", "w2", Some(1)).unwrap(), vec!["[tmm chat] peer: [reply] fyi".to_string()]);
         store.insert_activity("s", "w2", 1300, "notif", "completed", "", "", "", "").unwrap();
-        assert!(store.current_turn_prompts("s", "w2", 64).unwrap().is_empty());
+        assert!(store.current_turn_prompts("s", "w2", None).unwrap().is_empty());
+
+        // #256 review: an open turn of 200 inputs comes back WHOLE, so the
+        // first requester survives recovery; Some(1) reads just the newest.
+        store.insert_activity("s", "w2", 2000, "prompt", "[tmm chat] orchestrator: request", "", "app", "", "").unwrap();
+        for i in 0..199 {
+            store.insert_activity("s", "w2", 2001 + i, "prompt", &format!("[tmm chat] builder: [reply] {i}"), "", "app", "", "").unwrap();
+        }
+        let all = store.current_turn_prompts("s", "w2", None).unwrap();
+        assert_eq!(all.len(), 200);
+        assert_eq!(all[0], "[tmm chat] orchestrator: request");
+        assert_eq!(store.current_turn_prompts("s", "w2", Some(1)).unwrap(), vec!["[tmm chat] builder: [reply] 198".to_string()]);
     }
 
     /// Paging backwards through a complete log (board #9). The cursor is (ts, id)
