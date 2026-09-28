@@ -213,12 +213,21 @@ history as containing a live signing key.
   logical change per commit. Don't let verified work sit uncommitted in the
   tree. Never commit `agent-team-page/` or other unrelated in-progress work
   without being asked.
-- Preserve the human's configured Git author. Kiro-authored commits add exactly
-  one final trailer, after a blank line:
-  `Co-authored-by: Kiro Agent <244629292+kiro-agent@users.noreply.github.com>`.
-  This is the public Kiro Agent GitHub identity; Kiro remains a co-author rather
-  than replacing the user's author. Do not add it when Kiro only reviewed or
-  integrated someone else's commit; other agents use their own identity.
+- Preserve the human's configured Git author. The agent that made the change
+  adds exactly one final trailer, after a blank line; an agent that only
+  reviewed or integrated someone else's commit adds none. The canonical
+  trailer per backend is THIS table, nothing else (owner, 2026-09-28: the
+  Kimi one was invented on the spot by the first kimi session and copied
+  from history ever after — an unlisted backend adds NO trailer until the
+  owner assigns one, never one it made up or excavated from git log):
+
+  | backend | trailer | what the address is |
+  |---|---|---|
+  | kiro | `Co-authored-by: Kiro Agent <244629292+kiro-agent@users.noreply.github.com>` | the public Kiro Agent GitHub identity — attributable |
+  | claude | `Co-Authored-By: Claude <model> <noreply@anthropic.com>` as the CLI emits it (e.g. `Claude Fable 5.1`, `Claude Opus 4.8 (1M context)`) | Anthropic's noreply — not project-controlled |
+  | codex | `Co-authored-by: Codex <noreply@openai.com>` | OpenAI's noreply — not project-controlled |
+  | kimi | `Co-authored-by: Kimi Agent <kimi-agent@users.noreply.github.com>` | **a plain-text marker, NOT a GitHub account** (GitHub's noreply carries a numeric user id; this has none). Born 2026-09-20 with the first kimi session (#222); kept for consistency with the commits that carry it |
+  | grok / omp | none assigned | no trailer until the owner assigns one |
 
 ## Testing
 
