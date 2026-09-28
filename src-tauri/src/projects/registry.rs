@@ -84,10 +84,17 @@ pub fn teams_save(def: &Value) -> Result<Value, String> {
         // BASE's backend — the same rule registry_save applies, for the same
         // reason (a bad id runs the default model and says so in a line
         // nobody reads).
-        if !m.base.trim().is_empty() && (!m.model.trim().is_empty() || !m.effort.trim().is_empty()) {
+        if !m.base.trim().is_empty()
+            && (!m.model.trim().is_empty() || !m.effort.trim().is_empty() || !m.input_mode.trim().is_empty())
+        {
             if let Some(base) = registry_get(m.base.trim())? {
                 models::validate(&base.backend, m.model.trim()).map_err(|e| format!("member '{}': {e}", m.name))?;
                 models::validate_effort(&base.backend, m.effort.trim()).map_err(|e| format!("member '{}': {e}", m.name))?;
+                // Board #254: the input-mode override, against the base's
+                // backend, by the one rule registry_save uses.
+                if !m.input_mode.trim().is_empty() {
+                    models::validate_input_mode(&base.backend, m.input_mode.trim()).map_err(|e| format!("member '{}': {e}", m.name))?;
+                }
             }
         }
         if let Some(a) = m.agent.as_ref().filter(|_| m.base.trim().is_empty()) {

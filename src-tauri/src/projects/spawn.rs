@@ -1737,6 +1737,59 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
     }
 
     /// Board #113: a def edit must reach a window whose NAME is not the def's.
+    /// Board #254: a member derived from a registry agent overrides the
+    /// base's input mode like model/effort. teams_save validates it against
+    /// the base's backend, a restart (refresh_agent) renders the effective
+    /// mode into the member's own config, and an empty override follows the
+    /// base — including a later change of the base.
+    #[test]
+    fn a_team_member_input_mode_override_renders_on_restart_and_empty_inherits() {
+        super::super::tests::use_test_store();
+        let ws = std::env::temp_dir().join(format!("tmm-member-mode-{}", uuid::Uuid::new_v4()));
+        let ws_str = ws.to_string_lossy().to_string();
+        let save = |name: &str, backend: &str, mode: &str| {
+            super::super::registry_save(&json!({
+                "name": name, "backend": backend, "model": "", "effort": "", "input_mode": mode,
+                "system": "Base.", "skills": "[]", "mcp": "[]"
+            }))
+            .unwrap()
+        };
+        save("mmbase", "kiro", "queue");
+        save("mmclaude", "claude", "queue");
+        let team = |members: &str| super::super::teams_save(&json!({ "name": "mmteam", "description": "", "members": members }));
+        let err = team(r#"[{"name":"cc","base":"mmclaude","input_mode":"steer"}]"#).unwrap_err();
+        assert!(err.contains("member 'cc'") && err.contains("steer is not offered for claude"), "{err}");
+        assert!(team(r#"[{"name":"x","base":"mmbase","input_mode":"interrupt"}]"#).is_err(), "only queue|steer");
+        team(r#"[{"name":"st","base":"mmbase","input_mode":"steer"},{"name":"in","base":"mmbase"}]"#).unwrap();
+
+        let spawn_all = || {
+            let t = super::super::team_get("mmteam").unwrap().unwrap();
+            let flat = super::super::teams::expand(&t, &|n| super::super::team_get(n), SPAWN_CAP).unwrap();
+            let base = super::super::registry_get("mmbase").unwrap();
+            let roster: Vec<super::super::teams::RosterEntry> = vec![
+                ("st".into(), String::new(), "mmteam".into()),
+                ("in".into(), String::new(), "mmteam".into()),
+            ];
+            for (f, w) in flat.iter().zip(["st", "in"]) {
+                let d = super::super::teams::effective_def(f, base.as_ref(), w, &roster).unwrap();
+                materialize(&d, w, "proj", &ws_str, "", "", Some("mmteam"), "", f.member.name.trim()).unwrap();
+            }
+        };
+        let mode = |w: &str| -> String {
+            let cli: Value = serde_json::from_str(&std::fs::read_to_string(agent_home(&ws_str, w).join("settings/cli.json")).unwrap()).unwrap();
+            cli["chat.defaultInterruptBehavior"].as_str().unwrap().to_string()
+        };
+        spawn_all();
+        assert_eq!((mode("st").as_str(), mode("in").as_str()), ("steer", "queue"), "spawn: override, then inherit");
+        // The base moves to steer: the inheriting member follows on restart;
+        // the member's own override is untouched.
+        save("mmbase", "kiro", "steer");
+        team(r#"[{"name":"st","base":"mmbase","input_mode":"queue"},{"name":"in","base":"mmbase"}]"#).unwrap();
+        assert!(refresh_agent(&ws_str, "proj", "st") && refresh_agent(&ws_str, "proj", "in"));
+        assert_eq!((mode("st").as_str(), mode("in").as_str()), ("queue", "steer"), "restart: the override, and the base's new mode");
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
     /// The recipe's provenance (`agent_def`, or `team`+`member`) is what the
     /// restart resolves through; a def deleted after the spawn degrades soft.
     #[test]

@@ -988,9 +988,11 @@ export interface TeamMember {
    * of its members. name/base/agent are ignored for this kind. */
   team?: string;
   role: string;
-  /** Model / effort overrides for a derived member; empty = the base's. */
+  /** Model / effort / input-mode overrides for a derived member; empty = the
+   * base's (input mode: board #254, `queue` | `steer`). */
   model?: string;
   effort?: string;
+  input_mode?: '' | 'queue' | 'steer';
   /** Complete definition for the bare source. Registry/sub-team sources leave
    * this null and inherit their prompt, Skills and MCP unchanged. */
   agent?: RegAgent | null;

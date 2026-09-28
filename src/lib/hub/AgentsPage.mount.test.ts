@@ -332,7 +332,7 @@ test('Team disclosure is not an edit; its actual role uses the guarded Save (#15
   } finally { await app.close(); }
 });
 
-test('a team\'s bare member takes the same input-mode field; a registry-based member inherits (#245)', async context => {
+test('a team\'s bare member takes the same input-mode field (#245)', async context => {
   const fixture = await hostFixture();
   const served = (name: string, input_modes: boolean) => ({ name, icon: `/assets/${name}.svg`, color: `--backend-${name}`, efforts: [], input_modes });
   const writes: any[] = [];
@@ -342,16 +342,16 @@ test('a team\'s bare member takes the same input-mode field; a registry-based me
   ]) };
   let controls!: { section: (value: string) => void };
   const app = await fixture.mount(context, {
-    props: { ready: (value: typeof controls) => controls = value, backends: [served('kiro', true), served('claude', false)] },
+    props: { ready: (value: typeof controls) => controls = value, backends: [served('kiro', true), served('codex', true), served('claude', false)] },
     modules: [rpc({ teamsList: async () => ({ teams: [team] }), teamsSave: async (value: any) => { writes.push(value); return {}; } })],
   });
   try {
     controls.section('teams'); await app.flush();
     await openAgent(app, 'squad');
-    const fields = () => [...app.document.querySelectorAll<HTMLButtonElement>('[aria-label="While busy"]')];
+    const bareField = () => app.document.querySelectorAll<HTMLElement>('.member')[1]?.querySelector<HTMLButtonElement>('[aria-label="While busy"]');
     app.document.querySelectorAll<HTMLButtonElement>('.member-summary')[1]!.click(); await app.flush();
-    assert.equal(fields().length, 1, 'only the bare member has the field; the registry-based member inherits its base');
-    fields()[0]!.click(); await app.flush();
+    assert.ok(bareField(), 'the bare member has the field');
+    bareField()!.click(); await app.flush();
     [...app.document.querySelectorAll<HTMLButtonElement>('[role=option]')].find(o => o.textContent?.trim() === 'Steer')!.click();
     await app.flush();
     assert.ok([...app.document.querySelectorAll('.editor .hint')].some(h => /wrong sender/u.test(h.textContent ?? '')), 'the same cost hint');
@@ -360,6 +360,47 @@ test('a team\'s bare member takes the same input-mode field; a registry-based me
     const members = JSON.parse(writes[0].members);
     assert.equal(members[1].agent.input_mode, 'steer', 'the bare member saves steer');
     assert.equal(members[0].agent, null, 'the derived member carries no definition of its own');
+    assert.equal(members[0].input_mode, '', 'an untouched derived member inherits');
+  } finally { await app.close(); }
+});
+
+test('a member derived from a registry agent overrides its input mode, or inherits it (#254)', async context => {
+  // Owner 2026-09-28: "team 内的 agent … 应该需要能单独配置". The same field, with
+  // an "inherit (<base's mode>)" default, only where the BASE's backend switches.
+  const fixture = await hostFixture();
+  const served = (name: string, input_modes: boolean) => ({ name, icon: `/assets/${name}.svg`, color: `--backend-${name}`, efforts: [], input_modes });
+  const writes: any[] = [];
+  const team = { name: 'squad', description: '', members: JSON.stringify([
+    { name: 'dev', base: 'kb', role: 'Implement' },
+    { name: 'cc', base: 'cb', role: 'Review' },
+  ]) };
+  let controls!: { section: (value: string) => void };
+  const app = await fixture.mount(context, {
+    props: { ready: (value: typeof controls) => controls = value, backends: [served('kiro', true), served('claude', false)] },
+    modules: [rpc({
+      registryList: async () => ({ agents: [{ ...alpha, name: 'kb', backend: 'kiro', input_mode: 'steer' }, { ...alpha, name: 'cb', backend: 'claude' }] }),
+      teamsList: async () => ({ teams: [team] }),
+      teamsSave: async (value: any) => { writes.push(value); return {}; },
+    })],
+  });
+  try {
+    controls.section('teams'); await app.flush();
+    await openAgent(app, 'squad');
+    const body = (i: number) => app.document.querySelectorAll<HTMLElement>('.member')[i];
+    const field = (i: number) => body(i)?.querySelector<HTMLButtonElement>('[aria-label="While busy"]');
+    assert.equal(field(0)?.querySelector('.sel-value')?.textContent, 'same as base (Steer)', 'empty inherits, and says what it inherits');
+    assert.ok([...body(0)!.querySelectorAll('.hint')].some(h => /wrong sender/u.test(h.textContent ?? '')), 'an inherited steer still says what it costs');
+    app.document.querySelectorAll<HTMLButtonElement>('.member-summary')[1]!.click(); await app.flush();
+    assert.equal(field(1), null, 'a claude base cannot switch: no field');
+    app.document.querySelectorAll<HTMLButtonElement>('.member-summary')[0]!.click(); await app.flush(); // one open at a time
+    field(0)!.click(); await app.flush();
+    [...app.document.querySelectorAll<HTMLButtonElement>('[role=option]')].find(o => o.textContent?.trim() === 'Queue')!.click();
+    await app.flush();
+    command(app, 'Save').click();
+    for (let i = 0; i < 5 && !writes.length; i++) await app.flush();
+    const members = JSON.parse(writes[0].members);
+    assert.deepEqual([members[0].input_mode, members[1].input_mode], ['queue', ''], 'the override is saved; the claude member stays inherit');
+    assert.equal(members[0].agent, null, 'still a derived member');
   } finally { await app.close(); }
 });
 

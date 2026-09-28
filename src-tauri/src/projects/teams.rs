@@ -48,6 +48,12 @@ pub struct Member {
     pub model: String,
     #[serde(default)]
     pub effort: String,
+    /// Input-mode OVERRIDE for a derived member (board #245/#254): `queue` or
+    /// `steer`, empty = the base's own mode. Same contract as model/effort,
+    /// and additive in the members JSON (absent reads as empty), so a saved
+    /// team needs no migration.
+    #[serde(default)]
+    pub input_mode: String,
     /// Complete definition for a bare coding agent. Its `name` is ignored in
     /// favour of the member name. Registry and sub-team members leave it empty.
     #[serde(default)]
@@ -186,6 +192,9 @@ pub fn effective_def(flat: &Flat, base: Option<&RegAgent>, window_name: &str, ro
     }
     if !member.effort.trim().is_empty() {
         def.effort = member.effort.trim().to_string();
+    }
+    if !member.input_mode.trim().is_empty() {
+        def.input_mode = member.input_mode.trim().to_string();
     }
     let mut system = def.system.trim().to_string();
     let mut block = format!("## Your team: \"{}\"", team.name);
@@ -337,7 +346,7 @@ mod tests {
         assert_eq!(d.skills, r#"["eli5"]"#, "bare Skills reach the ordinary spawn path");
         assert_eq!(d.mcp, r#"["search"]"#, "bare MCP reaches the ordinary spawn path");
         assert!(!d.system.contains("teammates"), "a one-member team has no roster block");
-        let gone = Flat { member: Member { name: "x".into(), base: "gone".into(), team: String::new(), role: String::new(), model: String::new(), effort: String::new(), agent: None }, team: t.clone(), path: t.name.clone(), briefs: vec![] };
+        let gone = Flat { member: Member { name: "x".into(), base: "gone".into(), team: String::new(), role: String::new(), model: String::new(), effort: String::new(), input_mode: String::new(), agent: None }, team: t.clone(), path: t.name.clone(), briefs: vec![] };
         assert!(effective_def(&gone, None, "x", &[]).is_err());
     }
 
@@ -351,5 +360,21 @@ mod tests {
         assert_eq!((a.model.as_str(), a.effort.as_str()), ("claude-opus-5", "high"), "an override replaces the base's");
         let b = effective_def(&flat_of(&t, 1), Some(&base), "b", &[]).unwrap();
         assert_eq!((b.model.as_str(), b.effort.as_str()), ("auto", ""), "empty keeps the base's");
+    }
+
+    /// Board #254: a derived member may override the base's input mode like
+    /// model/effort; empty inherits it.
+    #[test]
+    fn effective_def_applies_an_input_mode_override() {
+        let t = team(r#"[{"name":"a","base":"kiro","input_mode":"steer"},{"name":"b","base":"kiro"}]"#);
+        let mut base = agent("kiro", "");
+        base.backend = "kiro".into();
+        let a = effective_def(&flat_of(&t, 0), Some(&base), "a", &[]).unwrap();
+        assert_eq!(a.input_mode, "steer", "the override replaces the base's");
+        let b = effective_def(&flat_of(&t, 1), Some(&base), "b", &[]).unwrap();
+        assert_eq!(b.input_mode, "queue", "empty keeps the base's");
+        base.input_mode = "steer".into();
+        let b2 = effective_def(&flat_of(&t, 1), Some(&base), "b", &[]).unwrap();
+        assert_eq!(b2.input_mode, "steer", "…whatever the base says");
     }
 }

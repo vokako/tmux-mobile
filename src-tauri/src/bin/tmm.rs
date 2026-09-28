@@ -84,7 +84,7 @@ USAGE (human or agent — self-management):
   tmm registry list                   centrally-defined agents
   tmm teams list                      configured agent teams (members + roles)
   tmm teams save --name <n> --def '<members json>' [--description <text>]
-                                      members: [{"name","base","role"[,"model","effort"]} | {"name","role","agent":{…}} | {"team":"<other team>"[,"role"]}]
+                                      members: [{"name","base","role"[,"model","effort","input_mode"]} | {"name","role","agent":{…}} | {"team":"<other team>"[,"role"]}]
   tmm teams delete <name>
   tmm registry save --name <n> --backend <{backends}> [--system <text>]
                     [--model m] [--effort low|medium|high|…] [--skills a,b] [--mcp <json>]

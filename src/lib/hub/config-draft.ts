@@ -37,6 +37,8 @@ export function configPayload(draft: ConfigDraft) {
       members: JSON.stringify(draft.value.members.map(m => ({
         name: m.team ? '' : m.name.trim(), base: m.team ? '' : m.base, team: m.team ?? '', role: m.role.trim(),
         model: m.base && !m.team ? (m.model ?? '').trim() : '', effort: m.base && !m.team ? (m.effort ?? '') : '',
+        // A derived member's input-mode override (#254): '' = the base's.
+        input_mode: m.base && !m.team ? (m.input_mode ?? '') : '',
         agent: m.base || m.team || !m.agent ? null : {
           ...agentPayload(m.agent), name: m.name.trim(),
         },

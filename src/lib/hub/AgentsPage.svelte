@@ -410,7 +410,7 @@
   // registry agent inherited whole, or a sub-team inherited whole. Only the
   // bare source owns prompt / Skills / MCP in this editor.
   const TEAM_MAX = 8; // mirrors the server's spawn cap (validated there too, on the EXPANSION)
-  const blankMember = () => ({ name: '', base: defs[0]?.name ?? '', team: '', role: '', model: '', effort: '', agent: null, expanded: true });
+  const blankMember = () => ({ name: '', base: defs[0]?.name ?? '', team: '', role: '', model: '', effort: '', input_mode: '', agent: null, expanded: true });
   function bareEditor(agent = {}) {
     const skillEntries = parseRefs(agent.skills);
     const mcpEntries = parseRefs(agent.mcp);
@@ -434,7 +434,7 @@
       let members = [];
       if (team) { try { members = JSON.parse(team.members) ?? []; } catch { members = []; } }
       editingTeam = team
-        ? { name: team.name, description: team.description ?? '', members: members.map((m, i) => ({ name: m.name ?? '', base: m.base ?? '', team: m.team ?? '', role: m.role ?? '', model: m.model ?? '', effort: m.effort ?? '', agent: m.agent ? bareEditor(m.agent) : null, expanded: i === 0 })) }
+        ? { name: team.name, description: team.description ?? '', members: members.map((m, i) => ({ name: m.name ?? '', base: m.base ?? '', team: m.team ?? '', role: m.role ?? '', model: m.model ?? '', effort: m.effort ?? '', input_mode: m.input_mode ?? '', agent: m.agent ? bareEditor(m.agent) : null, expanded: i === 0 })) }
         : { name: '', description: '', members: [blankMember()] };
       rememberDraft();
     });
@@ -475,6 +475,9 @@
     m.team = '';
     m.base = v;
     m.agent = v ? null : (m.agent ?? bareEditor());
+    // A steer override cannot follow the member to a base the list says
+    // cannot switch (#254) — same rule as a backend pick (pickBackend).
+    if (m.input_mode === 'steer' && servedBackendsKnown() && !backendSwitchesInputMode(baseBackend(m))) m.input_mode = '';
     m.expanded = true;
   }
   /** Teams offerable as a member: every OTHER team (the server also refuses
@@ -489,6 +492,8 @@
     modelsList(backend).then((r) => { modelsByBackend[backend] = r.models ?? []; }).catch(() => {});
   }
   const baseBackend = (m) => defs.find((d) => d.name === m.base)?.backend ?? '';
+  /** The base's own input mode, which an empty member override inherits (#254). */
+  const baseInputMode = (m) => defs.find((d) => d.name === m.base)?.input_mode ?? 'queue';
   const memberBackend = (m) => m.team ? '' : (m.base ? baseBackend(m) : (m.agent?.backend ?? ''));
   const memberName = (m) => m.team || m.name.trim() || t('teamsUnnamedMember');
   const memberSource = (m) => m.team
@@ -618,23 +623,28 @@
 </script>
 
 <svelte:window onkeydown={editorKey} />
-{#snippet inputModeField(draft)}
-  <!-- Board #245: one field for every complete agent definition — the
-       registry editor and a team's bare member. Shown only where the switch
-       was measured (the server's backends_list says which); elsewhere the CLI
-       decides and the field would promise a behaviour no config carries. A
-       saved steer is always shown, so it is never hidden while the list is
-       missing and can always be changed back. -->
-  {#if switchesInputMode(draft.backend) || draft.input_mode === 'steer'}
+{#snippet inputModeField(draft, backend = draft.backend, inherited = null)}
+  <!-- Board #245: one field for every agent definition — the registry editor,
+       a team's bare member and (#254) a member derived from a registry agent.
+       Shown only where the switch was measured (the server's backends_list
+       says which); elsewhere the CLI decides and the field would promise a
+       behaviour no config carries. A saved steer is always shown, so it is
+       never hidden while the list is missing and can always be changed back.
+       A derived member passes its base's backend and mode: '' = inherit, the
+       same contract as its model/effort overrides. -->
+  {#if switchesInputMode(backend) || draft.input_mode === 'steer'}
     <label class="config-field"><span class="config-field-label">{t('agentsInputMode')}</span>
       <Select bind:value={draft.input_mode} disabled={saving || removing}
-        options={[{ value: 'queue', label: t('agentsInputQueue') }, { value: 'steer', label: t('agentsInputSteer') }]}
+        options={[
+          ...(inherited ? [{ value: '', label: `${t('teamsInherit')} (${t(inherited === 'steer' ? 'agentsInputSteer' : 'agentsInputQueue')})` }] : []),
+          { value: 'queue', label: t('agentsInputQueue') }, { value: 'steer', label: t('agentsInputSteer') },
+        ]}
         ariaLabel={t('agentsInputMode')} />
     </label>
   {/if}
 {/snippet}
-{#snippet inputModeHint(draft)}
-  {#if draft.input_mode === 'steer'}<p class="hint">{t('agentsInputSteerHint')}</p>{/if}
+{#snippet inputModeHint(draft, inherited = null)}
+  {#if (draft.input_mode || inherited) === 'steer'}<p class="hint">{t('agentsInputSteerHint')}</p>{/if}
 {/snippet}
 {#snippet rows(kind)}
   <!-- One kind's definitions as rows — the phone's sidebar list (narrowed by
@@ -952,7 +962,9 @@
                             options={[{ value: '', label: t('teamsInherit') }, ...backendEfforts(baseBackend(m))]}
                             ariaLabel={t('agentsEffort')} />
                         </label>
+                        {@render inputModeField(m, baseBackend(m), baseInputMode(m))}
                       </div>
+                      {@render inputModeHint(m, baseInputMode(m))}
                     </section>
                   {/if}
                   {#if !m.base && !m.team && m.agent}
