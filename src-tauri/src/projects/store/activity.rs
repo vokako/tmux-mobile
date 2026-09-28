@@ -102,13 +102,22 @@ impl Store {
         self.activity_page(session, since_ts, None, limit).map(|(rows, _)| rows)
     }
 
-    /// Prompts newer than this window's last turn end, oldest first — empty
-    /// when no turn is open. `Some(n)` keeps the newest n (the per-input
-    /// "is a turn open?" question asks for one); `None` returns the whole
-    /// open turn, which is what rebuilding its reply edge after a restart
-    /// needs: a bound there dropped the EARLIEST requester once a turn held
-    /// more inputs than the bound (#256 review).
-    pub fn current_turn_prompts(&self, session: &str, window: &str, limit: Option<usize>) -> Result<Vec<String>, String> {
+    /// Visit the prompts newer than this window's last turn end, oldest
+    /// first, and return how many were visited (0: the window has carried no
+    /// input since its last end). STREAMED, one row at a time: rebuilding a
+    /// turn's reply edge after a restart has to see every input — a newest-N
+    /// page dropped the turn's FIRST requester once the turn held more than
+    /// N (#256 review) — without holding a never-ending turn (grok, #252) in
+    /// memory; the caller keeps only what it folds (distinct senders).
+    /// `Some(n)` stops after n rows (the per-input "has this turn any input
+    /// yet?" question asks for one).
+    pub fn for_each_open_turn_prompt(
+        &self,
+        session: &str,
+        window: &str,
+        limit: Option<usize>,
+        mut visit: impl FnMut(&str),
+    ) -> Result<usize, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -119,17 +128,20 @@ impl Store {
                      WHERE session = ?1 AND COALESCE(NULLIF(win, ''), CAST(window AS TEXT)) = ?2 AND kind = 'notif'
                        AND text IN ('completed', 'failed', 'interrupted')
                    ), 0)
-                 ORDER BY id DESC LIMIT ?3",
+                 ORDER BY id LIMIT ?3",
             )
-            .map_err(|e| format!("prepare current turn prompts: {e}"))?;
-        let mut rows: Vec<String> = stmt
-            // SQLite: a negative LIMIT is no limit.
-            .query_map(rusqlite::params![session, window, limit.map_or(-1, |n| n as i64)], |r| r.get(0))
-            .map_err(|e| format!("query current turn prompts: {e}"))?
-            .collect::<Result<_, _>>()
-            .map_err(|e| format!("read current turn prompts: {e}"))?;
-        rows.reverse();
-        Ok(rows)
+            .map_err(|e| format!("prepare open turn prompts: {e}"))?;
+        // SQLite: a negative LIMIT is no limit.
+        let mut rows = stmt
+            .query(rusqlite::params![session, window, limit.map_or(-1, |n| n as i64)])
+            .map_err(|e| format!("query open turn prompts: {e}"))?;
+        let mut seen = 0;
+        while let Some(row) = rows.next().map_err(|e| format!("read open turn prompts: {e}"))? {
+            let text: String = row.get(0).map_err(|e| format!("read open turn prompt: {e}"))?;
+            visit(&text);
+            seen += 1;
+        }
+        Ok(seen)
     }
 
     /// The newest persisted TURN FACT of each kind, per window (board #249):
@@ -540,8 +552,14 @@ mod tests {
     }
 
     #[test]
-    fn current_turn_prompts_survive_the_server_process() {
+    fn open_turn_prompts_survive_the_server_process() {
         let store = Store::open_memory().unwrap();
+        let all = |limit: Option<usize>| {
+            let mut out = Vec::new();
+            let n = store.for_each_open_turn_prompt("s", "w2", limit, |t| out.push(t.to_string())).unwrap();
+            assert_eq!(n, out.len());
+            out
+        };
         store.insert_activity("s", "w2", 900, "prompt", "[tmm chat] old: closed turn", "", "app", "", "").unwrap();
         store.insert_activity("s", "w2", 1000, "notif", "completed", "", "", "", "").unwrap();
         store.insert_activity("s", "w2", 1100, "prompt", "[tmm chat] lead: work", "", "app", "", "").unwrap();
@@ -549,24 +567,25 @@ mod tests {
         store.insert_activity("s", "w2", 1250, "prompt", "[tmm chat] peer: [reply] fyi", "", "app", "", "").unwrap();
         // Every input of the OPEN turn, oldest first; the closed turn's is not.
         assert_eq!(
-            store.current_turn_prompts("s", "w2", None).unwrap(),
+            all(None),
             vec!["[tmm chat] lead: work".to_string(), "[tmm chat] peer: [reply] fyi".to_string()]
         );
-        // The bound keeps the NEWEST.
-        assert_eq!(store.current_turn_prompts("s", "w2", Some(1)).unwrap(), vec!["[tmm chat] peer: [reply] fyi".to_string()]);
+        // The bound stops early (oldest first).
+        assert_eq!(all(Some(1)), vec!["[tmm chat] lead: work".to_string()]);
         store.insert_activity("s", "w2", 1300, "notif", "completed", "", "", "", "").unwrap();
-        assert!(store.current_turn_prompts("s", "w2", None).unwrap().is_empty());
+        assert!(all(None).is_empty());
 
         // #256 review: an open turn of 200 inputs comes back WHOLE, so the
-        // first requester survives recovery; Some(1) reads just the newest.
+        // first requester survives recovery; Some(1) reads just one row.
         store.insert_activity("s", "w2", 2000, "prompt", "[tmm chat] orchestrator: request", "", "app", "", "").unwrap();
         for i in 0..199 {
             store.insert_activity("s", "w2", 2001 + i, "prompt", &format!("[tmm chat] builder: [reply] {i}"), "", "app", "", "").unwrap();
         }
-        let all = store.current_turn_prompts("s", "w2", None).unwrap();
-        assert_eq!(all.len(), 200);
-        assert_eq!(all[0], "[tmm chat] orchestrator: request");
-        assert_eq!(store.current_turn_prompts("s", "w2", Some(1)).unwrap(), vec!["[tmm chat] builder: [reply] 198".to_string()]);
+        let whole = all(None);
+        assert_eq!(whole.len(), 200);
+        assert_eq!(whole[0], "[tmm chat] orchestrator: request");
+        assert_eq!(whole[199], "[tmm chat] builder: [reply] 198");
+        assert_eq!(all(Some(1)), vec!["[tmm chat] orchestrator: request".to_string()]);
     }
 
     /// Paging backwards through a complete log (board #9). The cursor is (ts, id)

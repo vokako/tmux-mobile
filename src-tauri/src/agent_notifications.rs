@@ -92,23 +92,26 @@ impl AgentNotificationHub {
     /// replaced by the newest input, so a `[reply]` landing mid-turn erased
     /// the real requester — 27 of 404 turns on 2026-09-27, among them the
     /// #248 SHIP orchestrator had asked for, which then reached nobody for
-    /// 3h27m (temp/stall-analysis.md). The open/closed question is the turn
-    /// log's, the one turn record, not a second flag kept here.
+    /// 3h27m (temp/stall-analysis.md). "Joins" means the turn has already
+    /// carried an input since its last end in the turn log — not a second
+    /// status rule (see `telemetry::for_each_turn_input`). The in-memory
+    /// edge is a cache of that fold, parsed from the FULL prompt (the log
+    /// keeps a truncated copy); it is trusted only while the log says the
+    /// turn it belongs to is still open, so an interrupted turn's cache
+    /// (an interrupt takes no edge) never leaks into the next turn.
     fn start_turn(&self, session: &str, window: &str, prompt: &str) {
-        let open = turn_is_open(session, window);
+        let joins = turn_inputs(session, window, Some(1), |_| {}) > 0;
         let key = window_key(session, window);
         let held = self.state.lock().unwrap().reply_targets.remove(&key);
-        let mut targets = match (open, held) {
+        let mut targets = match (joins, held) {
             (false, _) => Vec::new(),
             (true, Some(targets)) => targets,
             // A restart mid-turn lost the in-memory edge: rebuild it from
-            // EVERY input the turn recorded (read once, then held in memory)
-            // before this one joins.
-            (true, None) => targets_of(&open_turn_prompts(session, window)),
+            // EVERY input the turn recorded, streamed, before this one joins.
+            (true, None) => recovered_targets(session, window),
         };
-        let mut st = self.state.lock().unwrap();
         join_targets(&mut targets, reply_targets(prompt));
-        st.reply_targets.insert(key, targets);
+        self.state.lock().unwrap().reply_targets.insert(key, targets);
     }
 
     fn take_reply_targets(&self, session: &str, window: &str) -> Vec<String> {
@@ -116,7 +119,7 @@ impl AgentNotificationHub {
         if let Some(targets) = self.state.lock().unwrap().reply_targets.remove(&key) {
             return targets;
         }
-        targets_of(&open_turn_prompts(session, window))
+        recovered_targets(session, window)
     }
 
     /// The agent conversation id last reported by a hook in this tmux window,
@@ -597,42 +600,29 @@ pub(crate) fn string_field(
     })
 }
 
-/// Is this window's turn open? Mobile has no telemetry store: every input
-/// opens a fresh edge there.
-fn turn_is_open(session: &str, window: &str) -> bool {
+/// The turn's recorded inputs since its last end (see
+/// `telemetry::for_each_turn_input`). Desktop-gated like every
+/// `crate::projects` reader: mobile has no telemetry store, so every input
+/// opens a fresh edge and a missing edge is empty — the same fail-soft
+/// answer a missing turn gives on desktop.
+fn turn_inputs(session: &str, window: &str, limit: Option<usize>, visit: impl FnMut(&str)) -> usize {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        crate::projects::telemetry::turn_open(session, window)
+        crate::projects::telemetry::for_each_turn_input(session, window, limit, visit)
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
-        let _ = (session, window);
-        false
+        let _ = (session, window, limit, visit);
+        0
     }
 }
 
-/// The inputs of this window's open turn, oldest first (empty: no open
-/// turn). Desktop-gated like every `crate::projects` reader: the telemetry
-/// store does not exist on mobile, where an empty route is the same
-/// fail-soft answer a missing turn gives here.
-fn open_turn_prompts(session: &str, window: &str) -> Vec<String> {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        crate::projects::telemetry::current_turn_prompts(session, window)
-    }
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    {
-        let _ = (session, window);
-        Vec::new()
-    }
-}
-
-/// The reply edge of a turn's inputs: every addressed sender, once, in order.
-fn targets_of(prompts: &[String]) -> Vec<String> {
+/// The reply edge rebuilt from the log: every addressed sender of every
+/// input of the open turn, once, in order. Memory is the distinct senders,
+/// never the turn's inputs.
+fn recovered_targets(session: &str, window: &str) -> Vec<String> {
     let mut targets = Vec::new();
-    for prompt in prompts {
-        join_targets(&mut targets, reply_targets(prompt));
-    }
+    turn_inputs(session, window, None, |prompt| join_targets(&mut targets, reply_targets(prompt)));
     targets
 }
 
@@ -1108,11 +1098,9 @@ mod tests {
         let prompts: Vec<_> = events.iter().filter(|e| e.kind == "prompt").collect();
         assert_eq!(prompts.len(), 1, "one keyboard/delivery prompt, not two: {events:?}");
         assert_eq!(prompts[0].text, line);
-        assert_eq!(
-            crate::projects::telemetry::current_turn_prompts(&session, &pane.window_name),
-            vec![line.to_string()],
-            "the window's prompt is still the human's line"
-        );
+        let mut inputs = Vec::new();
+        crate::projects::telemetry::for_each_turn_input(&session, &pane.window_name, None, |t| inputs.push(t.to_string()));
+        assert_eq!(inputs, vec![line.to_string()], "the window's prompt is still the human's line");
         let tool = events.iter().find(|e| e.kind == "tool" && e.tool == "Subagent").expect("the brief lands in the tool lane");
         assert!(tool.text.contains("adversarial-review"), "{}", tool.text);
 
@@ -1542,6 +1530,22 @@ mod tests {
         let restarted = AgentNotificationHub::load_at(root.clone());
         input(&restarted, "[tmm chat 2026-09-27 23:02] lead: @validator one more");
         assert_eq!(restarted.take_reply_targets(&session, "v"), vec!["orchestrator", "lead"], "recovered at the next input");
+        record_notification(&session, "v", "completed", unix_seconds());
+
+        // Tool-only stretches (validator: derive_from calls them running):
+        // a tool after an END carries no input, so the next input still
+        // opens a fresh edge — even after an interrupt, whose in-memory
+        // cache nobody took.
+        use crate::projects::telemetry::record_tool;
+        input(&hub, "[tmm chat 2026-09-28 00:00] orchestrator: @validator start Y");
+        record_interrupt(&session, "v");
+        record_tool(&session, "v", "memory", "capture");
+        input(&hub, "[tmm chat 2026-09-28 00:01] builder: [reply] fyi");
+        assert!(hub.take_reply_targets(&session, "v").is_empty(), "no leak through a tool-only stretch");
+        record_notification(&session, "v", "completed", unix_seconds());
+        record_tool(&session, "v", "memory", "capture");
+        input(&hub, "[tmm chat 2026-09-28 00:02] lead: @validator go");
+        assert_eq!(hub.take_reply_targets(&session, "v"), vec!["lead"]);
         let _ = std::fs::remove_dir_all(root);
     }
 }

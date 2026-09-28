@@ -86,9 +86,15 @@ an automatic `[reply]` or legacy `[done]` envelope does not.
 **The edge accumulates within a turn** (#256). An input that arrives while the
 window's turn is open (codex steer, anything typed mid-turn) ADDS its senders,
 deduplicated and in arrival order; only the turn's end consumes the edge.
-Whether a turn is open is read from the turn log (`current_turn_prompts`: the
-prompts newer than the window's last `completed`/`failed`/`interrupted`), the
-same record status is derived from, so no second open/closed flag exists.
+An input "joins" when the turn log already holds an input since the window's
+last `completed`/`failed`/`interrupted` (`telemetry::for_each_turn_input`,
+the same end facts `recover_open_turns` replays into `derive_from`). This is
+not a second status rule: it answers whose requests the turn carries, never
+whether the window is working, so a tool-only stretch that `derive_from`
+reads as running carries no requester. The in-memory edge caches the fold
+(parsed from the full prompt; the log keeps a 1024-char copy) and is trusted
+only while the log says its turn is open, so an interrupted turn's cache never
+leaks into the next one.
 Incident (2026-09-27, `temp/stall-analysis.md`): `start_turn` REPLACED the
 edge with the newest input's senders, so a `[reply]` landing mid-turn erased
 the real requester. 27 of 404 turns in 14 hours lost their requester; one was
@@ -105,11 +111,11 @@ one hop, so two stop hooks cannot ping-pong.
 
 The managed-home gate excludes hand-started agents, final text is capped at
 `MAX_REPLY_CHARS = 6144`, and reply targets are removed when used. If the
-server restarts mid-turn, the durable activity log recovers every prompt newer
-than the previous turn end — all of them, unbounded, because a newest-N page
-dropped the turn's first requester once it held more inputs than N (#256
-review) — and an input after the
-restart joins them. `tmm send` does not suppress the final response:
+server restarts mid-turn, the edge is rebuilt by STREAMING every prompt newer
+than the previous turn end and keeping only the distinct senders: a newest-N
+page dropped the turn's first requester once it held more than N inputs (#256
+review), and a never-ending turn (grok, #252) must not be loaded whole. An
+input after the restart joins the rebuilt edge. `tmm send` does not suppress the final response:
 it starts a separate question or handoff.
 
 ### Historical auto-reply design (superseded 2026-09-08)

@@ -409,38 +409,33 @@ pub fn recent_events(session: &str, since_ts: u64) -> Vec<ActivityEvent> {
     events_page(session, since_ts, None, LOAD_EVENTS).0
 }
 
-/// Every prompt newer than this window's last turn end, oldest first; empty
-/// when the window has no open turn. The durable path lets a restarted
-/// server rebuild the open turn's reply edge (#256). Unbounded on purpose:
-/// the edge is every requester the turn carried, and the read runs once per
-/// window per restart (the rebuilt edge then lives in memory).
-pub fn current_turn_prompts(session: &str, window: &str) -> Vec<String> {
-    turn_prompts(session, window, None)
-}
-
-/// Is this window's turn open (a prompt newer than its last end)? Asked on
-/// every input, so it reads one row, never the whole turn.
-pub fn turn_open(session: &str, window: &str) -> bool {
-    !turn_prompts(session, window, Some(1)).is_empty()
-}
-
-fn turn_prompts(session: &str, window: &str, limit: Option<usize>) -> Vec<String> {
+/// Visit every INPUT this window's turn has carried since its last end
+/// (`completed`/`failed`/`interrupted` — the same end facts
+/// `recover_open_turns` replays into `derive_from`), oldest first, streamed.
+/// Returns how many. This answers "whose requests is this turn carrying?",
+/// never "is the window working?": a tool-only stretch (kiro housekeeping,
+/// a turn opened by keyboard before hooks) is running to `derive_from` and
+/// carries no input here, which is exactly right for a reply edge — nobody
+/// asked. Fail-soft: an unreadable store visits nothing (#256).
+pub fn for_each_turn_input(session: &str, window: &str, limit: Option<usize>, mut visit: impl FnMut(&str)) -> usize {
     if !cfg!(test) {
-        return super::with_store(|s| s.current_turn_prompts(session, window, limit)).unwrap_or_default();
+        return super::with_store(|s| s.for_each_open_turn_prompt(session, window, limit, visit)).unwrap_or(0);
     }
     let map = events().lock().unwrap();
-    let Some(rows) = map.get(session) else { return Vec::new() };
-    let mut prompts = Vec::new();
-    for event in rows.iter().rev().filter(|event| event.window == window) {
-        if event.kind == "notif" && matches!(event.text.as_str(), "completed" | "failed" | "interrupted") {
-            break;
-        }
-        if event.kind == "prompt" && limit.is_none_or(|n| prompts.len() < n) {
-            prompts.push(event.text.clone());
+    let Some(rows) = map.get(session) else { return 0 };
+    let rows: Vec<&ActivityEvent> = rows.iter().filter(|event| event.window == window).collect();
+    let start = rows
+        .iter()
+        .rposition(|e| e.kind == "notif" && matches!(e.text.as_str(), "completed" | "failed" | "interrupted"))
+        .map_or(0, |i| i + 1);
+    let mut seen = 0;
+    for event in &rows[start..] {
+        if event.kind == "prompt" && limit.is_none_or(|n| seen < n) {
+            visit(&event.text);
+            seen += 1;
         }
     }
-    prompts.reverse();
-    prompts
+    seen
 }
 
 /// How much trace this session has: (events, oldest ts, newest ts). For the
@@ -1993,7 +1988,7 @@ mod tests {
         backdate(&session);
         sweep_deliveries(&session);
         assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 1, "the held line's clock ran");
-        assert!(current_turn_prompts(&session, "w1").is_empty(), "no reply edge recovered for a cancelled turn");
+        assert_eq!(for_each_turn_input(&session, "w1", None, |_| {}), 0, "no reply edge recovered for a cancelled turn");
     }
 
     /// Orchestrator 15:44 (validator 15:42-15:43): tool dedupe may collapse a
