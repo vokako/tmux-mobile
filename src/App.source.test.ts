@@ -688,3 +688,25 @@ test('the phone tab bar hides for Files\' reading mode through one signal, gated
   assert.match(source, /\.immersive \.tabbar \{ display: none; \}/u);
   assert.match(source, /:global\(html\.keyboard-open\) \.tabbar \{ display: none; \}/u, 'the keyboard hide it sits beside');
 });
+
+test('every connect path runs the one server handshake, which loads backends_list (board #253)', () => {
+  // The boot path (a page load with a saved token, the most common connect)
+  // called probeHub alone, so setServedBackends never ran and the Agents
+  // editor hid the queue/steer field on the live app while the mount tests,
+  // which serve the list directly, passed. Each place that marks the socket
+  // connected must reach serverReady(), and nothing may probe or load
+  // backends on its own beside it.
+  const ready = source.match(/function serverReady\(\) \{([\s\S]*?)\n  \}/u)?.[1] ?? '';
+  assert.match(ready, /probeHub\(\);/u);
+  assert.match(ready, /loadBackends\(\);/u);
+  const sites = [...source.matchAll(/connected = true;/gu)].map((m) => m.index!);
+  assert.equal(sites.length, 3, 'boot, reconnect success, manual connect');
+  for (const at of sites) {
+    const rest = source.slice(at);
+    const nextFn = rest.search(/\n  (?:async )?function /u);
+    const body = nextFn < 0 ? rest : rest.slice(0, nextFn);
+    assert.match(body, /serverReady\(\);/u, `the connect path at offset ${at} runs the handshake`);
+  }
+  const outside = source.replace(/function serverReady\(\) \{[\s\S]*?\n  \}/u, '');
+  assert.doesNotMatch(outside, /^\s*(?:probeHub|loadBackends)\(\);/mu, 'no path does half the handshake');
+});

@@ -597,8 +597,7 @@
       });
     } catch {}
     resubscribeAll();
-    probeHub();
-    loadBackends();
+    serverReady();
     // Tell Terminal to reset stale resize state + re-fit against the new server.
     window.dispatchEvent(new Event('ws-reconnected'));
   }
@@ -610,6 +609,16 @@
     backendsList()
       .then((r) => setServedBackends(r?.backends ?? null))
       .catch(() => setServedBackends(null));
+  }
+
+  /** What EVERY connect path asks a server it has just reached: does it host
+   * the Hub, and which backends can it spawn. ONE call per path (board #253):
+   * the boot path called probeHub alone, so a page load with a saved token
+   * never fetched backends_list and the Agents editor hid the queue/steer
+   * field (and fell back to the frozen backend list). */
+  function serverReady() {
+    probeHub();
+    loadBackends();
   }
 
   function onConnected() {
@@ -625,8 +634,7 @@
     // (send_keys still works — it's a plain RPC) until a full reload.
     // Mirrors onReconnectSuccess; on a first-ever connect both are no-ops.
     resubscribeAll();
-    probeHub();
-    loadBackends();
+    serverReady();
     window.dispatchEvent(new Event('ws-reconnected'));
   }
 
@@ -1098,7 +1106,7 @@
           localStorage.setItem('tmux_machine_id', mid);
         }
       } catch {}
-      probeHub();
+      serverReady();
       try {
         const s = JSON.parse(localStorage.getItem('tmux_state') || '{}');
         // A saved target names a session that may not exist any more — killed
