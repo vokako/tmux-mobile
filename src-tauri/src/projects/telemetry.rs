@@ -220,6 +220,10 @@ pub struct ActivityEvent {
     /// for every other event and for rows before v24.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub deliveries: Vec<DeliveryRef>,
+    /// `prompt` events only: who the FULL prompt asks (`address::requesters`,
+    /// board #257), written in the same INSERT as the row. Server-side only.
+    #[serde(skip)]
+    pub requesters: Option<Vec<String>>,
 }
 
 /// One delivery row named by an event: its id, and the message it carries.
@@ -255,6 +259,11 @@ fn push_full(session: &str, window: &str, kind: &str, text: String, tool: String
 
 #[allow(clippy::too_many_arguments)]
 fn push_full_at(session: &str, window: &str, ts_ms: u64, kind: &str, text: String, tool: String, via: String, deliveries: Vec<DeliveryRef>) -> Option<i64> {
+    push_full_with(session, window, ts_ms, kind, text, tool, via, deliveries, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_full_with(session: &str, window: &str, ts_ms: u64, kind: &str, text: String, tool: String, via: String, deliveries: Vec<DeliveryRef>, requesters: Option<Vec<String>>) -> Option<i64> {
     push(
         session,
         ActivityEvent {
@@ -267,6 +276,7 @@ fn push_full_at(session: &str, window: &str, ts_ms: u64, kind: &str, text: Strin
             via,
             state: String::new(),
             deliveries,
+            requesters,
         },
     )
 }
@@ -322,7 +332,8 @@ fn persist(session: &str, ev: &ActivityEvent) -> Option<i64> {
 fn persist_now(session: &str, ev: &ActivityEvent) -> Option<i64> {
     let written = super::with_store(|s| {
         let refs = if ev.deliveries.is_empty() { String::new() } else { serde_json::to_string(&ev.deliveries).unwrap_or_default() };
-        s.insert_activity(session, &ev.window, ev.ts, &ev.kind, &ev.text, &ev.tool, &ev.via, &ev.state, &refs)
+        let requesters = ev.requesters.as_ref().map(|r| serde_json::to_string(r).unwrap_or_default());
+        s.insert_activity_with(session, &ev.window, ev.ts, &ev.kind, &ev.text, &ev.tool, &ev.via, &ev.state, &refs, requesters.as_deref())
     });
     if let Err(e) = &written {
         // Fail-soft, but not SILENT: a lost write is a hole in the trace, and the
@@ -384,6 +395,7 @@ pub fn events_page(
                     via: r.via,
                     state: r.state,
                     deliveries: serde_json::from_str(&r.deliveries).unwrap_or_default(),
+                    requesters: None,
                 })
                 .collect();
             return (events, has_more);
@@ -613,21 +625,20 @@ fn turn_fact(
     event: Option<(&str, String, String, String, Vec<DeliveryRef>)>,
     apply: impl FnOnce(&mut Rec, u64, u64),
 ) {
-    turn_fact_row(session, window, ts, event, apply);
+    turn_fact_unless_row(session, window, ts, |_| false, event, apply, None);
 }
 
-/// `turn_fact`, returning the activity row id it was written as (None: not
-/// persisted — tests, or a failed write).
-fn turn_fact_row(
+/// `turn_fact` for a prompt: its requesters ride in the SAME activity INSERT
+/// as the row, under the same ORDER lock (board #257, validator 05:04).
+fn prompt_fact(
     session: &str,
     window: &str,
     ts: u64,
-    event: Option<(&str, String, String, String, Vec<DeliveryRef>)>,
+    event: (&str, String, String, String, Vec<DeliveryRef>),
+    requesters: Vec<String>,
     apply: impl FnOnce(&mut Rec, u64, u64),
-) -> Option<i64> {
-    let mut row = None;
-    turn_fact_unless_row(session, window, ts, |_| false, event, apply, &mut row);
-    row
+) {
+    turn_fact_unless_row(session, window, ts, |_| false, Some(event), apply, Some(requesters));
 }
 
 /// `turn_fact`, skipped when `same` says the record already holds exactly
@@ -641,7 +652,7 @@ fn turn_fact_unless(
     event: Option<(&str, String, String, String, Vec<DeliveryRef>)>,
     apply: impl FnOnce(&mut Rec, u64, u64),
 ) -> bool {
-    turn_fact_unless_row(session, window, ts, same, event, apply, &mut None)
+    turn_fact_unless_row(session, window, ts, same, event, apply, None)
 }
 
 fn turn_fact_unless_row(
@@ -651,7 +662,7 @@ fn turn_fact_unless_row(
     same: impl FnOnce(&Rec) -> bool,
     event: Option<(&str, String, String, String, Vec<DeliveryRef>)>,
     apply: impl FnOnce(&mut Rec, u64, u64),
-    row_out: &mut Option<i64>,
+    requesters: Option<Vec<String>>,
 ) -> bool {
     static ORDER: Mutex<()> = Mutex::new(());
     let _order = ORDER.lock().unwrap_or_else(|e| e.into_inner());
@@ -660,14 +671,14 @@ fn turn_fact_unless_row(
         return false;
     }
     let row = event.and_then(|(kind, text, tool, via, deliveries)| {
-        push_full_at(session, window, ts * 1000 + now_ms() % 1000, kind, text, tool, via, deliveries)
+        push_full_with(session, window, ts * 1000 + now_ms() % 1000, kind, text, tool, via, deliveries, requesters)
     });
     // Tests widen the gap between the row and the order, so a lost lock
     // shows up as a reordering instead of a lucky pass.
     #[cfg(test)]
     std::thread::sleep(std::time::Duration::from_micros(30));
     // The order comes from the one counter, after the insert, under the lock.
-    *row_out = row;
+    let _ = row;
     let seq = order_of();
     with_rec(session, window, |r| apply(r, ts, seq));
     true
@@ -902,14 +913,10 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
     // the row's text is cut at MAX_PROMPT_CHARS for display, and a combined
     // prompt of held lines can put its second requester past that cut.
     let requesters = crate::address::requesters(prompt);
-    let row = turn_fact_row(session, window, ts, Some(("prompt", text, String::new(), via.to_string(), refs)), |r, ts, seq| {
+    prompt_fact(session, window, ts, ("prompt", text, String::new(), via.to_string(), refs), requesters, |r, ts, seq| {
         r.prompt = Some(ts);
         r.prompt_seq = seq;
     });
-    if let Some(id) = row {
-        let stored = serde_json::to_string(&requesters).unwrap_or_default();
-        let _ = super::with_store(|s| s.set_activity_requesters(id, &stored));
-    }
     acked
 }
 
@@ -1118,6 +1125,18 @@ pub fn owed_message_ids(session: &str) -> Vec<String> {
 /// does to the derived records and the recovery mark, and nothing more: the
 /// delivery queue in state.db is deliberately untouched, because its survival
 /// is what board #5 is about. Test-only.
+/// Test-only: a window's prompt rows as stored (text, requesters).
+#[cfg(test)]
+pub fn test_prompt_rows(session: &str, window: &str) -> Vec<(String, Option<String>)> {
+    super::with_store(|s| s.prompt_rows(session, window)).unwrap()
+}
+
+/// Test-only: run SQL on the store's connection (fault triggers).
+#[cfg(test)]
+pub fn test_exec_sql(sql: &str) {
+    super::with_store(|s| s.exec_test_sql(sql)).unwrap()
+}
+
 #[cfg(test)]
 pub fn forget_process_state(session: &str) {
     store().lock().unwrap().retain(|(s, _), _| s != session);

@@ -1654,6 +1654,11 @@ mod tests {
         let hub = AgentNotificationHub::load_at(root.clone());
         hub.start_turn(&session, "v", &combined);
         record_prompt(&session, "v", &combined);
+        // validator 05:04 / orchestrator 05:05: the row carries its senders
+        // the moment record_prompt returns — one INSERT, no second write.
+        let rows = crate::projects::telemetry::test_prompt_rows(&session, "v");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1.as_deref(), Some(r#"["lead","validator"]"#), "text and requesters in the same row: {rows:?}");
         let mut texts = Vec::new();
         crate::projects::telemetry::recent_events(&session, 0).into_iter().filter(|e| e.kind == "prompt").for_each(|e| texts.push(e.text));
         assert!(!texts[0].contains("validator:"), "the stored display text really is cut before the second sender");
@@ -1665,6 +1670,31 @@ mod tests {
         PERSIST_IN_TEST.with(|p| p.set(false));
         assert_eq!(got, vec!["lead".to_string(), "validator".to_string()], "both, once each, in order");
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// validator 05:04: a failed write can never leave a durable prompt row
+    /// without its senders. The one INSERT carries both, so an injected
+    /// failure (TEMP trigger) leaves NO row at all — never a truncated text
+    /// with NULL requesters — and nothing reads a half-written edge.
+    #[test]
+    fn a_failed_prompt_write_leaves_no_row_without_its_requesters() {
+        use crate::projects::telemetry::{record_prompt, test_exec_sql, test_prompt_rows, PERSIST_IN_TEST};
+        crate::projects::tests::use_test_store();
+        PERSIST_IN_TEST.with(|p| p.set(true));
+        let session = format!("prompt-fault-{}", uuid::Uuid::new_v4());
+        test_exec_sql(&format!(
+            "CREATE TEMP TRIGGER prompt_fault BEFORE INSERT ON activity WHEN NEW.session = '{session}' AND NEW.kind = 'prompt'
+             BEGIN SELECT RAISE(ABORT, 'injected'); END;"
+        ));
+        record_prompt(&session, "v", "[tmm chat 2026-09-28 05:05] lead: @v ask");
+        test_exec_sql("DROP TRIGGER prompt_fault;");
+        let after_fault = test_prompt_rows(&session, "v");
+        record_prompt(&session, "v", "[tmm chat 2026-09-28 05:06] validator: @v ask");
+        let after = test_prompt_rows(&session, "v");
+        PERSIST_IN_TEST.with(|p| p.set(false));
+        assert!(after_fault.is_empty(), "the failed INSERT wrote nothing: {after_fault:?}");
+        assert!(after.iter().all(|(_, r)| r.is_some()), "every durable prompt row has its requesters: {after:?}");
+        assert_eq!(after.len(), 1);
     }
 
     #[test]

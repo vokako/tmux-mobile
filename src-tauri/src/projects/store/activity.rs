@@ -78,13 +78,34 @@ impl Store {
         state: &str,
         deliveries: &str,
     ) -> Result<i64, String> {
+        self.insert_activity_with(session, window, ts, kind, text, tool, via, state, deliveries, None)
+    }
+
+    /// `insert_activity` plus a prompt row's `requesters` (board #257, v27),
+    /// in the SAME statement: the display text and the sender map commit
+    /// together or not at all (validator 05:04 — a second UPDATE left a
+    /// window where a durable prompt had no senders).
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_activity_with(
+        &self,
+        session: &str,
+        window: &str,
+        ts: u64,
+        kind: &str,
+        text: &str,
+        tool: &str,
+        via: &str,
+        state: &str,
+        deliveries: &str,
+        requesters: Option<&str>,
+    ) -> Result<i64, String> {
         // `window` (the INDEX column) is 0 for name-keyed rows; `win` carries
         // the identity (board #120). Old rows read back via the COALESCE below.
         self.conn
             .execute(
-                "INSERT INTO activity (session, window, win, ts, kind, text, tool, via, state, deliveries)
-                 VALUES (?1, 0, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                rusqlite::params![session, window, ts as i64, kind, text, tool, via, state, deliveries],
+                "INSERT INTO activity (session, window, win, ts, kind, text, tool, via, state, deliveries, requesters)
+                 VALUES (?1, 0, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                rusqlite::params![session, window, ts as i64, kind, text, tool, via, state, deliveries, requesters],
             )
             .map(|_| self.conn.last_insert_rowid())
             .map_err(|e| format!("insert activity: {e}"))
@@ -111,13 +132,18 @@ impl Store {
     /// memory; the caller keeps only what it folds (distinct senders).
     /// `Some(n)` stops after n rows (the per-input "has this turn any input
     /// yet?" question asks for one).
-    /// The requesters of a prompt row (board #257, schema v27): a JSON array
-    /// parsed from the FULL prompt, beside the display-truncated text.
-    pub fn set_activity_requesters(&self, id: i64, requesters: &str) -> Result<(), String> {
-        self.conn
-            .execute("UPDATE activity SET requesters = ?2 WHERE id = ?1", rusqlite::params![id, requesters])
-            .map(|_| ())
-            .map_err(|e| format!("set activity requesters: {e}"))
+    /// Test-only: every prompt row of a window as (text, requesters) — the
+    /// raw columns, to prove the pair was written by one statement.
+    #[cfg(test)]
+    pub fn prompt_rows(&self, session: &str, window: &str) -> Result<Vec<(String, Option<String>)>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT text, requesters FROM activity WHERE session = ?1 AND win = ?2 AND kind = 'prompt' ORDER BY id")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params![session, window], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(|e| e.to_string())?;
+        Ok(rows.filter_map(Result::ok).collect())
     }
 
     pub fn for_each_open_turn_prompt(
