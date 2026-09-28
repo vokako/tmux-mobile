@@ -25,7 +25,7 @@ test('Sidebar renders live/closed rows and the compact sheet without another wra
   ];
   const panes: SidebarPane[] = Array.from({ length: 5 }, (_, window) => ({
     session: 'alpha', window, window_name: `agent${window}`,
-    active: true, current_command: 'kiro', pane_title: '',
+    active: true, current_command: 'kiro-cli', agent: 'kiro',
   }));
   const view = (extra: Record<string, unknown> = {}) => h.fragment(render(Sidebar, { props: {
     rows, panes, selected: 'alpha', tick, talkMap: { 'proj:alpha': tick - 300_000 },

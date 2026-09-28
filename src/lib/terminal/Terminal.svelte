@@ -14,7 +14,7 @@
   import { moveMs } from '../ui/motion.ts';
   import { hoverInfo } from '../ui/hover.ts';
   import { t } from '../core/i18n.svelte.ts';
-  import { detectAgent, paneIsAgent, paneAgent, AGENTS } from '../core/agents.ts';
+  import { agentByBackend, paneIsAgent, paneAgent } from '../core/agents.ts';
   import { copyText } from '../core/clipboard.ts';
   import { fonts } from '../app/fonts.svelte.ts';
   import { terminalPrefs } from '../app/terminal-prefs.svelte.ts';
@@ -56,7 +56,7 @@
   // `chromeless` = embedded with NO window-switcher bar (used by the desktop
   // agent grid, where each cell is pinned to one agent's pane — there is
   // nothing to switch to, so the bar would only steal vertical space).
-  let { target, session, command: initialCommand = '', fontSize = 14, embedded = false, active = true, chromeless = false, visible = true, onSwitchPane = null, onPaneExit = () => {}, onClose = null, onOpenSessions = null, splitEligible = false, splitActive = false, splitLayout = 1, onSetLayout = null } = $props();
+  let { target, session, fontSize = 14, embedded = false, active = true, chromeless = false, visible = true, onSwitchPane = null, onPaneExit = () => {}, onClose = null, onOpenSessions = null, splitEligible = false, splitActive = false, splitLayout = 1, onSetLayout = null } = $props();
   // The chip bar's layout menu is the shared `ui/ContextMenu`, anchored to
   // its toggle exactly like the shell's floating one in split mode (App.svelte).
   // It was a hand-rolled `position:absolute` strip with a backdrop — no
@@ -73,11 +73,12 @@
     splitMenuAt = splitMenuAt ? null : { anchor: anchorOf(e.currentTarget), trigger: e.currentTarget };
   }
 
-  // svelte-ignore state_referenced_locally — intentional: seeded from the
-  // prop (hence the name), then kept fresh by the $effect below and by
-  // pane_output pushes carrying current_command.
-  let command = $state(initialCommand);
-  $effect(() => { command = initialCommand; });
+  // The agent backend the shown pane runs, as the server derived it from the
+  // pane's processes (board #260): pushed with every current_command change
+  // on pane_output, and forgotten when the target changes so a switch never
+  // carries the previous pane's verdict.
+  let liveAgent = $state(null);
+  $effect(() => { void target; liveAgent = null; });
 
   // Keyboard as an OVERLAY instead of a resize, for agent TUIs only.
   //
@@ -92,9 +93,10 @@
   //
   // Editors are deliberately NOT in this set: `vim` repaints cheaply and it
   // genuinely needs to lay itself out inside the visible area, so it keeps the
-  // normal resize behaviour. The set is `AGENTS` — the same table that paints
-  // the agent icons — so "which apps are chat TUIs" is answered in one place.
-  const keepRowsOnKeyboard = $derived(isMobile && !!detectAgent(command));
+  // normal resize behaviour. The verdict is the server's pane `agent` — the
+  // same one that paints the agent icons — so "which apps are chat TUIs" is
+  // answered in one place.
+  const keepRowsOnKeyboard = $derived(isMobile && !!agentByBackend(liveAgent));
   let termEl;
   // `term` is a plain let on purpose: it is read in hundreds of places and
   // must not turn every effect that touches it into a dependency. The
@@ -290,9 +292,9 @@
   // state that suppresses rendering — see resumeLiveTail().
   let resumeLiveTailRef = null;
 
-  // pane_output snapshots now carry `current_command` (server piggybacks it
-  // on cursor reads — same tmux subprocess, zero extra cost). Update
-  // `command` in the pane-output listener below; no separate polling RPC needed.
+  // pane_output snapshots carry `current_command` + `agent` on every command
+  // change; the pane-output listener below keeps `liveAgent` fresh from them,
+  // no separate polling RPC needed.
 
   // Window switcher
   let windowPanes = $state([]);
@@ -372,7 +374,7 @@
       const next = cycleItem(items, current, event.detail.direction);
       if (!next || String(next.window) === currentWindow) return;
       preparePaneSwitch();
-      onSwitchPane(`${next.session}:${next.window}.${next.pane}`, next.current_command);
+      onSwitchPane(`${next.session}:${next.window}.${next.pane}`);
     };
     window.addEventListener('terminal-window-shortcut', onWindowShortcut);
     return () => window.removeEventListener('terminal-window-shortcut', onWindowShortcut);
@@ -1468,13 +1470,13 @@
     // Named refs so cleanup removes EXACTLY this cell's listener — two cells
     // on the same target each register their own; removing by reference
     // leaves the other's intact.
-    const onPaneOutputCb = (t, content, cursor, currentCommand) => {
+    const onPaneOutputCb = (t, content, cursor, currentCommand, agent) => {
       if (t !== target) return;
       if (cursor) lastCursor = cursor;
-      // Pane's running command, only present on first push and on changes.
-      // Drives the window-switcher agent icons and status-bar highlight.
+      // Pane's running command + agent, only present on first push and on
+      // changes. Drives the keyboard overlay (keepRowsOnKeyboard).
       if (currentCommand !== undefined) {
-        command = currentCommand;
+        liveAgent = agent ?? null;
       }
       // A HIDDEN terminal only records the frame. The page-layers keep every
       // page mounted (`visibility: hidden`) so state survives tab switches —
@@ -1734,7 +1736,7 @@
               showPanePicker = false;
               if (`${p.session}:${p.window}.${p.pane}` !== target && onSwitchPane) {
                 preparePaneSwitch();
-                onSwitchPane(`${p.session}:${p.window}.${p.pane}`, p.current_command);
+                onSwitchPane(`${p.session}:${p.window}.${p.pane}`);
               }
             }}
             onClose={() => showPanePicker = false}
@@ -1765,7 +1767,7 @@
                   e.stopPropagation();
                   if (String(w.window) !== currentWindow && onSwitchPane) {
                     preparePaneSwitch();
-                    onSwitchPane(`${w.session}:${w.window}.${w.pane}`, w.current_command);
+                    onSwitchPane(`${w.session}:${w.window}.${w.pane}`);
                   }
                 }}
               />
@@ -1785,7 +1787,7 @@
                 const p = ps[ps.length - 1];
                 if (p && onSwitchPane) {
                   preparePaneSwitch();
-                  onSwitchPane(`${p.session}:${p.window}.${p.pane}`, p.current_command);
+                  onSwitchPane(`${p.session}:${p.window}.${p.pane}`);
                 }
               } catch {}
             }}

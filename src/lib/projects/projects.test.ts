@@ -82,9 +82,9 @@ test('a live project offers one tappable chip per window, from its active pane',
   );
 });
 
-test('a live agent window carries its icon from the running process', () => {
+test('a live agent window carries the icon of the server\'s process-derived agent', () => {
   const chips = liveWindowChips([
-    pane('app', 1, 1, { window_name: 'agent', current_command: 'kiro-cli-chat' }),
+    pane('app', 1, 1, { window_name: 'agent', current_command: 'kiro-cli-chat', agent: 'kiro' }),
   ]);
   assert.equal(chips.length, 1);
   assert.equal(chips[0]?.agentTag, 'Kiro');

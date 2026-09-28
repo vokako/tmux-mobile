@@ -236,7 +236,7 @@
     }
     const p = ps[0];
     if (!p) return;
-    openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command);
+    openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`);
   }
   // Chip click is always a direct-open, even for multi-window sessions.
   // The chip is an MRU fast-switch surface — toggling a row's expansion
@@ -253,17 +253,17 @@
       const ps = panes[s.name] || [];
       const p = ps.find(x => x.window === win && x.pane === pane) || ps[0];
       if (!p) return;
-      openTerminal(s.name, activeTarget, p.current_command);
+      openTerminal(s.name, activeTarget);
       return;
     }
     const ps = panes[s.name] || [];
     const aiPane = ps.find(p => paneAgent(p));
     const p = aiPane || ps[0];
     if (!p) return;
-    openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command);
+    openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`);
   }
   function openPane(s: TmuxSession, p: TmuxPane) {
-    openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command);
+    openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`);
   }
 
   // ─── Kill, behind the app's confirmation ─────────────
@@ -557,7 +557,7 @@
               const ps2 = await listPanes(s.name);
               panes[s.name] = ps2;
               const p = ps2[ps2.length - 1];
-              if (p) openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command);
+              if (p) openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`);
             } catch (e) { error = (e as Error).message; }
           }}>
             <Icon name="plus" size={12} /> {t('window')}
@@ -662,7 +662,7 @@
           const ps = await listPanes(proj.session);
           const p = ps[0];
           if (p) {
-            openTerminal(proj.session, `${p.session}:${p.window}.${p.pane}`, p.current_command);
+            openTerminal(proj.session, `${p.session}:${p.window}.${p.pane}`);
           }
         } catch {}
         await refresh();

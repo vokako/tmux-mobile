@@ -34,7 +34,7 @@ The shortcut bar's Ctrl arms a modifier for the NEXT letter typed on the system 
 
 ### Keyboard is an OVERLAY for agent TUIs, a resize for everything else
 
-opening the keyboard used to shrink the box → change cols×rows → `resize_pane` → tmux resize → the agent redraws its whole conversation (seconds), twice per toggle. Now `.keep-rows` (`isMobile && detectAgent(command)`, i.e. the shared `AGENTS` table) pins the xterm host to `--kb-locked-h` and bottom-anchors it under `html.keyboard-open`, so the observed box never changes and the ResizeObserver — still the ONE re-fit trigger — has nothing to report. `--kb-locked-h` is captured in `doResize` only while the keyboard is DOWN. `vim` and friends keep resizing: they repaint cheaply and need the real visible size. Verified: a kiro pane held `151x27` across open+close, a zsh pane went `27 → 8 → 27`. See `docs/design-docs/pages/terminal-sizing.md`.
+opening the keyboard used to shrink the box → change cols×rows → `resize_pane` → tmux resize → the agent redraws its whole conversation (seconds), twice per toggle. Now `.keep-rows` (`isMobile && agentByBackend(liveAgent)`, i.e. the server's process-derived pane `agent`, board #260) pins the xterm host to `--kb-locked-h` and bottom-anchors it under `html.keyboard-open`, so the observed box never changes and the ResizeObserver — still the ONE re-fit trigger — has nothing to report. `--kb-locked-h` is captured in `doResize` only while the keyboard is DOWN. `vim` and friends keep resizing: they repaint cheaply and need the real visible size. Verified: a kiro pane held `151x27` across open+close, a zsh pane went `27 → 8 → 27`. See `docs/design-docs/pages/terminal-sizing.md`.
 
 ### Printable keys bypass xterm's keydown
 

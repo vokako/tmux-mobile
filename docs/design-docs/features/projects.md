@@ -216,13 +216,18 @@ decision rather than a special case in the reconciler.
 
 `agents.rs` is one table used for **both** detection and relaunch, so the two
 can never disagree; a detector that recognises "codex" but relaunches something
-else would quietly rebuild the wrong workspace. Detection takes the EARLIEST
-match in the pane's command text (`pane_current_command`, title, then the
-foreground child's argv), mirroring the client's `detectAgent`: a later match is
-a subprocess the agent spawned — a real case was codex spawning a
-`kiro-web-search` helper and being labelled Kiro. Claude Code needs no special
-case even though its process name is a bare version number, because its argv
-path contains `.../claude/versions/<v>`.
+else would quietly rebuild the wrong workspace. Detection reads the pane's
+PROCESSES only — `pane_current_command`, the pane process's own argv, then the
+argv chain below it (`agents::detect_processes`) — and takes the EARLIEST
+match: a later match is a subprocess the agent spawned (a real case was codex
+spawning a `kiro-web-search` helper and being labelled Kiro). Claude Code needs
+no special case even though its process name can be a bare version number,
+because its argv says `claude` or `.../claude/versions/<v>`. Labels are not
+evidence: `pane_title` is whatever the last CLI wrote and nothing resets it on
+exit, so a zsh where grok had quit still read "grok" and wore its icon
+(owner, 2026-09-28, board #260); the window name is a label too. The verdict
+is computed once per pane in the listing (`TmuxPane::agent`) and the client
+reads that field — it has no matcher of its own.
 
 ## Restoring the conversation, not just the window
 
@@ -404,7 +409,7 @@ a project (`state.db`, `src-tauri/src/projects/`) is a directory + the windows i
 
 **Every session is a project**: `auto_adopt_once` on the capture tick adopts anything untracked (that is also the migration for pre-existing sessions), guarded by a 120 s session age and "archived is never re-adopted" (the `tmm-team-` prefix exclusion died with the Team system, board #100). There is ONE create path — the `+` calls `project_create` + `project_up`, and its agent presets seed an agent slot rather than a raw command, because a shell command is observed-only and never replayed. `up` matches windows BY NAME and only creates what is missing (the session may be the one you're typing in), `down` kills the session and keeps the declaration, and the capture loop folds live tmux back in — nobody hand-writes a project. One rule keeps it honest: a window must survive 120 s to become restorable, and an ordinary vanished window leaves the declaration; a managed agent's isolated home is durable membership, so Stop retains its absent slot/session id and only Remove ejects it. There is NO topology history — the declaration is the last observed state, which is what "restore what I had before closing/rebooting" means; a 20-deep snapshot list was removed as dead weight (its `restore` rewrote the declaration without projecting it, so a live project's next capture tick undid it).
 
-**Identity is the SESSION, not the path** — several sessions parked in `$HOME` is normal, so `UNIQUE` sits on `session`; the workspace dir comes from `pick_workspace` over ALL windows (most frequent, `$HOME` only as a last resort), never from the focused pane. Migrations MUST `PRAGMA foreign_keys=OFF`: libsqlite3-sys defaults them ON, so a table rebuild's `DROP TABLE` cascades the children away. Only agent slots are relaunched: an observed `npm run dev` is recorded, never replayed. `projects/agents.rs` is ONE table for detection and relaunch so they cannot disagree (earliest match in the pane text wins — a later match is a subprocess); for MANAGED windows `detect_managed` reads the backend off the launch recipe FIRST, because the sniff lies for our own spawns — the npm codex runs as `node` with nothing saying "codex" anywhere, so a spawned codex fell out of delivery/roster/vitals/recovery until the record beat the sniff (measured 2026-08-22). And there is ONE way to ask about a pane — `agents::detect_pane(ws, &pane)` over `agents::pane_text` (command, title, window name, child argv, shallow → deep) — because seven call sites used to assemble that haystack by hand and one did it differently (the capturer read `child_cmd` and not the window name; the roster, delivery, vitals and recovery read the window name and not `child_cmd`), so the declaration and the roster could disagree about whether the same window was an agent (2026-09-03 review).
+**Identity is the SESSION, not the path** — several sessions parked in `$HOME` is normal, so `UNIQUE` sits on `session`; the workspace dir comes from `pick_workspace` over ALL windows (most frequent, `$HOME` only as a last resort), never from the focused pane. Migrations MUST `PRAGMA foreign_keys=OFF`: libsqlite3-sys defaults them ON, so a table rebuild's `DROP TABLE` cascades the children away. Only agent slots are relaunched: an observed `npm run dev` is recorded, never replayed. `projects/agents.rs` is ONE table for detection and relaunch so they cannot disagree (earliest match in the pane text wins — a later match is a subprocess); for MANAGED windows `detect_managed` reads the backend off the launch recipe FIRST, because the sniff lies for our own spawns — the npm codex runs as `node` with nothing saying "codex" anywhere, so a spawned codex fell out of delivery/roster/vitals/recovery until the record beat the sniff (measured 2026-08-22). And there is ONE way to ask about a pane — `agents::detect_pane(ws, &pane)`: the recipe, else the listing's process-derived `TmuxPane::agent` — because seven call sites used to assemble a detection haystack by hand and one did it differently (the capturer read `child_cmd` and not the window name; the roster, delivery, vitals and recovery read the window name and not `child_cmd`), so the declaration and the roster could disagree about whether the same window was an agent (2026-09-03 review). The client used to be the eighth: its own regex over command + title + child argv, which is how a stale title painted a shell as grok (board #260); it now reads `agent` off the pane.
 
 **An agent resumes its conversation, not a blank prompt**: the notify hooks already carry `session_id`, the hub keeps the last one per tmux window, the capturer stamps it onto the slot (sticky — a quiet cycle must not erase it), and managed `up` prefers `--resume-id`/`--resume <id>`/`codex resume <id>`/`grok --resume <id>`. If the exact id has not reached `state.db` before the 20-second capture tick, the isolated-home fallback is `kiro-cli chat --resume` / `claude --continue` / `grok --continue` / `codex resume --last`; the Codex form is safe only here because CODEX_HOME is per-agent and `--last` is cwd-filtered, while the generic shared-home path still starts clean.
 

@@ -40,6 +40,14 @@ pub struct TmuxPane {
     /// identity lives in the argv. Empty when the pane runs a bare shell.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub child_cmd: String,
+    /// The agent CLI this pane's PROCESSES run (backend name), or `None` for
+    /// anything else — derived once, here, by `agents::detect_processes` over
+    /// the process name, the pane process's own argv and its descendants'
+    /// (board #260). Never from `pane_title` or `window_name`: those are
+    /// labels a CLI sets and nothing resets, so a shell where grok had exited
+    /// still said "grok". Every reader, server and client, takes this field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<&'static str>,
 }
 
 use std::sync::{OnceLock, RwLock};
@@ -386,21 +394,43 @@ fn parse_pane_lines(output: &str) -> Vec<TmuxPane> {
                 current_path: parts.get(8).unwrap_or(&"").to_string(),
                 active: parts.get(9).unwrap_or(&"0") == &"1",
                 child_cmd: String::new(),
+                agent: None,
             };
             let pid: u32 = parts.get(10).unwrap_or(&"0").parse().unwrap_or(0);
             (pane, pid)
         })
         .collect();
     // Single ps snapshot serves every pane in this listing.
-    if panes.iter().any(|(_, pid)| *pid > 0) {
-        let table = process_table();
-        for (pane, pid) in panes.iter_mut() {
-            if *pid > 0 {
-                pane.child_cmd = descendant_cmd(&table, *pid);
-            }
+    let table = panes.iter().any(|(_, pid)| *pid > 0).then(process_table);
+    for (pane, pid) in panes.iter_mut() {
+        let root = table.as_deref().filter(|_| *pid > 0).map(|t| {
+            pane.child_cmd = descendant_cmd(t, *pid);
+            t.get(pid).map(|(_, args)| args.as_str()).unwrap_or("")
+        });
+        // The detection table lives with the projects (desktop-only, like the
+        // store): a phone is a client of a desktop server, never a server
+        // whose panes run agents, so its listing simply carries no verdict.
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            pane.agent = crate::projects::agents::detect_processes(
+                &pane.current_command,
+                root.unwrap_or(""),
+                &pane.child_cmd,
+            )
+            .map(|a| a.backend);
         }
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        let _ = root;
     }
     panes.into_iter().map(|(p, _)| p).collect()
+}
+
+/// The agent CLI running in ONE pane (`TmuxPane::agent`), for the terminal
+/// stream's command-change push (board #260): the same listing and the same
+/// derivation as `list_panes`, just for one target.
+pub fn pane_agent(target: &str) -> Option<&'static str> {
+    let output = run_tmux(&["display-message", "-p", "-t", target, PANE_FORMAT]).ok()?;
+    parse_pane_lines(&output).into_iter().next()?.agent
 }
 
 /// List panes across ALL sessions in one tmux call. Avoids the N+1 RPC
@@ -1446,5 +1476,34 @@ mod tests {
         let before = PS_CALLS.load(std::sync::atomic::Ordering::SeqCst);
         let _ = parse_pane_lines(&line);
         assert_eq!(PS_CALLS.load(std::sync::atomic::Ordering::SeqCst) - before, 1);
+    }
+
+    /// Board #260 on a real tmux: a pane's agent comes from its processes,
+    /// never its title. A plain process wearing an agent's stale title (what
+    /// an exited CLI leaves behind) lists as no agent; a process whose argv
+    /// names an agent lists as that agent under an ordinary title, in the
+    /// listing and in the one-pane `pane_agent` the terminal stream reads.
+    #[test]
+    fn a_real_pane_is_an_agent_by_its_processes_not_its_title() {
+        let session = format!("tmm-detect-{}", std::process::id());
+        let _ = kill_session(&session);
+        if new_session(&session, None, Some("cat")).is_err() {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        let _guard = KillOnDrop(session.clone());
+        run_tmux(&["select-pane", "-t", &format!("={session}:"), "-T", "grok"]).expect("set title");
+        // `exec -a` sets argv[0]: the process is `sleep`, its argv says kiro-cli.
+        run_tmux(&["new-window", "-d", "-t", &format!("={session}:"), "bash -c 'exec -a kiro-cli sleep 300'"])
+            .expect("agent-argv window");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let panes = list_panes(&session).expect("list");
+        let stale = panes.iter().find(|p| p.pane_title == "grok").expect("the stale-title pane");
+        assert_eq!(stale.agent, None, "a title is not a process: {stale:?}");
+        let agent = panes.iter().find(|p| p.pane_title != "grok").expect("the argv pane");
+        assert_eq!(agent.agent, Some("kiro"), "{agent:?}");
+        let target = |p: &TmuxPane| format!("{}:{}.{}", p.session, p.window, p.pane);
+        assert_eq!(pane_agent(&target(stale)), None);
+        assert_eq!(pane_agent(&target(agent)), Some("kiro"));
     }
 }

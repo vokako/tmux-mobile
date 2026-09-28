@@ -1061,8 +1061,8 @@ test('Watch in the shared menu routes the clicked agent on phone and narrow desk
     const routes: unknown[][] = [];
     const { rpc } = roomFixture();
     const panes = [
-      { session: 'fixture', window: 0, pane: 0, active: true, current_command: 'kiro', window_name: 'alice', pane_title: 'alice', current_path: '/fixture', width: 80, height: 24 },
-      { session: 'fixture', window: 1, pane: 0, active: true, current_command: 'codex', window_name: 'bob', pane_title: 'bob', current_path: '/fixture', width: 80, height: 24 },
+      { session: 'fixture', window: 0, pane: 0, active: true, current_command: 'kiro', agent: 'kiro', window_name: 'alice', pane_title: 'alice', current_path: '/fixture', width: 80, height: 24 },
+      { session: 'fixture', window: 1, pane: 0, active: true, current_command: 'codex', agent: 'codex', window_name: 'bob', pane_title: 'bob', current_path: '/fixture', width: 80, height: 24 },
     ];
     const app = await (await compiledHub()).mount(context, {
       props: { visible: true, mobile, openTerminal: (...args: unknown[]) => routes.push(args) },
@@ -1084,7 +1084,7 @@ test('Watch in the shared menu routes the clicked agent on phone and narrow desk
       const watch = [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')].find(button => button.textContent?.includes('Watch in terminal'))!;
       assert.ok(watch); watch.click();
       await app.flush();
-      assert.deepEqual(routes, [['fixture', 'fixture:1.0', 'codex']]);
+      assert.deepEqual(routes, [['fixture', 'fixture:1.0']]);
       assert.equal(selectedCard(app.document), 'alice');
       panes.splice(0, 1);
       await app.advance(20000);

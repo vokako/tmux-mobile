@@ -178,7 +178,6 @@
   let drawerBoardNew = $state(null); // the drawer head's + (board #23): new issue, requested into the embedded Board
   let drawerFilesDir = $state(''); // where the drawer's Files is — the jump hands it over
   let termTarget = $state('');
-  let termCommand = $state('');
   // The switcher bar folds non-agent windows (board #92: "只 filter 出当前有效
   // 的 agent window，其他 window 可以帮我折叠起来"): shells and other windows
   // hide behind a +N pill so they never push the agent pills out of the bar.
@@ -354,7 +353,7 @@
     termOpen = !!dv;
     // The old room's pane must never leak into this one's terminal partition
     // — and the unfold is a transient reading of THAT room's bar (board #92).
-    termTarget = ''; termCommand = ''; winsExpanded = false;
+    termTarget = ''; winsExpanded = false;
     // Seat the recipient's pane (board #209): the card the user left selected
     // and the pane beside it are ONE choice — same rule as openDrawer/#91.
     if (dv === 'term') {
@@ -946,16 +945,14 @@
         ?? panes.find((p) => p.session === selected && p.window === pick.window);
       if (p) {
         termTarget = `${p.session}:${p.window}.${p.pane}`;
-        termCommand = p.current_command || '';
       } else {
         termTarget = '';
-        termCommand = '';
       }
     }
     if (mobile || (compact && drawerView === 'term')) {
       // Compact layouts have no terminal drawer; use the whole Terminal tab.
       const m = /^(.+):(\d+)\.(\d+)$/.exec(termTarget);
-      if (m) openTerminal(selected, termTarget, termCommand);
+      if (m) openTerminal(selected, termTarget);
       return;
     }
     if (termOpen) return; // switching partitions while open is a content swap, not a move
@@ -997,7 +994,6 @@
       ?? panes.find((p) => p.session === selected && p.window === a.window);
     if (p) {
       termTarget = `${p.session}:${p.window}.${p.pane}`;
-      termCommand = p.current_command || '';
     }
   }
 
@@ -1934,12 +1930,12 @@
          grid item the reveal pins; the Drawer inside never changes size
          while the track moves (board #174). ── -->
     <div class="track drawer-track" id={drawerId} bind:this={drawerTrackEl}>
-    <Drawer {compact} {visible} {fontSize} {selected} {projectPath} {termTarget} {termCommand}
+    <Drawer {compact} {visible} {fontSize} {selected} {projectPath} {termTarget}
       {drawerView} {drawerFilesReq} {drawerIssueReq} {drawerBoardNew}
       {agents} {panes} {managedAgents} {winsExpanded} {stateLabel} {stateTone}
       bind:drawerFilesDir onpick={pickWindow} onclose={closeDrawer}
       onexpand={() => (winsExpanded = !winsExpanded)}
-      onterminal={() => { const m = /^(.+):(\d+)\.(\d+)$/.exec(termTarget); if (m) openTerminal(selected, termTarget, termCommand); }}
+      onterminal={() => { const m = /^(.+):(\d+)\.(\d+)$/.exec(termTarget); if (m) openTerminal(selected, termTarget); }}
       onfiles={() => openFilesTab?.(selected, drawerFilesDir || projectPath)}
       onboard={() => openBoardTab?.(selected)}
       onnewissue={() => (drawerBoardNew = { n: (drawerBoardNew?.n ?? 0) + 1 })}

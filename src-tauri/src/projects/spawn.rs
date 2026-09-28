@@ -1878,7 +1878,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
             session: "s".into(), window: w, pane: 0, width: 80, height: 24,
             current_command: "kiro-cli".into(), window_name: name.into(),
             pane_title: String::new(), current_path: String::new(),
-            active: true, child_cmd: String::new(),
+            active: true, child_cmd: String::new(), agent: Some("kiro"),
         };
         let managed = |name: &str| {
             let home = ws.join(".tmm/agents").join(name);

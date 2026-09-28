@@ -165,6 +165,14 @@ async fn subscription_loop(
             params.insert("cursor".into(), cursor_obj);
             if cmd_changed {
                 params.insert("current_command".into(), serde_json::Value::String(current_cmd));
+                // The pane's agent rides with every command change (board
+                // #260): the terminal's keyboard overlay asks "is this a chat
+                // TUI?", and that verdict has ONE definition — the listing's
+                // process-derived `TmuxPane::agent` — not a second matcher in
+                // the client over a process name. Once per change, not per frame.
+                let t = target.clone();
+                let agent = tokio::task::spawn_blocking(move || tmux::pane_agent(&t)).await.ok().flatten();
+                params.insert("agent".into(), agent.map_or(serde_json::Value::Null, |a| serde_json::Value::String(a.into())));
             }
             let msg = serde_json::json!({
                 "id": null,

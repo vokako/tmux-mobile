@@ -23,7 +23,7 @@ Rust-based WebSocket server providing JSON-RPC interface to tmux and filesystem 
 - `subscribe(target)` starts a polling loop (200ms interval)
 - Polls `capture_pane_with_width` (ANSI escapes + joined soft-wrapped lines + CJK width fix)
 - Also polls `cursor_info` for cursor position
-- Pushes `pane_output` with content (only when changed), cursor position, and `current_command` on the first push or when it changes
+- Pushes `pane_output` with content (only when changed), cursor position, and `current_command` + the pane's process-derived `agent` on the first push or when the command changes
 - Pushes `pane_closed` after repeated capture failures (pane gone)
 - One subscription map per connection (multiple targets supported)
 - `unsubscribe` or disconnect stops the loop

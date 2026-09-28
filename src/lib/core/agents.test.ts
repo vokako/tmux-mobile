@@ -1,16 +1,47 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { paneAgent, paneChipLabel } from './agents.ts';
+import { readFileSync } from 'node:fs';
+import { AGENTS, agentByBackend, paneAgent, paneChipLabel } from './agents.ts';
+
+// Board #260: WHICH agent a pane runs is the server's verdict (`agent`,
+// derived from the pane's processes — agents.rs owns the matcher and its
+// word-boundary / shallowest-wins tests). The client reads it and never
+// re-derives it from labels: the owner's tmux-mobile:1 was a zsh whose title
+// still said "grok" after grok exited, and the old client matcher over
+// command + title + child argv painted it as grok.
+test('a pane is an agent only by the server verdict, never by its labels', () => {
+  // A variable, not a literal: a real pane carries pane_title too.
+  const ownerCase = { current_command: 'zsh', pane_title: 'grok', window_name: 'zsh' };
+  assert.equal(paneAgent(ownerCase), null);
+  assert.equal(paneAgent({ current_command: 'kiro-cli-chat', window_name: 'codex' }), null);
+  assert.equal(paneAgent({ current_command: 'zsh', agent: 'grok' })?.tag, 'Grok');
+  assert.equal(paneAgent({ current_command: 'node', agent: 'codex' })?.tag, 'Codex');
+  assert.equal(paneAgent({ agent: null }), null);
+  assert.equal(paneAgent(null), null);
+});
+
+test('every backend the server can name has a tag and an icon', () => {
+  // The detection table's rows: the six spawnable backends + detection-only openclaw.
+  for (const backend of ['kiro', 'claude', 'codex', 'grok', 'omp', 'kimi', 'openclaw']) {
+    const agent = agentByBackend(backend);
+    assert.ok(agent, backend);
+    assert.equal(agent.icon, `/assets/${backend}.svg`);
+  }
+  assert.equal(agentByBackend('Kiro')?.tag, 'Kiro', 'case-insensitive, like a stored slot backend');
+  assert.equal(agentByBackend('vim'), null);
+  assert.equal(agentByBackend(''), null);
+});
+
+test('the client carries no matcher of its own', () => {
+  // One definition (tenet 8): a regex table here would be a second answer.
+  for (const a of AGENTS) assert.equal('match' in a, false, a.tag);
+  const source = readFileSync(new URL('./agents.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /export function (detectAgent|paneText)\b/u);
+});
 
 test('recognized agent panes use icon-only chip labels', () => {
-  const panes = [
-    { current_command: 'kiro-cli-chat' },
-    { current_command: 'node', child_cmd: 'codex' },
-    { current_command: '2.1.141' },
-  ];
-  for (const pane of panes) {
-    assert.ok(paneAgent(pane));
-    assert.equal(paneChipLabel(pane, '0.0'), '');
+  for (const agent of ['kiro', 'codex', 'claude']) {
+    assert.equal(paneChipLabel({ current_command: 'node', agent }, '0.0'), '');
   }
 });
 
@@ -18,30 +49,4 @@ test('ordinary panes keep their process or fallback label', () => {
   assert.equal(paneChipLabel({ current_command: 'zsh' }, '0.0'), 'zsh');
   assert.equal(paneChipLabel({ window_name: 'logs' }, '0.0'), 'logs');
   assert.equal(paneChipLabel({}, '0.0'), '0.0');
-});
-
-// kimi-code spawns a "kiro-web-search" helper — without the Kimi entry the
-// /kiro/ match in the child chain painted the pane as Kiro.
-test('kimi-code wins over a kiro-* tool in its child chain', () => {
-  const pane = { current_command: 'kimi-code', child_cmd: 'uv tool uvx kiro-web-search' };
-  assert.equal(paneAgent(pane)?.tag, 'Kimi');
-});
-
-// oh-my-pi's CLI is a single `omp` binary, and "omp" is a substring of
-// everyday process text (docker-compose, a component build). The entry is
-// word-bounded: real omp panes match, compose panes stay ordinary shells.
-test('omp is detected as a word, never inside compose', () => {
-  assert.equal(paneAgent({ current_command: 'omp' })?.tag, 'OMP');
-  assert.equal(paneAgent({ current_command: 'sh', child_cmd: '/home/u/.local/bin/omp --continue' })?.tag, 'OMP');
-  assert.equal(paneAgent({ current_command: 'docker-compose' }), null);
-  assert.equal(paneAgent({ current_command: 'node', pane_title: 'component-lab' }), null);
-});
-
-// The same boundary rule protects every short brand name: a window named
-// after the kirocrew project is not a Kiro agent, but the real launch
-// spellings (kiro-cli-chat, codex.js) keep their `-`/`.` boundaries.
-test('brand needles are word-bounded on every backend', () => {
-  assert.equal(paneAgent({ current_command: 'bash', pane_title: 'kirocrew-in-agentcore' }), null);
-  assert.equal(paneAgent({ current_command: 'kiro-cli-chat' })?.tag, 'Kiro');
-  assert.equal(paneAgent({ current_command: 'node', child_cmd: 'node /usr/lib/node_modules/codex/bin/codex.js' })?.tag, 'Codex');
 });

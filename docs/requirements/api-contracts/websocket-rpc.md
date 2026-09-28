@@ -51,7 +51,7 @@ JSON-RPC over WebSocket (`ws://` or `wss://`).
 |--------|--------|----------|
 | `ping` | — | `"pong"`. Used by the client's idle probe to detect half-open links. |
 | `list_sessions` | — | Array of `{name, windows, attached, created, last_opened?}` objects. `last_opened` is unix seconds of the last time this session was opened via tmux-mobile (`subscribe` RPC); absent if never opened. |
-| `list_panes` | `session` | Array of pane objects: `{session, window, pane, width, height, current_command, window_name, pane_title, current_path, active, child_cmd?}`. `current_path` is tmux `#{pane_current_path}`; `active` marks the window's active pane; `child_cmd` is the foreground descendant argv (detects interpreter-launched agent CLIs), omitted for bare shells. |
+| `list_panes` | `session` | Array of pane objects: `{session, window, pane, width, height, current_command, window_name, pane_title, current_path, active, child_cmd?, agent?}`. `current_path` is tmux `#{pane_current_path}`; `active` marks the window's active pane; `child_cmd` is the foreground descendant argv, omitted for bare shells; `agent` is the backend name (`kiro`, `claude`, `codex`, `grok`, `omp`, `kimi`, `openclaw`) the pane's PROCESSES run, derived by the server from the process name and argv chain — never from `pane_title` or `window_name` — and omitted for anything else. Clients read `agent`; they do not re-derive it (board #260). `list_sessions_with_panes` carries the same pane objects. |
 | `list_sessions_with_panes` | — | `{sessions, panes}` — the two lists above in one round-trip (saves 1+N RPCs on the Sessions page). |
 | `new_session` | `name?`, `path?`, `command?` | OK |
 | `kill_session` | `name` | OK |
@@ -209,7 +209,7 @@ are team-agnostic. The Team tab hides itself when these return -32601.
 ## Server Push Messages
 | Method | Params | Description |
 |--------|--------|-------------|
-| `pane_output` | `target`, `content?`, `cursor`, `current_command?` | Pushed on content/cursor change; `current_command` appears on the first push and when the command changes |
+| `pane_output` | `target`, `content?`, `cursor`, `current_command?`, `agent?` | Pushed on content/cursor change; `current_command` appears on the first push and when the command changes, and `agent` (the pane's backend name as in `list_panes`, `null` for none) appears with it |
 | `pane_closed` | `target` | Pushed when pane becomes unreachable (after repeated capture failures) |
 | `team_message` | `room`, `message` | New group-chat message in a team room |
 

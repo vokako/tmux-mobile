@@ -11,7 +11,7 @@
   import { t } from '../core/i18n.svelte.ts';
   import type { TmuxPane } from '../core/ws.ts';
 
-  export interface SplitCell { id: number; target: string; session: string; command: string }
+  export interface SplitCell { id: number; target: string; session: string }
 
   let {
     cells,            // one entry per grid cell
@@ -29,7 +29,7 @@
     activeCellId: number;
     fontSize?: number;
     onActivate?: (cellId: number) => void;
-    onAssign?: (cellId: number, target: string, session: string, command: string) => void;
+    onAssign?: (cellId: number, target: string, session: string) => void;
     onCloseCell?: (cellId: number) => void;
     onPaneExit?: (cellId: number) => void;
     visible?: boolean;
@@ -51,7 +51,7 @@
   }
   function closePicker() { pickerCellId = null; }
   function pickPane(cellId: number, p: TmuxPane) {
-    onAssign(cellId, `${p.session}:${p.window}.${p.pane}`, p.session, p.current_command);
+    onAssign(cellId, `${p.session}:${p.window}.${p.pane}`, p.session);
     closePicker();
   }
 </script>
@@ -73,12 +73,11 @@
             <Terminal
               target={cell.target}
               session={cell.session}
-              command={cell.command}
               embedded={true}
               active={cell.id === activeCellId}
               {visible}
               {fontSize}
-              onSwitchPane={(t2: string, cmd: string) => onAssign(cell.id, t2, t2.split(':')[0] ?? '', cmd)}
+              onSwitchPane={(t2: string) => onAssign(cell.id, t2, t2.split(':')[0] ?? '')}
               onPaneExit={() => onPaneExit(cell.id)}
               onClose={() => onCloseCell(cell.id)}
             />

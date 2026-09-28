@@ -241,7 +241,7 @@
     }
     const live = await paneTargets(row.project.session);
     const pane = live.find((p) => p.active) ?? live[0];
-    if (pane) openTerminal(row.project.session, `${pane.session}:${pane.window}.${pane.pane}`, pane.current_command);
+    if (pane) openTerminal(row.project.session, `${pane.session}:${pane.window}.${pane.pane}`);
   }
 
   /// Tap a window chip: jump straight into that window. A closed project has to
@@ -255,7 +255,7 @@
     const live = await paneTargets(row.project.session);
     const pane = live.find((p) => p.window_name === name && p.active)
       ?? live.find((p) => p.window_name === name);
-    if (pane) openTerminal(row.project.session, `${pane.session}:${pane.window}.${pane.pane}`, pane.current_command);
+    if (pane) openTerminal(row.project.session, `${pane.session}:${pane.window}.${pane.pane}`);
   }
 
 

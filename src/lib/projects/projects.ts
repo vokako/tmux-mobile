@@ -2,7 +2,7 @@
 // component stays markup: the row ordering and the window-chip rules are the
 // parts worth testing, and `node --test` can reach them without a DOM.
 
-import { AGENTS, paneAgent, type Agent, type PaneLike } from '../core/agents.ts';
+import { agentByBackend, paneAgent, type PaneLike } from '../core/agents.ts';
 
 export type SlotKind = 'shell' | 'agent';
 
@@ -61,12 +61,6 @@ export interface WindowChip {
   target: string | null;
   agentIcon: string | null;
   agentTag: string | null;
-}
-
-/** The AGENTS entry for a backend name we stored on a slot (`kiro`, `codex`…). */
-export function agentByBackend(backend: string | null | undefined): Agent | null {
-  if (!backend) return null;
-  return AGENTS.find((a) => a.tag.toLowerCase() === backend.toLowerCase()) ?? null;
 }
 
 /**

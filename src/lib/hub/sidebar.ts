@@ -3,7 +3,7 @@ import type { TmuxPane } from '../core/ws.ts';
 import type { ProjectRow } from '../projects/projects.ts';
 
 export type SidebarPane = Pick<TmuxPane,
-  'session' | 'window' | 'window_name' | 'active' | 'current_command' | 'pane_title' | 'child_cmd'>;
+  'session' | 'window' | 'window_name' | 'active' | 'current_command' | 'agent'>;
 
 interface RowAgent {
   icon: string | null;

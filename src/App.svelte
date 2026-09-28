@@ -62,7 +62,6 @@
   let connected = $state(false);
   let terminalTarget = $state('');
   let terminalSession = $state('');
-  let terminalCommand = $state('');
   // Files follows the session the user touched LAST — opening a terminal pane
   // OR selecting a chat project both set it. It used to derive from the
   // terminal alone, so browsing a project in the chat never moved the Files
@@ -175,26 +174,26 @@
     const base = splitCells.length
       ? splitCells.slice()
       : (terminalTarget
-          ? [{ id: nextCellId++, target: terminalTarget, session: terminalSession, command: terminalCommand }]
+          ? [{ id: nextCellId++, target: terminalTarget, session: terminalSession }]
           : []);
     const next = base.slice(0, n);
-    while (next.length < n) next.push({ id: nextCellId++, target: '', session: '', command: '' });
+    while (next.length < n) next.push({ id: nextCellId++, target: '', session: '' });
     splitLayout = n;
     splitCells = next;
     if (activeCellId == null || !next.some(c => c.id === activeCellId)) {
       activeCellId = next[0]?.id ?? null;
     }
   }
-  function assignCell(id, target, session, command = '') {
-    splitCells = splitCells.map(c => c.id === id ? { ...c, target, session, command } : c);
+  function assignCell(id, target, session) {
+    splitCells = splitCells.map(c => c.id === id ? { ...c, target, session } : c);
     // Keep the single-pane mirror pointed at the active cell so the
     // narrow-screen fallback and Files page follow what the user is using.
     if (id === activeCellId && target) {
-      terminalTarget = target; terminalSession = session; terminalCommand = command;
+      terminalTarget = target; terminalSession = session;
     }
   }
   function closeCell(id) {
-    splitCells = splitCells.map(c => c.id === id ? { ...c, target: '', session: '', command: '' } : c);
+    splitCells = splitCells.map(c => c.id === id ? { ...c, target: '', session: '' } : c);
   }
   function cellPaneExit(id) { closeCell(id); }
 
@@ -537,7 +536,7 @@
   $effect(() => {
     if (!connected) return;
     localStorage.setItem('tmux_state', JSON.stringify({
-      page, terminalTarget, terminalSession, terminalCommand,
+      page, terminalTarget, terminalSession,
       splitLayout, splitCells,
     }));
   });
@@ -638,11 +637,10 @@
     window.dispatchEvent(new Event('ws-reconnected'));
   }
 
-  function openTerminal(session, target, command = '') {
+  function openTerminal(session, target) {
     const from = page;
     terminalSession = session;
     terminalTarget = target;
-    terminalCommand = command;
     page = 'terminal';
     navPush();
     if (from === 'hub') jumpedFrom = 'hub';
@@ -669,7 +667,6 @@
       const pick = before[before.length - 1] || remaining[0];
       if (pick) {
         terminalTarget = `${pick.session}:${pick.window}.${pick.pane}`;
-        terminalCommand = pick.current_command || '';
         return;
       }
     } catch {} // list_panes fails when the whole session died with the pane
@@ -1121,7 +1118,6 @@
               if (!(sessions ?? []).some((x) => x.name === s.terminalSession)) {
                 terminalTarget = '';
                 terminalSession = '';
-                terminalCommand = '';
                 splitCells = splitCells.filter((c) => c.session !== s.terminalSession);
               }
             })
@@ -1130,7 +1126,6 @@
         if (s.terminalTarget) {
           terminalTarget = s.terminalTarget;
           terminalSession = s.terminalSession || '';
-          terminalCommand = s.terminalCommand || '';
           // Restore split layout only on eligible (desktop + wide) clients;
           // a desktop-saved state silently stays single-pane on a phone.
           if (splitEligible && s.splitLayout > 1 && Array.isArray(s.splitCells) && s.splitCells.length) {
@@ -1741,7 +1736,7 @@
            switches. Desktop-eligible only (needs width + the desktop server):
            mobile keeps the tab layout untouched. -->
       <div class="page-layer" class:hidden={page !== 'hub'}>
-        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} onReselect={(fn) => { pageReselect.hub = fn; }} openAgentConfig={(name, kind) => openAgentsConfig(name, kind)} openFilesTab={(s, path, file) => { if (s) filesSession = s; if (path || file) filesNavReq = { path, file, n: (filesNavReq?.n ?? 0) + 1 }; switchTab('files'); jumpedFrom = 'hub'; }} openBoardTab={(s, issue) => { if (s) filesSession = s; if (issue) boardIssueReq = { session: s, id: issue, n: (boardIssueReq?.n ?? 0) + 1 }; switchTab('board'); jumpedFrom = 'hub'; }} />
+        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt) => openTerminal(s, tgt)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} onReselect={(fn) => { pageReselect.hub = fn; }} openAgentConfig={(name, kind) => openAgentsConfig(name, kind)} openFilesTab={(s, path, file) => { if (s) filesSession = s; if (path || file) filesNavReq = { path, file, n: (filesNavReq?.n ?? 0) + 1 }; switchTab('files'); jumpedFrom = 'hub'; }} openBoardTab={(s, issue) => { if (s) filesSession = s; if (issue) boardIssueReq = { session: s, id: issue, n: (boardIssueReq?.n ?? 0) + 1 }; switchTab('board'); jumpedFrom = 'hub'; }} />
       </div>
     {/if}
     <!-- The Agents PAGE exists where Agents is a page: the desktop rail. On
@@ -1839,11 +1834,11 @@
               onCloseCell={closeCell}
               onPaneExit={cellPaneExit} />
           {:else}
-            <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {fontSize}
+            <Terminal target={terminalTarget} session={terminalSession} {fontSize}
               visible={page === 'terminal'}
               splitEligible={splitEligible} {splitActive} {splitLayout} onSetLayout={setLayout}
               onOpenSessions={layout.isTouchDevice ? () => sessListOpen = true : null}
-              onSwitchPane={(t, cmd) => { terminalTarget = t; terminalSession = t.split(':')[0]; terminalCommand = cmd || ''; }} onPaneExit={paneExitFallback} />
+              onSwitchPane={(t) => { terminalTarget = t; terminalSession = t.split(':')[0]; }} onPaneExit={paneExitFallback} />
           {/if}
         </div>
       {:else}

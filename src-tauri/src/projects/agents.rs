@@ -114,8 +114,8 @@ pub fn home_dir(workspace: &str, name: &str) -> Option<std::path::PathBuf> {
 /// be non-word bytes (`-`, `.`, `/`, space … all count as boundaries, so
 /// `kiro-cli-chat`, `codex.js` and `/bin/omp` match). Substring matching
 /// painted plain shells as agents — "omp" lives inside docker-compose, and a
-/// window named after the kirocrew project contained "kiro". Mirrors the
-/// frontend's `\b`-bounded regexes in `core/agents.ts`, underscore included.
+/// window named after the kirocrew project contained "kiro". `_` is a word
+/// character, as in a regex `\b`.
 fn find_word(haystack: &str, needle: &str) -> Option<usize> {
     let bytes = haystack.as_bytes();
     let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
@@ -135,11 +135,12 @@ fn find_word(haystack: &str, needle: &str) -> Option<usize> {
 
 /// The agent running in a pane, or `None` for an ordinary shell.
 ///
-/// `text` must be ordered shallow → deep (`pane_current_command`, then the
-/// title, then the foreground child's argv) because the EARLIEST match wins:
-/// a late match is a subprocess the agent spawned, not what the user launched.
-/// Claude Code needs no special case even though its process name is a bare
-/// version number — its argv path contains `.../claude/versions/<v>`.
+/// `text` must be ordered shallow → deep (`detect_processes`: the process
+/// name, the pane process's argv, then its descendants' argv) because the
+/// EARLIEST match wins: a late match is a subprocess the agent spawned, not
+/// what the user launched. Claude Code needs no special case even though its
+/// process name can be a bare version number — its argv says `claude`
+/// (invoked by name) or `.../claude/versions/<v>` (by path).
 pub fn detect(text: &str) -> Option<&'static KnownAgent> {
     let lower = text.to_lowercase();
     let mut best: Option<(usize, &'static KnownAgent)> = None;
@@ -154,57 +155,47 @@ pub fn detect(text: &str) -> Option<&'static KnownAgent> {
 }
 
 /// The agent in a MANAGED window: the launch recipe's recorded backend first,
-/// the pane sniff (`detect`) as the fallback for windows we did not create.
+/// the pane's process-derived agent (`TmuxPane::agent`) as the fallback for
+/// windows we did not create.
 ///
-/// The sniff is inherently wrong for some backends we ourselves spawned: the
-/// npm-installed codex runs as `node` (`bin/codex.js` shim), its pane title is
-/// the project name, and the window name is the agent's name — nothing says
-/// "codex", so `detect` returned None and the window fell out of delivery,
+/// The process evidence can be empty for a backend we ourselves spawned (an
+/// interpreter whose argv was clipped, a `ps` that failed), and a managed
+/// window that fell back to a shell is still that agent's slot for delivery,
 /// the roster, vitals and recovery (found live 2026-08-22: a spawned cx-probe
 /// never received its @mention). We WROTE the backend into `launch.json` at
 /// spawn — for our own windows the record beats the sniff.
-pub fn detect_managed(
-    workspace: Option<&str>,
-    window_name: &str,
-    pane_text: &str,
-) -> Option<&'static KnownAgent> {
-    if let Some(recipe) = workspace.and_then(|ws| home_dir(ws, window_name)).map(|h| h.join("launch.json")) {
-        if let Some(backend) = std::fs::read_to_string(recipe)
-            .ok()
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-            .and_then(|v| v.get("backend").and_then(|b| b.as_str().map(str::to_owned)))
-        {
-            if let Some(agent) = known().iter().find(|a| a.backend == backend) {
-                return Some(agent);
-            }
-        }
-    }
-    detect(pane_text)
+fn recipe_agent(workspace: Option<&str>, window_name: &str) -> Option<&'static KnownAgent> {
+    let recipe = workspace.and_then(|ws| home_dir(ws, window_name))?.join("launch.json");
+    let backend = std::fs::read_to_string(recipe)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("backend").and_then(|b| b.as_str().map(str::to_owned)))?;
+    known().iter().find(|a| a.backend == backend)
 }
 
-/// Every clue a pane offers about the agent in it, shallow → deep, in the
-/// order `detect` wants: `pane_current_command` (the process tmux started),
-/// the pane title and the window name (labels the launcher set — for a
-/// spawned window the name IS the agent's identity), then the foreground
-/// child's argv (the deepest process, where an interpreter-launched CLI such
-/// as the npm codex finally says its own name).
+/// The agent a pane's PROCESSES run, shallow → deep (board #260): the
+/// process tmux reports in the foreground (`pane_current_command`), the pane
+/// process's own argv, then the argv chain below it (`descendant_cmd`) —
+/// where an interpreter-launched CLI such as the npm codex (`node`) or Claude
+/// Code (a version-named binary) finally says its own name.
 ///
-/// ONE function because seven callers used to build this string by hand and
-/// one of them differently: the capturer looked at `child_cmd` and not the
-/// window name, the roster/delivery/vitals/recovery looked at the window name
-/// and not `child_cmd` — so the declaration and the roster could disagree
-/// about whether the same window was an agent.
-pub fn pane_text(pane: &TmuxPane) -> String {
-    format!(
-        "{} {} {} {}",
-        pane.current_command, pane.pane_title, pane.window_name, pane.child_cmd
-    )
+/// Labels are NOT evidence. `pane_title` is whatever the last CLI wrote with
+/// an OSC title sequence and nothing resets it when that CLI exits: the
+/// owner's `tmux-mobile:1` read `current_command zsh, title grok` after grok
+/// quit, and the old haystack (command + title + window name + child argv)
+/// painted the shell as grok. The window name is a label too — a window named
+/// after the kirocrew project is not kiro. ONE function, called once per pane
+/// in the listing (`tmux::parse_pane_lines`), so the server and the client
+/// read the same verdict off `TmuxPane::agent` instead of each re-deriving it.
+pub fn detect_processes(current_command: &str, pane_argv: &str, child_argv: &str) -> Option<&'static KnownAgent> {
+    detect(&format!("{current_command} {pane_argv} {child_argv}"))
 }
 
-/// The agent in `pane`, by its recipe first and every pane clue second — the
-/// one way to ask about a pane (`detect_managed` over `pane_text`).
+/// The agent in `pane`: its launch recipe first (managed windows), its
+/// process-derived agent second — the one way to ask about a pane.
 pub fn detect_pane(workspace: Option<&str>, pane: &TmuxPane) -> Option<&'static KnownAgent> {
-    detect_managed(workspace, &pane.window_name, &pane_text(pane))
+    recipe_agent(workspace, &pane.window_name)
+        .or_else(|| pane.agent.and_then(|b| known().iter().find(|a| a.backend == b)))
 }
 
 /// The launch line for a backend name we stored earlier.
@@ -285,32 +276,46 @@ mod tests {
             current_path: "/w".into(),
             active: true,
             child_cmd: child.into(),
+            agent: detect_processes(cmd, "-zsh", child).map(|a| a.backend),
         }
     }
 
-    /// The two clues the old call sites disagreed on both count now: the
-    /// window name (a spawned window is named after its agent) and the
-    /// foreground child's argv (where an interpreter-launched CLI says its
-    /// name). And the order stays shallow → deep, so a shell whose child is
-    /// an agent is still the agent, while a label never outranks the process.
+    /// Board #260, the owner's case: grok exited, its OSC title stayed. A
+    /// shell with a stale agent title, or an agent-named window, and no agent
+    /// process is a shell — labels are not evidence.
     #[test]
-    fn a_pane_is_read_by_every_clue_in_one_order() {
-        // The npm codex: `node` process, project title, agent-named window —
-        // the window name is what says codex (roster's view).
-        assert_eq!(detect_pane(None, &pane("node", "myproj", "codex-2", "")).map(|a| a.backend), Some("codex"));
-        // Same process, anonymous window, but argv names it (capturer's view).
-        assert_eq!(
-            detect_pane(None, &pane("node", "myproj", "win3", "node /x/@openai/codex/bin/codex.js")).map(|a| a.backend),
-            Some("codex")
-        );
-        // Shallow beats deep: the process tmux started wins over a subprocess.
-        assert_eq!(
-            detect_pane(None, &pane("kiro-cli", "chat", "w", "node kiro-web-search")).map(|a| a.backend),
-            Some("kiro")
-        );
-        // A bare shell with an ordinary name is not an agent.
+    fn a_stale_title_or_window_name_is_not_an_agent() {
+        // tmux-mobile:1 measured 2026-09-28: current_command zsh, title grok.
+        assert!(detect_pane(None, &pane("zsh", "grok", "zsh", "")).is_none());
+        for label in ["kiro", "claude", "Claude Code", "codex", "grok", "omp", "kimi", "openclaw"] {
+            assert!(detect_pane(None, &pane("zsh", label, "w", "")).is_none(), "title {label}");
+            assert!(detect_pane(None, &pane("bash", "~", label, "")).is_none(), "window {label}");
+        }
         assert!(detect_pane(None, &pane("zsh", "~", "shell", "")).is_none());
-        assert_eq!(pane_text(&pane("a", "b", "c", "d")), "a b c d");
+    }
+
+    /// Each backend is found by its PROCESSES alone, spelled the way this
+    /// host's panes spell them (`ps -o args`, 2026-09-28), with a title that
+    /// says nothing — and the process tmux started still outranks a
+    /// subprocess (shallow → deep).
+    #[test]
+    fn every_backend_is_found_by_its_processes() {
+        for (cmd, child, want) in [
+            ("kiro-cli", "kiro-cli chat --agent builder --trust-all-tools", "kiro"),
+            ("claude", "claude --mcp-config /w/.tmm/agents/lead/mcp.json", "claude"),
+            ("2.1.141", "/home/u/.local/share/claude/versions/2.1.141 --resume", "claude"),
+            ("node", "node /home/u/.local/bin/codex -c mcp_servers.kiro-web-search.command=uvx", "codex"),
+            ("grok", "grok --model grok-code", "grok"),
+            ("omp", "/home/u/.local/bin/omp --continue", "omp"),
+            ("kimi-code", "kimi-code uv tool uvx kiro-web-search", "kimi"),
+        ] {
+            assert_eq!(detect_pane(None, &pane(cmd, "host.example.com", "w", child)).map(|a| a.backend), Some(want), "{cmd}");
+        }
+        // The pane process itself is evidence too: a window created with the
+        // CLI as its command has no shell above it (`node codex.js` is root).
+        assert_eq!(detect_processes("node", "node /x/@openai/codex/bin/codex.js", "").map(|a| a.backend), Some("codex"));
+        // Shallow beats deep: the process tmux started wins over a subprocess.
+        assert_eq!(detect_processes("kiro-cli", "-zsh", "node kiro-web-search").map(|a| a.backend), Some("kiro"));
     }
 
     #[test]
@@ -429,19 +434,20 @@ mod tests {
         let home = ws.join(".tmm").join("agents").join("cx-probe");
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(home.join("launch.json"), r#"{"backend":"codex","cmd":"command codex"}"#).unwrap();
-        let pane_text = "node bedrock-e2e cx-probe"; // measured: cmd/title/window_name
-        assert!(detect(pane_text).is_none(), "the sniff alone must miss — that is the bug");
-        let hit = detect_managed(Some(ws.to_str().unwrap()), "cx-probe", pane_text);
+        // measured: cmd node, title = project, window = agent name, no argv clue
+        let probe = pane("node", "bedrock-e2e", "cx-probe", "");
+        assert!(probe.agent.is_none(), "the processes alone say nothing — that is the bug");
+        let hit = detect_pane(Some(ws.to_str().unwrap()), &probe);
         assert_eq!(hit.map(|a| a.backend), Some("codex"), "the recipe is the record");
-        // No workspace (a hand-started window) still sniffs.
-        assert!(detect_managed(None, "cx-probe", pane_text).is_none());
+        // No workspace (a hand-started window) reads the processes only.
+        assert!(detect_pane(None, &probe).is_none());
         assert_eq!(
-            detect_managed(None, "w", "kiro-cli chat").map(|a| a.backend),
+            detect_pane(None, &pane("kiro-cli", "t", "w", "kiro-cli chat")).map(|a| a.backend),
             Some("kiro")
         );
-        // A recipe naming an unknown backend falls back to the sniff.
+        // A recipe naming an unknown backend falls back to the processes.
         std::fs::write(home.join("launch.json"), r#"{"backend":"martian"}"#).unwrap();
-        assert!(detect_managed(Some(ws.to_str().unwrap()), "cx-probe", pane_text).is_none());
+        assert!(detect_pane(Some(ws.to_str().unwrap()), &probe).is_none());
         std::fs::remove_dir_all(&ws).ok();
     }
 }

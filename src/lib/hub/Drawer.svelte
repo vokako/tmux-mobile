@@ -13,7 +13,7 @@
     compact = false, visible = false, fontSize = 14, selected = '',
     /** The project's declared path — where its Files partition starts (board #181). */
     projectPath = '',
-    termTarget = '', termCommand = '', drawerView = 'term',
+    termTarget = '', drawerView = 'term',
     drawerFilesReq = null, drawerIssueReq = null, drawerBoardNew = null,
     agents = [], panes = [], managedAgents = [], winsExpanded = false,
     stateLabel = (state) => state, stateTone = () => undefined,
@@ -96,7 +96,7 @@
   <div class="term-body" class:off={drawerView !== 'term'}>
     {#if termTarget}
       {#key termTarget}
-        <Terminal target={termTarget} session={selected} command={termCommand} {fontSize} embedded chromeless active={visible && drawerView === 'term'} visible={visible && drawerView === 'term'} />
+        <Terminal target={termTarget} session={selected} {fontSize} embedded chromeless active={visible && drawerView === 'term'} visible={visible && drawerView === 'term'} />
       {/key}
     {:else}
       <div class="empty">{t('hubNoPane')}</div>

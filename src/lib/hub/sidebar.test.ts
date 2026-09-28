@@ -18,7 +18,7 @@ const row: ProjectRow = {
 };
 const pane = (name: string, window: number, overrides: Partial<SidebarPane> = {}): SidebarPane => ({
   session: 'alpha', window, window_name: name, active: true,
-  current_command: 'kiro', pane_title: '', ...overrides,
+  current_command: 'kiro-cli', agent: 'kiro', ...overrides,
 });
 const live = row.slots.slice(0, 5).map((s) => pane(s.window_name, s.ord));
 
@@ -26,7 +26,7 @@ test('live chips keep every active agent window in input order and exclude shell
   const panes = [
     pane('other', 10, { session: 'elsewhere' }),
     pane('inactive', 11, { active: false }),
-    pane('shell', 12, { current_command: 'bash' }),
+    pane('shell', 12, { current_command: 'bash', agent: undefined }),
     live[0]!, pane('duplicate', 0), ...live.slice(1),
   ];
   const chips = rowAgents(row, panes, { 'alpha:alice': 'working', 'alpha:bob': 'waiting' });
@@ -64,7 +64,7 @@ test('closed chips list every declared agent with its backend and no live state 
 
 test('hover counts all live names and missing slots; the chips show every live one', () => {
   const panes = [
-    ...live, live[0]!, pane('shell', 90, { current_command: 'bash' }),
+    ...live, live[0]!, pane('shell', 90, { current_command: 'bash', agent: undefined }),
     pane('frank', 5, { active: false }), pane('elsewhere', 0, { session: 'other' }),
   ];
   assert.equal(rowAgents(row, panes, {}).length, 5);

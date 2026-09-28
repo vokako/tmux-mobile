@@ -8,53 +8,36 @@
 // MIT). White-background avatars get a hairline ring so they read on
 // light surfaces.
 //
-// Detection is intentionally loose (case-insensitive substring) because tmux's
-// pane_current_command reports the short process name (e.g. "kiro-cli-chat")
-// while pane_title often carries the full argv line. We check both.
+// WHICH agent a pane runs is not decided here (board #260). The server
+// derives it once per pane from the pane's processes (`TmuxPane::agent`,
+// `agents::detect_processes`) and every listing carries the backend name;
+// this table only turns that name into a tag and an icon. The client used to
+// run its own matcher over command + pane_title + child argv, and a title is
+// a label nothing resets: a shell where grok had exited kept the title
+// "grok" and wore grok's icon.
 
 export interface Agent {
   tag: string;
-  match: RegExp;
   icon: string;
   iconSize: number;
 }
-// Minimal pane shape needed for detection; real panes (ws.ts TmuxPane)
+// Minimal pane shape the agent readers need; real panes (ws.ts TmuxPane)
 // satisfy it, and so do partial objects in tests.
 export type PaneLike = {
+  /** Backend name the server derived from the pane's processes; absent = no agent. */
+  agent?: string | null;
   current_command?: string;
-  pane_title?: string;
-  child_cmd?: string;
   window_name?: string;
 } | null | undefined;
 
 export const AGENTS: Agent[] = [
-  // Kimi Code runs as `kimi` (2.0.2; older builds `kimi-code`). It must
-  // match BEFORE the /kiro/ entry can fire: a kimi pane's child chain
-  // typically contains its "kiro-web-search" helper, and "kimi" in
-  // current_command always sits earlier in the pane text than any
-  // child-chain "kiro".
-  //
-  // Every needle is WORD-BOUNDED (\b): these are short brand names that ride
-  // inside ordinary words — "omp" lives in "compose", "kiro" in a window
-  // named after the kirocrew project — and a substring hit painted plain
-  // shells as agents. `-`, `.` and `/` are boundaries, so `kiro-cli-chat`,
-  // `codex.js` and `/bin/omp` still match.
-  { tag: 'Kimi',     match: /\bkimi\b/i,     icon: '/assets/kimi.svg',     iconSize: 14 },
-  { tag: 'Kiro',     match: /\bkiro\b/i,     icon: '/assets/kiro.svg',     iconSize: 14 },
-  // Claude Code's binary is a version-named symlink
-  // (~/.local/share/claude/versions/2.1.141), so pane_current_command
-  // reports "2.1.141" — no "claude" anywhere. The pane_title carries
-  // "Claude Code" only when the shell doesn't overwrite the title (many
-  // setups pin it to the hostname). Detect EITHER the word or a bare
-  // semver-looking process name at the start of the command field.
-  { tag: 'Claude',   match: /\bclaude\b|^\d+\.\d+\.\d+(?:\s|$)/i, icon: '/assets/claude.svg', iconSize: 14 },
-  { tag: 'Codex',    match: /\bcodex\b/i,    icon: '/assets/codex.svg',    iconSize: 14 },
-  { tag: 'Grok',     match: /\bgrok\b/i,     icon: '/assets/grok.svg',     iconSize: 14 },
-  { tag: 'OpenClaw', match: /\bopenclaw\b/i, icon: '/assets/openclaw.svg', iconSize: 14 },
-  // oh-my-pi's CLI: a single `omp` binary (ELF, so pane_current_command says
-  // "omp" directly). The word boundary is what keeps docker-compose panes
-  // from wearing its icon.
-  { tag: 'OMP',      match: /\bomp\b/i,      icon: '/assets/omp.svg',      iconSize: 14 },
+  { tag: 'Kimi',     icon: '/assets/kimi.svg',     iconSize: 14 },
+  { tag: 'Kiro',     icon: '/assets/kiro.svg',     iconSize: 14 },
+  { tag: 'Claude',   icon: '/assets/claude.svg',   iconSize: 14 },
+  { tag: 'Codex',    icon: '/assets/codex.svg',    iconSize: 14 },
+  { tag: 'Grok',     icon: '/assets/grok.svg',     iconSize: 14 },
+  { tag: 'OpenClaw', icon: '/assets/openclaw.svg', iconSize: 14 },
+  { tag: 'OMP',      icon: '/assets/omp.svg',      iconSize: 14 },
 ];
 
 // ── The server's backend list (board #130) ──────────────────────────────
@@ -152,42 +135,17 @@ export function backendIcon(backend: string | null | undefined): string | null {
   }
 }
 
-// Return the matching AGENTS entry for a blob of text (current_command,
-// pane_title, or a combination), or null if none match.
-//
-// When several agents match, the one whose match sits EARLIEST in the text
-// wins — not the one listed first in AGENTS. paneText orders its parts
-// shallow→deep (command, title, then the pane's process chain from the
-// shell downward), so an early match is the process the user actually
-// launched, while a late match is a subprocess. Real case: codex spawning
-// a "kiro-web-search" MCP tool put "kiro" deep in the chain and the
-// array-order rule painted the session as Kiro.
-export function detectAgent(text: string | null | undefined): Agent | null {
-  if (!text) return null;
-  let best: Agent | null = null;
-  let bestIdx = Infinity;
-  for (const a of AGENTS) {
-    const idx = text.search(a.match);
-    if (idx >= 0 && idx < bestIdx) {
-      best = a;
-      bestIdx = idx;
-    }
-  }
-  return best;
+/** The AGENTS entry for a backend name (`kiro`, `codex`…) — a pane's
+ * server-derived `agent`, or a backend stored on a slot. */
+export function agentByBackend(backend: string | null | undefined): Agent | null {
+  if (!backend) return null;
+  const key = backend.toLowerCase();
+  return AGENTS.find((a) => a.tag.toLowerCase() === key) ?? null;
 }
 
-// All detection-relevant text for a pane, in one place. `child_cmd` is the
-// pane shell's descendant argv reported by the server — the only reliable
-// signal for interpreter-launched CLIs (codex runs as plain "node"; claude
-// as a bare version number). current_command/pane_title alone miss those.
-export function paneText(p: PaneLike): string {
-  if (!p) return '';
-  return (p.current_command || '') + ' ' + (p.pane_title || '') + ' ' + (p.child_cmd || '');
-}
-
-// Agent entry for a pane (or null).
+// Agent entry for a pane (or null): the server's verdict, read, never re-derived.
 export function paneAgent(p: PaneLike): Agent | null {
-  return detectAgent(paneText(p));
+  return agentByBackend(p?.agent);
 }
 
 export function paneChipLabel(p: PaneLike, fallback = ''): string {

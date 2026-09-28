@@ -71,8 +71,8 @@ test('Hub keeps the Drawer mount gate, durable state and navigation authority (#
   assert.match(source, /bind:drawerFilesDir onpick=\{pickWindow\} onclose=\{closeDrawer\}/u);
   assert.match(source, /onfilesback=\{\(back\) => \{ drawerFilesBack = back; \}\}/u);
   assert.match(source, /onexpand=\{\(\) => \(winsExpanded = !winsExpanded\)\}/u);
-  assert.match(source, /termTarget = ''; termCommand = ''; winsExpanded = false;/u);
-  assert.match(source, /onterminal=\{\(\) => \{ const m = [^]*?if \(m\) openTerminal\(selected, termTarget, termCommand\); \}\}/u);
+  assert.match(source, /termTarget = ''; winsExpanded = false;/u);
+  assert.match(source, /onterminal=\{\(\) => \{ const m = [^]*?if \(m\) openTerminal\(selected, termTarget\); \}\}/u);
   // #181: maximize hands the parked position, else the project's declared path.
   assert.match(source, /onfiles=\{\(\) => openFilesTab\?\.\(selected, drawerFilesDir \|\| projectPath\)\}/u);
   assert.match(source, /onboard=\{\(\) => openBoardTab\?\.\(selected\)\}/u);
@@ -516,7 +516,7 @@ test('the drawer follows the project — partition parked and restored per room 
   // the old room's pane target never leaks into the new room's terminal.
   assert.match(source, /const dv = compact \? '' : hubPrefs\.drawer\(session\);/u);
   assert.match(source, /termOpen = !!dv;/u);
-  assert.match(source, /termTarget = ''; termCommand = '';/u, 'stale pane target cleared on switch');
+  assert.match(source, /termTarget = ''; winsExpanded = false;/u, 'stale pane target cleared on switch');
 });
 
 test('a stage job dies with its room, and nothing sends while one is in flight (board #25 review)', () => {

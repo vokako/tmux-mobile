@@ -27,6 +27,9 @@ export interface TmuxPane {
   current_path: string;
   active: boolean;
   child_cmd?: string; // omitted when the pane runs a bare shell
+  /** The agent CLI the pane's processes run (backend name, board #260);
+   * omitted for anything else. The server's one verdict — never re-derive it. */
+  agent?: string;
 }
 // Cursor: x/y position, width, height, trailing trimmed lines.
 export interface Cursor { x: number; y: number; w: number; h: number; t: number }// Team messages / notification snapshots are consumed by still-unconverted
@@ -37,6 +40,8 @@ export type PaneOutputCb = (
   content: string | undefined,
   cursor: Cursor | undefined,
   currentCommand: string | undefined,
+  /** Sent WITH current_command: the pane's agent backend, null for none. */
+  agent: string | null | undefined,
 ) => void;
 export type PaneClosedCb = (target: string) => void;
 // Errors surfaced by this module carry an optional `code`: a JSON-RPC error
@@ -531,12 +536,12 @@ export function connect(url: string, token: string, timeoutMs = CONNECT_TIMEOUT_
       if (!data) return;
 
       if (data.method === 'pane_output') {
-        // current_command is included only on the first push and when it
-        // actually changes — most ticks omit it. Fan out to EVERY listener
+        // current_command (with the pane's `agent`) is included only on the
+        // first push and when it actually changes — most ticks omit it. Fan out to EVERY listener
         // on this target (multiple split cells may show the same window).
         const tgt = data.params?.target;
         const set = paneOutputListeners.get(tgt);
-        if (set) for (const cb of set) cb(tgt, data.params?.content, data.params?.cursor, data.params?.current_command);
+        if (set) for (const cb of set) cb(tgt, data.params?.content, data.params?.cursor, data.params?.current_command, data.params?.agent);
         return;
       }
 

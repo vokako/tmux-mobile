@@ -111,9 +111,13 @@ test('the keyboard is an overlay for agent TUIs, not a resize', () => {
   // repaints its whole conversation. Pinning the box breaks it at step two.
   assert.match(
     source,
-    /const keepRowsOnKeyboard = \$derived\(isMobile && !!detectAgent\(command\)\)/u,
+    /const keepRowsOnKeyboard = \$derived\(isMobile && !!agentByBackend\(liveAgent\)\)/u,
     'the whitelist must be the shared agent table, not a hardcoded name',
   );
+  // …and the verdict is the server's (board #260): the pushed pane `agent`,
+  // reset on a target switch — never a client-side match over a command.
+  assert.match(source, /if \(currentCommand !== undefined\) \{\s*liveAgent = agent \?\? null;/u);
+  assert.match(source, /\$effect\(\(\) => \{ void target; liveAgent = null; \}\);/u);
   assert.match(
     source,
     /<div class="xterm-wrap" class:keep-rows=\{keepRowsOnKeyboard\}/u,
@@ -229,7 +233,7 @@ test('the phone bar leads with hamburger + name, chips unchanged (board #19)', (
   assert.match(bar, /<h1 class="win-title" title=\{session\}>\{session\}<\/h1>/u, 'the name is the title');
   assert.ok(!bar.includes('<AgentChip'), 'the session chip is retired from the lead-in');
   // The window chips keep their switch handler.
-  assert.match(source, /onSwitchPane\(`\$\{w\.session\}:\$\{w\.window\}\.\$\{w\.pane\}`, w\.current_command\);/u,
+  assert.match(source, /onSwitchPane\(`\$\{w\.session\}:\$\{w\.window\}\.\$\{w\.pane\}`\);/u,
     'chip quick-switch untouched');
 });
 

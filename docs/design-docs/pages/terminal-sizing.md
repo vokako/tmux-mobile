@@ -51,9 +51,11 @@ chat TUI keeps its prompt.
 Mechanically it is two lines of CSS and one class, and it deliberately does NOT
 add a sizing trigger:
 
-- `keepRowsOnKeyboard = isMobile && !!detectAgent(command)` puts the
-  `.keep-rows` class on the xterm host. The set is `AGENTS` — the same table
-  that paints the agent icons — so "which apps are chat TUIs" has one answer.
+- `keepRowsOnKeyboard = isMobile && !!agentByBackend(liveAgent)` puts the
+  `.keep-rows` class on the xterm host. `liveAgent` is the pane's `agent`,
+  pushed by the server with every `current_command` change — the same
+  process-derived verdict that paints the agent icons (board #260) — so
+  "which apps are chat TUIs" has one answer.
 - `html.keyboard-open .xterm-wrap.keep-rows` pins `height: var(--kb-locked-h)`
   with `position: absolute; bottom: 0`. `App.svelte` toggles that class in the
   same layout pass that shrinks `--app-height`, so the pinned height applies
