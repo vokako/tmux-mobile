@@ -21,7 +21,7 @@
    `Stop`/`StopFailure` closes it. Pane activity is not work, `idle_prompt`
    is not a question, and an agent's `tmm status` is a description, not state.
 4. **One reply edge:** hooks capture the final response and return it to
-   the party that opened the turn. `[reply]` creates no reverse edge;
+   every party whose request the turn carried. `[reply]` creates no reverse edge;
    hook-originated text is recorded, not delivered.
 5. **Humans and agents read the same record:** the room is the only log,
    and every line typed into a pane is human-readable.

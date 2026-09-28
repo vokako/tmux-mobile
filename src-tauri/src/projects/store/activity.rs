@@ -102,11 +102,15 @@ impl Store {
         self.activity_page(session, since_ts, None, limit).map(|(rows, _)| rows)
     }
 
-    /// The prompt that opened the currently unclosed turn, if any. Used to
-    /// recover an automatic reply edge after a server restart.
-    pub fn current_turn_prompt(&self, session: &str, window: &str) -> Result<Option<String>, String> {
-        self.conn
-            .query_row(
+    /// Every prompt newer than this window's last turn end, oldest first —
+    /// empty when no turn is open. Used to decide whether a new prompt joins
+    /// an open turn and to recover the turn's reply edge after a server
+    /// restart (#256). Bounded to the newest `limit` so a window whose turn
+    /// never closes (grok, #252) cannot make this read grow for ever.
+    pub fn current_turn_prompts(&self, session: &str, window: &str, limit: usize) -> Result<Vec<String>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
                 "SELECT text FROM activity
                  WHERE session = ?1 AND COALESCE(NULLIF(win, ''), CAST(window AS TEXT)) = ?2 AND kind = 'prompt'
                    AND id > COALESCE((
@@ -114,12 +118,16 @@ impl Store {
                      WHERE session = ?1 AND COALESCE(NULLIF(win, ''), CAST(window AS TEXT)) = ?2 AND kind = 'notif'
                        AND text IN ('completed', 'failed', 'interrupted')
                    ), 0)
-                 ORDER BY id DESC LIMIT 1",
-                rusqlite::params![session, window],
-                |r| r.get(0),
+                 ORDER BY id DESC LIMIT ?3",
             )
-            .optional()
-            .map_err(|e| format!("query current turn prompt: {e}"))
+            .map_err(|e| format!("prepare current turn prompts: {e}"))?;
+        let mut rows: Vec<String> = stmt
+            .query_map(rusqlite::params![session, window, limit as i64], |r| r.get(0))
+            .map_err(|e| format!("query current turn prompts: {e}"))?
+            .collect::<Result<_, _>>()
+            .map_err(|e| format!("read current turn prompts: {e}"))?;
+        rows.reverse();
+        Ok(rows)
     }
 
     /// The newest persisted TURN FACT of each kind, per window (board #249):
@@ -530,17 +538,22 @@ mod tests {
     }
 
     #[test]
-    fn current_turn_prompt_survives_the_server_process() {
+    fn current_turn_prompts_survive_the_server_process() {
         let store = Store::open_memory().unwrap();
+        store.insert_activity("s", "w2", 900, "prompt", "[tmm chat] old: closed turn", "", "app", "", "").unwrap();
         store.insert_activity("s", "w2", 1000, "notif", "completed", "", "", "", "").unwrap();
         store.insert_activity("s", "w2", 1100, "prompt", "[tmm chat] lead: work", "", "app", "", "").unwrap();
         store.insert_activity("s", "w2", 1200, "tool", "file.rs", "Edit", "", "", "").unwrap();
+        store.insert_activity("s", "w2", 1250, "prompt", "[tmm chat] peer: [reply] fyi", "", "app", "", "").unwrap();
+        // Every input of the OPEN turn, oldest first; the closed turn's is not.
         assert_eq!(
-            store.current_turn_prompt("s", "w2").unwrap().as_deref(),
-            Some("[tmm chat] lead: work")
+            store.current_turn_prompts("s", "w2", 64).unwrap(),
+            vec!["[tmm chat] lead: work".to_string(), "[tmm chat] peer: [reply] fyi".to_string()]
         );
+        // The bound keeps the NEWEST.
+        assert_eq!(store.current_turn_prompts("s", "w2", 1).unwrap(), vec!["[tmm chat] peer: [reply] fyi".to_string()]);
         store.insert_activity("s", "w2", 1300, "notif", "completed", "", "", "", "").unwrap();
-        assert_eq!(store.current_turn_prompt("s", "w2").unwrap(), None);
+        assert!(store.current_turn_prompts("s", "w2", 64).unwrap().is_empty());
     }
 
     /// Paging backwards through a complete log (board #9). The cursor is (ts, id)

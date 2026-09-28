@@ -232,7 +232,7 @@ either participant at any time.
 - `@name` types `[tmm chat <time>] <sender>: <text>` into that pane; `@all`
   types into every managed agent; `@human` notifies the person.
 - Hooks capture every final response, record it in the room and return it
-  **only** to the party that opened the turn. `[reply]` creates no reverse edge.
+  **only** to the parties whose requests the turn carried. `[reply]` creates no reverse edge.
 - An agent speaks actively through `tmm send "@name …"`, which ultimately
   types into the recipient's pane. `tmm done` returns to the brief's sender.
 - Rejected designs included `tmm done` suppressing auto-post, which lost

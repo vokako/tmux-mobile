@@ -67,7 +67,7 @@ the project hub (`hub_*` RPCs, `src-tauri/src/server/hub_rpc.rs`, room `proj:<se
 
 **The prompt teaches the communication flow, not the full CLI.** Inbound
 messages are stamped and queued. The final response is captured by hooks,
-recorded in the room and returned once to the agent that opened the turn.
+recorded in the room and returned once to each agent whose request the turn carried.
 `[reply]` inputs create no reverse edge, preventing ping-pong. `tmm send
 "@name …"` starts a new question or handoff; a recipient-less send is rejected,
 except `--status` ambient progress. `tmm log` supplies room history, backlog

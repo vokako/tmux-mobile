@@ -409,25 +409,30 @@ pub fn recent_events(session: &str, since_ts: u64) -> Vec<ActivityEvent> {
     events_page(session, since_ts, None, LOAD_EVENTS).0
 }
 
-/// The prompt newer than this window's last turn end. The durable path lets a
-/// stop hook recover its reply edge after the server restarted mid-turn.
-pub fn current_turn_prompt(session: &str, window: &str) -> Option<String> {
+/// How many inputs of one open turn the durable read returns (newest kept).
+const TURN_PROMPTS: usize = 64;
+
+/// Every prompt newer than this window's last turn end, oldest first; empty
+/// when the window has no open turn. The durable path tells a new prompt
+/// whether it joins an open turn and lets a stop hook recover its reply edge
+/// after the server restarted mid-turn (#256).
+pub fn current_turn_prompts(session: &str, window: &str) -> Vec<String> {
     if !cfg!(test) {
-        return super::with_store(|s| s.current_turn_prompt(session, window))
-            .ok()
-            .flatten();
+        return super::with_store(|s| s.current_turn_prompts(session, window, TURN_PROMPTS)).unwrap_or_default();
     }
     let map = events().lock().unwrap();
-    let rows = map.get(session)?;
+    let Some(rows) = map.get(session) else { return Vec::new() };
+    let mut prompts = Vec::new();
     for event in rows.iter().rev().filter(|event| event.window == window) {
-        if event.kind == "prompt" {
-            return Some(event.text.clone());
-        }
         if event.kind == "notif" && matches!(event.text.as_str(), "completed" | "failed" | "interrupted") {
-            return None;
+            break;
+        }
+        if event.kind == "prompt" && prompts.len() < TURN_PROMPTS {
+            prompts.push(event.text.clone());
         }
     }
-    None
+    prompts.reverse();
+    prompts
 }
 
 /// How much trace this session has: (events, oldest ts, newest ts). For the
@@ -1980,7 +1985,7 @@ mod tests {
         backdate(&session);
         sweep_deliveries(&session);
         assert_eq!(recent_events(&session, 0).iter().filter(|e| e.kind == "warn").count(), 1, "the held line's clock ran");
-        assert_eq!(current_turn_prompt(&session, "w1"), None, "no reply edge recovered for a cancelled turn");
+        assert!(current_turn_prompts(&session, "w1").is_empty(), "no reply edge recovered for a cancelled turn");
     }
 
     /// Orchestrator 15:44 (validator 15:42-15:43): tool dedupe may collapse a

@@ -110,7 +110,8 @@ before the message (a reply is what ends a turn).
 
 `stop` carries `assistant_response` — the only hook payload containing the
 answer. At `userPromptSubmit`, the stamped `[tmm chat …] sender:` envelope
-establishes this turn's reply edge. Human senders need no pane delivery;
+establishes this turn's reply edge, and a later input in the same open turn
+adds its senders to it (#256). Human senders need no pane delivery;
 automatic `[reply]` and legacy `[done]` envelopes establish no edge.
 
 `maybe_auto_post` gates on `managed_home`, caps the answer at 6144 characters

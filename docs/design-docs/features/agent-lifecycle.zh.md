@@ -93,7 +93,8 @@ hook final 会把真实回复目标写进房间消息的 `to` 字段，但不改
 ## 5 · 一轮结束
 
 `stop` 带 `assistant_response`，也是唯一带答案的 hook。`userPromptSubmit`
-会从 `[tmm chat …] sender:` 信封中记录本轮的回复目标；`[reply]` 和旧
+会从 `[tmm chat …] sender:` 信封中记录本轮的回复目标；同一轮进行中再到的
+输入会把它的发送者追加进去，而不是覆盖（#256）；`[reply]` 和旧
 `[done]` 信封不建立反向边。
 
 `maybe_auto_post` 只处理托管 agent，把 final response 记录进房间，并由

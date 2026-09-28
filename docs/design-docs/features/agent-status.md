@@ -83,6 +83,20 @@ codex 0.153.4 runs `spawn_agent` children as threads INSIDE the parent's process
 the non-human senders for the current turn. A normal request creates the edge;
 an automatic `[reply]` or legacy `[done]` envelope does not.
 
+**The edge accumulates within a turn** (#256). An input that arrives while the
+window's turn is open (codex steer, anything typed mid-turn) ADDS its senders,
+deduplicated and in arrival order; only the turn's end consumes the edge.
+Whether a turn is open is read from the turn log (`current_turn_prompts`: the
+prompts newer than the window's last `completed`/`failed`/`interrupted`), the
+same record status is derived from, so no second open/closed flag exists.
+Incident (2026-09-27, `temp/stall-analysis.md`): `start_turn` REPLACED the
+edge with the newest input's senders, so a `[reply]` landing mid-turn erased
+the real requester. 27 of 404 turns in 14 hours lost their requester; one was
+the #248 final SHIP orchestrator had asked validator for, which reached nobody
+for 3h27m. A turn whose end is never observed (an Escape typed in the pane
+itself fires no hook) keeps its requesters for the next input, the same limit
+status derivation has.
+
 When a managed window's stop hook fires, `maybe_auto_post` always records the
 final response in the room. `TeamRoomPoster` then types
 `[tmm chat <ts>] <agent>: [reply] <final>` into each stored sender's pane with
@@ -91,8 +105,9 @@ one hop, so two stop hooks cannot ping-pong.
 
 The managed-home gate excludes hand-started agents, final text is capped at
 `MAX_REPLY_CHARS = 6144`, and reply targets are removed when used. If the
-server restarts mid-turn, the durable activity log recovers the prompt newer
-than the previous turn end. `tmm send` does not suppress the final response:
+server restarts mid-turn, the durable activity log recovers every prompt newer
+than the previous turn end (bounded to the newest 64), and an input after the
+restart joins them. `tmm send` does not suppress the final response:
 it starts a separate question or handoff.
 
 ### Historical auto-reply design (superseded 2026-09-08)

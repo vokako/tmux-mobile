@@ -45,9 +45,11 @@ struct State {
     /// the capturer stamps with it (`src-tauri/src/projects`), because that is
     /// what has to survive the reboot which loses tmux in the first place.
     sessions: HashMap<String, String>,
-    /// window key → senders whose addressed request opened the current turn.
-    /// Parsed from the stamped input at `userPromptSubmit`; `[reply]` and
-    /// legacy `[done]` envelopes deliberately create no reverse edge.
+    /// window key → senders of every addressed request the current turn
+    /// carries, in arrival order (#256: a later input JOINS the edge, it
+    /// never replaces it). Parsed from the stamped input at
+    /// `userPromptSubmit`; `[reply]` and legacy `[done]` envelopes
+    /// deliberately create no reverse edge.
     reply_targets: HashMap<String, Vec<String>>,
     /// Injected by the server after the team bus is ready. `None` on mobile.
     /// Box'd pointer stored here so it shares the Mutex with the rest of state.
@@ -83,11 +85,28 @@ impl AgentNotificationHub {
 
     /// Record who should receive this turn's final reply. Human requests need
     /// no pane delivery; the Hub already shows the room.
+    ///
+    /// Called BEFORE the prompt is recorded, so the turn log answers whether
+    /// this input opens a turn or joins an open one (codex steer, an input
+    /// typed mid-turn). Joining ADDS its senders (#256): the edge used to be
+    /// replaced by the newest input, so a `[reply]` landing mid-turn erased
+    /// the real requester — 27 of 404 turns on 2026-09-27, among them the
+    /// #248 SHIP orchestrator had asked for, which then reached nobody for
+    /// 3h27m (temp/stall-analysis.md). The open/closed question is the turn
+    /// log's, the one turn record, not a second flag kept here.
     fn start_turn(&self, session: &str, window: &str, prompt: &str) {
-        self.state.lock().unwrap().reply_targets.insert(
-            window_key(session, window),
-            reply_targets(prompt),
-        );
+        let earlier = open_turn_prompts(session, window);
+        let key = window_key(session, window);
+        let mut st = self.state.lock().unwrap();
+        let mut targets = if earlier.is_empty() {
+            Vec::new()
+        } else {
+            // A restart mid-turn lost the in-memory edge: rebuild it from the
+            // turn's recorded inputs before this one joins.
+            st.reply_targets.remove(&key).unwrap_or_else(|| targets_of(&earlier))
+        };
+        join_targets(&mut targets, reply_targets(prompt));
+        st.reply_targets.insert(key, targets);
     }
 
     fn take_reply_targets(&self, session: &str, window: &str) -> Vec<String> {
@@ -95,17 +114,7 @@ impl AgentNotificationHub {
         if let Some(targets) = self.state.lock().unwrap().reply_targets.remove(&key) {
             return targets;
         }
-        // Desktop-gated like every `crate::projects` reader: the telemetry
-        // store does not exist on mobile, where an empty route is the same
-        // fail-soft answer a missing turn gives on desktop.
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        {
-            crate::projects::telemetry::current_turn_prompt(session, window)
-                .map(|prompt| reply_targets(&prompt))
-                .unwrap_or_default()
-        }
-        #[cfg(any(target_os = "android", target_os = "ios"))]
-        Vec::new()
+        targets_of(&open_turn_prompts(session, window))
     }
 
     /// The agent conversation id last reported by a hook in this tmux window,
@@ -283,8 +292,8 @@ impl AgentNotificationHub {
             crate::projects::vitals::sniff_window_soon(&session, &window);
         }
 
-        // Stop hook final: record the answer and deliver it to the sender whose
-        // addressed request opened this turn:
+        // Stop hook final: record the answer and deliver it to every sender
+        // whose addressed request this turn carried:
         //   1. Only managed windows (constraint 3): a .tmm/agents/<name> dir
         //      must exist, so direct or adopted agents never auto-post.
         //   2. There must be a reply body worth posting.
@@ -584,6 +593,39 @@ pub(crate) fn string_field(
             .filter(|s| !s.is_empty())
             .map(str::to_owned)
     })
+}
+
+/// The inputs of this window's open turn, oldest first (empty: no open
+/// turn). Desktop-gated like every `crate::projects` reader: the telemetry
+/// store does not exist on mobile, where every input opens a fresh edge and
+/// an empty route is the same fail-soft answer a missing turn gives here.
+fn open_turn_prompts(session: &str, window: &str) -> Vec<String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        crate::projects::telemetry::current_turn_prompts(session, window)
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = (session, window);
+        Vec::new()
+    }
+}
+
+/// The reply edge of a turn's inputs: every addressed sender, once, in order.
+fn targets_of(prompts: &[String]) -> Vec<String> {
+    let mut targets = Vec::new();
+    for prompt in prompts {
+        join_targets(&mut targets, reply_targets(prompt));
+    }
+    targets
+}
+
+fn join_targets(targets: &mut Vec<String>, more: Vec<String>) {
+    for sender in more {
+        if !targets.contains(&sender) {
+            targets.push(sender);
+        }
+    }
 }
 
 /// Senders of stamped chat requests in a submitted prompt. Automatic
@@ -1051,8 +1093,8 @@ mod tests {
         assert_eq!(prompts.len(), 1, "one keyboard/delivery prompt, not two: {events:?}");
         assert_eq!(prompts[0].text, line);
         assert_eq!(
-            crate::projects::telemetry::current_turn_prompt(&session, &pane.window_name).as_deref(),
-            Some(line),
+            crate::projects::telemetry::current_turn_prompts(&session, &pane.window_name),
+            vec![line.to_string()],
             "the window's prompt is still the human's line"
         );
         let tool = events.iter().find(|e| e.kind == "tool" && e.tool == "Subagent").expect("the brief lands in the tool lane");
@@ -1415,6 +1457,58 @@ mod tests {
         let root = std::env::temp_dir().join(format!("tmm-reply-edge-{}", uuid::Uuid::new_v4()));
         let restarted = AgentNotificationHub::load_at(root.clone());
         assert_eq!(restarted.take_reply_targets(&session, "w2"), vec!["lead"]);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// #256 (temp/stall-analysis.md, #248 20:47–20:51): orchestrator asked
+    /// validator for the final review, builder's `[reply]` landed in the SAME
+    /// turn and replaced the edge, and the SHIP reached nobody for 3h27m.
+    /// A later input in an open turn joins the edge; a closed turn (stop or
+    /// interrupt) never leaks its requesters into the next one; a restart
+    /// mid-turn rebuilds the edge from every input the turn recorded.
+    #[test]
+    fn a_later_input_in_the_same_turn_joins_the_reply_edge() {
+        use crate::projects::telemetry::{record_interrupt, record_notification, record_prompt};
+        crate::projects::tests::use_test_store();
+        let session = format!("reply-join-{}", uuid::Uuid::new_v4());
+        let root = std::env::temp_dir().join(format!("tmm-reply-join-{}", uuid::Uuid::new_v4()));
+        let hub = AgentNotificationHub::load_at(root.clone());
+        // The live order: start_turn, then the prompt is recorded.
+        let input = |hub: &AgentNotificationHub, line: &str| {
+            hub.start_turn(&session, "v", line);
+            record_prompt(&session, "v", line);
+        };
+
+        input(&hub, "[tmm chat 2026-09-27 20:47] orchestrator: @validator final review of #248 please");
+        input(&hub, "[tmm chat 2026-09-27 20:47] builder: [reply] ready for final review");
+        input(&hub, "[tmm chat 2026-09-27 20:48] lead: @validator also check the docs");
+        input(&hub, "[tmm chat 2026-09-27 20:48] orchestrator: @validator and the tests");
+        input(&hub, "[tmm chat 2026-09-27 20:49] human: @validator thanks");
+        assert_eq!(
+            hub.take_reply_targets(&session, "v"),
+            vec!["orchestrator", "lead"],
+            "every requester once, in order; [reply] and human add nobody"
+        );
+        record_notification(&session, "v", "completed", unix_seconds());
+
+        // The next turn opens fresh: nobody from the closed turn rides along.
+        input(&hub, "[tmm chat 2026-09-27 20:52] builder: [reply] thanks");
+        assert!(hub.take_reply_targets(&session, "v").is_empty());
+        record_notification(&session, "v", "completed", unix_seconds());
+
+        // An interrupt closes the turn too (it takes no edge: no reply).
+        input(&hub, "[tmm chat 2026-09-27 21:00] orchestrator: @validator start X");
+        record_interrupt(&session, "v");
+        input(&hub, "[tmm chat 2026-09-27 21:01] builder: [reply] fyi");
+        assert!(hub.take_reply_targets(&session, "v").is_empty(), "the interrupted turn's requester does not leak");
+        record_notification(&session, "v", "completed", unix_seconds());
+
+        // A restart mid-turn: the new process's first input joins the inputs
+        // the turn already recorded instead of starting over.
+        input(&hub, "[tmm chat 2026-09-27 22:00] orchestrator: @validator review #255");
+        let restarted = AgentNotificationHub::load_at(root.clone());
+        input(&restarted, "[tmm chat 2026-09-27 22:01] builder: [reply] pushed a fix");
+        assert_eq!(restarted.take_reply_targets(&session, "v"), vec!["orchestrator"]);
         let _ = std::fs::remove_dir_all(root);
     }
 }
