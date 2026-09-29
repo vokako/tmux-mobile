@@ -99,17 +99,20 @@ Conventions that keep the board honest:
   A note is delivered to the issue's reporter AND assignee (never to you or
   the human), so do not also `tmm send` it to them.
 - `move <id> review` when YOUR part is done — this is a HANDOFF, not a
-  label: the issue's reporter is notified automatically (the line lands in
-  their pane) and reviews it. Whoever accepts the work (the reporter by
-  default, or the lead the team names) moves it to `done`; if it needs fixes
-  they `note` what to fix and move it back to `doing`.
+  label: a managed reporter gets the handoff in its pane and reviews it
+  (a human reporter sees it on the board). Whoever accepts the work (the
+  reporter by default, or the lead the team names) moves it to `done`; if it
+  needs fixes they `note` what to fix and move it back to `doing`.
 - Board status is the ISSUE's lifecycle; live agent state comes from hooks.
 - Every status change is recorded in the room (`[tmm] board #N a → b`),
   so the chat shows the flow without anyone narrating it.
+- Notices (review handoff, assignment, notes) are lines typed into a pane,
+  so they reach a live MANAGED agent only: never you, never the human. The
+  human reads the board and the room.
 
 The ideal loop (and who moves what): the human (or lead) files the issue →
-the lead assigns it (the assignment lands in the assignee's pane) → the
-assignee `take`s it (todo → doing) → finishes and `move review` (the
+the lead assigns it (a managed assignee gets it in its pane) → the
+assignee `take`s it (todo → doing) → finishes and `move review` (a managed
 reporter is notified) → whoever accepts the work (the reporter by default,
 or the lead the team names) accepts with `move done`, or `note`s fixes and
 moves it back to `doing`.
