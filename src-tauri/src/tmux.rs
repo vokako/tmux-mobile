@@ -776,6 +776,17 @@ fn pane_send_lock(target: &str) -> std::sync::Arc<std::sync::Mutex<()>> {
     map.entry(target.to_string()).or_default().clone()
 }
 
+/// Run `f` holding `target`'s send lock — the same one `send_command` takes,
+/// so nothing typed through it interleaves with `f`. For a read → key →
+/// verify sequence that must be one step (#271's queue/steer switch). `f`
+/// must not call `send_command` on the same target (the lock is not
+/// reentrant); `send_keys` does not lock.
+pub fn with_pane_send_lock<R>(target: &str, f: impl FnOnce() -> R) -> R {
+    let lock = pane_send_lock(target);
+    let _guard = lock.lock().unwrap();
+    f()
+}
+
 /// The error `send_command` returns for a pane in copy-mode (board #250).
 pub const PANE_IN_MODE: &str = "pane is in copy mode";
 

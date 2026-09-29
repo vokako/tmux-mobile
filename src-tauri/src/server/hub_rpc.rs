@@ -625,26 +625,18 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
             let key = agent_backend(session, agent).and_then(|b| b.live_input_toggle()).ok_or_else(|| {
                 RpcError::InvalidParams(format!("'{agent}' cannot switch queue/steer while it runs"))
             })?;
-            let Some(pane) = crate::tmux::find_window_by_name(session, agent) else {
-                return Err(RpcError::InvalidParams(format!("no window named '{agent}' in session '{session}'")));
+            // The delivery target, so the switch serializes with every line
+            // typed into this pane (the same send lock, validator 04:31).
+            let Some(target) = crate::projects::delivery::agent_target(session, agent) else {
+                return Err(RpcError::InvalidParams(format!("no live window named '{agent}' in session '{session}'")));
             };
-            let now = crate::projects::delivery::input_mode(session, agent);
-            if now == Some(mode) {
-                return Ok(serde_json::json!({ "agent": agent, "mode": mode, "changed": false }));
+            let want = if mode == "steer" { "steer" } else { "queue" };
+            let changed = crate::projects::delivery::switch_input_mode(session, agent, &target, want, key)
+                .map_err(|e| RpcError::Internal(format!("{agent}: {e}")))?;
+            if changed {
+                let _ = rooms::post(&room, agent, &format!("[tmm] {agent} → {mode} mode (this session)"));
             }
-            crate::tmux::send_keys(&pane, key, false).map_err(RpcError::Internal)?;
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-            loop {
-                std::thread::sleep(std::time::Duration::from_millis(150));
-                if crate::projects::delivery::input_mode(session, agent) == Some(mode) {
-                    break;
-                }
-                if std::time::Instant::now() >= deadline {
-                    return Err(RpcError::Internal(format!("{agent} did not confirm {mode} mode")));
-                }
-            }
-            let _ = rooms::post(&room, agent, &format!("[tmm] {agent} → {mode} mode (this session)"));
-            Ok(serde_json::json!({ "agent": agent, "mode": mode, "changed": true }))
+            Ok(serde_json::json!({ "agent": agent, "mode": mode, "changed": changed }))
         }
 
         // Eject an agent from the project: stop it, drop its slot, remove its

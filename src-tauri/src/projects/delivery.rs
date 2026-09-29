@@ -112,6 +112,51 @@ pub fn input_mode(session: &str, window: &str) -> Option<&'static str> {
     input_mode_seen(session, window, &pane, &screen)
 }
 
+/// Switch the session to `want` with the CLI's live toggle `key` (board
+/// #271), as ONE step under the pane's send lock (validator 04:31): two
+/// clients asking for the same mode at once must not both read the old mode
+/// and both press, toggling it back. Idempotent — nothing is typed when the
+/// pane already runs `want` — and verified: after the one key the pane must
+/// show `want` within `VERIFY`, else an error, never a second press.
+/// `Ok(true)` = switched, `Ok(false)` = was already there.
+pub fn switch_input_mode(session: &str, window: &str, target: &str, want: &'static str, key: &str) -> Result<bool, String> {
+    // The pane id keys the remembered reading, as for every other caller.
+    let pane = crate::tmux::find_window_by_name(session, window).unwrap_or_default();
+    let read = || {
+        let screen = crate::tmux::capture_pane_plain(target, Some(0)).unwrap_or_default();
+        input_mode_seen(session, window, &pane, &screen)
+    };
+    switch_with(target, want, read, || crate::tmux::send_keys(target, key, false), SWITCH_VERIFY)
+}
+
+const SWITCH_VERIFY: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The switch's logic with its screen and its key injected (tested).
+fn switch_with(
+    target: &str,
+    want: &'static str,
+    read: impl Fn() -> Option<&'static str>,
+    press: impl FnOnce() -> Result<(), String>,
+    verify: std::time::Duration,
+) -> Result<bool, String> {
+    crate::tmux::with_pane_send_lock(target, || {
+        if read() == Some(want) {
+            return Ok(false);
+        }
+        press()?;
+        let deadline = std::time::Instant::now() + verify;
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            if read() == Some(want) {
+                return Ok(true);
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(format!("the pane did not confirm {want} mode"));
+            }
+        }
+    })
+}
+
 /// Does this window hold lines while busy (board #257)? Only a session
 /// that runs QUEUE does: a line held for a steering kiro would wait for an
 /// echo a steered line never produces. Read at typing time from the live
@@ -356,6 +401,53 @@ mod tests {
         let home = std::path::Path::new(&path).join(".tmm").join("agents").join(window);
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(home.join("launch.json"), serde_json::json!({ "backend": backend, "input_mode": mode, "cmd": "x" }).to_string()).unwrap();
+    }
+
+    /// Board #271 (validator 04:31): two concurrent switches to the same mode
+    /// on one pane press ONE key; the second sees the switched pane and
+    /// changes nothing. The fake pane repaints only after a delay, the
+    /// window in which both would otherwise read the old mode.
+    #[test]
+    fn concurrent_switches_to_one_mode_press_one_key() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let target = format!("switch-test-{}", uuid::Uuid::new_v4());
+        let presses = Arc::new(AtomicUsize::new(0));
+        let mode = Arc::new(Mutex::new("queue"));
+        let run = |target: String, presses: Arc<AtomicUsize>, mode: Arc<Mutex<&'static str>>| {
+            std::thread::spawn(move || {
+                let read = || Some(*mode.lock().unwrap());
+                let press = || {
+                    presses.fetch_add(1, Ordering::SeqCst);
+                    let mode = mode.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(120));
+                        let mut m = mode.lock().unwrap();
+                        *m = if *m == "queue" { "steer" } else { "queue" };
+                    });
+                    Ok(())
+                };
+                switch_with(&target, "steer", read, press, std::time::Duration::from_secs(2))
+            })
+        };
+        let a = run(target.clone(), presses.clone(), mode.clone());
+        let b = run(target.clone(), presses.clone(), mode.clone());
+        let mut results = vec![a.join().unwrap(), b.join().unwrap()];
+        results.sort();
+        assert_eq!(presses.load(Ordering::SeqCst), 1, "one key for two requests");
+        assert_eq!(*mode.lock().unwrap(), "steer", "the pane ends in the asked mode");
+        assert_eq!(results, vec![Ok(false), Ok(true)], "one switched, the other found it switched");
+    }
+
+    #[test]
+    fn a_switch_the_pane_never_confirms_is_an_error_after_one_key() {
+        let target = format!("switch-test-{}", uuid::Uuid::new_v4());
+        let presses = std::cell::Cell::new(0);
+        let r = switch_with(&target, "steer", || Some("queue"), || { presses.set(presses.get() + 1); Ok(()) }, std::time::Duration::from_millis(200));
+        assert_eq!(presses.get(), 1, "never a blind second press");
+        assert!(r.unwrap_err().contains("did not confirm steer"));
+        assert_eq!(switch_with(&target, "queue", || Some("queue"), || panic!("no key when already there"), std::time::Duration::from_millis(10)), Ok(false));
+        assert!(switch_with(&target, "steer", || None, || Err("tmux says no".into()), std::time::Duration::from_millis(10)).is_err(),
+            "a key tmux refused is an error, not a success");
     }
 
     /// Board #271: the running mode is the SCREEN's, then what the screen

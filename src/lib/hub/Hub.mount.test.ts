@@ -2365,3 +2365,79 @@ test('a group Interrupt names the member whose interrupt failed; the others are 
     assert.equal(calls.length, 2, 'nothing is retried by itself');
   } finally { await app.close(); }
 });
+
+// Board #271: the kiro card's queue ⇄ steer item, mounted through a host that
+// serves backends_list as App does. Only a backend the server says can switch
+// LIVE offers it, and only when hub_agents reports the running mode.
+let hosted: ReturnType<typeof compileMount> | undefined;
+const compiledHost = () => hosted ??= compileMount(new URL('./Hub.test.svelte', import.meta.url), [
+  new URL('../core/ws.ts', import.meta.url),
+]);
+const served = (name: string, toggle: boolean) => ({ name, icon: `/assets/${name}.svg`, color: `--backend-${name}`, efforts: [], input_modes: true, input_mode_toggle: toggle });
+
+async function menuOf(app: { document: Document; window: any; flush: () => Promise<void> }, name: string) {
+  app.document.querySelector('.ctx') && app.document.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await app.flush();
+  stripCard(app.document, name).querySelector('.agent-select')!.dispatchEvent(new app.window.MouseEvent('contextmenu', { bubbles: true }));
+  await app.flush();
+  return [...app.document.querySelectorAll<HTMLButtonElement>('.ctx button')];
+}
+
+test('the kiro card menu switches queue ⇄ steer for this session; codex and older servers show no item (#271)', { timeout: 60000 }, async (context) => {
+  const fixture = await compiledHost();
+  const { rpc } = roomFixture();
+  let modes: Record<string, string | null | undefined> = { alice: 'queue', bob: 'queue' };
+  const calls: unknown[][] = [];
+  const app = await fixture.mount(context, {
+    props: { visible: true, backends: [served('kiro', true), served('codex', false)] },
+    setup(window) { window.Element.prototype.getAnimations = () => []; },
+    modules: [{
+      ...rpc,
+      hubAgents: async () => ({ agents: [
+        { name: 'alice', window: 0, managed: true, agent: 'kiro', state: 'idle', input_mode: modes.alice },
+        { name: 'bob', window: 1, managed: true, agent: 'codex', state: 'idle', input_mode: modes.bob },
+      ] }),
+      hubAgentInputMode: async (...args: unknown[]) => { calls.push(args); modes.alice = args[2] as string; return { agent: 'alice', mode: args[2], changed: true }; },
+    }],
+  });
+  const item = (buttons: HTMLButtonElement[]) => buttons.find((b) => /Switch to (Steer|Queue)/u.test(b.textContent ?? ''));
+  try {
+    for (let i = 0; i < 20 && !app.document.querySelector('.acard[data-agent="alice"]'); i++) await app.flush();
+    let toSteer = item(await menuOf(app, 'alice'));
+    assert.ok(toSteer, 'a queued kiro offers steer');
+    assert.match(toSteer!.textContent!, /Switch to Steer/u);
+    assert.match(toSteer!.querySelector('.ctx-hint')?.textContent ?? '', /this session · no delivery check while it works/u,
+      'steer says it is this session only, and what it costs');
+    toSteer!.click();
+    for (let i = 0; i < 5 && !calls.length; i++) await app.flush();
+    assert.deepEqual(calls, [['fixture', 'alice', 'steer']], 'the one RPC, with the other mode');
+    for (let i = 0; i < 5; i++) await app.flush();
+    const toQueue = item(await menuOf(app, 'alice'));
+    assert.match(toQueue?.textContent ?? '', /Switch to Queue/u, 'the reloaded row flips the label');
+    assert.equal(toQueue!.querySelector('.ctx-hint')?.textContent, 'this session');
+    assert.equal(item(await menuOf(app, 'bob')), undefined, 'codex: its mode is fixed at launch');
+    modes = { alice: undefined, bob: undefined };
+    await app.advance(5000);
+    assert.equal(item(await menuOf(app, 'alice')), undefined, 'an older server reports no mode: no item');
+  } finally { await app.close(); }
+});
+
+test('without the served capability the kiro card offers no switch (#271)', { timeout: 60000 }, async (context) => {
+  const fixture = await compiledHost();
+  const { rpc } = roomFixture();
+  const app = await fixture.mount(context, {
+    props: { visible: true, backends: null },
+    setup(window) { window.Element.prototype.getAnimations = () => []; },
+    modules: [{
+      ...rpc,
+      hubAgents: async () => ({ agents: [{ name: 'alice', window: 0, managed: true, agent: 'kiro', state: 'idle', input_mode: 'queue' }] }),
+      hubAgentInputMode: async () => assert.fail('no switch without the capability'),
+    }],
+  });
+  try {
+    for (let i = 0; i < 20 && !app.document.querySelector('.acard[data-agent="alice"]'); i++) await app.flush();
+    const buttons = await menuOf(app, 'alice');
+    assert.ok(buttons.length > 0, 'the menu opened');
+    assert.equal(buttons.find((b) => /Switch to/u.test(b.textContent ?? '')), undefined);
+  } finally { await app.close(); }
+});
