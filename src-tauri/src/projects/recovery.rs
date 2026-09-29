@@ -4,7 +4,9 @@
 //! A backend occasionally aborts a turn with a load-shedding error — kiro
 //! paints `An unexpected error occurred during the response stream …
 //! ModelTemporarilyUnavailable … please try again` (or, on kiro v3, `● <model>
-//! is experiencing high traffic …`) and then sits at its prompt.
+//! is experiencing high traffic …`), Claude Code on Bedrock paints `● API
+//! Error: 503 Bedrock is unable to process your request …` (#280), and then
+//! it sits at its prompt.
 //! The agent is fine, the turn is lost, and until a human types something the
 //! window is dead weight. This module watches managed agent panes from the
 //! capture tick and types `continue` at one that shows such an error.
@@ -101,6 +103,29 @@ const MODEL_UNAVAILABLE: &str = "themodelyouveselectedistemporarilyunavailable";
 /// rewording without the parenthesis, the colon or the close paren is prose
 /// ABOUT the error, and a false hit types `continue` into a working agent.
 const HIGH_TRAFFIC: &str = " is experiencing high traffic. Try again, or select another model. (Request ID: ";
+/// Claude Code's shape (Claude Code 2.1.284 on Amazon Bedrock, board #280,
+/// 2026-09-29): `● API Error: 503 Bedrock is unable to process your request.
+/// This is a server-side issue, usually temporary — try again in a moment.
+/// If it persists, check your Amazon Bedrock service status.`, the `●`
+/// bullet flush-left and the rest hard-wrapped with two-space indents
+/// (captured at 100 and 57 columns). It carries no request id, so the block
+/// must be EXACTLY this text with only whitespace collapsed; its own words
+/// say it is transient ("usually temporary — try again"). The status code is
+/// the only variable part, and it must be a 5xx.
+const CLAUDE_BEDROCK_5XX: (&str, &str) = (
+    "● API Error: ",
+    " Bedrock is unable to process your request. This is a server-side issue, usually temporary — try again in a moment. If it persists, check your Amazon Bedrock service status.",
+);
+
+/// Is this block, its lines joined with spaces, exactly Claude Code's
+/// transient Bedrock server error?
+fn claude_bedrock_5xx(spaced: &str) -> bool {
+    let flat = spaced.split_whitespace().collect::<Vec<_>>().join(" ");
+    let Some(rest) = flat.strip_prefix(CLAUDE_BEDROCK_5XX.0) else { return false };
+    let Some(code) = rest.strip_suffix(CLAUDE_BEDROCK_5XX.1) else { return false };
+    code.len() == 3 && code.starts_with('5') && code.chars().all(|c| c.is_ascii_digit())
+}
+
 /// "Claude Opus 4.1 (1M context)" is five.
 const MODEL_NAME_WORDS: usize = 5;
 
@@ -214,7 +239,8 @@ fn signature_within(text: &str, window: usize) -> Option<String> {
         }
         let hit = (c.starts_with(HEADER) && TRANSIENT.iter().any(|m| c.contains(m)))
             || c.starts_with(MODEL_UNAVAILABLE)
-            || high_traffic(spaced);
+            || high_traffic(spaced)
+            || claude_bedrock_5xx(spaced);
         if !hit {
             continue;
         }
@@ -537,6 +563,94 @@ mod tests {
     /// chat delivery above it, the blank lines are a single space, and the
     /// prompt furniture below.
     const HIGH_TRAFFIC_SCREEN: &str = "  › [tmm chat 2026-09-28 13:55] human: @kiro\n    你现在什么阶段 在处理数据吗还是在训练了\n \n● Claude Opus 5.5 is experiencing high traffic. Try\n  again, or select another model. (Request ID:\n  ef8dd12f-668e-4cdb-a8a7-7ecc7baa4146)\n \n▸ Credits: 121.98 • Time: 129m 30s\n\n ◐ 7 tasks remaining · ctrl+x expand\n───────────────────────────────────────────────────────\n Trust All Tools active, confirmations are off · /quit\n to exit\n───────────────────────────────────────────────────────\nkiro · Claude Opus 5.5 · high · ◑ 35% · Midway: 10h 53m\n/local/home/cfu/work/projects/lingting · (main)\n\n›  ask a question or describe a task ↵\n              /sessions to resume · /copy to clipboard\n";
+
+    /// Board #280: Claude Code 2.1.284's real paint, captured from a scratch
+    /// claude against a local endpoint answering 503, at 100 and 57 columns.
+    const CLAUDE_503_WIDE: &str = "❯ say hi\n\n● API Error: 503 Bedrock is unable to process your request. This is a server-side issue,\n  usually temporary — try again in a moment. If it persists, check your Amazon Bedrock\n  service status.\n\n✻ Crunched for 0s · done 11:52 AM\n\n\n\n────────────────────────────────────────────────────────────────────────────────────────────────────\n❯\n────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n";
+    const CLAUDE_503_NARROW: &str = "❯ again\n\n● API Error: 503 Bedrock is unable to process\n  your request. This is a server-side issue,\n  usually temporary — try again in a moment. If\n  it persists, check your Amazon Bedrock service\n  status.\n\n✻ Worked for 0s · done 11:52 AM\n\n─────────────────────────────────────────────────────────\n❯\n─────────────────────────────────────────────────────────\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← fo…\n";
+
+    #[test]
+    fn claude_codes_bedrock_503_is_detected() {
+        assert!(scan_tail(CLAUDE_503_WIDE), "100 columns");
+        assert!(scan_tail(CLAUDE_503_NARROW), "57 columns");
+        assert_eq!(error_signature(CLAUDE_503_NARROW).as_deref(), Some("1|"), "no request id: the hit count is the signature");
+        assert!(scan_tail("● API Error: 500 Bedrock is unable to process your request. This is a server-side issue, usually temporary — try again in a moment. If it persists, check your Amazon Bedrock service status.\n"),
+            "any 5xx with the same text");
+    }
+
+    /// The same text QUOTED, reworded or cut is not having the error: a
+    /// false hit types `continue` into a working claude.
+    #[test]
+    fn quoting_claude_codes_503_is_not_having_it() {
+        let paint = "● API Error: 503 Bedrock is unable to process your request. This is a server-side issue,\n  usually temporary — try again in a moment. If it persists, check your Amazon Bedrock\n  service status.";
+        // The owner's own board issue, typed into an agent's pane as a chat line.
+        assert!(!scan_tail(&format!("[tmm chat 2026-09-29 11:28] human: [board #280] {paint}\n")), "quoted under a stamp");
+        assert!(!scan_tail(&format!("● Bash(tmm board show 280)\n  ⎿ {paint}\n")), "tool output under a bullet head");
+        let text = "Bedrock is unable to process your request. This is a server-side issue, usually temporary — try again in a moment. If it persists, check your Amazon Bedrock service status.";
+        for (bad, why) in [
+            (format!("● API Error: 429 {text}"), "not a 5xx"),
+            (format!("● API Error: 5030 {text}"), "not a status code"),
+            (format!("● The pane showed API Error: 503 {text}"), "prose about it"),
+            (format!("● API Error: 503 {text} I will retry."), "text after it"),
+            ("● API Error: 503 Bedrock is unable to process your request.".to_string(), "cut short"),
+            (format!("● API Error: 503 {}", text.replace("usually temporary — try again", "try again")), "no transient words"),
+        ] {
+            assert!(!scan_tail(&format!("{bad}\n")), "{why}: {bad}");
+        }
+    }
+
+    /// Board #280, end to end on a real managed CLAUDE pane: the scan runs
+    /// for every managed agent (the recipe names the backend), reads the
+    /// 503 block off the screen and types ONE `continue`; the next tick, with
+    /// the same error still painted and no hook yet, waits. A pane that only
+    /// QUOTES the error under a chat stamp gets nothing.
+    #[test]
+    fn a_managed_claude_pane_showing_the_503_gets_one_continue() {
+        super::super::tests::use_test_store();
+        let tag = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
+        let session = format!("tmm-rec-claude-{tag}");
+        let ws = std::env::temp_dir().join(format!("tmm-rec-claude-ws-{tag}"));
+        for name in ["cl", "quoted"] {
+            let home = ws.join(".tmm/agents").join(name);
+            std::fs::create_dir_all(&home).unwrap();
+            std::fs::write(home.join("launch.json"), serde_json::json!({ "backend": "claude", "cmd": "claude", "team": "" }).to_string()).unwrap();
+        }
+        let paint = std::env::temp_dir().join(format!("tmm-rec-claude-{tag}.txt"));
+        std::fs::write(&paint, CLAUDE_503_NARROW).unwrap();
+        let quoted = std::env::temp_dir().join(format!("tmm-rec-claude-q-{tag}.txt"));
+        std::fs::write(&quoted, "[tmm chat 2026-09-29 11:28] human: [board #280] ● API Error: 503 Bedrock is unable to process your request. This is a server-side issue, usually temporary — try again in a moment. If it persists, check your Amazon Bedrock service status.\n").unwrap();
+        // The pane prints the capture, then reads its input (what `continue` lands in).
+        let show = |f: &std::path::Path| format!("cat {}; cat", f.display());
+        let ok = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-x", "57", "-y", "36", "-s", &session, "-n", "cl", "-c", &ws.to_string_lossy(), &show(&paint)])
+            .status().map(|s| s.success()).unwrap_or(false);
+        if !ok {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        std::process::Command::new("tmux").args(["new-window", "-d", "-t", &session, "-n", "quoted", "-c", &ws.to_string_lossy(), &show(&quoted)]).status().unwrap();
+        let cleanup = || {
+            let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
+            let _ = std::fs::remove_dir_all(&ws);
+            let _ = std::fs::remove_file(&paint);
+            let _ = std::fs::remove_file(&quoted);
+        };
+        if super::super::adopt(&session, Some("rec-claude-test")).is_err() {
+            cleanup();
+            panic!("adopt failed");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        check_once();
+        check_once();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let cl = crate::tmux::capture_pane_plain(&format!("{session}:cl"), Some(0)).unwrap_or_default();
+        let q = crate::tmux::capture_pane_plain(&format!("{session}:quoted"), Some(0)).unwrap_or_default();
+        let notes: Vec<String> = super::super::telemetry::recent_events(&session, 0).into_iter().map(|e| e.text).filter(|t| t.starts_with("auto-continue")).collect();
+        cleanup();
+        assert_eq!(cl.matches("continue").count(), 2, "typed once (the pane echoes it: tty + cat): {cl:?}");
+        assert!(!q.contains("\ncontinue"), "a quote gets nothing: {q:?}");
+        assert_eq!(notes, vec!["auto-continue 1/4 — transient model error in cl".to_string()], "one send, one record");
+    }
 
     #[test]
     fn the_high_traffic_error_is_detected() {
