@@ -2406,15 +2406,14 @@ test('the kiro card menu switches queue ⇄ steer for this session; codex and ol
     let toSteer = item(await menuOf(app, 'alice'));
     assert.ok(toSteer, 'a queued kiro offers steer');
     assert.match(toSteer!.textContent!, /Switch to Steer/u);
-    assert.match(toSteer!.querySelector('.ctx-hint')?.textContent ?? '', /this session · no receipts while busy/u,
-      'steer says it is this session only, and what it costs');
+    assert.equal(toSteer!.querySelector('.ctx-hint'), null, 'no hint line under the item (#272)');
     toSteer!.click();
     for (let i = 0; i < 5 && !calls.length; i++) await app.flush();
     assert.deepEqual(calls, [['fixture', 'alice', 'steer']], 'the one RPC, with the other mode');
     for (let i = 0; i < 5; i++) await app.flush();
     const toQueue = item(await menuOf(app, 'alice'));
     assert.match(toQueue?.textContent ?? '', /Switch to Queue/u, 'the reloaded row flips the label');
-    assert.equal(toQueue!.querySelector('.ctx-hint')?.textContent, 'this session');
+    assert.equal(toQueue!.querySelector('.ctx-hint'), null, 'neither direction has one (#272)');
     assert.equal(item(await menuOf(app, 'bob')), undefined, 'codex: its mode is fixed at launch');
     modes = { alice: undefined, bob: undefined };
     await app.advance(5000);

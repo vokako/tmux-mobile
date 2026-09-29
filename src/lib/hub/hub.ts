@@ -1086,17 +1086,16 @@ export function isSessionStart(text: string | null | undefined): boolean {
 /** The card menu's queue ⇄ steer item for one agent (board #271), or null
  * when there is none to offer: the server must report the mode the session
  * RUNS (`input_mode`, derived from the pane) and the backend must switch it
- * live (`toggles`, from `backends_list`). The item names the OTHER mode. */
+ * live (`toggles`, from `backends_list`). The item names the OTHER mode,
+ * with no hint line (owner, #272: "后边的小字不要了吧，看着不好看"). */
 export function inputModeSwitch(
   agent: { agent?: string | null; input_mode?: 'queue' | 'steer' | null } | null | undefined,
   toggles: (backend: string | null | undefined) => boolean,
-): { next: 'queue' | 'steer'; label: 'hubToQueue' | 'hubToSteer'; hint: 'hubModeSession' | 'hubModeSteerHint' } | null {
+): { next: 'queue' | 'steer'; label: 'hubToQueue' | 'hubToSteer' } | null {
   if (!agent?.input_mode || !toggles(agent.agent)) return null;
   return agent.input_mode === 'steer'
-    ? { next: 'queue', label: 'hubToQueue', hint: 'hubModeSession' }
-    // Steer's known limit said where it is chosen (#245/#271): a line sent to
-    // a busy steering kiro fires no hook, so it gets no delivery check.
-    : { next: 'steer', label: 'hubToSteer', hint: 'hubModeSteerHint' };
+    ? { next: 'queue', label: 'hubToQueue' }
+    : { next: 'steer', label: 'hubToSteer' };
 }
 
 /** A slash command the person sent (`hub_command` records `[tmm] /goal args →

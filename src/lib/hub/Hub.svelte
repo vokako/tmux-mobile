@@ -1568,10 +1568,9 @@
         ? [{ label: t('hubInterrupt'), icon: 'stop', warn: true, disabled: interrupting.includes(name), onselect: () => interrupt(name, session) }]
         : []),
       // Queue ⇄ steer for this session, where the running CLI can switch
-      // (#271): the item names the OTHER mode; the configured one returns
-      // on restart, which the hint says.
+      // (#271): the item names the OTHER mode, no hint line (#272).
       ...(modeSwitch
-        ? [{ label: t(modeSwitch.label), icon: 'zap', hint: t(modeSwitch.hint),
+        ? [{ label: t(modeSwitch.label), icon: 'zap',
             onselect: () => switchInputMode(name, modeSwitch.next, session) }]
         : []),
       { label: t('hubRestart'), icon: 'refresh', onselect: () => restartAgent(name) },

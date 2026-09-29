@@ -1775,9 +1775,9 @@ test('a long command folds its arguments through the message budget; short ones 
 
 test('the card offers the OTHER input mode only where the running CLI can switch (#271)', () => {
   const kiroOnly = (b: string | null | undefined) => b === 'kiro';
-  assert.deepEqual(inputModeSwitch({ agent: 'kiro', input_mode: 'queue' }, kiroOnly), { next: 'steer', label: 'hubToSteer', hint: 'hubModeSteerHint' },
-    'choosing steer says this session AND its missing delivery check');
-  assert.deepEqual(inputModeSwitch({ agent: 'kiro', input_mode: 'steer' }, kiroOnly), { next: 'queue', label: 'hubToQueue', hint: 'hubModeSession' });
+  assert.deepEqual(inputModeSwitch({ agent: 'kiro', input_mode: 'queue' }, kiroOnly), { next: 'steer', label: 'hubToSteer' },
+    'the label only: no hint line (#272)');
+  assert.deepEqual(inputModeSwitch({ agent: 'kiro', input_mode: 'steer' }, kiroOnly), { next: 'queue', label: 'hubToQueue' });
   assert.equal(inputModeSwitch({ agent: 'codex', input_mode: 'queue' }, kiroOnly), null, 'codex: the mode is fixed at launch');
   assert.equal(inputModeSwitch({ agent: 'kiro', input_mode: null }, kiroOnly), null, 'no derived mode: nothing to switch');
   assert.equal(inputModeSwitch({ agent: 'kiro' }, kiroOnly), null, 'an older server sends no mode');
