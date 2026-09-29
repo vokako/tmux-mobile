@@ -254,12 +254,18 @@ async fn main() {
             let from = ctx.agent.clone().unwrap_or_else(|| "human".into());
             // A `/command` goes to the CLI, not its model — the composer's
             // rule, read by the same `address::slash_command` (board #274):
-            // typed verbatim through hub_command, no chat stamp. Text only;
-            // an image or --status makes it an ordinary message.
-            if !is_status && images.is_empty() {
-                if let Some((to, command)) = tmux_mobile::address::slash_command(&body).filter(|(to, _)| !to.is_empty()) {
-                    if to == from {
-                        fail(EXIT_USAGE, &format!("{from} cannot send a command to itself"));
+            // typed verbatim through hub_command, no chat stamp.
+            match send_route(&body, &from, !is_status && images.is_empty()) {
+                SendRoute::Post => {}
+                SendRoute::ToSelf => fail(EXIT_USAGE, &format!("{from} cannot send a command to itself")),
+                SendRoute::Command { to, command } => {
+                    // A command aimed at nobody fails loudly (orchestrator
+                    // 08:36): a named target must be a managed agent here.
+                    if to != "all" {
+                        let agents = rpc(&ctx, "hub_agents", json!({ "session": session })).await;
+                        if !managed_names(&agents).contains(&to) {
+                            fail(EXIT_NOT_FOUND, &format!("no managed agent named '{to}' — a /command goes to an agent's CLI"));
+                        }
                     }
                     let r = rpc(&ctx, "hub_command", json!({
                         "session": session, "agent": to, "text": command, "from": from
@@ -1331,9 +1337,77 @@ async fn follow_log(ctx: &Ctx, session: &str, mut since: i64, limit: i64) {
     }
 }
 
+/// Where `tmm send` takes a body (board #274). `plain` = no `--status` and
+/// no image: only plain text can be a command, as in the composer.
+#[derive(Debug, PartialEq, Eq)]
+enum SendRoute {
+    /// An ordinary room message (`hub_post`).
+    Post,
+    /// Typed verbatim into `to`'s CLI (`hub_command`; `to` may be `all`).
+    Command { to: String, command: String },
+    /// A command the sender addressed to itself: refused.
+    ToSelf,
+}
+
+fn send_route(body: &str, from: &str, plain: bool) -> SendRoute {
+    let Some((to, command)) = plain.then(|| tmux_mobile::address::slash_command(body)).flatten() else {
+        return SendRoute::Post;
+    };
+    // `@human` is a chat recipient, never a command target (validator /
+    // orchestrator 08:36): "@human /compact" is said to the person, as before.
+    if to.is_empty() || to == "human" {
+        SendRoute::Post
+    } else if to == from {
+        SendRoute::ToSelf
+    } else {
+        SendRoute::Command { to, command }
+    }
+}
+
+/// The managed agents in a `hub_agents` answer.
+fn managed_names(agents: &Value) -> Vec<String> {
+    agents["agents"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter(|r| r["managed"].as_bool() == Some(true))
+                .filter_map(|r| r["name"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Board #274 (validator / orchestrator 08:36): the CLI's routing.
+    /// `@human /x` stays a room message with its exact body; `@dev /compact`
+    /// and `@all /clear` are commands; a command to yourself is refused;
+    /// `--status`, an image, prose and a path are messages.
+    #[test]
+    fn tmm_send_routes_a_command_like_the_composer_but_never_to_the_human() {
+        let cmd = |to: &str, c: &str| SendRoute::Command { to: to.into(), command: c.into() };
+        assert_eq!(send_route("@dev /compact", "lead", true), cmd("dev", "/compact"));
+        assert_eq!(send_route("@all /clear", "lead", true), cmd("all", "/clear"));
+        assert_eq!(send_route("@ghost /compact", "lead", true), cmd("ghost", "/compact"), "the roster check, not the rule, refuses a ghost");
+        assert_eq!(send_route("@human /compact", "lead", true), SendRoute::Post, "the human is told, not commanded");
+        assert_eq!(send_route("@human /compact", "human", true), SendRoute::Post, "…from any sender, never a self-refusal");
+        assert_eq!(send_route("@lead /compact", "lead", true), SendRoute::ToSelf);
+        assert_eq!(send_route("@dev /compact", "lead", false), SendRoute::Post, "--status or an image: a message");
+        assert_eq!(send_route("@dev please /compact", "lead", true), SendRoute::Post);
+        assert_eq!(send_route("@dev /usr/bin/ls", "lead", true), SendRoute::Post);
+        assert_eq!(send_route("/compact", "lead", true), SendRoute::Post, "no target: a message, as in the composer");
+    }
+
+    #[test]
+    fn only_managed_rows_are_command_targets() {
+        let agents = json!({ "agents": [
+            { "name": "zsh", "managed": false }, { "name": "dev", "managed": true }, { "name": "hand", "managed": false },
+        ] });
+        assert_eq!(managed_names(&agents), vec!["dev".to_string()]);
+        assert!(managed_names(&json!({})).is_empty());
+    }
 
     #[test]
     fn repeated_valued_flags_survive_the_map() {

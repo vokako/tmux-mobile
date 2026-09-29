@@ -30,7 +30,9 @@ this reference stays one screen.
 ```
 # the room (context from $TMM_PROJECT / $TMM_AGENT, exported by the launcher)
 tmm send "@name <text>"              send to one or more recipients (@all, @human)
-tmm send "@name /command [args]"     typed VERBATIM into its CLI, like the composer (#274)
+tmm send "@name /command [args]"     typed VERBATIM into its CLI, like the composer (#274);
+                                     @name must be a managed agent (else exit 4, nothing
+                                     recorded); "@human /x" is a chat message to the person
 tmm send "<text>" --status           ambient progress; room-only, interrupts nobody
 tmm send … --image <path|url>        attach an image by REFERENCE (repeatable)
 tmm log [--since <ts>] [--limit N] [-f]      read chat; --since exclusive (ms), -f follows
