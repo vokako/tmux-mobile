@@ -2406,7 +2406,7 @@ test('the kiro card menu switches queue ⇄ steer for this session; codex and ol
     let toSteer = item(await menuOf(app, 'alice'));
     assert.ok(toSteer, 'a queued kiro offers steer');
     assert.match(toSteer!.textContent!, /Switch to Steer/u);
-    assert.match(toSteer!.querySelector('.ctx-hint')?.textContent ?? '', /this session · no delivery check while it works/u,
+    assert.match(toSteer!.querySelector('.ctx-hint')?.textContent ?? '', /this session · no receipts while busy/u,
       'steer says it is this session only, and what it costs');
     toSteer!.click();
     for (let i = 0; i < 5 && !calls.length; i++) await app.flush();

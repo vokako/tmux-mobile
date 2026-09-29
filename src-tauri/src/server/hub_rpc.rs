@@ -634,7 +634,7 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
             let changed = crate::projects::delivery::switch_input_mode(session, agent, &target, want, key)
                 .map_err(|e| RpcError::Internal(format!("{agent}: {e}")))?;
             if changed {
-                let _ = rooms::post(&room, agent, &format!("[tmm] {agent} → {mode} mode (this session)"));
+                let _ = rooms::post(&room, agent, &format!("[tmm] switched {agent} — {mode} mode (this session)"));
             }
             Ok(serde_json::json!({ "agent": agent, "mode": mode, "changed": changed }))
         }

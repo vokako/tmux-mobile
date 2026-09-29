@@ -894,6 +894,8 @@ test('a lifecycle line splits into a highlighted verb and its subject', () => {
   assert.deepEqual(sysParts('removed k'), { verb: 'removed', who: 'k', text: '', cmd: false });
   // The spawn brief follows the em-dash; the dash itself is layout, not content.
   assert.deepEqual(sysParts('spawned dev — fix the bug'), { verb: 'spawned', who: 'dev', text: 'fix the bug', cmd: false });
+  // #271: the live queue/steer switch is its own row in the one grammar.
+  assert.deepEqual(sysParts('switched kiro — steer mode (this session)'), { verb: 'switched', who: 'kiro', text: 'steer mode (this session)', cmd: false });
   // A verb with nothing after it (`[tmm] done`) names nobody.
   assert.deepEqual(sysParts('done'), { verb: 'done', who: '', text: '', cmd: false });
   // A /command record (`[tmm] {text} → {targets}`) splits into the same three
@@ -917,6 +919,7 @@ test('a lifecycle verb speaks the one status colour language', () => {
   assert.equal(sysVerbColor('done'), 'var(--status-ok)');
   assert.equal(sysVerbColor('stopped'), 'var(--text3)');
   assert.equal(sysVerbColor('removed'), 'var(--status-danger)');
+  assert.equal(sysVerbColor('switched'), 'var(--accent)');
   // Never a literal colour: both themes read the same tokens.
   for (const v of ['spawned', 'stopped', 'removed', 'done', 'interrupted', 'wat', '']) {
     assert.match(sysVerbColor(v), /^var\(--|^color-mix\(/u, `${v} must resolve through a token`);
