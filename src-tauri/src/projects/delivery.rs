@@ -208,6 +208,12 @@ fn deliver_with(session: &str, window: &str, target: &str, line: &str, msg_id: &
     let _guard = lock.lock().unwrap();
     let held = telemetry::held_rows(session, window);
     let mode = mode();
+    // The decision below and the typing and row it leads to are ONE step
+    // against the prompt edge (validator 11:50): `record_prompt` deletes the
+    // first line's row and then writes its prompt fact under this lock, so
+    // `turn_busy` and `line_in_flight` are never read in between. Order:
+    // window lock → this → pane send lock (typing).
+    let _order = telemetry::delivery_decision();
     // A steer window whose last line was typed idle but has not echoed yet
     // is already IN that turn (board #281): kiro took the first line, so a
     // second one lands in the running turn — steered, no hook. The owed
@@ -757,6 +763,48 @@ mod tests {
         assert!(!telemetry::line_in_flight(&a, "dev"));
         assert!(deliver_with(&a, "dev", "t", second, "a2", || Some("steer")));
         assert_eq!(pending(&a, "dev"), 2, "past the ack window the window reads idle again: the line owes");
+    }
+
+    /// Board #281 (validator 11:50): the gap INSIDE the prompt edge. The
+    /// first line's echo is paused after its row is deleted and before its
+    /// prompt fact is written; a second line arriving then must WAIT for the
+    /// edge (the decision takes the same lock), and then find the turn open
+    /// and steer. Negative control: a decision outside that lock reads idle
+    /// with no row in flight and owes the second line an echo.
+    #[test]
+    fn a_line_during_the_prompt_edge_waits_for_it_and_steers() {
+        let s = setup("edge-gap");
+        let first = "[tmm chat 10:14] data: [board #13 reply] first";
+        assert!(deliver_with(&s, "dev", "t", first, "m1", || Some("steer")));
+        assert_eq!(pending(&s, "dev"), 1);
+        let (deleted_tx, deleted) = std::sync::mpsc::channel();
+        *telemetry::IN_PROMPT_SETTLED_HOOK.lock().unwrap() = Some(Box::new(move || {
+            deleted_tx.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(300));
+        }));
+        let echo = {
+            let s = s.clone();
+            std::thread::spawn(move || record_prompt(&s, "dev", first))
+        };
+        deleted.recv().unwrap();
+        assert_eq!(pending(&s, "dev"), 0, "the first row is gone, the prompt fact not yet written");
+        let second = {
+            let s = s.clone();
+            std::thread::spawn(move || {
+                fake();
+                let ok = deliver_with(&s, "dev", "t", "[tmm chat 10:14] data: [board #12 reply] second", "m2", || Some("steer"));
+                (ok, typed())
+            })
+        };
+        assert!(echo.join().unwrap(), "the echo settled the first line");
+        let (ok, typed_second) = second.join().unwrap();
+        assert!(ok);
+        assert_eq!(typed_second.len(), 1, "typed");
+        assert_eq!(pending(&s, "dev"), 0, "waited for the edge, then steered: no row");
+        assert!(telemetry::recent_events(&s, 0).iter().any(|e| e.kind == "steered" && e.deliveries.iter().any(|d| d.msg == "m2")));
+        end(&s, "dev");
+        telemetry::sweep_deliveries(&s);
+        assert!(warns(&s).is_empty(), "{:?}", warns(&s));
     }
 
     /// The owner's case: a burst of 10 to a busy queue-mode agent is ONE

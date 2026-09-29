@@ -632,10 +632,28 @@ fn turn_order() -> std::sync::MutexGuard<'static, ()> {
     TURN_ORDER.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// The turn-fact lock for a delivery decision (board #281, validator 11:50):
+/// `delivery::deliver_with` reads `turn_busy` and `line_in_flight` and then
+/// types and records the line, and `record_prompt` deletes the settled row
+/// and then writes the prompt fact. Both run under THIS lock, so a decision
+/// never falls in the gap between that delete and that fact. Lock order,
+/// one for the whole app: window lock → this → pane send lock. No holder of
+/// this lock takes a window lock (prompt settlement, end edge, interrupt,
+/// command rows only touch the store; the #257 flush runs after the end
+/// edge returns).
+pub fn delivery_decision() -> std::sync::MutexGuard<'static, ()> {
+    turn_order()
+}
+
 /// Test-only: runs once inside the next prompt's critical section, so a test
 /// can race another turn fact against it and prove it waits (board #264).
 #[cfg(test)]
 static IN_PROMPT_HOOK: Mutex<Option<Box<dyn FnOnce() + Send>>> = Mutex::new(None);
+/// Test-only: runs once inside the next prompt's critical section AFTER its
+/// rows are settled (deleted) and BEFORE its prompt fact is written — the
+/// gap a delivery decision must never fall into (board #281).
+#[cfg(test)]
+pub(crate) static IN_PROMPT_SETTLED_HOOK: Mutex<Option<Box<dyn FnOnce() + Send>>> = Mutex::new(None);
 /// Test-only: runs once inside the next end edge's critical section, after
 /// its had-prompt read and before its retirement.
 #[cfg(test)]
@@ -1033,6 +1051,10 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
         .filter(|row| queue(|s| s.delete_delivery_id(row.id)).unwrap_or(false))
         .collect();
     let acked = !won.is_empty();
+    #[cfg(test)]
+    if let Some(hook) = IN_PROMPT_SETTLED_HOOK.lock().unwrap().take() {
+        hook();
+    }
     let refs: Vec<DeliveryRef> = won.iter().map(|row| DeliveryRef::of(row)).collect();
     // A prompt that carried neither the candidate command nor any chat line
     // of ours proves that command echoes nothing: that ONE row is dropped,
