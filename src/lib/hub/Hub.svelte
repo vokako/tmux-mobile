@@ -1571,7 +1571,7 @@
       // (#271): the item names the OTHER mode; the configured one returns
       // on restart, which the hint says.
       ...(modeSwitch
-        ? [{ label: t(modeSwitch.label), icon: 'zap', hint: t('hubModeSession'),
+        ? [{ label: t(modeSwitch.label), icon: 'zap', hint: t(modeSwitch.hint),
             onselect: () => switchInputMode(name, modeSwitch.next, session) }]
         : []),
       { label: t('hubRestart'), icon: 'refresh', onselect: () => restartAgent(name) },

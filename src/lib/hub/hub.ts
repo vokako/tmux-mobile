@@ -1090,11 +1090,13 @@ export function isSessionStart(text: string | null | undefined): boolean {
 export function inputModeSwitch(
   agent: { agent?: string | null; input_mode?: 'queue' | 'steer' | null } | null | undefined,
   toggles: (backend: string | null | undefined) => boolean,
-): { next: 'queue' | 'steer'; label: 'hubToQueue' | 'hubToSteer' } | null {
+): { next: 'queue' | 'steer'; label: 'hubToQueue' | 'hubToSteer'; hint: 'hubModeSession' | 'hubModeSteerHint' } | null {
   if (!agent?.input_mode || !toggles(agent.agent)) return null;
   return agent.input_mode === 'steer'
-    ? { next: 'queue', label: 'hubToQueue' }
-    : { next: 'steer', label: 'hubToSteer' };
+    ? { next: 'queue', label: 'hubToQueue', hint: 'hubModeSession' }
+    // Steer's known limit said where it is chosen (#245/#271): a line sent to
+    // a busy steering kiro fires no hook, so it gets no delivery check.
+    : { next: 'steer', label: 'hubToSteer', hint: 'hubModeSteerHint' };
 }
 
 /** A slash command the person sent (`hub_command` records `[tmm] /goal args →
