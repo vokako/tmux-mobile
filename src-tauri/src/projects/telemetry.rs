@@ -963,6 +963,26 @@ pub fn drop_held(session: &str, window: &str) {
 /// names real rows only (#249). The sweep's own `warn` kind says so at once,
 /// on the target window, with the reason and the line. Nothing retries it:
 /// the person reading scrollback leaves the mode, and the sender resends.
+/// Lines typed into a busy steer-mode session's running turn (board #276):
+/// one `steered` event naming the chat messages they carry, instead of
+/// pending rows no hook would ever settle. Not a turn fact (`turn_facts`
+/// reads prompt/tool/notif only), and hidden in the feed except as the
+/// reason a bubble shows no ring.
+pub fn record_steered(session: &str, window: &str, line: &str, msgs: &[&str]) {
+    recovery_mark(session);
+    with_rec(session, window, |_| {});
+    let refs = msgs.iter().filter(|m| !m.is_empty()).map(|m| DeliveryRef { id: 0, msg: m.to_string() }).collect();
+    push_full(session, window, "steered", truncate_chars(line, 160), String::new(), String::new(), refs);
+}
+
+/// Drop delivery rows that are owed nothing (#276: released rows steered
+/// into a running turn).
+pub fn forget_deliveries(ids: &[i64]) {
+    for id in ids {
+        forget_delivery(*id);
+    }
+}
+
 pub fn record_undelivered(session: &str, window: &str, line: &str, reason: &str) {
     push_event(session, window, "warn", format!("undelivered ({reason}): {}", truncate_chars(line, 160)));
 }

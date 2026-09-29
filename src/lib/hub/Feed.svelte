@@ -789,11 +789,13 @@
                        already means "recorded, nobody interrupted". -->
                   {#if b.delivered}
                     <span class="m-state ok" title={t('hubDeliveredHint')}><Icon name="circle-check" size={11} /></span>
-                  {:else if b.command}
+                  {:else if b.command || b.steered}
                     <!-- A /command carries no promise (board #264): most never
                          reach a prompt hook, so a hollow ring would wait for
                          ever. It gains the check only when its echo settles
-                         it; otherwise just the time. -->
+                         it; otherwise just the time. A line steered into a
+                         busy turn (#276) reads the same way: typed into the
+                         running turn, no check to wait for. -->
                   {:else if !mentionedAgents(m.body ?? '', managedNames).length}
                     <span class="m-state note" title={t('hubNoteHint')}><i class="st note-dot"></i></span>
                   {:else}

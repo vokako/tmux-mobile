@@ -1394,7 +1394,7 @@ export function draftUpdate(
  * `note` is a single observed fact, `steps` is a collapsible run of tool calls
  * (the "what it did between two replies" pane). */
 export type FeedBlock =
-  | { type: 'msg'; ts: number; msg: any; delivered: boolean; command?: SentCommand }
+  | { type: 'msg'; ts: number; msg: any; delivered: boolean; command?: SentCommand; steered?: boolean }
   | { type: 'sys'; ts: number; key: string; items: string[] }
   | { type: 'prompt'; ts: number; window: string; text: string }
   | { type: 'progress'; ts: number; window: string; state: string; text: string }
@@ -1730,6 +1730,15 @@ export function feedBlocks(
     if (e.kind === 'prompt' && e.via === 'app') for (const d of e.deliveries ?? []) settledRows.add(d.id);
   }
   for (const e of activity) {
+    // A line typed into a busy steer-mode turn (board #276) will never echo:
+    // the server owes it nothing and names its message here, so the bubble
+    // promises no check. The event itself is never drawn.
+    if (e.kind === 'steered') {
+      const named = new Set((e.deliveries ?? []).map((d) => d.msg).filter(Boolean));
+      for (const m of msgs) if (m.type === 'msg' && named.has(m.msg?.id)) m.steered = true;
+      consumed.add(e);
+      continue;
+    }
     // A warn about a row a later echo settled is retracted: the line was late,
     // not lost.
     if (e.kind === 'warn' && e.deliveries?.some((d) => settledRows.has(d.id))) {

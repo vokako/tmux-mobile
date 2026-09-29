@@ -481,6 +481,22 @@ test('a prompt typed at the agent keyboard becomes its own input row', () => {
   assert.deepEqual(feedBlocks([], orphan, 'status').map((b) => b.type), ['prompt'], 'never silently dropped');
 });
 
+test('a line steered into a busy turn promises no check, and its event is never drawn (#276)', () => {
+  const msgs = [
+    { id: 'm1', ts: 100, from: 'human', body: '@dev steered in' },
+    { id: 'm2', ts: 110, from: 'human', body: '@dev still owed' },
+  ];
+  const steered = ev({ ts: 101, kind: 'steered', text: '[tmm chat 03:00] human: @dev steered in', deliveries: [{ id: 0, msg: 'm1' }] });
+  for (const level of ['chat', 'status', 'tools'] as const) {
+    const blocks = feedBlocks(msgs, [steered], level);
+    assert.deepEqual(blocks.map((b) => b.type), ['msg', 'msg'], `${level}: no row for the event`);
+    const [a, b] = blocks as Extract<ReturnType<typeof feedBlocks>[number], { type: 'msg' }>[];
+    assert.equal(a!.steered, true);
+    assert.equal(a!.delivered, false, 'not a check: nothing echoed');
+    assert.ok(!b!.steered, 'only the named message');
+  }
+});
+
 test('an echo that names its messages is a receipt even when they are not loaded (#249)', () => {
   // 13:12 in the owner's screenshot: a 12:41 message 184 rows back, outside
   // the loaded page, was echoed with via:'app' and still drew an INPUT row.

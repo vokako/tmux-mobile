@@ -904,8 +904,10 @@ export interface HubActivityEvent {
   window: string;
   /** tool = a hook tool call, status = `tmm status`, notif = a lifecycle hook,
    * prompt = a prompt the agent accepted (userPromptSubmit), warn = a line we
-   * typed that the agent never echoed back. */
-  kind: 'tool' | 'status' | 'notif' | 'prompt' | 'warn';
+   * typed that the agent never echoed back, steered = lines typed into a busy
+   * steer-mode turn, which owe no echo (board #276; `deliveries[].msg` names
+   * them). */
+  kind: 'tool' | 'status' | 'notif' | 'prompt' | 'warn' | 'steered';
   /** For `tool` events this is the ARGUMENT (a path, a command); the tool's
    * name is `tool`. For every other kind it is the whole line. */
   text: string;

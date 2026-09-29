@@ -166,16 +166,6 @@ fn switch_with(
     })
 }
 
-/// Does this window hold lines while busy (board #257)? Only a session
-/// that runs QUEUE does: a line held for a steering kiro would wait for an
-/// echo a steered line never produces. Read at typing time from the live
-/// mode, so a Ctrl+S pressed in the terminal a moment ago is honoured (#271),
-/// and read under the window's lock (`deliver_with`), so a switch from the
-/// app lands wholly before the decision or wholly after it.
-pub fn coalesces(session: &str, window: &str) -> bool {
-    input_mode(session, window) == Some("queue")
-}
-
 /// The live pane of a managed agent window, as a tmux target — `None` for a
 /// dead window, a shell, or an agent this app did not start.
 pub fn agent_target(session: &str, window: &str) -> Option<String> {
@@ -190,24 +180,36 @@ pub fn agent_target(session: &str, window: &str) -> Option<String> {
 /// True when it was typed or held; false when the pane refused it (said in
 /// the feed as `undelivered`, board #250).
 pub fn deliver(session: &str, window: &str, target: &str, line: &str, msg_id: &str) -> bool {
-    deliver_with(session, window, target, line, msg_id, || coalesces(session, window))
+    deliver_with(session, window, target, line, msg_id, || input_mode(session, window))
 }
 
-/// Tests' shorthand: deliver with the mode decided up front.
+/// Tests' shorthand: deliver with the mode decided up front (`true` = a
+/// queue-mode session, `false` = a backend without the choice).
 #[cfg(test)]
 fn deliver_as(session: &str, window: &str, target: &str, line: &str, msg_id: &str, coalesce: bool) -> bool {
-    deliver_with(session, window, target, line, msg_id, || coalesce)
+    deliver_with(session, window, target, line, msg_id, || coalesce.then_some("queue"))
 }
 
-/// `deliver` with the mode reading injected. `coalesce` is asked INSIDE the
+/// `deliver` with the mode reading injected. The mode is read INSIDE the
 /// window's lock — the lock `switch_input_mode` holds across its key and its
 /// verify (validator 04:48) — so the line is decided against the mode before
 /// a switch or after it, never between.
-fn deliver_with(session: &str, window: &str, target: &str, line: &str, msg_id: &str, coalesce: impl FnOnce() -> bool) -> bool {
+///
+/// Three outcomes for a window whose turn is open: QUEUE holds the line
+/// (#257); STEER types it into the running turn and owes no echo (#276:
+/// a steered line fires no `userPromptSubmit`, so a pending row could only
+/// ever be swept `unconfirmed`); no choice types it as before.
+fn deliver_with(session: &str, window: &str, target: &str, line: &str, msg_id: &str, mode: impl FnOnce() -> Option<&'static str>) -> bool {
     let lock = window_lock(session, window);
     let _guard = lock.lock().unwrap();
     let held = telemetry::held_rows(session, window);
-    let busy = coalesce() && telemetry::turn_busy(session, window);
+    let mode = mode();
+    let open = mode.is_some() && telemetry::turn_busy(session, window);
+    let busy = open && mode == Some("queue");
+    let steered = open && mode == Some("steer");
+    if steered && held.is_empty() {
+        return type_steered(session, window, target, line, msg_id);
+    }
     if !busy && held.is_empty() {
         return type_now(session, window, target, line, msg_id);
     }
@@ -221,9 +223,28 @@ fn deliver_with(session: &str, window: &str, target: &str, line: &str, msg_id: &
         return type_now(session, window, target, line, msg_id);
     }
     if !busy || overdue(&held) {
-        flush_locked(session, window, target);
+        flush_locked(session, window, target, steered);
     }
     true
+}
+
+/// A line typed into a BUSY steer-mode session's running turn (board #276):
+/// typed, but no pending row — nothing can settle it, and the sweep would
+/// report a line the model did receive. Recorded as a `steered` event naming
+/// its message, so the feed draws no ring that promises a check. A refusal
+/// is said at once, as for any line (#250).
+fn type_steered(session: &str, window: &str, target: &str, line: &str, msg_id: &str) -> bool {
+    match type_text(target, line) {
+        Ok(()) => {
+            telemetry::record_steered(session, window, line, &[msg_id]);
+            super::vitals::sniff_window_soon(session, window);
+            true
+        }
+        Err(e) => {
+            telemetry::record_undelivered(session, window, line, e.trim());
+            false
+        }
+    }
 }
 
 /// Has the oldest held line waited past `HOLD_MAX_SECS`?
@@ -283,10 +304,14 @@ pub fn flush_on_start() {
 fn flush_at(session: &str, window: &str, target: &str) {
     let lock = window_lock(session, window);
     let _guard = lock.lock().unwrap();
-    if telemetry::turn_busy(session, window) && !overdue(&telemetry::held_rows(session, window)) {
+    let busy = telemetry::turn_busy(session, window);
+    if busy && !overdue(&telemetry::held_rows(session, window)) {
         return;
     }
-    flush_locked(session, window, target);
+    // An overdue flush into a turn still open: steered if the session now
+    // runs steer (#276), so its rows are owed no echo.
+    let steered = busy && input_mode(session, window) == Some("steer");
+    flush_locked(session, window, target, steered);
 }
 
 /// Type the first combined prompt of the held lines. The rows are marked
@@ -294,7 +319,7 @@ fn flush_at(session: &str, window: &str, target: &str) {
 /// put back on a refusal: a pane in copy mode keeps them held, reported once,
 /// retried at the next trigger (board #257 decision 2 — the sender was
 /// already told the line is queued).
-fn flush_locked(session: &str, window: &str, target: &str) {
+fn flush_locked(session: &str, window: &str, target: &str, steered: bool) {
     let rows = telemetry::held_rows(session, window);
     let take = first_prompt(&rows.iter().map(|r| r.line.as_str()).collect::<Vec<_>>(), FLUSH_MAX_CHARS);
     if take == 0 {
@@ -310,7 +335,16 @@ fn flush_locked(session: &str, window: &str, target: &str) {
         return;
     }
     match type_text(target, &text) {
-        Ok(()) => super::vitals::sniff_window_soon(session, window),
+        Ok(()) => {
+            // Steered into a running turn (#276): the released rows are owed
+            // no echo; the event names their messages instead.
+            if steered {
+                telemetry::forget_deliveries(&ids);
+                let msgs: Vec<&str> = batch.iter().map(|r| r.msg_id.as_str()).collect();
+                telemetry::record_steered(session, window, &text, &msgs);
+            }
+            super::vitals::sniff_window_soon(session, window)
+        }
         Err(e) => {
             if let Err(err) = telemetry::rehold(&ids) {
                 eprintln!("⚠️  could not re-hold deliveries for {session}:{window} ({err})");
@@ -509,7 +543,7 @@ mod tests {
             pressed.recv().unwrap();
             let line = "[tmm chat 2026-09-29 05:00] lead: @dev during the switch";
             if read_inside_lock {
-                assert!(deliver_with(&s, "dev", "t", line, "", || *mode.lock().unwrap() == "queue"));
+                assert!(deliver_with(&s, "dev", "t", line, "", || Some(*mode.lock().unwrap())));
             } else {
                 let stale = *mode.lock().unwrap() == "queue";
                 assert!(deliver_as(&s, "dev", "t", line, "", stale));
@@ -560,10 +594,10 @@ mod tests {
             };
             let line = "[tmm chat 2026-09-29 05:01] lead: @dev before the switch";
             assert!(deliver_with(&s, "dev", "t", line, "", || {
-                let queue = *mode.lock().unwrap() == "queue";
+                let now = *mode.lock().unwrap();
                 read_tx.send(()).unwrap();
                 std::thread::sleep(std::time::Duration::from_millis(200));
-                queue
+                Some(now)
             }));
             assert_eq!(switch.join().unwrap(), Ok(true));
             assert_eq!(held(&s, "dev"), 1, "decided against queue: held");
@@ -598,6 +632,63 @@ mod tests {
         agent_with_recipe(&scratch, &s, "cl", "claude", "queue");
         assert_eq!(input_mode_seen(&s, "cl", "%4", steer), None);
         assert_eq!(input_mode_seen(&s, "nobody", "%5", steer), None, "not an agent this app started");
+    }
+
+    /// Board #276: the three outcomes for an open turn, by the mode the
+    /// session runs. Busy+steer: typed, NO pending row, one `steered` event
+    /// naming the message, and the sweep reports nothing after the turn.
+    /// Busy+queue: held as before. Idle+steer: an ordinary row, settled by
+    /// the hook (the line starts a turn).
+    #[test]
+    fn a_line_steered_into_a_busy_turn_owes_no_echo() {
+        let s = setup("steer");
+        busy(&s, "dev");
+        let steer = || Some("steer");
+        for (i, msg) in ["m1", "m2", "m3"].iter().enumerate() {
+            assert!(deliver_with(&s, "dev", "t", &format!("[tmm chat 03:0{i}] lead: @dev steer {i}"), msg, steer));
+        }
+        assert_eq!(typed().len(), 3, "typed into the running turn at once");
+        assert_eq!((held(&s, "dev"), pending(&s, "dev")), (0, 0), "no row: nothing can settle it");
+        let steered: Vec<Vec<String>> = telemetry::recent_events(&s, 0)
+            .into_iter()
+            .filter(|e| e.kind == "steered")
+            .map(|e| e.deliveries.into_iter().map(|d| d.msg).collect())
+            .collect();
+        assert_eq!(steered, vec![vec!["m1".to_string()], vec!["m2".to_string()], vec!["m3".to_string()]]);
+        // The sweep reports only pending rows, so no row = no `unconfirmed`,
+        // ever (the live check waits out the 45 s ack window for real).
+        end(&s, "dev");
+        telemetry::sweep_deliveries(&s);
+        assert!(warns(&s).is_empty(), "{:?}", warns(&s));
+        assert!(!telemetry::turn_busy(&s, "dev"), "a steered event is not a turn fact");
+
+        // Busy + queue: held, exactly as #257.
+        let q = setup("steer-queue");
+        busy(&q, "dev");
+        assert!(deliver_with(&q, "dev", "t", "[tmm chat 03:10] lead: @dev later", "", || Some("queue")));
+        assert_eq!((typed().len(), held(&q, "dev")), (0, 1));
+
+        // Idle + steer: the line starts a turn, the hook fires: owed and settled.
+        let i = setup("steer-idle");
+        let line = "[tmm chat 03:20] lead: @dev start";
+        assert!(deliver_with(&i, "dev", "t", line, "m9", || Some("steer")));
+        assert_eq!(pending(&i, "dev"), 1, "an idle window still owes the echo");
+        assert!(record_prompt(&i, "dev", line));
+        assert_eq!(pending(&i, "dev"), 0);
+    }
+
+    /// Mixed: one message to two agents, one busy in steer and one idle. The
+    /// steered one owes nothing; the other still owes its echo.
+    #[test]
+    fn one_message_steered_into_one_agent_and_owed_by_another() {
+        let s = setup("steer-mixed");
+        busy(&s, "a");
+        let line = "[tmm chat 03:30] lead: @a @b both";
+        assert!(deliver_with(&s, "a", "ta", line, "mx", || Some("steer")));
+        assert!(deliver_with(&s, "b", "tb", line, "mx", || Some("steer")));
+        assert_eq!((pending(&s, "a"), pending(&s, "b")), (0, 1), "a owes nothing; b's echo is still owed (and swept if it never comes)");
+        assert!(record_prompt(&s, "b", line), "b's hook settles its row");
+        assert_eq!(pending(&s, "b"), 0);
     }
 
     /// The owner's case: a burst of 10 to a busy queue-mode agent is ONE
