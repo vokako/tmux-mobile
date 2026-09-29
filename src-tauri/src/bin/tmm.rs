@@ -310,6 +310,33 @@ async fn main() {
                     return;
                 }
             }
+            // A message is never typed back into its sender's pane (the
+            // server's skip, which stops a reply looping into its author), so
+            // the CLI says so instead of printing ✓ for nobody (board #283:
+            // five watcher notices were lost this way). A wake, above, is the
+            // one mechanism that reaches its own sender.
+            // Whether anyone else gets it is read from the live roster, the
+            // same `hub_agents` read a /command target is checked against
+            // (#274; orchestrator 14:28): say only what is true.
+            if !is_status && names_self(&body, ctx.agent.as_deref()) {
+                let me = ctx.agent.as_deref().unwrap_or_default();
+                let names = tmux_mobile::address::mention_names(&body);
+                let peers = if names.iter().all(|n| n == me) {
+                    Vec::new()
+                } else {
+                    managed_names(&rpc(&ctx, "hub_agents", json!({ "session": session })).await)
+                };
+                let (reached, unknown) = others(&names, me, &peers);
+                let unknown = if unknown.is_empty() { String::new() } else { format!(" (no managed agent named {})", unknown.join(", ")) };
+                if !reached {
+                    fail(EXIT_USAGE, &format!(
+                        "a message to yourself is never typed into your own pane, and it names no one else here{unknown}; \
+                         to be woken use tmm send \"@{from} …\" --in 10s (a wake reaches you) or \
+                         tmm task start <name> --wake -- <cmd>"
+                    ));
+                }
+                eprintln!("note: your own copy (@{from}) is not typed into your pane{unknown}");
+            }
             let r = rpc(&ctx, "hub_post", json!({
                 "session": session, "from": from, "body": body, "status": is_status
             })).await;
@@ -1591,6 +1618,36 @@ fn send_route(body: &str, from: &str, plain: bool) -> SendRoute {
     }
 }
 
+/// Does this message name its own sender (board #283)? Only a managed
+/// AGENT has a pane a line could be typed back into: `human` is the reserved
+/// identity with none (`--agent human`, TMM_AGENT=human, or no agent at all),
+/// and the human writing `@human` is addressing the person (orchestrator 14:28).
+fn names_self(body: &str, agent: Option<&str>) -> bool {
+    agent.is_some_and(|me| me != "human" && tmux_mobile::address::mention_names(body).iter().any(|n| n == me))
+}
+
+/// For a message that names its sender `me`: does anyone ELSE get it, and
+/// which names reach nobody? `peers` are the room's managed agents. `@human`
+/// is a real recipient (the person reads the room); `@all` is one when there
+/// is another managed agent; any other name must be a managed agent. Pure.
+fn others(names: &[String], me: &str, peers: &[String]) -> (bool, Vec<String>) {
+    let mut reached = false;
+    let mut unknown = Vec::new();
+    for n in names.iter().filter(|n| *n != me) {
+        let real = match n.as_str() {
+            "human" => true,
+            "all" => peers.iter().any(|p| p != me),
+            _ => peers.contains(n),
+        };
+        if real {
+            reached = true;
+        } else if n != "all" && !unknown.contains(n) {
+            unknown.push(n.clone());
+        }
+    }
+    (reached, unknown)
+}
+
 /// The managed agents in a `hub_agents` answer.
 fn managed_names(agents: &Value) -> Vec<String> {
     agents["agents"]
@@ -1625,6 +1682,33 @@ mod tests {
         assert_eq!(send_route("@dev please /compact", "lead", true), SendRoute::Post);
         assert_eq!(send_route("@dev /usr/bin/ls", "lead", true), SendRoute::Post);
         assert_eq!(send_route("/compact", "lead", true), SendRoute::Post, "no target: a message, as in the composer");
+    }
+
+    /// Board #283 (orchestrator 14:28): a send is refused when it names its
+    /// sender and nobody else real — alone, with an unknown name, or with
+    /// @all in a room where the sender is the only agent; with a real peer
+    /// or the human it goes, naming any unknown token. The human identity
+    /// never trips it.
+    #[test]
+    fn a_send_to_yourself_is_refused_unless_someone_real_else_gets_it() {
+        let v = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let names = |b: &str| tmux_mobile::address::mention_names(b);
+        let me = Some("engineer");
+        for body in ["@engineer [watcher] job done", "@engineer @engineer twice", "@architect @engineer x", "@engineer @all hi"] {
+            assert!(names_self(body, me), "{body}");
+        }
+        for (body, agent) in [("@architect job done", me), ("@engineers similar", me), ("mail a@engineer", me), ("@human hi", None), ("@human /compact", Some("human")), ("@human @lead hi", Some("human"))] {
+            assert!(!names_self(body, agent), "{body} as {agent:?}");
+        }
+        let room = v(&["engineer", "architect"]);
+        let alone = v(&["engineer"]);
+        assert_eq!(others(&names("@engineer only"), "engineer", &room), (false, v(&[])));
+        assert_eq!(others(&names("@engineer @ghost x"), "engineer", &room), (false, v(&["ghost"])), "self + unknown");
+        assert_eq!(others(&names("@engineer @all x"), "engineer", &alone), (false, v(&[])), "self + @all, no peers");
+        assert_eq!(others(&names("@engineer @all x"), "engineer", &room), (true, v(&[])));
+        assert_eq!(others(&names("@architect @engineer x"), "engineer", &room), (true, v(&[])), "self + a real peer");
+        assert_eq!(others(&names("@architect @engineer @ghost x"), "engineer", &room), (true, v(&["ghost"])), "sent, the unknown named");
+        assert_eq!(others(&names("@engineer @human look"), "engineer", &alone), (true, v(&[])), "the human reads the room");
     }
 
     /// `--in` / `--at` take a value; were they boolean, "10m" would join the text.
