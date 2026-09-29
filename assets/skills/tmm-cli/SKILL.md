@@ -175,7 +175,9 @@ tmm project create <path> [--name n] [--session s] [--with-agent kiro|claude|cod
 tmm project up <session>            # bring the tmux session up (recreates
                                     #   missing windows, relaunches agents)
 tmm project down <session>          # kill the session, KEEP the declaration
-tmm project rename <session> --name "New name"
+tmm project rename <session> --name "New name"   # the tmux session follows
+                                    #   the name (slugged; printed); the room,
+                                    #   board and wakes move with it
 tmm project archive <session>       # forget the project (session survives)
 tmm project delete <session>        # forget it AND delete its agents' homes
 ```

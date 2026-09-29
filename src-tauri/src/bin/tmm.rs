@@ -88,7 +88,8 @@ USAGE (human or agent — self-management):
   tmm project list                    all projects
   tmm project create <path> [--name n] [--session s] [--with-agent {backends}]
   tmm project up <session>            bring a project's tmux session up
-  tmm project rename <session> --name "New name"   rename the label (session unchanged)
+  tmm project rename <session> --name "New name"   rename it: the tmux session follows the
+                                      name (slugged); the room, board and wakes move with it
   tmm project delete <session>        forget the project and delete its agents' homes
   tmm project down <session>          kill the session, keep the declaration
   tmm project archive <session>       remove from projects (session survives)
@@ -700,8 +701,10 @@ async fn main() {
             }
         }
         ("project", rest) if rest.first().map(String::as_str) == Some("rename") => {
-            // Renames the LABEL. The session is the project's identity (and the
-            // chat room's key), so it is deliberately untouched.
+            // Renames the project: the tmux session follows the name (slugged,
+            // since 2026-08-19, board #278). The room is recorded on the
+            // project and stays; the board and wakes move with the session,
+            // and the old name keeps resolving for agents started under it.
             let Some(name) = rest.get(1).cloned() else {
                 fail(EXIT_USAGE, "project rename needs a session and a new name: tmm project rename <session> --name \"New name\"");
             };
@@ -710,7 +713,13 @@ async fn main() {
             };
             let id = resolve_project_id(&ctx, &name).await;
             let r = rpc(&ctx, "project_rename", json!({ "id": id, "name": new_name })).await;
-            if ctx.json { println!("{r}"); } else { println!("✓ renamed {name} → {new_name}"); }
+            if ctx.json {
+                println!("{r}");
+            } else {
+                // The session is what `--project` and TMM_PROJECT name: say it.
+                let session = r["session"].as_str().unwrap_or(&name);
+                println!("✓ renamed {name} → {new_name} (session {session})");
+            }
         }
         ("project", rest) if matches!(rest.first().map(String::as_str), Some("up" | "down" | "archive" | "delete")) => {
             let action = rest[0].clone();
@@ -1672,6 +1681,7 @@ mod tests {
     fn the_tmm_cli_skill_teaches_what_the_help_teaches() {
         let skill = include_str!("../../../assets/skills/tmm-cli/SKILL.md");
         let help = usage();
+        assert!(!help.contains("session unchanged"), "a rename moves the session (#278)");
         for term in ["tmm wake list", "tmm wake cancel", "--wake", "--in ", "--at ", "/compact", "tmm agent mode", "--input-mode"] {
             assert!(help.contains(term), "help lost {term:?}");
             assert!(skill.contains(term), "the tmm-cli skill does not teach {term:?}");
@@ -1683,7 +1693,7 @@ mod tests {
         assert!(!skill.contains("--can-hire"), "a retired flag (2026-09-26)");
         // A chat line never cancels a turn, and a steered one IS read inside
         // it (#276): the skill must not teach either myth (validator 10:27).
-        for myth in ["INTERRUPTS", "only read between turns", "the line lands in", "assignment lands in"] {
+        for myth in ["INTERRUPTS", "only read between turns", "the line lands in", "assignment lands in", "session unchanged"] {
             assert!(!skill.contains(myth), "the skill still says {myth:?}");
         }
         // Every address in an example is a PLACEHOLDER, a variable, all or
