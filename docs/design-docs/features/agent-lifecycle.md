@@ -61,17 +61,20 @@ was a bug we already paid for:
    a database. Managed windows only: `@all` must never type into a kiro the user
    started by hand.
 
-For a Team member, delivery appends a background-only context block after the
-current line. It contains routed conversation since that member's prior
-delivery, so an agent woken after other teammates talked can see both the
-messages and their sender→recipient edges. The current request stays first;
-non-Team agents, hook replies and Board notices do not gain this block.
+For a Team member, delivery puts a background-only context block BEFORE the
+current line, which comes last (board #279). It contains routed conversation
+since that member's prior delivery, so an agent woken after other teammates
+talked can see both the messages and their sender→recipient edges, and then
+reads what it must answer. Non-Team agents, hook replies and Board notices do
+not gain this block.
 Hook final replies store their exact reply targets in the room envelope's
 `to` field without changing the visible body.
 
-Three recipients, three different costs — a name interrupts one agent, `@all`
-interrupts everyone, and no recipient interrupts nobody (the room keeps it for
-their next `tmm log`).
+Three recipients, three deliveries — a name types into one agent's pane, `@all`
+into every managed agent's, and no recipient into nobody's (the room keeps it
+for their next `tmm log`). A typed line never cancels a running turn: idle, it
+starts one; busy, it waits for the turn's end or joins it, by that CLI and its
+input mode. Only `tmm agent interrupt` cancels a turn.
 
 The typed line carries local wall time (`[tmm chat 2026-08-17 16:31] human: …`)
 for the reader's sake: a CLI resuming a conversation cannot recover *when*

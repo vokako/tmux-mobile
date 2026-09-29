@@ -91,6 +91,47 @@ pub fn slash_command(text: &str) -> Option<(String, String)> {
     Some((to.to_string(), rest.to_string()))
 }
 
+/// A line as its producer typed it (board #279): `text` is what goes into
+/// the pane, the one text its echo is matched against; `ask_at` is the byte
+/// where the stamped line starts inside it — 0 when nothing leads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Typed {
+    pub text: String,
+    pub ask_at: usize,
+}
+
+/// Between a Team context block and the line it accompanies.
+const CONTEXT_GAP: &str = "\n\n";
+
+/// What a Team agent is TYPED (board #279, owner 2026-09-29 10:49: "把这个放在
+/// 前面，然后把真正给 Agent 发送的最后的消息放到它的后面"): the room context
+/// first, the stamped line it accompanies LAST, so the last thing the model
+/// reads is what it must answer. The producer knows where the line starts,
+/// so it says so (`ask_at`) — nothing later finds it by reading the text.
+pub fn context_first(line: &str, context: Option<&str>) -> Typed {
+    match context {
+        Some(context) => Typed { text: format!("{context}{CONTEXT_GAP}{line}"), ask_at: context.len() + CONTEXT_GAP.len() },
+        None => Typed { text: line.to_string(), ask_at: 0 },
+    }
+}
+
+/// How a typed line is SHOWN (board #279): the ask first, then the context
+/// that led it — the two parts `context_first` recorded, split at its own
+/// `ask_at`, never parsed back out of the text (orchestrator 13:24). A stored
+/// prompt is cut at 1024 chars while a context block runs to 12 KiB, so the
+/// typed order would show only the context. An offset that does not split
+/// `text` into those two parts (a stale row, a char boundary it misses) shows
+/// the text as typed. Pure; the same bytes, reordered.
+pub fn shown(text: &str, ask_at: usize) -> String {
+    if ask_at == 0 {
+        return text.to_string();
+    }
+    match (text.get(..ask_at).and_then(|c| c.strip_suffix(CONTEXT_GAP)), text.get(ask_at..)) {
+        (Some(context), Some(ask)) if !context.is_empty() && !ask.is_empty() => format!("{ask}{CONTEXT_GAP}{context}"),
+        _ => text.to_string(),
+    }
+}
+
 /// Senders of stamped chat REQUESTS in a submitted prompt — the ONE reading
 /// of whom a turn's final reply is owed to (#256, #257). Every stamped line
 /// `[tmm chat …] sender: body` counts once, in order; the human, automatic
@@ -191,5 +232,32 @@ mod tests {
             let want = (!command.is_empty()).then(|| (to.to_string(), command.to_string()));
             assert_eq!(slash_command(body), want, "{body:?}");
         }
+    }
+
+    /// Board #279 (orchestrator 13:24): the producer's parts in, the typed
+    /// text and its display out. Typed: context first, the line last; shown:
+    /// the line first, then its context — the same bytes, split where the
+    /// producer said, whatever either part contains.
+    #[test]
+    fn a_team_line_is_typed_context_first_and_shown_ask_first() {
+        let context = "[tmm team context — x]\n[09-29 10:41] lead -> writer: row\n[/tmm team context]";
+        // An ask that quotes a whole block, blank lines, multibyte text.
+        let line = format!("[tmm chat 2026-09-29 10:42] lead: @writer ask 中文\n\n{context}\n\nthird");
+        let typed = context_first(&line, Some(context));
+        assert_eq!(typed.text, format!("{context}\n\n{line}"));
+        assert_eq!(&typed.text[typed.ask_at..], line, "ask_at is where the line starts");
+        assert_eq!(shown(&typed.text, typed.ask_at), format!("{line}\n\n{context}"));
+        assert_eq!(requesters(&typed.text), vec!["lead".to_string()]);
+        // No context: typed and shown as is.
+        let solo = context_first(&line, None);
+        assert_eq!((solo.text.as_str(), solo.ask_at), (line.as_str(), 0));
+        assert_eq!(shown(&solo.text, 0), line);
+        // An offset that does not split the text into those two parts shows
+        // the text as typed: past the end, inside a char, no gap before it.
+        let at_han = line.find('中').unwrap() + 1;
+        for bad in [typed.text.len() + 5, at_han, typed.ask_at - 1, typed.text.len()] {
+            assert_eq!(shown(&typed.text, bad), typed.text, "ask_at {bad}");
+        }
+        assert_eq!(shown(&line, at_han), line, "inside a multibyte char: no panic, as typed");
     }
 }

@@ -75,9 +75,11 @@ messages are consolidated, and unclear context is verified before action.
 Board handoff and spawn fit in one line each; everything else stays in
 `tmm --help` and the CLI skill.
 
-**A Team agent receives the conversation delta with its next @mention.** The
-current stamped request stays first. A `[tmm team context …]` block follows,
-containing non-noise room messages since that target's previous delivery as
+**A Team agent receives the conversation delta with its next @mention.** A
+`[tmm team context …]` block comes FIRST and the current stamped request
+LAST (board #279, owner 2026-09-29 10:49: "把这个放在前面，然后把真正给 Agent
+发送的最后的消息放到它的后面"), so the last thing the model reads is what it
+must answer. The block contains non-noise room messages since that target's previous delivery as
 `sender -> recipients: body`. Explicit mentions and new hook-captured final
 replies persist their exact recipients in the room message's `to` field;
 historical replies without that route are reconstructed from the senders
@@ -85,9 +87,26 @@ waiting on the agent. Status and lifecycle rows are omitted. This is Team-only
 (`launch.json.team`); solo managed agents keep the original one-line delivery.
 The delta is bounded to 40 recent messages / 12K characters from the newest
 1000 room rows, says when older context was omitted, excludes archived messages,
-and labels itself background rather than instructions. `[tmm chat …]` remains
-first so delivery receipts and the one-hop reply edge keep their existing
-semantics.
+and labels itself background rather than instructions. The order moved
+nothing a reader depends on (the consumer audit is on #279). The receipt
+matches the whole typed line, which is what was typed. The reply edge reads
+`[tmm chat …]` lines wherever they sit, and context rows never start one.
+A held batch (#257) keeps each context right before its own line. The
+activity log SHOWS the prompt ask first, because its 1024-char display cut
+would otherwise keep only the context. That order comes from the producer,
+never from reading the echo (orchestrator 2026-09-29 13:24):
+`address::context_first` returns the typed text and `ask_at`, the byte where
+the stamped line starts in it, and the delivery row keeps that offset
+(`deliveries.ask_at`, schema v30; 0 when nothing leads the line). The receipt
+matcher (`settled_by`) also returns WHERE in the echo it found each settled
+row, mapped from its whitespace-free match back to the echo's own bytes, and
+the stored text replaces each Team row's span in place with its
+`address::shown` form (its line, then its context). Every byte outside those
+spans (a person's words typed around our line, the break between held lines)
+stays as it was, in order (orchestrator 14:03: no display loss). An echo that
+settled nothing (a person typing, a pasted context block) is stored raw. An integer, not a display-text column: it duplicates no text and cannot
+disagree with the `line` it splits; an offset that does not split it shows
+the line as typed.
 
 ### Registry defaults are exactly the six backend-native agents
 

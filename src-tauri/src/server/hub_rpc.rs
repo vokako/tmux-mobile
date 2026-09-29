@@ -1150,12 +1150,8 @@ fn team_context(
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn delivered_chat_line(from: &str, body: &str, context: Option<&str>) -> String {
-    let current = format!("[tmm chat {}] {from}: {body}", stamp_now());
-    match context {
-        Some(context) => format!("{current}\n\n{context}"),
-        None => current,
-    }
+fn delivered_chat_line(from: &str, body: &str, context: Option<&str>) -> crate::address::Typed {
+    crate::address::context_first(&format!("[tmm chat {}] {from}: {body}", stamp_now()), context)
 }
 
 /// Type an @mentioned chat line into each mentioned agent's pane. Team members
@@ -1244,7 +1240,7 @@ fn deliver_mentions(
         // deltas abut instead of overlapping. Typed is not confirmed: the
         // agent's userPromptSubmit echo settles it, and a pane that refused
         // it (#250, copy mode) is said in the feed.
-        crate::projects::delivery::deliver(session, &p.window_name, &target, &line, msg_id);
+        crate::projects::delivery::deliver(session, &p.window_name, &target, &line.text, line.ask_at, msg_id);
     }
 }
 
@@ -1935,6 +1931,42 @@ mod tests {
         assert!(context.contains("writer -> @lead: @lead new work"));
     }
 
+    /// Board #279 (orchestrator 13:24): the producer's parts in, the display
+    /// out. A room body that quotes the close marker (then 1100 chars) and an
+    /// ask that quotes a whole context block change nothing: the producer
+    /// records where its own line starts, and nothing reads the text for
+    /// markers. The echo of the typed row is stored ask first; the SAME text
+    /// typed by a person (no row) is stored raw.
+    #[test]
+    fn the_producer_records_where_its_line_starts_whatever_the_text_quotes() {
+        let quoted = format!("see:\n[/tmm team context]\nthen {}", "x".repeat(1100));
+        let routed = vec![RoutedChat { ts: 1_790_680_000_000, from: "researcher".into(), to: vec!["writer".into()], body: quoted, hidden: false }];
+        let context = team_context(&routed, "lead", false).expect("a row");
+        let ask = format!("@lead REAL ASK, quoting:\n{context}\nend of quote");
+        let typed = delivered_chat_line("writer", &ask, Some(&context));
+        assert!(typed.text.starts_with("[tmm team context") && typed.text.ends_with("end of quote"), "typed context first, unchanged");
+        let line = &typed.text[typed.ask_at..];
+        assert!(line.starts_with("[tmm chat ") && line.ends_with(&ask), "ask_at is the stamped line: {line}");
+        assert_eq!(&typed.text[..typed.ask_at], format!("{context}\n\n"));
+        let shown = crate::address::shown(&typed.text, typed.ask_at);
+        assert_eq!(shown, format!("{line}\n\n{context}"), "the line, then the context it came with");
+        assert_eq!(crate::address::requesters(&typed.text), vec!["writer".to_string()]);
+        // Stored: one receipt from the typed row, the display ask first.
+        crate::projects::tests::use_test_store();
+        let s = format!("tmm-ctx-quote-{}", uuid::Uuid::new_v4());
+        crate::projects::telemetry::record_typed(&s, "lead", &typed.text, typed.ask_at, "m1");
+        assert!(crate::projects::telemetry::record_prompt(&s, "lead", &typed.text), "one echo, one receipt");
+        assert!(crate::projects::telemetry::owed_rows(&s, "lead").is_empty());
+        let prompts = |s: &str| crate::projects::telemetry::recent_events(s, 0).into_iter().filter(|e| e.kind == "prompt").collect::<Vec<_>>();
+        let stored = prompts(&s).pop().unwrap();
+        assert!(stored.text.starts_with(line.get(..1000).unwrap()), "the 1024-char stored text keeps the ask: {}", stored.text);
+        // Negative control: the same text with no row of ours is raw.
+        let h = format!("tmm-ctx-paste-{}", uuid::Uuid::new_v4());
+        assert!(!crate::projects::telemetry::record_prompt(&h, "lead", &typed.text));
+        let raw = prompts(&h).pop().unwrap();
+        assert!(raw.text.starts_with("[tmm team context"), "a pasted block is stored as typed, not reordered: {}", raw.text);
+    }
+
     #[test]
     fn team_context_keeps_the_current_request_first_and_handles_all() {
         let messages = vec![
@@ -1948,11 +1980,15 @@ mod tests {
         assert_eq!(routed[2].to, vec!["human"]);
 
         let context = team_context(&routed, "lead", true).expect("lead has no prior boundary");
-        let delivered = delivered_chat_line("human", "@lead decide", Some(&context));
-        assert!(delivered.starts_with("[tmm chat "));
-        assert!(delivered.find("@lead decide").unwrap() < delivered.find("[tmm team context").unwrap());
+        let delivered = delivered_chat_line("human", "@lead decide", Some(&context)).text;
+        // Board #279: the context first, the ask LAST.
+        assert!(delivered.starts_with("[tmm team context"), "{delivered}");
+        assert!(delivered.find("[/tmm team context]").unwrap() < delivered.find("[tmm chat ").unwrap());
+        assert!(delivered.ends_with(": @lead decide"), "the last thing read is the ask: {delivered}");
+        let from_agent = delivered_chat_line("writer", "@lead decide", Some(&context));
+        assert_eq!(crate::address::requesters(&from_agent.text), vec!["writer".to_string()], "the reply edge still finds the requester");
         assert!(!delivered.contains("older room history omitted"), "@all is lead's prior delivery");
-        assert!(!delivered_chat_line("human", "@solo decide", None).contains("[tmm team context"));
+        assert!(!delivered_chat_line("human", "@solo decide", None).text.contains("[tmm team context"));
     }
 
     /// Kills the test session and removes its workspace when dropped, so a
@@ -2475,8 +2511,11 @@ mod tests {
     #[test]
     fn mention_delivery_adds_context_only_to_the_team_member() {
         crate::projects::tests::use_test_store();
-        let session = format!("tmm-team-context-{}", uuid::Uuid::new_v4());
-        let ws = std::env::temp_dir().join(format!("tmm-team-context-ws-{}", uuid::Uuid::new_v4()));
+        // The guard exists before anything it cleans (#268/#269, validator
+        // 12:38): every exit path, a panic included, kills and removes.
+        let mut scratch = crate::tmux::Scratch::new("team-context");
+        let session = scratch.session("s");
+        let ws = std::path::PathBuf::from(scratch.path());
         for (name, team) in [("lead", "content"), ("solo", "")] {
             let home = ws.join(".tmm/agents").join(name);
             std::fs::create_dir_all(&home).unwrap();
@@ -2501,7 +2540,6 @@ mod tests {
             .unwrap_or(false);
         if !created {
             eprintln!("no tmux server — skipping");
-            let _ = std::fs::remove_dir_all(&ws);
             return;
         }
         std::process::Command::new("tmux")
@@ -2530,7 +2568,10 @@ mod tests {
         assert!(lead.contains("[tmm team context"), "team member receives catch-up: {lead:?}");
         assert!(lead.contains("writer -> @researcher"), "explicit route is named: {lead:?}");
         assert!(lead.contains("researcher -> @writer"), "automatic reply route is named: {lead:?}");
-        assert!(!lead.contains("@lead @solo decide\n\n[tmm team context]\n[tmm chat"), "the current message is not part of its own catch-up");
+        // What was TYPED (the row), not the pane: `cat` echoes a typed line
+        // back a timing-dependent number of times.
+        let typed_lead = crate::projects::telemetry::owed_rows(&session, "lead").into_iter().next().expect("lead's row").line;
+        assert_eq!(typed_lead.matches("@lead @solo decide").count(), 1, "the current message is not part of its own catch-up: {typed_lead}");
         assert!(solo.contains("@lead @solo decide"), "solo receives the current request: {solo:?}");
         assert!(!solo.contains("[tmm team context"), "solo stays one-line: {solo:?}");
         // Each typed line names the message it carries (board #249), so its
@@ -2539,8 +2580,21 @@ mod tests {
         let owed = crate::projects::telemetry::owed_message_ids(&session);
         assert_eq!(owed, vec![id.clone(), id], "one row per typed pane, each naming the message");
 
-        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
-        let _ = std::fs::remove_dir_all(&ws);
+        // Board #279: the team member reads the context FIRST and the ask
+        // LAST; its one echo (what kiro submits: the typed text) settles its
+        // row, the stored prompt shows the ask first, and the solo line's
+        // row stays owed.
+        let ctx_at = lead.find("[tmm team context").unwrap();
+        let ask_at = lead.find("[tmm chat ").unwrap();
+        assert!(ctx_at < ask_at, "context before the ask in the pane: {lead:?}");
+        let typed = typed_lead;
+        assert!(typed.starts_with("[tmm team context") && typed.ends_with("human: @lead @solo decide"), "{typed}");
+        assert!(crate::projects::telemetry::record_prompt(&session, "lead", &typed), "one echo, one receipt");
+        assert!(crate::projects::telemetry::owed_rows(&session, "lead").is_empty());
+        assert_eq!(crate::projects::telemetry::owed_rows(&session, "solo").len(), 1, "solo's own row is untouched");
+        let stored = crate::projects::telemetry::recent_events(&session, 0).into_iter().rfind(|e| e.kind == "prompt").unwrap();
+        assert!(stored.text.starts_with("[tmm chat ") && stored.text.contains("@lead @solo decide"), "stored ask first: {}", stored.text);
+        assert_eq!(stored.deliveries.len(), 1, "the receipt names the row");
     }
 
     /// A Board reply is first persisted, then delivered into the assigned

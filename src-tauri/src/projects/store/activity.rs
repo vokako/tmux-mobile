@@ -65,6 +65,16 @@ pub struct DeliveryRow {
     /// Idle row, settling it if it carries it and dropping it otherwise.
     /// `None` for a chat line.
     pub command: Option<CommandLife>,
+    /// Where the stamped line starts in `line` (board #279, v30): its
+    /// producer typed a Team context before it. 0 when nothing leads it.
+    pub ask_at: usize,
+}
+
+impl DeliveryRow {
+    /// The line as shown: its ask first (`address::shown`).
+    pub fn shown(&self) -> String {
+        crate::address::shown(&self.line, self.ask_at)
+    }
 }
 
 /// Whether a command row can be taken by a prompt yet (board #264). Stored
@@ -359,13 +369,14 @@ impl Store {
         session: &str,
         window: &str,
         line: &str,
+        ask_at: usize,
         ts: u64,
         msg_id: &str,
     ) -> Result<(), String> {
         self.conn
             .execute(
-                "INSERT INTO deliveries (session, win, line, ts, msg_id) VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![session, window, line, ts as i64, msg_id],
+                "INSERT INTO deliveries (session, win, line, ts, msg_id, ask_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![session, window, line, ts as i64, msg_id, ask_at as i64],
             )
             .map(|_| ())
             .map_err(|e| format!("insert delivery: {e}"))
@@ -419,11 +430,11 @@ impl Store {
     /// A line for a busy queue-mode agent, stored but NOT typed yet (board
     /// #257). Invisible to the echo match and the sweep until
     /// `set_deliveries_held(…, false, …)` marks it typed.
-    pub fn insert_held_delivery(&self, session: &str, window: &str, line: &str, ts: u64, msg_id: &str) -> Result<(), String> {
+    pub fn insert_held_delivery(&self, session: &str, window: &str, line: &str, ask_at: usize, ts: u64, msg_id: &str) -> Result<(), String> {
         self.conn
             .execute(
-                "INSERT INTO deliveries (session, win, line, ts, msg_id, held) VALUES (?1, ?2, ?3, ?4, ?5, 1)",
-                rusqlite::params![session, window, line, ts as i64, msg_id],
+                "INSERT INTO deliveries (session, win, line, ts, msg_id, held, ask_at) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6)",
+                rusqlite::params![session, window, line, ts as i64, msg_id, ask_at as i64],
             )
             .map(|_| ())
             .map_err(|e| format!("insert held delivery: {e}"))
@@ -435,7 +446,7 @@ impl Store {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, win, line, ts, msg_id, warned, command FROM deliveries
+                "SELECT id, win, line, ts, msg_id, warned, command, ask_at FROM deliveries
                  WHERE session = ?1 AND win = ?2 AND held = 1 ORDER BY id",
             )
             .map_err(|e| format!("prepare held deliveries: {e}"))?;
@@ -449,6 +460,7 @@ impl Store {
                     msg_id: r.get(4)?,
                     warned: r.get::<_, i64>(5)? != 0,
                     command: CommandLife::from_code(r.get::<_, i64>(6)?),
+                    ask_at: r.get::<_, i64>(7)?.try_into().unwrap_or(0),
                 })
             })
             .map_err(|e| format!("query held deliveries: {e}"))?;
@@ -531,12 +543,12 @@ impl Store {
     ) -> Result<Vec<DeliveryRow>, String> {
         let (sql, args): (&str, Vec<Box<dyn rusqlite::ToSql>>) = match window {
             Some(w) => (
-                "SELECT id, win, line, ts, msg_id, warned, command FROM deliveries
+                "SELECT id, win, line, ts, msg_id, warned, command, ask_at FROM deliveries
                  WHERE session = ?1 AND win = ?2 AND held = 0 ORDER BY id",
                 vec![Box::new(session.to_string()), Box::new(w.to_string())],
             ),
             None => (
-                "SELECT id, win, line, ts, msg_id, warned, command FROM deliveries WHERE session = ?1 AND held = 0 ORDER BY id",
+                "SELECT id, win, line, ts, msg_id, warned, command, ask_at FROM deliveries WHERE session = ?1 AND held = 0 ORDER BY id",
                 vec![Box::new(session.to_string())],
             ),
         };
@@ -554,6 +566,7 @@ impl Store {
                     msg_id: r.get(4)?,
                     warned: r.get::<_, i64>(5)? != 0,
                     command: CommandLife::from_code(r.get::<_, i64>(6)?),
+                    ask_at: r.get::<_, i64>(7)?.try_into().unwrap_or(0),
                 })
             })
             .map_err(|e| format!("query deliveries: {e}"))?;
@@ -662,9 +675,9 @@ mod tests {
     #[test]
     fn the_prune_never_drops_a_held_line() {
         let store = Store::open_memory().unwrap();
-        store.insert_delivery("s", "w", "old typed", 100, "").unwrap();
-        store.insert_held_delivery("s", "w", "old held", 100, "").unwrap();
-        store.insert_delivery("s", "w", "new typed", 10_000, "").unwrap();
+        store.insert_delivery("s", "w", "old typed", 0, 100, "").unwrap();
+        store.insert_held_delivery("s", "w", "old held", 0, 100, "").unwrap();
+        store.insert_delivery("s", "w", "new typed", 0, 10_000, "").unwrap();
         assert_eq!(store.prune_deliveries(5_000).unwrap(), 1);
         assert_eq!(store.held_deliveries("s", "w").unwrap().iter().map(|r| r.line.as_str()).collect::<Vec<_>>(), vec!["old held"]);
         assert_eq!(store.pending_deliveries("s", Some("w")).unwrap().iter().map(|r| r.line.as_str()).collect::<Vec<_>>(), vec!["new typed"]);
@@ -678,13 +691,13 @@ mod tests {
     #[test]
     fn outstanding_deliveries_are_kept_per_window_and_settle_once() {
         let store = Store::open_memory().unwrap();
-        store.insert_delivery("s", "w1", "hello", 100, "").unwrap();
+        store.insert_delivery("s", "w1", "hello", 0, 100, "").unwrap();
         // Delivering the same body again is a SECOND promise with its own row
         // (board #122): the pane was typed into twice, two echoes are coming,
         // and each settles one row, oldest first.
-        store.insert_delivery("s", "w1", "hello", 150, "").unwrap();
-        store.insert_delivery("s", "w2", "other", 120, "").unwrap();
-        store.insert_delivery("t", "w1", "elsewhere", 130, "").unwrap();
+        store.insert_delivery("s", "w1", "hello", 0, 150, "").unwrap();
+        store.insert_delivery("s", "w2", "other", 0, 120, "").unwrap();
+        store.insert_delivery("t", "w1", "elsewhere", 0, 130, "").unwrap();
 
         let triple = |rows: Vec<DeliveryRow>| rows.into_iter().map(|r| (r.window, r.line, r.ts)).collect::<Vec<_>>();
         let all = store.pending_deliveries("s", None).unwrap();
@@ -709,7 +722,7 @@ mod tests {
 
         // The recovery horizon: a line nobody ever acked is forgotten rather
         // than resurrected days later, and the fresh one stays.
-        store.insert_delivery("t", "w2", "ancient", 10, "").unwrap();
+        store.insert_delivery("t", "w2", "ancient", 0, 10, "").unwrap();
         assert_eq!(store.prune_deliveries(100).unwrap(), 1);
         assert_eq!(store.pending_deliveries("t", None).unwrap().len(), 1);
     }
@@ -721,9 +734,9 @@ mod tests {
     #[test]
     fn deliveries_carry_their_message_and_settle_by_row() {
         let store = Store::open_memory().unwrap();
-        store.insert_delivery("s", "w1", "same", 100, "m1").unwrap();
-        store.insert_delivery("s", "w1", "same", 101, "m2").unwrap();
-        store.insert_delivery("s", "w1", "notice", 102, "").unwrap();
+        store.insert_delivery("s", "w1", "same", 0, 100, "m1").unwrap();
+        store.insert_delivery("s", "w1", "same", 0, 101, "m2").unwrap();
+        store.insert_delivery("s", "w1", "notice", 0, 102, "").unwrap();
         let rows = store.pending_deliveries("s", Some("w1")).unwrap();
         assert_eq!(rows.iter().map(|r| r.msg_id.as_str()).collect::<Vec<_>>(), vec!["m1", "m2", ""]);
         assert!(store.delete_delivery_id(rows[1].id).unwrap(), "the second of two identical bodies");

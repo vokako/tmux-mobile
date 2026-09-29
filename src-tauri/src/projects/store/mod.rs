@@ -129,6 +129,7 @@ impl Store {
         self.ensure_delivery_held()?;
         self.ensure_activity_requesters()?;
         self.ensure_delivery_command()?;
+        self.ensure_delivery_ask_at()?;
         self.ensure_wakes()
     }
 

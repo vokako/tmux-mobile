@@ -44,7 +44,7 @@ pub const HOLD_MAX_SECS: u64 = 300;
 
 /// What separates two held lines in the combined prompt: a blank line, the
 /// same break a team context block already sits behind.
-const SEPARATOR: &str = "\n\n";
+pub(super) const SEPARATOR: &str = "\n\n";
 
 fn window_lock(session: &str, window: &str) -> Arc<Mutex<()>> {
     static LOCKS: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
@@ -178,16 +178,18 @@ pub fn agent_target(session: &str, window: &str) -> Option<String> {
 
 /// Deliver one line to one managed agent window whose pane is `target`.
 /// True when it was typed or held; false when the pane refused it (said in
-/// the feed as `undelivered`, board #250).
-pub fn deliver(session: &str, window: &str, target: &str, line: &str, msg_id: &str) -> bool {
-    deliver_with(session, window, target, line, msg_id, || input_mode(session, window))
+/// the feed as `undelivered`, board #250). `ask_at` is where the stamped
+/// line starts in `line` — its producer typed a Team context before it
+/// (board #279, `address::context_first`) — and 0 when nothing leads it.
+pub fn deliver(session: &str, window: &str, target: &str, line: &str, ask_at: usize, msg_id: &str) -> bool {
+    deliver_with(session, window, target, line, ask_at, msg_id, || input_mode(session, window))
 }
 
 /// Tests' shorthand: deliver with the mode decided up front (`true` = a
 /// queue-mode session, `false` = a backend without the choice).
 #[cfg(test)]
 fn deliver_as(session: &str, window: &str, target: &str, line: &str, msg_id: &str, coalesce: bool) -> bool {
-    deliver_with(session, window, target, line, msg_id, || coalesce.then_some("queue"))
+    deliver_with(session, window, target, line, 0, msg_id, || coalesce.then_some("queue"))
 }
 
 /// `deliver` with the mode reading injected. The mode is read INSIDE the
@@ -203,7 +205,7 @@ fn deliver_as(session: &str, window: &str, target: &str, line: &str, msg_id: &st
 /// (#257); STEER types it into the running turn and owes no echo (#276:
 /// a steered line fires no `userPromptSubmit`, so a pending row could only
 /// ever be swept `unconfirmed`); no choice types it as before.
-fn deliver_with(session: &str, window: &str, target: &str, line: &str, msg_id: &str, mode: impl FnOnce() -> Option<&'static str>) -> bool {
+fn deliver_with(session: &str, window: &str, target: &str, line: &str, ask_at: usize, msg_id: &str, mode: impl FnOnce() -> Option<&'static str>) -> bool {
     let lock = window_lock(session, window);
     let _guard = lock.lock().unwrap();
     let held = telemetry::held_rows(session, window);
@@ -224,20 +226,20 @@ fn deliver_with(session: &str, window: &str, target: &str, line: &str, msg_id: &
     let busy = open && mode == Some("queue");
     let steered = open && mode == Some("steer");
     if steered && held.is_empty() {
-        return type_steered(session, window, target, line, msg_id);
+        return type_steered(session, window, target, line, ask_at, msg_id);
     }
     if !busy && held.is_empty() {
-        return type_now(session, window, target, line, msg_id);
+        return type_now(session, window, target, line, ask_at, msg_id);
     }
     // Held — for the busy turn's end, or (idle) BEHIND lines still held from a
     // copy-mode refusal or a restart, never ahead of them. A hold that could
     // not be written is today's behaviour, never a silent loss (orchestrator
     // 04:49): type it now, as an ordinary delivery; if that fails too, the
     // existing `undelivered` warn says so.
-    if let Err(e) = telemetry::record_held(session, window, line, msg_id) {
+    if let Err(e) = telemetry::record_held(session, window, line, ask_at, msg_id) {
         eprintln!("⚠️  could not hold a delivery for {session}:{window} ({e}); typing it now");
         // Into a steer turn it is steered, owing no echo (validator, #276).
-        return if steered { type_steered(session, window, target, line, msg_id) } else { type_now(session, window, target, line, msg_id) };
+        return if steered { type_steered(session, window, target, line, ask_at, msg_id) } else { type_now(session, window, target, line, ask_at, msg_id) };
     }
     if !busy || overdue(&held) {
         flush_locked(session, window, target, steered);
@@ -250,15 +252,15 @@ fn deliver_with(session: &str, window: &str, target: &str, line: &str, msg_id: &
 /// report a line the model did receive. Recorded as a `steered` event naming
 /// its message, so the feed draws no ring that promises a check. A refusal
 /// is said at once, as for any line (#250).
-fn type_steered(session: &str, window: &str, target: &str, line: &str, msg_id: &str) -> bool {
+fn type_steered(session: &str, window: &str, target: &str, line: &str, ask_at: usize, msg_id: &str) -> bool {
     match type_text(target, line) {
         Ok(()) => {
-            telemetry::record_steered(session, window, line, &[msg_id]);
+            telemetry::record_steered(session, window, &crate::address::shown(line, ask_at), &[msg_id]);
             super::vitals::sniff_window_soon(session, window);
             true
         }
         Err(e) => {
-            telemetry::record_undelivered(session, window, line, e.trim());
+            telemetry::record_undelivered(session, window, &crate::address::shown(line, ask_at), e.trim());
             false
         }
     }
@@ -271,17 +273,17 @@ fn overdue(held: &[super::store::DeliveryRow]) -> bool {
 
 /// The pre-#257 path: type the line, then record the promise its echo will
 /// settle; a refusal is said at once and records nothing (#250).
-fn type_now(session: &str, window: &str, target: &str, line: &str, msg_id: &str) -> bool {
+fn type_now(session: &str, window: &str, target: &str, line: &str, ask_at: usize, msg_id: &str) -> bool {
     match type_text(target, line) {
         Ok(()) => {
-            telemetry::record_delivery(session, window, line, msg_id);
+            telemetry::record_typed(session, window, line, ask_at, msg_id);
             // A line just landed in this pane: sniff its vitals once the TUI
             // has repainted (delayed + throttled inside).
             super::vitals::sniff_window_soon(session, window);
             true
         }
         Err(e) => {
-            telemetry::record_undelivered(session, window, line, e.trim());
+            telemetry::record_undelivered(session, window, &crate::address::shown(line, ask_at), e.trim());
             false
         }
     }
@@ -379,12 +381,13 @@ fn flush_steered(session: &str, window: &str, target: &str, batch: &[super::stor
         return;
     }
     let msgs: Vec<&str> = batch.iter().map(|r| r.msg_id.as_str()).collect();
+    let shown = batch.iter().map(|r| r.shown()).collect::<Vec<_>>().join(SEPARATOR);
     match type_text(target, text) {
         Ok(()) => {
-            telemetry::record_steered(session, window, text, &msgs);
+            telemetry::record_steered(session, window, &shown, &msgs);
             super::vitals::sniff_window_soon(session, window);
         }
-        Err(e) => telemetry::record_undelivered(session, window, text, e.trim()),
+        Err(e) => telemetry::record_undelivered(session, window, &shown, e.trim()),
     }
 }
 
@@ -576,7 +579,7 @@ mod tests {
             pressed.recv().unwrap();
             let line = "[tmm chat 2026-09-29 05:00] lead: @dev during the switch";
             if read_inside_lock {
-                assert!(deliver_with(&s, "dev", "t", line, "", || Some(*mode.lock().unwrap())));
+                assert!(deliver_with(&s, "dev", "t", line, 0, "", || Some(*mode.lock().unwrap())));
             } else {
                 let stale = *mode.lock().unwrap() == "queue";
                 assert!(deliver_as(&s, "dev", "t", line, "", stale));
@@ -626,7 +629,7 @@ mod tests {
                 })
             };
             let line = "[tmm chat 2026-09-29 05:01] lead: @dev before the switch";
-            assert!(deliver_with(&s, "dev", "t", line, "", || {
+            assert!(deliver_with(&s, "dev", "t", line, 0, "", || {
                 let now = *mode.lock().unwrap();
                 read_tx.send(()).unwrap();
                 std::thread::sleep(std::time::Duration::from_millis(200));
@@ -678,7 +681,7 @@ mod tests {
         busy(&s, "dev");
         let steer = || Some("steer");
         for (i, msg) in ["m1", "m2", "m3"].iter().enumerate() {
-            assert!(deliver_with(&s, "dev", "t", &format!("[tmm chat 03:0{i}] lead: @dev steer {i}"), msg, steer));
+            assert!(deliver_with(&s, "dev", "t", &format!("[tmm chat 03:0{i}] lead: @dev steer {i}"), 0, msg, steer));
         }
         assert_eq!(typed().len(), 3, "typed into the running turn at once");
         assert_eq!((held(&s, "dev"), pending(&s, "dev")), (0, 0), "no row: nothing can settle it");
@@ -698,13 +701,13 @@ mod tests {
         // Busy + queue: held, exactly as #257.
         let q = setup("steer-queue");
         busy(&q, "dev");
-        assert!(deliver_with(&q, "dev", "t", "[tmm chat 03:10] lead: @dev later", "", || Some("queue")));
+        assert!(deliver_with(&q, "dev", "t", "[tmm chat 03:10] lead: @dev later", 0, "", || Some("queue")));
         assert_eq!((typed().len(), held(&q, "dev")), (0, 1));
 
         // Idle + steer: the line starts a turn, the hook fires: owed and settled.
         let i = setup("steer-idle");
         let line = "[tmm chat 03:20] lead: @dev start";
-        assert!(deliver_with(&i, "dev", "t", line, "m9", || Some("steer")));
+        assert!(deliver_with(&i, "dev", "t", line, 0, "m9", || Some("steer")));
         assert_eq!(pending(&i, "dev"), 1, "an idle window still owes the echo");
         assert!(record_prompt(&i, "dev", line));
         assert_eq!(pending(&i, "dev"), 0);
@@ -717,8 +720,8 @@ mod tests {
         let s = setup("steer-mixed");
         busy(&s, "a");
         let line = "[tmm chat 03:30] lead: @a @b both";
-        assert!(deliver_with(&s, "a", "ta", line, "mx", || Some("steer")));
-        assert!(deliver_with(&s, "b", "tb", line, "mx", || Some("steer")));
+        assert!(deliver_with(&s, "a", "ta", line, 0, "mx", || Some("steer")));
+        assert!(deliver_with(&s, "b", "tb", line, 0, "mx", || Some("steer")));
         assert_eq!((pending(&s, "a"), pending(&s, "b")), (0, 1), "a owes nothing; b's echo is still owed (and swept if it never comes)");
         assert!(record_prompt(&s, "b", line), "b's hook settles its row");
         assert_eq!(pending(&s, "b"), 0);
@@ -736,9 +739,9 @@ mod tests {
         let s = setup("inflight");
         let first = "[tmm chat 10:14] data: [board #13 reply] first";
         let second = "[tmm chat 10:14] data: [board #12 reply] second";
-        assert!(deliver_with(&s, "dev", "t", first, "m1", || Some("steer")));
+        assert!(deliver_with(&s, "dev", "t", first, 0, "m1", || Some("steer")));
         std::thread::sleep(std::time::Duration::from_millis(200));
-        assert!(deliver_with(&s, "dev", "t", second, "m2", || Some("steer")));
+        assert!(deliver_with(&s, "dev", "t", second, 0, "m2", || Some("steer")));
         assert_eq!(typed().len(), 2, "both typed at once");
         assert_eq!(pending(&s, "dev"), 1, "only the first owes an echo");
         let steered: Vec<String> = telemetry::recent_events(&s, 0).into_iter().filter(|e| e.kind == "steered").flat_map(|e| e.deliveries).map(|d| d.msg).collect();
@@ -751,17 +754,17 @@ mod tests {
 
         // Queue control: the second line owes too (it will be its own turn).
         let q = setup("inflight-queue");
-        assert!(deliver_with(&q, "dev", "t", first, "q1", || Some("queue")));
-        assert!(deliver_with(&q, "dev", "t", second, "q2", || Some("queue")));
+        assert!(deliver_with(&q, "dev", "t", first, 0, "q1", || Some("queue")));
+        assert!(deliver_with(&q, "dev", "t", second, 0, "q2", || Some("queue")));
         assert_eq!(pending(&q, "dev"), 2, "queue mode is unchanged");
 
         // A first line that never echoes (the CLI did not take it) stops
         // steering later lines once the sweep's clock would report it.
         let a = setup("inflight-aged");
-        assert!(deliver_with(&a, "dev", "t", first, "a1", || Some("steer")));
+        assert!(deliver_with(&a, "dev", "t", first, 0, "a1", || Some("steer")));
         crate::projects::with_store(|st| st.backdate_deliveries(&a, crate::projects::now() - 46)).unwrap();
         assert!(!telemetry::line_in_flight(&a, "dev"));
-        assert!(deliver_with(&a, "dev", "t", second, "a2", || Some("steer")));
+        assert!(deliver_with(&a, "dev", "t", second, 0, "a2", || Some("steer")));
         assert_eq!(pending(&a, "dev"), 2, "past the ack window the window reads idle again: the line owes");
     }
 
@@ -775,7 +778,7 @@ mod tests {
     fn a_line_during_the_prompt_edge_waits_for_it_and_steers() {
         let s = setup("edge-gap");
         let first = "[tmm chat 10:14] data: [board #13 reply] first";
-        assert!(deliver_with(&s, "dev", "t", first, "m1", || Some("steer")));
+        assert!(deliver_with(&s, "dev", "t", first, 0, "m1", || Some("steer")));
         assert_eq!(pending(&s, "dev"), 1);
         let (deleted_tx, deleted) = std::sync::mpsc::channel();
         *telemetry::IN_PROMPT_SETTLED_HOOK.lock().unwrap() = Some(Box::new(move || {
@@ -792,7 +795,7 @@ mod tests {
             let s = s.clone();
             std::thread::spawn(move || {
                 fake();
-                let ok = deliver_with(&s, "dev", "t", "[tmm chat 10:14] data: [board #12 reply] second", "m2", || Some("steer"));
+                let ok = deliver_with(&s, "dev", "t", "[tmm chat 10:14] data: [board #12 reply] second", 0, "m2", || Some("steer"));
                 (ok, typed())
             })
         };
@@ -805,6 +808,49 @@ mod tests {
         end(&s, "dev");
         telemetry::sweep_deliveries(&s);
         assert!(warns(&s).is_empty(), "{:?}", warns(&s));
+    }
+
+    /// Board #279 × #257 (orchestrator 13:24): a Team line typed alone, and
+    /// three held and typed as one prompt. Typed, each context sits right
+    /// BEFORE its own line; the one echo settles every row (one receipt each)
+    /// and names the senders; stored, each line comes before its context, in
+    /// typed order — from the offsets the producer recorded on the rows.
+    #[test]
+    fn team_lines_are_typed_context_first_and_stored_ask_first_alone_or_held() {
+        let ctx = |n: u8| format!("[tmm team context — x]\n[09-29 10:4{n}] a -> b: row {n}\n[/tmm team context]");
+        let line = |n: u8, who: &str| format!("[tmm chat 10:4{n}] {who}: @dev ask {n}");
+        let stored = |s: &str| {
+            let e = telemetry::recent_events(s, 0).into_iter().rfind(|e| e.kind == "prompt").unwrap();
+            (e.text, e.requesters.map(|r| serde_json::to_string(&r).unwrap()))
+        };
+        // Alone: typed at once.
+        let s = setup("team-one");
+        let one = crate::address::context_first(&line(1, "lead"), Some(&ctx(1)));
+        assert!(deliver_with(&s, "dev", "t", &one.text, one.ask_at, "m1", || Some("queue")));
+        assert_eq!(typed(), vec![one.text.clone()]);
+        assert!(record_prompt(&s, "dev", &one.text), "one echo, one receipt");
+        assert_eq!(pending(&s, "dev"), 0);
+        assert_eq!(stored(&s), (format!("{}\n\n{}", line(1, "lead"), ctx(1)), Some(r#"["lead"]"#.to_string())));
+        // Held ×3: one combined prompt at the turn's end.
+        let s = setup("team-held");
+        busy(&s, "dev");
+        let who = ["lead", "validator", "lead"];
+        let parts: Vec<_> = (1..=3).map(|n| crate::address::context_first(&line(n, who[n as usize - 1]), Some(&ctx(n)))).collect();
+        for (i, t) in parts.iter().enumerate() {
+            assert!(deliver_with(&s, "dev", "t", &t.text, t.ask_at, &format!("m{i}"), || Some("queue")));
+        }
+        assert!(typed().is_empty(), "held while busy");
+        end(&s, "dev");
+        flush_at(&s, "dev", "t");
+        let prompts = typed();
+        let want = [ctx(1), line(1, "lead"), ctx(2), line(2, "validator"), ctx(3), line(3, "lead")].join("\n\n");
+        assert_eq!(prompts, vec![want.clone()], "each context right before its own line");
+        assert!(record_prompt(&s, "dev", &want));
+        assert_eq!(pending(&s, "dev"), 0, "one echo settles all three");
+        let shown = [line(1, "lead"), ctx(1), line(2, "validator"), ctx(2), line(3, "lead"), ctx(3)].join("\n\n");
+        assert_eq!(stored(&s), (shown, Some(r#"["lead","validator"]"#.to_string())), "ask first per row, typed order; each requester once");
+        let receipt = telemetry::recent_events(&s, 0).into_iter().rfind(|e| e.kind == "prompt").unwrap();
+        assert_eq!(receipt.deliveries.len(), 3, "the receipt names every row");
     }
 
     /// The owner's case: a burst of 10 to a busy queue-mode agent is ONE
@@ -926,7 +972,7 @@ mod tests {
 
         let s = setup("restart-busy");
         crate::projects::with_store(|st| st.insert_activity(&s, "dev", crate::projects::now() * 1000, "prompt", "long turn", "", "app", "", "")).unwrap();
-        crate::projects::with_store(|st| st.insert_held_delivery(&s, "dev", "[tmm chat 03:00] lead: @dev a", crate::projects::now(), "")).unwrap();
+        crate::projects::with_store(|st| st.insert_held_delivery(&s, "dev", "[tmm chat 03:00] lead: @dev a", 0, crate::projects::now(), "")).unwrap();
         telemetry::forget_process_state(&s);
         flush_at(&s, "dev", "t");
         assert!(typed().is_empty(), "the replayed turn is open: still held");
@@ -943,9 +989,9 @@ mod tests {
         let s = setup("start-idle");
         let r = setup("start-running");
         crate::projects::with_store(|st| {
-            st.insert_held_delivery(&s, "dev", "[tmm chat 03:00] lead: @dev idle one", crate::projects::now(), "")?;
+            st.insert_held_delivery(&s, "dev", "[tmm chat 03:00] lead: @dev idle one", 0, crate::projects::now(), "")?;
             st.insert_activity(&r, "dev", crate::projects::now() * 1000, "prompt", "long turn", "", "app", "", "")?;
-            st.insert_held_delivery(&r, "dev", "[tmm chat 03:00] lead: @dev running one", crate::projects::now(), "")
+            st.insert_held_delivery(&r, "dev", "[tmm chat 03:00] lead: @dev running one", 0, crate::projects::now(), "")
         })
         .unwrap();
         telemetry::forget_process_state(&s);
@@ -1105,7 +1151,7 @@ mod tests {
              WHEN NEW.held = 1 AND NEW.line LIKE '%steer-hold-fault%'
              BEGIN SELECT RAISE(ABORT, 'disk full'); END;");
         let line = "[tmm chat 03:01] lead: @dev steer-hold-fault now";
-        assert!(deliver_with(&s, "dev", "t", line, "m1", || Some("steer")));
+        assert!(deliver_with(&s, "dev", "t", line, 0, "m1", || Some("steer")));
         sql("DROP TRIGGER steer_hold_fault;");
         assert_eq!(typed(), vec![line.to_string()], "typed at once");
         assert_eq!((held(&s, "dev"), pending(&s, "dev")), (1, 0), "no pending row for a steered line; the earlier one stays held");

@@ -851,11 +851,18 @@ pub fn record_tool(session: &str, window: &str, tool: &str, detail: &str) {
 /// a board notice, a reply, a typed first prompt) — the echo names it, so a
 /// client marks that message delivered without holding it (board #249).
 pub fn record_delivery(session: &str, window: &str, line: &str, msg_id: &str) {
+    record_typed(session, window, line, 0, msg_id);
+}
+
+/// `record_delivery` for a line whose stamped part starts at `ask_at`
+/// (board #279: a Team context was typed before it). The row keeps where,
+/// so its echo is SHOWN ask first without reading the text again.
+pub fn record_typed(session: &str, window: &str, line: &str, ask_at: usize, msg_id: &str) {
     recovery_mark(session); // read BEFORE the insert: this row is ours
     // The window's record exists from its first delivery, so `retain_windows`
     // sees it and drops its queue when the window goes.
     with_rec(session, window, |_| {});
-    let _ = queue(|s| s.insert_delivery(session, window, line, now(), msg_id));
+    let _ = queue(|s| s.insert_delivery(session, window, line, ask_at, now(), msg_id));
 }
 
 /// A slash command about to be typed whose backend declares what its
@@ -910,10 +917,10 @@ pub fn forget_delivery(id: i64) {
 /// typed at the turn's end.
 /// `Err` when the row could not be written: the caller must not report the
 /// line as queued (it falls back to typing it now, board #257 review).
-pub fn record_held(session: &str, window: &str, line: &str, msg_id: &str) -> Result<(), String> {
+pub fn record_held(session: &str, window: &str, line: &str, ask_at: usize, msg_id: &str) -> Result<(), String> {
     recovery_mark(session);
     with_rec(session, window, |_| {});
-    queue(|s| s.insert_held_delivery(session, window, line, now(), msg_id))
+    queue(|s| s.insert_held_delivery(session, window, line, ask_at, now(), msg_id))
 }
 
 /// The window's held lines, oldest first.
@@ -971,7 +978,7 @@ pub fn record_held_blocked(session: &str, window: &str, rows: &[super::store::De
 pub fn drop_held(session: &str, window: &str) {
     for row in held_rows(session, window) {
         if queue(|s| s.delete_delivery_id(row.id)).unwrap_or(false) {
-            record_undelivered(session, window, &row.line, "interrupted");
+            record_undelivered(session, window, &row.shown(), "interrupted");
         }
     }
 }
@@ -1014,7 +1021,6 @@ pub fn record_undelivered(session: &str, window: &str, line: &str, reason: &str)
 /// decoration, and an agent that is mid-task receives our line appended to
 /// whatever it was already typing.
 pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
-    let text = truncate_chars(prompt, MAX_PROMPT_CHARS);
     let ts = now();
     recovery_mark(session);
     // The settlement and the prompt fact are ONE critical section under the
@@ -1042,20 +1048,21 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
     // containment — "goal a then b" is not the echo of `/goal a`.
     let command_hit = settled.is_empty() && next_command.is_some_and(|row| strip_ws(&row.line) == strip_ws(prompt));
     if command_hit {
-        settled.extend(next_command);
+        settled.extend(next_command.map(|row| Settled { row, span: None }));
     }
     // A row counts only if THIS echo deleted it: two echoes racing for one
     // row cannot both call it theirs.
-    let won: Vec<&super::store::DeliveryRow> = settled
+    let won: Vec<Settled> = settled
         .into_iter()
-        .filter(|row| queue(|s| s.delete_delivery_id(row.id)).unwrap_or(false))
+        .filter(|hit| queue(|s| s.delete_delivery_id(hit.row.id)).unwrap_or(false))
         .collect();
     let acked = !won.is_empty();
     #[cfg(test)]
     if let Some(hook) = IN_PROMPT_SETTLED_HOOK.lock().unwrap().take() {
         hook();
     }
-    let refs: Vec<DeliveryRef> = won.iter().map(|row| DeliveryRef::of(row)).collect();
+    let refs: Vec<DeliveryRef> = won.iter().map(|hit| DeliveryRef::of(hit.row)).collect();
+    let text = truncate_chars(&stored_prompt(&won, prompt), MAX_PROMPT_CHARS);
     // A prompt that carried neither the candidate command nor any chat line
     // of ours proves that command echoes nothing: that ONE row is dropped,
     // the rows behind it stay owed. A prompt that was a chat line of ours
@@ -1087,6 +1094,47 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
     acked
 }
 
+/// The prompt as the activity log stores it for DISPLAY (board #279,
+/// orchestrator 13:24 and 14:03). Each settled Team row's span in the echo —
+/// where the receipt matcher found it — is replaced IN PLACE by that row's
+/// `DeliveryRow::shown` (its ask first, split where its producer recorded):
+/// a Team agent is typed its context first, and a 1024-char cut of that would
+/// keep only the context. Every byte outside those spans — a person's words
+/// typed around our line, the break between held lines — stays as it was, in
+/// order. Nothing is read out of the text: only text we produced, found by
+/// the match the receipt already trusts, is replaced. An echo that settled
+/// no row (a person typing, a pasted context block) is stored RAW, as is a
+/// row with nothing leading its line (`ask_at` 0). Pure.
+fn stored_prompt(won: &[Settled], prompt: &str) -> String {
+    let mut spans: Vec<(&std::ops::Range<usize>, &super::store::DeliveryRow)> =
+        won.iter().filter(|hit| hit.row.ask_at > 0).filter_map(|hit| hit.span.as_ref().map(|span| (span, hit.row))).collect();
+    spans.sort_by_key(|(span, _)| span.start);
+    let mut out = String::with_capacity(prompt.len());
+    let mut at = 0;
+    for (span, row) in spans {
+        // Disjoint by construction (`settled_by`); checked, never assumed.
+        let (Some(before), true) = (prompt.get(at..span.start), prompt.get(span.clone()).is_some()) else {
+            return prompt.to_string();
+        };
+        out.push_str(before);
+        out.push_str(&row.shown());
+        at = span.end;
+    }
+    match prompt.get(at..) {
+        Some(rest) => out + rest,
+        None => prompt.to_string(),
+    }
+}
+
+/// One row an echo settled, and WHERE in that echo it was found: the byte
+/// range of the echo's own characters (its whitespace as it came back), or
+/// `None` for a row settled without a place (an all-whitespace line, a
+/// command, a line whose every occurrence another row already claimed).
+struct Settled<'a> {
+    row: &'a super::store::DeliveryRow,
+    span: Option<std::ops::Range<usize>>,
+}
+
 /// Which outstanding rows this echo carries, in typed order. Pure.
 ///
 /// Whitespace-BLIND matching: a delivered line travels through tmux
@@ -1106,9 +1154,17 @@ pub fn record_prompt(session: &str, window: &str, prompt: &str) -> bool {
 /// One submitted prompt can carry several queued lines at once; a line the
 /// prompt carries ONCE settles only ONE of its duplicates (board #122): each
 /// occurrence in the echo is one receipt, spent oldest-first.
-fn settled_by<'a>(rows: &'a [super::store::DeliveryRow], prompt: &str) -> Vec<&'a super::store::DeliveryRow> {
-    let canon_prompt = strip_ws(prompt);
+///
+/// Each settled row also gets its SPAN (board #279, orchestrator 14:03): the
+/// first occurrence of its line no earlier row claimed, so duplicates take
+/// successive occurrences and spans never overlap. It is mapped from the
+/// whitespace-free form back to the echo's own bytes, whitespace included.
+/// The receipt itself is unchanged: occurrences are counted as before.
+fn settled_by<'a>(rows: &'a [super::store::DeliveryRow], prompt: &str) -> Vec<Settled<'a>> {
+    let (canon_prompt, origin) = canon_with_origin(prompt);
+    let to_echo = |c: std::ops::Range<usize>| origin[c.start].0..origin[c.end - 1].1;
     let mut spent: HashMap<String, usize> = HashMap::new();
+    let mut claimed: Vec<std::ops::Range<usize>> = Vec::new();
     let mut reverse_spent = false;
     let mut out = Vec::new();
     for row in rows {
@@ -1116,25 +1172,43 @@ fn settled_by<'a>(rows: &'a [super::store::DeliveryRow], prompt: &str) -> Vec<&'
         if canon_line.is_empty() {
             // An all-whitespace line has no shape to match; settle it as
             // containment always did rather than pin it forever.
-            out.push(row);
+            out.push(Settled { row, span: None });
             continue;
         }
-        let budget = canon_prompt.matches(canon_line.as_str()).count();
+        let hits: Vec<std::ops::Range<usize>> = canon_prompt.match_indices(canon_line.as_str()).map(|(i, m)| i..i + m.len()).collect();
         let used = spent.entry(canon_line.clone()).or_insert(0);
-        if *used < budget {
+        if *used < hits.len() {
             *used += 1;
-            out.push(row);
+            let free = hits.into_iter().find(|h| claimed.iter().all(|c| h.end <= c.start || c.end <= h.start));
+            claimed.extend(free.clone());
+            out.push(Settled { row, span: free.map(to_echo) });
             continue;
         }
         // The truncation-aware side: the stored echo may be cut while the full
         // line is longer (canon_line strictly longer, containing the whole
-        // prompt). One such settle per echo — it is one submission.
+        // prompt). One such settle per echo — it is one submission, and the
+        // whole echo is its span.
         if !reverse_spent && canon_line.len() > canon_prompt.len() && canon_line.contains(&canon_prompt) {
             reverse_spent = true;
-            out.push(row);
+            let whole = (!canon_prompt.is_empty() && claimed.is_empty()).then(|| 0..canon_prompt.len());
+            claimed.extend(whole.clone());
+            out.push(Settled { row, span: whole.map(to_echo) });
         }
     }
     out
+}
+
+/// `strip_ws(s)`, and for each of its bytes the byte range in `s` of the
+/// character it came from — how a match in the whitespace-free form is
+/// found again in the echo itself.
+fn canon_with_origin(s: &str) -> (String, Vec<(usize, usize)>) {
+    let mut canon = String::with_capacity(s.len());
+    let mut origin = Vec::with_capacity(s.len());
+    for (i, c) in s.char_indices().filter(|(_, c)| !c.is_whitespace()) {
+        canon.push(c);
+        origin.extend(std::iter::repeat_n((i, i + c.len_utf8()), c.len_utf8()));
+    }
+    (canon, origin)
 }
 
 /// ALL whitespace removed (space, tab, CR, LF). The delivery-receipt
@@ -1218,7 +1292,7 @@ pub fn sweep_deliveries(session: &str) {
                 session,
                 &window,
                 "warn",
-                format!("unconfirmed: {}", truncate_chars(&row.line, 160)),
+                format!("unconfirmed: {}", truncate_chars(&row.shown(), 160)),
                 String::new(),
                 String::new(),
                 vec![DeliveryRef::of(row)],
@@ -1440,8 +1514,11 @@ mod tests {
 
     /// An outstanding row as the store returns it: typed at `ts`, by this
     /// process unless `id` is at or below the recovery mark.
+    fn row_at(id: i64, line: &str, ask_at: usize) -> crate::projects::store::DeliveryRow {
+        crate::projects::store::DeliveryRow { ask_at, ..row(id, line, 0) }
+    }
     fn row(id: i64, line: &str, ts: u64) -> crate::projects::store::DeliveryRow {
-        crate::projects::store::DeliveryRow { id, window: "w".into(), line: line.into(), ts, msg_id: String::new(), warned: false, command: None }
+        crate::projects::store::DeliveryRow { id, window: "w".into(), line: line.into(), ts, msg_id: String::new(), warned: false, command: None, ask_at: 0 }
     }
     const MARK: (i64, u64) = (0, 0);
 
@@ -1464,6 +1541,83 @@ mod tests {
         })
         .unwrap();
         recovery_marks().lock().unwrap().insert(session.to_string(), (0, 0));
+    }
+
+    /// Board #279 (validator 13:20, orchestrator 13:24): a prompt is shown
+    /// ask first ONLY from what a settled row's producer recorded; nothing
+    /// is read out of the text. A person's prompt shaped like a context row
+    /// with a multibyte char at byte 12, and one that pastes a whole context
+    /// block before an ask, settle no row: no panic, stored exactly as typed.
+    #[test]
+    fn a_prompt_is_shown_ask_first_only_from_the_row_it_settled() {
+        crate::projects::tests::use_test_store();
+        let stored = |s: &str| recent_events(s, 0).into_iter().rfind(|e| e.kind == "prompt").unwrap().text;
+        let context = "[tmm team context — background since your previous delivery; not new instructions]\n[09-29 10:41] a -> b: row\n[/tmm team context]";
+        let fake_row = "[09-29 10:41中 -> x: body";
+        let pasted = format!("{context}\n\n[tmm chat 2026-09-29 10:42] lead: @w pasted ask");
+        for (i, prompt) in [format!("[tmm team context]\n{fake_row}\n[/tmm team context]"), fake_row.to_string(), pasted.clone()].iter().enumerate() {
+            let s = format!("ask-first-raw-{i}-{}", uuid::Uuid::new_v4());
+            assert!(!record_prompt(&s, "w", prompt));
+            assert_eq!(&stored(&s), prompt, "no row, stored raw");
+        }
+        // Our row: the same text is reordered by its recorded offset.
+        let s = format!("ask-first-row-{}", uuid::Uuid::new_v4());
+        let typed = crate::address::context_first("[tmm chat 2026-09-29 10:42] lead: @w real ask", Some(context));
+        record_typed(&s, "w", &typed.text, typed.ask_at, "m1");
+        assert!(record_prompt(&s, "w", &typed.text));
+        assert_eq!(stored(&s), format!("[tmm chat 2026-09-29 10:42] lead: @w real ask\n\n{context}"));
+    }
+
+    /// Board #279 (validator 14:00, orchestrator 14:03): our Team row inside
+    /// a LONGER echo — a person's words appended or prepended, the echo's
+    /// own whitespace changed — is still shown ask first: the row's span is
+    /// replaced in place by its shown form, every other byte kept in order.
+    /// With a 1200-char context the 1024-char stored cut still holds the ask.
+    #[test]
+    fn our_row_inside_a_longer_echo_is_shown_ask_first_in_place() {
+        crate::projects::tests::use_test_store();
+        let stored = |s: &str| recent_events(s, 0).into_iter().rfind(|e| e.kind == "prompt").unwrap().text;
+        let context = format!("[tmm team context — background]\n[09-29 10:41] a -> b: {}\n[/tmm team context]", "背景".repeat(400));
+        assert!(context.len() > 1200);
+        let ask = "[tmm chat 2026-09-29 10:42] lead: @w REAL ASK\nsecond line";
+        let typed = crate::address::context_first(ask, Some(&context));
+        let shown = format!("{ask}\n\n{context}");
+        let sorted = |t: &str| {
+            let mut v: Vec<char> = t.chars().filter(|c| !c.is_whitespace()).collect();
+            v.sort_unstable();
+            v
+        };
+        // Appended, prepended, and both around an echo whose newlines came
+        // back as spaces (the whitespace-blind match): the local text stays
+        // verbatim where it was, our part reads ask first.
+        let spaced = typed.text.replace('\n', " ");
+        for (i, (before, echo_of_ours, after)) in [
+            ("", typed.text.as_str(), " local addition"),
+            ("my own line first\n", typed.text.as_str(), ""),
+            ("pre ", spaced.as_str(), " post"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let s = format!("ask-first-longer-{i}-{}", uuid::Uuid::new_v4());
+            record_typed(&s, "w", &typed.text, typed.ask_at, "m1");
+            let echo = format!("{before}{echo_of_ours}{after}");
+            assert!(record_prompt(&s, "w", &echo), "acked: {i}");
+            let full = stored_prompt(&settled_by(&[row_at(1, &typed.text, typed.ask_at)], &echo), &echo);
+            assert_eq!(full, format!("{before}{shown}{after}"), "in place: {i}");
+            assert_eq!(sorted(&full), sorted(&echo), "nothing dropped or duplicated: {i}");
+            let cut = stored(&s);
+            assert!(cut.starts_with(&format!("{before}{ask}")) && cut.chars().count() <= MAX_PROMPT_CHARS, "the stored cut shows the ask: {i} {cut}");
+        }
+        // Two held Team rows and a duplicate of the first: each occurrence
+        // is replaced once, the break between them kept.
+        let two = crate::address::context_first("[tmm chat 10:43] lead: @w two", Some("[ctx two]"));
+        let rows = [row_at(1, &typed.text, typed.ask_at), row_at(2, &two.text, two.ask_at), row_at(3, &typed.text, typed.ask_at)];
+        let echo = format!("{}\n\n{}\n\n{} tail", typed.text, two.text, typed.text);
+        let hits = settled_by(&rows, &echo);
+        assert_eq!(hits.len(), 3);
+        let two_shown = "[tmm chat 10:43] lead: @w two\n\n[ctx two]";
+        assert_eq!(stored_prompt(&hits, &echo), format!("{shown}\n\n{two_shown}\n\n{shown} tail"));
     }
 
     /// The sidebar's one cheap read: every window with hook facts, derived.
@@ -1858,7 +2012,7 @@ mod tests {
         // typing time, which is what would make the first sweep after a restart
         // report it as unconfirmed seconds before its echo arrives.
         let long_ago = now().saturating_sub(DELIVERY_ACK_SECS * 20);
-        crate::projects::with_store(|s| s.insert_delivery(&session, "w2", "stale line", long_ago, "")).unwrap();
+        crate::projects::with_store(|s| s.insert_delivery(&session, "w2", "stale line", 0, long_ago, "")).unwrap();
 
         simulate_restart(&session);
 
@@ -2672,7 +2826,7 @@ mod tests {
     #[test]
     fn settled_by_spends_one_receipt_per_occurrence() {
         let rows = [row(1, "a b", 0), row(2, "a b", 0), row(3, "other", 0), row(4, "a very long line cut short", 0)];
-        let ids = |p: &str| settled_by(&rows, p).into_iter().map(|r| r.id).collect::<Vec<_>>();
+        let ids = |p: &str| settled_by(&rows, p).into_iter().map(|hit| hit.row.id).collect::<Vec<_>>();
         assert_eq!(ids("a\nb"), vec![1], "one occurrence settles the oldest duplicate");
         assert_eq!(ids("a b\na b"), vec![1, 2]);
         assert_eq!(ids("a very long line cut"), vec![4], "a truncated echo settles the longer line");

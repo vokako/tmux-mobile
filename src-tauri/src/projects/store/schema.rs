@@ -9,7 +9,7 @@ use super::registry::{DEFAULT_KIMI_SYSTEM, DEFAULT_OMP_MODEL, DEFAULT_OMP_SYSTEM
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 29;
+const SCHEMA_VERSION: i64 = 30;
 
 impl Store {
     /// Ensure the durable half of Board editability exists, then
@@ -696,6 +696,31 @@ impl Store {
             // v29 (board #275): scheduled wakes, a declaration per row.
             self.ensure_wakes()?;
         }
+        if version < 30 {
+            // v30 (board #279): where a row's stamped line starts, recorded
+            // by the producer that typed a Team context before it. Existing
+            // rows have none: 0.
+            self.ensure_delivery_ask_at()?;
+        }
+        Ok(())
+    }
+
+    /// The v30 shape (also a heal floor): `deliveries.ask_at`, added only
+    /// when absent.
+    pub(super) fn ensure_delivery_ask_at(&self) -> Result<(), String> {
+        let has: bool = self
+            .conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('deliveries') WHERE name = 'ask_at')",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("inspect deliveries.ask_at: {e}"))?;
+        if !has {
+            self.conn
+                .execute_batch("ALTER TABLE deliveries ADD COLUMN ask_at INTEGER NOT NULL DEFAULT 0;")
+                .map_err(|e| format!("add deliveries.ask_at: {e}"))?;
+        }
         Ok(())
     }
 
@@ -936,12 +961,36 @@ mod tests {
         assert_eq!((rows.len(), rows[0].line.as_str(), rows[0].msg_id.as_str(), rows[0].warned), (1, "old line", "", false));
         let evs = store.activity_since("s", 0, 10).unwrap();
         assert_eq!((evs.len(), evs[0].deliveries.as_str()), (1, ""));
-        store.insert_delivery("s", "w1", "new line", 200, "m9").unwrap();
+        store.insert_delivery("s", "w1", "new line", 0, 200, "m9").unwrap();
         assert_eq!(store.pending_deliveries("s", None).unwrap()[1].msg_id, "m9");
         // Re-running the step is harmless (the heal floor calls it on every open).
         store.ensure_delivery_msg_ids().unwrap();
         drop(store);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// v29 -> v30 (board #279): an outstanding row keeps its line and reads
+    /// `ask_at` 0 (shown as typed); a new row stores its offset.
+    #[test]
+    fn v29_deliveries_gain_ask_at_zero() {
+        // The guard exists before the database does (#268/#269): every exit
+        // path, a panic included, removes it.
+        let scratch = crate::tmux::Scratch::new("store-v30");
+        let path = std::path::Path::new(&scratch.path()).join("state.db");
+        {
+            let store = Store::open(&path).unwrap();
+            store.conn.execute_batch(
+                "ALTER TABLE deliveries DROP COLUMN ask_at;
+                 INSERT INTO deliveries (session, win, line, ts) VALUES ('s', 'w1', 'old line', 100);
+                 PRAGMA user_version = 29;",
+            ).unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        let rows = store.pending_deliveries("s", None).unwrap();
+        assert_eq!((rows.len(), rows[0].line.as_str(), rows[0].ask_at), (1, "old line", 0));
+        store.insert_held_delivery("s", "w1", "ctx\n\nline", 5, 200, "m9").unwrap();
+        assert_eq!(store.held_deliveries("s", "w1").unwrap()[0].shown(), "line\n\nctx");
+        store.ensure_delivery_ask_at().unwrap();
     }
 
     /// The heal step, which is not hypothetical: a dev binary built in the
@@ -970,7 +1019,7 @@ mod tests {
             assert!(store.pending_deliveries("s", None).is_err(), "the table really is gone");
         }
         let store = Store::open(&path).unwrap();
-        store.insert_delivery("s", "w1", "hello", 100, "").unwrap();
+        store.insert_delivery("s", "w1", "hello", 0, 100, "").unwrap();
         assert_eq!(store.pending_deliveries("s", None).unwrap().len(), 1, "healed on open");
         assert_eq!(store.issue_get("legacy", 1).unwrap().unwrap()["editable"], false, "legacy workflow evidence is locked during repair");
         assert_eq!(

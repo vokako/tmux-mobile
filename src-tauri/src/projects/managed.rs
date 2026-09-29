@@ -144,7 +144,7 @@ pub fn spawned_by(workspace: Option<&str>, window_name: &str) -> Option<String> 
 /// scans, so the record-only invariant of hook-sourced posts stays intact.
 pub fn deliver_chat_line(session: &str, target_name: &str, line: &str) -> bool {
     match crate::projects::delivery::agent_target(session, target_name) {
-        Some(target) => crate::projects::delivery::deliver(session, target_name, &target, line, ""),
+        Some(target) => crate::projects::delivery::deliver(session, target_name, &target, line, 0, ""),
         None => false,
     }
 }
