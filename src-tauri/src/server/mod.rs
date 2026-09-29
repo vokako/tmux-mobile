@@ -336,6 +336,11 @@ mod golden_errors {
             check(m, hub(m, serde_json::json!({"agent": "nobody-such"})),
                 ERR_INVALID_PARAMS, "'nobody-such' is not an agent this app started");
         }
+        // Board #271: the live queue/steer switch.
+        check("hub_agent_input_mode bad mode", hub("hub_agent_input_mode", serde_json::json!({"agent": "x", "mode": "interrupt"})),
+            ERR_INVALID_PARAMS, "mode must be queue or steer, not 'interrupt'");
+        check("hub_agent_input_mode not ours", hub("hub_agent_input_mode", serde_json::json!({"agent": "nobody-such", "mode": "steer"})),
+            ERR_INVALID_PARAMS, "'nobody-such' is not an agent this app started");
 
         // ── rpc.rs literals ──────────────────────────────────────────────
         check("git allowlist", rpc("git", serde_json::json!({"subcmd": "rm"})), ERR_INVALID_PARAMS, "git subcommand not allowed: rm");

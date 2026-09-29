@@ -96,6 +96,7 @@ impl Backend {
             "color": format!("--backend-{}", self.name()),
             "efforts": self.effort_values(),
             "input_modes": self.switches_input_mode(),
+            "input_mode_toggle": self.live_input_toggle().is_some(),
         })
     }
 
@@ -138,6 +139,26 @@ impl Backend {
             Backend::Grok => grok::command_echo(name, args),
             Backend::Omp => omp::command_echo(name, args),
             Backend::Kimi => kimi::command_echo(name, args),
+        }
+    }
+
+    /// The named key that switches queue/steer in a RUNNING session (#271),
+    /// where one was measured; `None` = the mode is fixed at launch (codex's
+    /// keymap is a launch-line override) or does not exist.
+    pub fn live_input_toggle(self) -> Option<&'static str> {
+        match self {
+            Backend::Kiro => kiro::LIVE_INPUT_TOGGLE,
+            _ => None,
+        }
+    }
+
+    /// The mode the pane RUNS now, from its screen (#271); `None` = the screen
+    /// does not say (or the backend cannot switch live), and the launch
+    /// recipe's start mode stands.
+    pub fn live_input_mode(self, pane: &str) -> Option<&'static str> {
+        match self {
+            Backend::Kiro => kiro::live_input_mode(pane),
+            _ => None,
         }
     }
 

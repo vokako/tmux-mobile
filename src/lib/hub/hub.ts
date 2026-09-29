@@ -1083,6 +1083,20 @@ export function isSessionStart(text: string | null | undefined): boolean {
   return /^\[[^\]]+\]\s*\(session start\)$/.test(t) || /^\[[^\]]+\]\s*Start now:/.test(t);
 }
 
+/** The card menu's queue ⇄ steer item for one agent (board #271), or null
+ * when there is none to offer: the server must report the mode the session
+ * RUNS (`input_mode`, derived from the pane) and the backend must switch it
+ * live (`toggles`, from `backends_list`). The item names the OTHER mode. */
+export function inputModeSwitch(
+  agent: { agent?: string | null; input_mode?: 'queue' | 'steer' | null } | null | undefined,
+  toggles: (backend: string | null | undefined) => boolean,
+): { next: 'queue' | 'steer'; label: 'hubToQueue' | 'hubToSteer' } | null {
+  if (!agent?.input_mode || !toggles(agent.agent)) return null;
+  return agent.input_mode === 'steer'
+    ? { next: 'queue', label: 'hubToQueue' }
+    : { next: 'steer', label: 'hubToSteer' };
+}
+
 /** A slash command the person sent (`hub_command` records `[tmm] /goal args →
  * kiro, dev`) as the parts of an OUTGOING bubble (board #264, owner
  * 2026-09-28: "不如直接还是气泡"): the recipients it was typed into, the

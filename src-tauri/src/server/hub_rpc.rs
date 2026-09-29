@@ -605,6 +605,48 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
             Ok(serde_json::json!({ "interrupted": agent }))
         }
 
+        // Switch a running agent between queue and steer for THIS session
+        // (board #271, orchestrator 03:58): the CLI's own live toggle, typed
+        // as its named key — exactly what a person does in the pane. The
+        // declaration (registry `input_mode`, #245) is untouched and a
+        // restart starts from it. Idempotent and verified: nothing is typed
+        // when the pane already runs `mode`, and after ONE key the screen
+        // must show the new mode, or the call fails — never a blind second
+        // press that could toggle it back.
+        "hub_agent_input_mode" => {
+            let agent = param(p, "agent")?;
+            let mode = param(p, "mode")?;
+            if !matches!(mode, "queue" | "steer") {
+                return Err(RpcError::InvalidParams(format!("mode must be queue or steer, not '{mode}'")));
+            }
+            if crate::projects::managed_home(session, agent).is_none() {
+                return Err(RpcError::InvalidParams(format!("'{agent}' is not an agent this app started")));
+            }
+            let key = agent_backend(session, agent).and_then(|b| b.live_input_toggle()).ok_or_else(|| {
+                RpcError::InvalidParams(format!("'{agent}' cannot switch queue/steer while it runs"))
+            })?;
+            let Some(pane) = crate::tmux::find_window_by_name(session, agent) else {
+                return Err(RpcError::InvalidParams(format!("no window named '{agent}' in session '{session}'")));
+            };
+            let now = crate::projects::delivery::input_mode(session, agent);
+            if now == Some(mode) {
+                return Ok(serde_json::json!({ "agent": agent, "mode": mode, "changed": false }));
+            }
+            crate::tmux::send_keys(&pane, key, false).map_err(RpcError::Internal)?;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                if crate::projects::delivery::input_mode(session, agent) == Some(mode) {
+                    break;
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Err(RpcError::Internal(format!("{agent} did not confirm {mode} mode")));
+                }
+            }
+            let _ = rooms::post(&room, agent, &format!("[tmm] {agent} → {mode} mode (this session)"));
+            Ok(serde_json::json!({ "agent": agent, "mode": mode, "changed": true }))
+        }
+
         // Eject an agent from the project: stop it, drop its slot, remove its
         // isolated home. Stop is the pause button, this is the delete button.
         "hub_agent_remove" => {
@@ -737,6 +779,13 @@ pub(super) fn handle_hub_request(req: &Request, _notifications: Option<&crate::a
 /// name (projects `up` renames by slot); adopted agents match by window name
 /// too, which is the best identity tmux offers.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+/// The backend of a managed agent's live pane, from its processes (#260).
+fn agent_backend(session: &str, agent: &str) -> Option<crate::backends::Backend> {
+    let panes = crate::tmux::list_panes(session).ok()?;
+    let p = panes.iter().find(|p| p.window_name == agent && p.active)?;
+    p.agent.and_then(crate::backends::Backend::parse)
+}
+
 fn window_of_agent(session: &str, agent: &str) -> Option<usize> {
     let panes = crate::tmux::list_panes(session).ok()?;
     panes.iter().find(|p| p.window_name == agent).map(|p| p.window)
@@ -1207,6 +1256,8 @@ fn agent_states(session: &str) -> serde_json::Value {
     telemetry::retain_windows(session, &live);
     crate::projects::vitals::retain_windows(session, &live);
 
+    // Each window's pane id: the live input mode is remembered per pane (#271).
+    let pane_ids: std::collections::HashMap<String, String> = crate::tmux::list_named_windows(session).into_iter().collect();
     let rows: Vec<serde_json::Value> = windows
         .values()
         .map(|p| {
@@ -1225,21 +1276,29 @@ fn agent_states(session: &str) -> serde_json::Value {
             // memory is kept WARM by `sniff_window_soon` at every hook edge and
             // delivered chat line, so this poll usually just reads it. Treating
             // every miss as "no information" is what made the card blink empty.
-            let vitals = if managed {
-                crate::tmux::capture_pane_plain(&format!("{session}:{}", p.window), Some(0))
-                    .map(|text| {
-                        crate::projects::vitals::sniff_remembered(
-                            session,
-                            &p.window_name,
-                            &text,
-                            &p.window_name,
-                            agent.map(|a| a.backend).unwrap_or(""),
-                        )
-                    })
-                    .unwrap_or_default()
+            // The same capture also says which queue/steer mode the session
+            // RUNS (#271): the one derivation, `delivery::input_mode_seen`.
+            let screen = if managed {
+                crate::tmux::capture_pane_plain(&format!("{session}:{}", p.window), Some(0)).ok()
             } else {
-                Default::default()
+                None
             };
+            let vitals = screen
+                .as_deref()
+                .map(|text| {
+                    crate::projects::vitals::sniff_remembered(
+                        session,
+                        &p.window_name,
+                        text,
+                        &p.window_name,
+                        agent.map(|a| a.backend).unwrap_or(""),
+                    )
+                })
+                .unwrap_or_default();
+            let input_mode = screen.as_deref().and_then(|text| {
+                let pane = pane_ids.get(&p.window_name).map(String::as_str).unwrap_or("");
+                crate::projects::delivery::input_mode_seen(session, &p.window_name, pane, text)
+            });
             serde_json::json!({
                 "window": p.window,
                 "name": p.window_name,
@@ -1253,6 +1312,8 @@ fn agent_states(session: &str) -> serde_json::Value {
                 "detail": st.detail,
                 "since": st.since,
                 "vitals": if vitals.is_empty() { serde_json::Value::Null } else { serde_json::to_value(&vitals).unwrap_or(serde_json::Value::Null) },
+                // queue|steer this session runs, where the backend has the choice (#271).
+                "input_mode": input_mode,
             })
         })
         .collect();

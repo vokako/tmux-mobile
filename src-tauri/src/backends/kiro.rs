@@ -12,6 +12,56 @@ pub(crate) const SWITCHES_INPUT_MODE: bool = true;
 /// The cli.json key that carries the definition's input mode.
 const INTERRUPT_KEY: &str = "chat.defaultInterruptBehavior";
 
+/// The session can switch the mode LIVE: Ctrl+S (a named key) toggles it,
+/// idle or mid-turn, for this session only — `settings/cli.json` is never
+/// rewritten and a restart starts from it again (board #271, measured on
+/// kiro-cli 2.22.1 `--agent-engine v3`).
+pub(crate) const LIVE_INPUT_TOGGLE: Option<&str> = Some("C-s");
+
+/// The mode this pane RUNS now, read off its screen (board #271) — `None`
+/// when the screen does not say, and the caller falls back to the launch
+/// recipe's start mode. kiro paints it in two measured shapes, both matched
+/// whole so a quoted copy (a chat delivery under its `›` stamp, tool output
+/// under a `●` head) never counts:
+/// - the confirmation of a Ctrl+S, a column-zero line EXACTLY
+///   `● Switched to Steer mode` / `● Switched to Queue mode`; kiro keeps only
+///   the newest one, so the bottom-most is the current mode;
+/// - while a turn runs, the prompt line `›  Kiro is working · Type to queue ·
+///   Ctrl+S to steer` (older builds without the `›`). Idle, kiro paints no
+///   mode at all.
+/// The confirmation outranks the footer (orchestrator, #271): both follow the
+/// latest toggle, and the confirmation is also there while idle.
+pub(crate) fn live_input_mode(pane: &str) -> Option<&'static str> {
+    let mode = |word: &str| match word {
+        "queue" | "Queue" => Some("queue"),
+        "steer" | "Steer" => Some("steer"),
+        _ => None,
+    };
+    let lines: Vec<&str> = pane.lines().collect();
+    for line in lines.iter().rev() {
+        let Some(rest) = line.trim_end().strip_prefix("● Switched to ") else { continue };
+        if let Some(m) = rest.strip_suffix(" mode").and_then(mode) {
+            return Some(m);
+        }
+    }
+    for line in lines.iter().rev() {
+        let l = line.trim_end();
+        let body = match l.strip_prefix('›') {
+            Some(after) if after.starts_with(' ') => after.trim_start(),
+            Some(_) => continue,
+            None => l.strip_prefix(' ').unwrap_or(l),
+        };
+        let Some(rest) = body.strip_prefix("Kiro is working · Type to ") else { continue };
+        let Some((now, other)) = rest.split_once(" · Ctrl+S to ") else { continue };
+        if let (Some(now), Some(other)) = (mode(now), mode(other)) {
+            if now != other {
+                return Some(now);
+            }
+        }
+    }
+    None
+}
+
 /// Reasoning-effort levels kiro-cli accepts (`kiro-cli chat --effort`,
 /// measured 2026-08-22: "e.g. low, medium, high, xhigh, max").
 pub(crate) fn effort_values() -> &'static [&'static str] {
@@ -859,6 +909,39 @@ pub(crate) fn is_user_prompt_submit(payload: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Board #271: panes captured on kiro-cli 2.22.1 v3 (capture-pane -p).
+    #[test]
+    fn the_live_input_mode_is_read_off_the_screen() {
+        let busy_queue = "● Shell sleep 40\n────\nkiro · Claude Opus 5.5 · high · ◔ 1% · Midway: expired   /tmp/steer/ws\n›  Kiro is working · Type to queue · Ctrl+S to steer\n";
+        let busy_steer = "kiro · Claude Opus 5.5 · high · ◑ 35%\n›  Kiro is working · Type to steer · Ctrl+S to queue\n";
+        let idle = "────\nkiro · Claude Opus 5.5 · high · ◔ 1%\n›  ask a question or describe a task ↵\n                                       /sessions to resume · /copy to clipboard\n";
+        assert_eq!(live_input_mode(busy_queue), Some("queue"));
+        assert_eq!(live_input_mode(busy_steer), Some("steer"));
+        assert_eq!(live_input_mode(idle), None, "idle kiro paints no mode");
+        // Older build (vitals.rs fixture): no `›`, one leading space.
+        assert_eq!(live_input_mode(" Kiro is working · Type to queue · Ctrl+S to steer\n"), Some("queue"));
+        // A Ctrl+S confirmation, idle; it outranks the footer.
+        let switched = format!("● Switched to Steer mode\n\n{idle}");
+        assert_eq!(live_input_mode(&switched), Some("steer"));
+        assert_eq!(live_input_mode(&format!("● Switched to Queue mode\n{busy_steer}")), Some("queue"),
+            "the confirmation is read first (orchestrator, #271)");
+        // Only the bottom-most confirmation counts.
+        assert_eq!(live_input_mode("● Switched to Steer mode\nx\n● Switched to Queue mode\n"), Some("queue"));
+    }
+
+    #[test]
+    fn a_quoted_mode_line_is_not_the_pane_mode() {
+        // The owner's own words, delivered as chat, and tool output reading a pane.
+        let chat = "  › [tmm chat 2026-09-29 03:47] human: @builder Switched to Steer mode 我观察到\n    ● Switched to Steer mode\n    Kiro is working · Type to steer · Ctrl+S to queue\n";
+        assert_eq!(live_input_mode(chat), None);
+        let tool = "● Shell tmux capture-pane -p -t x\n    ╰ output:\n        ● Switched to Queue mode\n        ›  Kiro is working · Type to queue · Ctrl+S to steer\n";
+        assert_eq!(live_input_mode(tool), None);
+        assert_eq!(live_input_mode("● Switched to Steer mode, then I pressed it again\n"), None, "prose around it");
+        assert_eq!(live_input_mode("›  Kiro is working · Type to queue · Ctrl+S to queue\n"), None, "a self-contradiction");
+        assert_eq!(live_input_mode("›Kiro is working · Type to steer · Ctrl+S to queue\n"), None);
+        assert_eq!(live_input_mode(""), None);
+    }
 
     /// v3's post-turn `memory` auto-capture is the housekeeping tool (board
     /// #227); every other tool, in either key spelling, is the agent's work.

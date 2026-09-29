@@ -32,17 +32,17 @@
   import { t } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectDown, projectDelete, projectArchive, projectCreate, projectRename, listSessionsWithPanes,
-    hubPost, hubCommand, modelsList, hubLog, hubRooms, hubAgents, fsMkdir, fsUpload, fsCwd, hubSpawn, hubSpawnTeam, teamsList, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
+    hubPost, hubCommand, modelsList, hubLog, hubRooms, hubAgents, fsMkdir, fsUpload, fsCwd, hubSpawn, hubSpawnTeam, teamsList, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, hubAgentInputMode, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { stateDotColor, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, pickDrawerAgent, addressed, addressedTeam, mentionedAgents, unreadSenders, stoppedAgents, slashCommand, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
+  import { stateDotColor, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, pickDrawerAgent, addressed, addressedTeam, mentionedAgents, unreadSenders, stoppedAgents, slashCommand, uploadImagePath, uploadFilePath, imageId, inputModeSwitch } from './hub.ts';
   import { resolvePathRef } from '../core/path-links.ts';
   import { ALL_TARGET, attachmentBody, attachToken, busyTargetsFor, targetMembers, targetTeam, teamTarget } from './hub-composer.ts';
   import { walkFeedGap } from './hub-history.ts';
   import { createHubBackRegistry } from './hub-back.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
-  import { backendIcon } from '../core/agents.ts';
+  import { backendIcon, backendTogglesInputMode } from '../core/agents.ts';
   import { anchorOf } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { groupActions, groupScope, runGroup } from './group-actions.ts';
@@ -1268,6 +1268,25 @@
   }
   const startAgent = (name) => restartAgent(name, 'start failed');
 
+  /** Queue ⇄ steer for this session (board #271): the CLI's own live
+   * toggle, verified by the server; the card reads the new mode from the
+   * pane on the next agents load. A failure is said in the composer's
+   * feedback slot, like a group verb's. */
+  async function switchInputMode(name, mode, session = selected) {
+    if (!session || session !== selected) return;
+    const feedbackToken = commandFeedbackLifetime.begin();
+    commandFeedbackAnchor = composer?.feedbackAnchor() ?? null;
+    try {
+      await hubAgentInputMode(session, name, mode);
+      await Promise.all([loadAgents(), loadFeed()]);
+    } catch (e) {
+      if (selected === session) commandFeedbackLifetime.update(feedbackToken, {
+        kind: 'error',
+        message: t('hubModeFailed').replace('{name}', name).replace('{error}', e?.message ?? String(e)),
+      });
+    }
+  }
+
   /** A group verb (board #258) — the per-agent RPC once per member, captured
    * when the menu was built. Stop always confirms and a restart confirms when
    * it would cut a running turn: both go through the one ConfirmDialog. The
@@ -1535,6 +1554,7 @@
       ];
     }
     const a = managedAgents.find((x) => x.name === name);
+    const modeSwitch = inputModeSwitch(a, backendTogglesInputMode);
     return [
       // The current recipient's card offers to stop addressing it (Record
       // only leads, as for All); any other card offers to talk to it (#196).
@@ -1546,6 +1566,13 @@
       ...config,
       ...(busyTargetsFor(name, agents).length
         ? [{ label: t('hubInterrupt'), icon: 'stop', warn: true, disabled: interrupting.includes(name), onselect: () => interrupt(name, session) }]
+        : []),
+      // Queue ⇄ steer for this session, where the running CLI can switch
+      // (#271): the item names the OTHER mode; the configured one returns
+      // on restart, which the hint says.
+      ...(modeSwitch
+        ? [{ label: t(modeSwitch.label), icon: 'zap', hint: t('hubModeSession'),
+            onselect: () => switchInputMode(name, modeSwitch.next, session) }]
         : []),
       { label: t('hubRestart'), icon: 'refresh', onselect: () => restartAgent(name) },
       { label: t('hubStop'), icon: 'stop', danger: true, onselect: () => askAction('stop', name) },

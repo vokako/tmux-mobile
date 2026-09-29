@@ -45,6 +45,7 @@ tmm board note <id> <text>           record progress/decisions ON the issue
 # teammates and projects
 tmm agent list                       windows + agent detection + derived state
 tmm agent interrupt|stop|restart|remove <name>
+tmm agent mode <name> queue|steer    kiro only: its Ctrl+S, this session (#271)
 tmm spawn <agent> [--brief <text>]   spawn a registry agent into this project
 tmm spawn --team <team> [--brief <text>]     start a configured team (all members)
 tmm project list                     ● live / ○ down, session + path
@@ -350,6 +351,7 @@ a teammate:
 | | CLI | UI |
 |---|---|---|
 | Agent | `tmm agent interrupt\|stop\|restart\|remove <name>` | roster card/context menu: Watch / Interrupt / Restart / Stop / Remove |
+| Input mode | `tmm agent mode <name> queue\|steer` | kiro card context menu: Switch to Steer / Switch to Queue (#271) |
 | Project | `tmm project up\|down\|archive\|delete <session>` | header: Open / Close / Delete (archive is the list's own action) |
 
 `remove` is the eject button next to stop's pause button: it kills the window,

@@ -72,6 +72,8 @@ USAGE (background tasks — LOCAL tmux only, no server needed, never exits 2):
 USAGE (human or agent — self-management):
   tmm agent list                      agents in this project and their states
   tmm agent interrupt <name>          cancel the turn it is running (Escape into its pane)
+  tmm agent mode <name> queue|steer   switch a kiro agent's queue/steer mode for this session
+                                      (its Ctrl+S; a restart returns to the configured mode)
   tmm agent stop|restart <name>       stop it, or bring it back resuming its conversation
   tmm agent remove <name>             eject it: stop + forget its slot + delete its home
   tmm project list                    all projects
@@ -519,6 +521,24 @@ async fn main() {
             };
             let r = rpc(&ctx, method, json!({ "session": session, "agent": name })).await;
             if ctx.json { println!("{r}"); } else { println!("✓ {action} {name}"); }
+        }
+        // Board #271: queue/steer for THIS session, the card menu's verb.
+        ("agent", rest) if rest.first().map(String::as_str) == Some("mode") => {
+            let session = need_project(&ctx);
+            let (Some(name), Some(mode)) = (rest.get(1).cloned(), rest.get(2).cloned()) else {
+                fail(EXIT_USAGE, "agent mode needs a name and a mode: tmm agent mode <name> queue|steer");
+            };
+            if !matches!(mode.as_str(), "queue" | "steer") {
+                fail(EXIT_USAGE, "agent mode is queue or steer: tmm agent mode <name> queue|steer");
+            }
+            let r = rpc(&ctx, "hub_agent_input_mode", json!({ "session": session, "agent": name, "mode": mode })).await;
+            if ctx.json {
+                println!("{r}");
+            } else if r.get("changed").and_then(|v| v.as_bool()) == Some(false) {
+                println!("✓ {name} already runs {mode} mode");
+            } else {
+                println!("✓ {name} → {mode} mode (this session; a restart returns to its configured mode)");
+            }
         }
         ("project", rest) if rest.first().map(String::as_str) == Some("list") => {
             let r = rpc(&ctx, "project_list", json!({})).await;

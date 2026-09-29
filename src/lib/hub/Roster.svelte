@@ -185,6 +185,7 @@
     const model = [a.agent, a.vitals?.model ? modelLabel(a.vitals.model) : ''].filter(Boolean).join(' · ');
     if (model) lines.push({ label: t('hubHoverModel'), value: model });
     if (a.vitals?.context_pct != null) lines.push({ label: t('hubHoverCtx'), value: `${a.vitals.context_pct}%` });
+    if (a.input_mode) lines.push({ label: t('hubHoverMode'), value: a.input_mode === 'steer' ? 'Steer' : 'Queue' });
     if (a.since) lines.push({ label: t('hubHoverSince'), value: fmtElapsed(a.since, tick) });
     if (a.team) lines.push({ label: t('teamsTitle'), value: a.team });
     lines.push({ label: t('hubHoverTarget'), value: `${selected}:${a.window}` });

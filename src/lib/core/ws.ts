@@ -802,6 +802,9 @@ export interface HubAgent {
   state: string;
   detail: string;
   since: number;
+  /** queue|steer the session RUNS now, derived from its pane (board #271);
+   * null where the backend has no such choice. */
+  input_mode?: 'queue' | 'steer' | null;
 }
 export const hubPost = (session: string, body: string, from = 'human') =>
   call('hub_post', { session, body, from });
@@ -961,6 +964,11 @@ export const hubAgentRemove = (session: string, agent: string) =>
  * the CLI and the UI share one implementation). */
 export const hubAgentInterrupt = (session: string, agent: string) =>
   call<{ interrupted: string }>('hub_agent_interrupt', { session, agent });
+/** Switch a running agent's queue|steer mode for THIS session (board #271):
+ * its CLI's own live toggle; a restart returns to the configured mode.
+ * `changed` is false when it already ran `mode`. */
+export const hubAgentInputMode = (session: string, agent: string, mode: 'queue' | 'steer') =>
+  call<{ agent: string; mode: 'queue' | 'steer'; changed: boolean }>('hub_agent_input_mode', { session, agent, mode });
 /** Kill and bring back. `resumed` is false when the agent had to start a fresh
  * conversation because the project declaration did not have it yet. */
 export const hubAgentRestart = (session: string, agent: string) =>

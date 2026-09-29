@@ -61,6 +61,9 @@ export interface BackendInfo {
   /** Whether a definition may choose queue|steer (board #245): only where
    * the switch was measured. Absent on older servers, which offer none. */
   input_modes?: boolean;
+  /** Whether a RUNNING session can switch queue|steer (board #271: kiro's
+   * Ctrl+S). Absent on older servers, which offer no switch. */
+  input_mode_toggle?: boolean;
 }
 let served: BackendInfo[] | null = null;
 const servedListeners = new Set<() => void>();
@@ -108,6 +111,11 @@ export function backendEfforts(backend: string | null | undefined): readonly str
  * truth only: no fallback list, so an older server offers nothing. */
 export function backendSwitchesInputMode(backend: string | null | undefined): boolean {
   return servedBackend(backend)?.input_modes === true;
+}
+/** Whether a running agent of this backend can switch queue|steer (#271).
+ * Server truth only, like `backendSwitchesInputMode`. */
+export function backendTogglesInputMode(backend: string | null | undefined): boolean {
+  return servedBackend(backend)?.input_mode_toggle === true;
 }
 /** The backend's colour token NAME (`--backend-x`), or null when it has none. */
 export function backendColorToken(backend: string | null | undefined): string | null {

@@ -2,7 +2,7 @@ import test from 'node:test';
 import { ALL_TARGET, teamTarget } from './hub-composer.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand, foldedCommandArgs } from './hub.ts';
+import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand, foldedCommandArgs, inputModeSwitch } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 import { mentionPalette, rosterGroups, rosterMarker, sortAgentsForRoster } from './hub.ts';
 
@@ -1768,4 +1768,15 @@ test('a long command folds its arguments through the message budget; short ones 
   // elideTail itself is unchanged by the shared cut: fits → identity, cut → fence repaired.
   assert.equal(elideTail('x', 3, 40), 'x');
   assert.ok(elideTail(`\`\`\`\n${'c'.repeat(300)}`, 3, 40).endsWith('\n```'));
+});
+
+test('the card offers the OTHER input mode only where the running CLI can switch (#271)', () => {
+  const kiroOnly = (b: string | null | undefined) => b === 'kiro';
+  assert.deepEqual(inputModeSwitch({ agent: 'kiro', input_mode: 'queue' }, kiroOnly), { next: 'steer', label: 'hubToSteer' });
+  assert.deepEqual(inputModeSwitch({ agent: 'kiro', input_mode: 'steer' }, kiroOnly), { next: 'queue', label: 'hubToQueue' });
+  assert.equal(inputModeSwitch({ agent: 'codex', input_mode: 'queue' }, kiroOnly), null, 'codex: the mode is fixed at launch');
+  assert.equal(inputModeSwitch({ agent: 'kiro', input_mode: null }, kiroOnly), null, 'no derived mode: nothing to switch');
+  assert.equal(inputModeSwitch({ agent: 'kiro' }, kiroOnly), null, 'an older server sends no mode');
+  assert.equal(inputModeSwitch({ agent: 'kiro', input_mode: 'queue' }, () => false), null, 'no served capability: no item');
+  assert.equal(inputModeSwitch(undefined, kiroOnly), null);
 });

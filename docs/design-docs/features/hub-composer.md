@@ -974,6 +974,8 @@ a name (the default lead) types into ONE agent's input; `@all` types into EVERY 
 
 ### A busy queue-mode agent gets its lines combined at the turn's end (board #257, 2026-09-28)
 
+(#271: "queue-mode" is the mode the session RUNS, read off the pane at typing time — `delivery::input_mode` — not the launch recipe; a kiro switched to steer with Ctrl+S is typed at once, as steer always was. See agents-overview.md § the input mode.)
+
 Owner, 2026-09-28 02:44: "如果在短时间内一下子有大量消息堆积，就会让 kiro 响应的实时性受到很大的影响…kiro 有堆积未处理消息时，可以合并投递". Before, every line typed at a busy queue-mode agent sat in the CLI's own queue and was drained ONE per turn boundary, each its own turn with its own full reply: a burst of 20 lines cost 20 turns, and on 2026-09-27 builder's median delivery lag was ~19.5 min, p90 ~44 min (`temp/stall-analysis.md`).
 
 Every delivery (`@name`, a board notice, a `[reply]`, a typed brief) takes ONE path, `projects::delivery::deliver`. When the target window's turn is open (`telemetry::turn_busy`: `running`/`waiting` by `derive_from`, never pane activity) AND the window was started in queue mode on a backend that has the switch (kiro, codex; read off `launch.json`'s `input_mode`, the mode the running process was started with, `''` = queue), the line is HELD: a row in the one `deliveries` table with `held = 1` (schema v26), persisted, not typed, invisible to the echo match and the sweep. It is typed later, in order, each line whole with its own stamp, joined by a blank line, as ONE prompt; the #249 matcher settles every row from that one echo, and `reply_targets` parses every stamped line, so each distinct requester gets one reply (#256). Delivery is still typing into a pane, later and combined.

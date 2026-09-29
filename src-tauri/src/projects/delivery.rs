@@ -55,21 +55,69 @@ fn window_lock(session: &str, window: &str) -> Arc<Mutex<()>> {
     map.entry(format!("{session}:{window}")).or_default().clone()
 }
 
-/// Does this window hold lines while busy? Read off its launch recipe — the
-/// mode the RUNNING process was started with (a registry edit takes effect
-/// at the next restart, which rewrites the recipe). Only backends with a
-/// queue/steer switch (kiro, codex) take part; a recipe from before the
-/// field reads `queue`, the v25 default.
+/// The launch recipe's backend and START mode (board #245): the mode the
+/// session began in; a recipe from before the field reads `queue`, the v25
+/// default. `None` for a window this app did not start.
+fn recipe_mode(session: &str, window: &str) -> Option<(crate::backends::Backend, &'static str)> {
+    let ws = super::project_for_session(session).ok().flatten()?.path;
+    let home = super::agents::home_dir(&ws, window)?;
+    let recipe: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(home.join("launch.json")).ok()?).ok()?;
+    let backend = crate::backends::Backend::parse(recipe["backend"].as_str()?)?;
+    Some((backend, if recipe["input_mode"].as_str() == Some("steer") { "steer" } else { "queue" }))
+}
+
+/// The last mode the SCREEN showed, per window, with the pane it was read
+/// on: kiro paints nothing about the mode while idle, so a Ctrl+S whose
+/// confirmation has scrolled away is remembered — but only for that pane. A
+/// restart kills the window (a new pane id) and the session starts from the
+/// recipe again, as kiro itself does.
+fn seen_modes() -> &'static Mutex<HashMap<(String, String), (String, &'static str)>> {
+    static SEEN: OnceLock<Mutex<HashMap<(String, String), (String, &'static str)>>> = OnceLock::new();
+    SEEN.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The queue/steer mode a managed agent's session RUNS now (board #271;
+/// orchestrator 03:58): what its screen says (`Backend::live_input_mode`,
+/// the one reading, in the backend file), else what the screen said last in
+/// this same pane, else the launch recipe's start mode. `pane` is the
+/// window's pane id and `screen` a capture of it. `None` for a window this
+/// app did not start or a backend without the choice.
+pub fn input_mode_seen(session: &str, window: &str, pane: &str, screen: &str) -> Option<&'static str> {
+    let (backend, start) = recipe_mode(session, window)?;
+    if !backend.switches_input_mode() {
+        return None;
+    }
+    let key = (session.to_string(), window.to_string());
+    let mut seen = seen_modes().lock().unwrap();
+    if seen.len() > 512 {
+        seen.clear();
+    }
+    if let Some(now) = backend.live_input_mode(screen) {
+        seen.insert(key, (pane.to_string(), now));
+        return Some(now);
+    }
+    match seen.get(&key) {
+        Some((p, m)) if p == pane => Some(*m),
+        _ => {
+            seen.remove(&key);
+            Some(start)
+        }
+    }
+}
+
+/// The same, capturing the window's visible screen now.
+pub fn input_mode(session: &str, window: &str) -> Option<&'static str> {
+    let pane = crate::tmux::find_window_by_name(session, window).unwrap_or_default();
+    let screen = if pane.is_empty() { String::new() } else { crate::tmux::capture_pane_plain(&pane, Some(0)).unwrap_or_default() };
+    input_mode_seen(session, window, &pane, &screen)
+}
+
+/// Does this window hold lines while busy (board #257)? Only a session
+/// that runs QUEUE does: a line held for a steering kiro would wait for an
+/// echo a steered line never produces. Read at typing time from the live
+/// mode, so a Ctrl+S pressed in the terminal a moment ago is honoured (#271).
 pub fn coalesces(session: &str, window: &str) -> bool {
-    let Some(ws) = super::project_for_session(session).ok().flatten().map(|p| p.path) else { return false };
-    let Some(home) = super::agents::home_dir(&ws, window) else { return false };
-    let Ok(text) = std::fs::read_to_string(home.join("launch.json")) else { return false };
-    let Ok(recipe) = serde_json::from_str::<serde_json::Value>(&text) else { return false };
-    let switches = recipe["backend"]
-        .as_str()
-        .and_then(crate::backends::Backend::parse)
-        .is_some_and(|b| b.switches_input_mode());
-    switches && recipe["input_mode"].as_str() != Some("steer")
+    input_mode(session, window) == Some("queue")
 }
 
 /// The live pane of a managed agent window, as a tmux target — `None` for a
@@ -293,6 +341,45 @@ mod tests {
         crate::projects::tests::use_test_store();
         fake();
         format!("coalesce-{tag}-{}", uuid::Uuid::new_v4())
+    }
+
+    /// A managed agent's home with a launch recipe, in a project the store
+    /// knows — what `recipe_mode` reads.
+    fn agent_with_recipe(scratch: &crate::tmux::Scratch, session: &str, window: &str, backend: &str, mode: &str) {
+        crate::projects::tests::use_test_store();
+        let path = scratch.path();
+        if crate::projects::project_for_session(session).unwrap().is_none() { crate::projects::with_store(|s| s.insert_project(&crate::projects::Project {
+            id: session.into(), name: session.into(), path: path.clone(), icon: None,
+            session: session.into(), adopted: false, autostart: false, created_at: 1,
+            last_up_at: None, last_seen_at: None, archived: false, room: String::new(),
+        })).unwrap(); }
+        let home = std::path::Path::new(&path).join(".tmm").join("agents").join(window);
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("launch.json"), serde_json::json!({ "backend": backend, "input_mode": mode, "cmd": "x" }).to_string()).unwrap();
+    }
+
+    /// Board #271: the running mode is the SCREEN's, then what the screen
+    /// said last in the same pane, then the recipe's start mode — and #257
+    /// holds lines only for a session that runs queue.
+    #[test]
+    fn the_running_input_mode_follows_the_pane_not_the_recipe() {
+        let mut scratch = crate::tmux::Scratch::new("inputmode");
+        let s = scratch.session("s");
+        agent_with_recipe(&scratch, &s, "dev", "kiro", "queue");
+        let idle = "kiro · Claude Opus 5.5 · high · ◔ 1%\n›  ask a question or describe a task ↵\n";
+        let steer = "kiro · Claude Opus 5.5\n›  Kiro is working · Type to steer · Ctrl+S to queue\n";
+        assert_eq!(input_mode_seen(&s, "dev", "%1", idle), Some("queue"), "nothing on screen: the start mode");
+        assert_eq!(input_mode_seen(&s, "dev", "%1", steer), Some("steer"), "the screen outranks the recipe");
+        assert_eq!(input_mode_seen(&s, "dev", "%1", idle), Some("steer"), "idle kiro paints nothing: the pane's last reading stands");
+        assert_eq!(input_mode_seen(&s, "dev", "%2", idle), Some("queue"), "a new pane (restart) starts from the recipe again");
+        assert_eq!(input_mode_seen(&s, "dev", "%2", "● Switched to Steer mode\n"), Some("steer"), "a Ctrl+S confirmation");
+        // codex switches only at launch: its screen is never read for a mode.
+        agent_with_recipe(&scratch, &s, "cx", "codex", "steer");
+        assert_eq!(input_mode_seen(&s, "cx", "%3", "›  Kiro is working · Type to queue · Ctrl+S to steer\n"), Some("steer"));
+        // A backend with no choice has no mode.
+        agent_with_recipe(&scratch, &s, "cl", "claude", "queue");
+        assert_eq!(input_mode_seen(&s, "cl", "%4", steer), None);
+        assert_eq!(input_mode_seen(&s, "nobody", "%5", steer), None, "not an agent this app started");
     }
 
     /// The owner's case: a burst of 10 to a busy queue-mode agent is ONE
