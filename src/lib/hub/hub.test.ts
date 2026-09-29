@@ -2,7 +2,7 @@ import test from 'node:test';
 import { ALL_TARGET, teamTarget } from './hub-composer.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand, foldedCommandArgs, inputModeSwitch } from './hub.ts';
+import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markMentions, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand, foldedCommandArgs, inputModeSwitch } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 import { mentionPalette, rosterGroups, rosterMarker, sortAgentsForRoster } from './hub.ts';
 
@@ -932,26 +932,32 @@ test('an unconfirmed delivery is visible even at the chat-only level', () => {
   assert.deepEqual(blocks.map((b) => b.type), ['msg', 'note'], 'a failed delivery is not opt-in detail');
 });
 
-test('markLeadingMention wraps only a leading address', () => {
-  assert.equal(
-    markLeadingMention('<p>@lead 查一下状态</p>'),
-    '<p><span class="m-to">@lead</span> 查一下状态</p>',
-  );
-  assert.equal(
-    markLeadingMention('<p>@all everyone</p>'),
-    '<p><span class="m-to">@all</span> everyone</p>',
-  );
-  // a bare address with nothing after it
-  assert.equal(markLeadingMention('<p>@human</p>'), '<p><span class="m-to">@human</span></p>');
+test('markMentions marks every valid address, anywhere in the message (#273)', () => {
+  const roster = ['architect', 'engineer', 'data', 'evaluator', 'reviewer', 'bob'];
+  const m = (n: string) => `<span class="m-to">@${n}</span>`;
+  // The owner's sample: five addresses in a row, all live agents.
+  assert.equal(markMentions('<p>@architect @engineer @data @evaluator @reviewer 哈喽，lab 团队你们好。</p>', roster),
+    `<p>${m('architect')} ${m('engineer')} ${m('data')} ${m('evaluator')} ${m('reviewer')} 哈喽，lab 团队你们好。</p>`);
+  assert.equal(markMentions('<p>ping @bob later</p><ul><li>and @all, @human</li></ul>', roster),
+    `<p>ping ${m('bob')} later</p><ul><li>and ${m('all')}, ${m('human')}</li></ul>`, 'mid-text, in a list, all and human');
+  assert.equal(markMentions('<p>请@bob 看一下（@data）</p>', roster), `<p>请${m('bob')} 看一下（${m('data')}）</p>`, 'a CJK neighbour before the @ still starts a word');
+  assert.equal(markMentions('<p>请@bob看一下</p>', roster), '<p>请@bob看一下</p>',
+    'glued CJK after it is part of the name (the server reads "bob看一下"), so it names nobody');
+  assert.equal(markMentions('<p><strong>@bob</strong>: go</p>', roster), `<p><strong>${m('bob')}</strong>: go</p>`, 'inside emphasis');
 });
 
-test('markLeadingMention leaves non-address mentions alone', () => {
-  // mid-text mention is content, not an address
-  assert.equal(markLeadingMention('<p>ping @lead later</p>'), '<p>ping @lead later</p>');
-  // a message that does not start with a paragraph (list, code) is untouched
-  assert.equal(markLeadingMention('<ul><li>@lead x</li></ul>'), '<ul><li>@lead x</li></ul>');
-  // an email is not a mention
-  assert.equal(markLeadingMention('<p>a@b.com hi</p>'), '<p>a@b.com hi</p>');
+test('markMentions leaves what names nobody plain (#273)', () => {
+  const roster = ['bob', 'builder'];
+  const same = (html: string, why: string) => assert.equal(markMentions(html, roster), html, why);
+  same('<p>@ghost gone, @Bob too</p>', 'a removed agent or a wrong case names nobody');
+  same('<p>mail a@bob.com or @bob.dev</p>', 'an email and a host are not addresses');
+  same('<p>@builder-2 yours</p>', 'a longer name is a different agent');
+  same('<p>run <code>@bob</code></p>', 'a code span');
+  same('<pre><code>@bob hi\n</code></pre>', 'a code block');
+  same('<p><a href="https://x">@bob</a></p>', 'a link\'s text');
+  same('<p>@ alone</p>', 'a bare @');
+  assert.equal(markMentions('<p><code>@bob</code> then @bob</p>', roster),
+    '<p><code>@bob</code> then <span class="m-to">@bob</span></p>', 'after a code span the text is read again');
 });
 
 test('the spawn kick never appears in the transcript', () => {

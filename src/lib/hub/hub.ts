@@ -1067,13 +1067,33 @@ export type FeedLevel = 'chat' | 'status' | 'tools';
  * spelling and stay recognized because the room is persisted — old messages
  * must not regress into bubbles. Returns the text without its marker, or null
  * when the body is ordinary prose. */
-/// Wrap a message's leading @recipient — the address, the composer's own
-/// prefix — in a span the bubble can set apart. Only the FIRST mention and
-/// only at the very start of the first paragraph: a mention mid-text is
-/// content, not an address. Works on rendered markdown HTML so the span
-/// stays inline in the first line box.
-export function markLeadingMention(html: string): string {
-  return html.replace(/^(\s*<p>)(@[\w][\w.-]*)(?=[\s<,，:：、!！?？]|$)/, '$1<span class="m-to">$2</span>');
+/** Wrap every VALID `@address` in a rendered message in the span the bubble
+ * sets apart (`.m-to`). Owner, 2026-09-29 (#273): "一个消息里如果有 @ 多个角色
+ * 这些有效的 @ 都应该被高亮起来；如果是无效的 就不要高亮了" — the server types a
+ * body into every agent it names ANYWHERE in it (`deliver_mentions`), so the
+ * old "only the leading one is an address" premise (455efceb) is gone. The
+ * addresses are `mentionSpans`'s, the one tokenizer; valid = a managed agent
+ * in `names`, `all` or `human`, so a removed agent, a typo or an email stays
+ * plain. Works on the rendered HTML: only text outside `code`, `pre` and `a`
+ * is read (a code sample or a link's text is not an address), and each text
+ * run is read on its own, since the tag before it stood for markdown
+ * punctuation the server read as a word break. */
+export function markMentions(html: string, names: readonly string[]): string {
+  const valid = (n: string) => n === 'all' || n === 'human' || names.includes(n);
+  let skip = 0;
+  return html.split(/(<[^>]*>)/u).map((part) => {
+    const tag = /^<(\/?)(code|pre|a)\b/iu.exec(part);
+    if (tag) { skip = Math.max(0, skip + (tag[1] ? -1 : 1)); return part; }
+    if (part.startsWith('<') || skip || !part.includes('@')) return part;
+    let out = '', from = 0;
+    for (const { at, name } of mentionSpans(part)) {
+      if (!valid(name)) continue;
+      const end = at + 1 + name.length;
+      out += `${part.slice(from, at)}<span class="m-to">${part.slice(at, end)}</span>`;
+      from = end;
+    }
+    return out + part.slice(from);
+  }).join('');
 }
 
 /** The spawn kick's echo: `[YYYY-MM-DD HH:MM] (session start)`. Also matches
@@ -1443,6 +1463,12 @@ export function mentionsAgent(body: string, name: string): boolean {
  * filter, the room-note verdict and the composer chip cannot disagree about
  * what `@bob:` means. */
 export function mentionTokens(body: string): string[] {
+  return mentionSpans(body).map((s) => s.name);
+}
+
+/** `mentionTokens` with where each address starts (the index of its `@`, in
+ * UTF-16 units), for a reader that marks them in place (`markMentions`). */
+export function mentionSpans(body: string): { at: number; name: string }[] {
   // Code points, not UTF-16 units, and Rust's own classes (validator, #248):
   // `char::is_alphanumeric` is `\p{Alphabetic}` or `\p{N}` — wider than
   // `\p{L}` (a Devanagari vowel sign is Alphabetic, not a Letter) — and a
@@ -1450,13 +1476,13 @@ export function mentionTokens(body: string): string[] {
   const inWord = /[A-Za-z0-9_.-]/u;
   const nameRun = /^[\p{Alphabetic}\p{N}_-]*/u;
   const hostTail = /^(?:@|\.[\p{Alphabetic}\p{N}_-])/u;
-  const out: string[] = [];
+  const out: { at: number; name: string }[] = [];
   for (let i = body.indexOf('@'); i >= 0; i = body.indexOf('@', i + 1)) {
     const before = [...body.slice(0, i)].pop();
     if (before && inWord.test(before)) continue;
     const rest = body.slice(i + 1);
     const run = nameRun.exec(rest)![0];
-    if (run && !hostTail.test(rest.slice(run.length))) out.push(run);
+    if (run && !hostTail.test(rest.slice(run.length))) out.push({ at: i, name: run });
   }
   return out;
 }

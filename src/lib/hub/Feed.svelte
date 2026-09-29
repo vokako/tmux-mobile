@@ -16,7 +16,7 @@
   import { boxFromOffsets } from '../ui/indicator.ts';
   import { heldAnchor, readingDirection, refoldEligible, sameReadingSize } from './hub-reading.ts';
   import { FONT_CHANGE_EVENT } from '../app/fonts.svelte.ts';
-  import { TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, mentionedAgents, splitImages, toolColor, pickAnchor, toolEventParts, elideTail, foldedCommandArgs, foldLines, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, perLineOf, STEPS_ROWS, stateIsLive } from './hub.ts';
+  import { TAIL_GAP, bottomGap, tailAfterScroll, markMentions, mentionedAgents, splitImages, toolColor, pickAnchor, toolEventParts, elideTail, foldedCommandArgs, foldLines, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, perLineOf, STEPS_ROWS, stateIsLive } from './hub.ts';
 
   let {
     blocks = [], agents = [], managedNames = [], selected = '', visible = false, compact = false,
@@ -748,7 +748,7 @@
               {#if b.command && rawOpen !== key}
                 <!-- The command in the bubble's own atoms, as plain text (no
                      markdown: arguments are data): the recipients in the
-                     leading-mention dialect, the name in the rendered inline-
+                     mention dialect, the name in the rendered inline-
                      code dialect, the arguments wrapping in full. -->
                 <p>{#each b.command.to as n, k (n)}<span class="m-to">@{n}</span>{k < b.command.to.length - 1 ? ' ' : ''}{/each}{b.command.to.length ? ' ' : ''}<code>{b.command.name}</code>{#if b.command.args}{' '}{folded ? cmdFold : b.command.args}{/if}</p>
               {:else if parts.text}
@@ -758,7 +758,7 @@
                   <!-- Folded: the start of the message, cut where the
                        budget runs out, …… glued to the last kept line.
                        Raw view and agent messages render in full. -->
-                  {@html markLeadingMention(renderMarkdown(folded ? foldBody(parts.text) : parts.text))}
+                  {@html markMentions(renderMarkdown(folded ? foldBody(parts.text) : parts.text), managedNames)}
                 {/if}
               {/if}
               <!-- One unfold control for a folded command and a folded text. -->

@@ -146,3 +146,25 @@ test('a sent /command renders as the sender bubble, whole, name in inline code (
   assert.ok(ackTree.querySelectorAll('.msg.me')[0]!.querySelector('.m-state.ok'), 'the settled command wears the check');
   assert.equal(ackTree.querySelector('.prompt'), null, 'its echo is consumed, not a duplicate INPUT row');
 });
+
+
+test('every valid @ in a bubble is marked, an invalid one is not, in both directions (#273)', { timeout: RENDER_TIMEOUT_MS }, async () => {
+  const Feed = (await h.load('/src/lib/hub/Feed.svelte')).default;
+  const { createRawSnippet } = await h.load('svelte');
+  const roster = ['architect', 'engineer', 'data', 'evaluator', 'reviewer'];
+  const messages = [
+    // The owner's 08:01 sample, plus a removed agent and an email.
+    { id: 'm', ts: 1, from: 'human', body: '@architect @engineer @data @evaluator @reviewer 哈喽，lab 团队你们好。\n\n@ghost and a@b.com stay plain; `@data` in code too.' },
+    { id: 'r', ts: 2, from: 'architect', body: 'Plan ready — @data owns G1, @human please confirm.' },
+  ];
+  const tree = h.fragment(h.render(Feed, { props: {
+    selected: 'fixture', roomReady: true, agents: [], managedNames: roster,
+    blocks: feedBlocks(messages, [], 'chat', (n) => n),
+    stepsRows: 5, following: false, newBelow: false,
+    emptyFeed: createRawSnippet(() => ({ render: () => '<div></div>' })),
+  } }).body as string);
+  const marked = (sel: string) => [...tree.querySelectorAll(`${sel} .m-to`)].map((n) => n.textContent);
+  assert.deepEqual(marked('.msg.me'), roster.map((n) => `@${n}`), 'all five, and nothing else');
+  assert.deepEqual(marked('.msg:not(.me)'), ['@data', '@human'], "an agent's bubble reads the same way");
+  assert.equal(tree.querySelector('.msg.me code')?.textContent, '@data', 'the code span keeps its text, unmarked');
+});
