@@ -48,6 +48,10 @@ const OPT_STARTED: &str = "@tmm_started";
 /// through tmux's command parser, and `#{pane_dead_status}` /
 /// `#{pane_dead_signal}` inside it are filled in at death.
 const OPT_WAKE: &str = "@tmm_wake_cmd";
+/// Why a task-end wake could not be sent (board #275): kept on the task so
+/// `tmm task status|list|logs` say it. A dead pane's tty is closed, so the
+/// hook cannot print into the pane itself (measured, tmux 3.6a).
+const OPT_WAKE_ERR: &str = "@tmm_wake_err";
 const WAKE_HOOK: &str = "run-shell -b \"#{E:@tmm_wake_cmd}\"";
 
 /// How long a FINISHED task's window outlives its process before a `tmm task`
@@ -112,6 +116,8 @@ pub struct Task {
     /// `#{pane_dead_time}`: unix seconds of the latest death, 0 while running
     /// (tmux clears it on respawn) or when tmux does not report it.
     pub dead_at: u64,
+    /// Why its `--wake` could not be sent (board #275); empty otherwise.
+    pub wake_error: String,
 }
 
 impl Task {
@@ -164,6 +170,7 @@ fn list_format() -> String {
         "#{pane_pid}".to_string(),
         format!("#{{{OPT_STARTED}}}"),
         "#{pane_dead_time}".to_string(),
+        format!("#{{{OPT_WAKE_ERR}}}"),
         format!("#{{{OPT_CMD}}}"),
     ]
     .join(SEP)
@@ -429,10 +436,20 @@ pub fn format_literal(text: &str) -> String {
     text.replace('#', "##")
 }
 
-/// Drop a pane's wake hook and command (no-op when it has none).
+/// Drop a pane's wake hook, command and any recorded failure.
 fn clear_wake(pane: &str) {
     let _ = tmux::run_tmux(&["set-hook", "-p", "-u", "-t", pane, "pane-died"]);
     let _ = tmux::run_tmux(&["set-option", "-p", "-u", "-t", pane, OPT_WAKE]);
+    let _ = tmux::run_tmux(&["set-option", "-w", "-u", "-t", pane, OPT_WAKE_ERR]);
+}
+
+/// Record on task `name` that its wake could not be sent (board #275), so
+/// the next `tmm task status|list|logs` says it — the visible trace the
+/// design promises. No retry: a wake is best-effort.
+pub fn note_wake_failure(name: &str, why: &str) -> Result<()> {
+    let task = need(name)?;
+    let line: String = why.lines().next().unwrap_or("").chars().take(200).collect();
+    set_opt(&task.pane, OPT_WAKE_ERR, &line)
 }
 
 fn set_opt(pane: &str, name: &str, value: &str) -> Result<()> {
@@ -501,7 +518,7 @@ fn join_cmd(argv: &[String]) -> String {
 /// (no `@tmm_task`) or rows tmux truncated.
 fn parse_line(line: &str) -> Option<Task> {
     let f: Vec<&str> = line.split(SEP).collect();
-    if f.len() < 11 || f[0].is_empty() {
+    if f.len() < 12 || f[0].is_empty() {
         return None;
     }
     let state = if f[4] != "1" {
@@ -522,9 +539,10 @@ fn parse_line(line: &str) -> Option<Task> {
         pid: f[7].to_string(),
         started: f[8].parse().unwrap_or(0),
         dead_at: f[9].parse().unwrap_or(0),
+        wake_error: f[10].to_string(),
         // The command can contain the separator only if a user put it there;
         // rejoin so it survives round-tripping regardless.
-        cmd: f[10..].join(SEP),
+        cmd: f[11..].join(SEP),
     })
 }
 
@@ -599,11 +617,11 @@ mod tests {
     }
 
     /// Field order: task, session, window, pane, dead, status, signal, pid,
-    /// started, dead_time, cmd.
+    /// started, dead_time, wake_error, cmd.
     #[test]
     fn parses_a_running_task() {
         let t = parse_line(&row(&[
-            "dev", "tmux", "3", "%518", "0", "", "", "4242", "1700000000", "", "npm run dev",
+            "dev", "tmux", "3", "%518", "0", "", "", "4242", "1700000000", "", "", "npm run dev",
         ]))
         .expect("row is a task");
         assert_eq!(t.name, "dev");
@@ -623,7 +641,7 @@ mod tests {
     #[test]
     fn parses_exit_code_of_a_finished_task() {
         let t = parse_line(&row(&[
-            "build", "tmm-tasks", "1", "%9", "1", "7", "", "0", "0", "1700000900", "cargo build",
+            "build", "tmm-tasks", "1", "%9", "1", "7", "", "0", "0", "1700000900", "", "cargo build",
         ]))
         .expect("row is a task");
         assert_eq!(t.state, State::Exited(7));
@@ -637,7 +655,7 @@ mod tests {
     #[test]
     fn a_signal_death_is_not_an_exit_code() {
         let t = parse_line(&row(&[
-            "x", "s", "1", "%1", "1", "", "kill", "0", "0", "1700000000", "sleep 30",
+            "x", "s", "1", "%1", "1", "", "kill", "0", "0", "1700000000", "", "sleep 30",
         ]))
         .unwrap();
         assert_eq!(t.state, State::Killed("kill".into()));
@@ -648,20 +666,20 @@ mod tests {
     #[test]
     fn ignores_windows_that_are_not_tasks() {
         // A plain window: @tmm_task is empty.
-        assert!(parse_line(&row(&["", "tmux", "1", "%1", "0", "", "", "1", "0", "", ""])).is_none());
+        assert!(parse_line(&row(&["", "tmux", "1", "%1", "0", "", "", "1", "0", "", "", ""])).is_none());
         assert!(parse_line("garbage").is_none());
     }
 
     #[test]
     fn dead_pane_without_a_status_is_not_reported_as_success() {
-        let t = parse_line(&row(&["x", "s", "1", "%1", "1", "", "", "0", "0", "", "c"])).unwrap();
+        let t = parse_line(&row(&["x", "s", "1", "%1", "1", "", "", "0", "0", "", "", "c"])).unwrap();
         assert_eq!(t.state, State::Exited(-1));
     }
 
     #[test]
     fn command_containing_the_separator_round_trips() {
         let t = parse_line(&row(&[
-            "x", "s", "1", "%1", "0", "", "", "1", "0", "", "echo <TMM_SEP> hi",
+            "x", "s", "1", "%1", "0", "", "", "1", "0", "", "", "echo <TMM_SEP> hi",
         ]))
         .unwrap();
         assert_eq!(t.cmd, "echo <TMM_SEP> hi");
@@ -876,6 +894,26 @@ mod tests {
         let _ = std::fs::remove_file(&log);
         let _ = tmux::kill_session(session);
         assert_eq!(lines, vec!["sh status=7 sig= #x".to_string()], "one wake, for the task that ended by itself; a literal # survives");
+    }
+
+    /// Board #275 (validator / orchestrator 09:33): a wake that could not be
+    /// sent is recorded ON the task, where `task status|list|logs` read it;
+    /// a restart of the task clears it.
+    #[test]
+    fn a_wake_failure_is_recorded_on_the_task_until_it_restarts() {
+        let _server = PrivateTmux::start("wakefail");
+        let session = "tmm-test-wakefail";
+        let name = format!("tmm-test-wf-{}", std::process::id());
+        let sh = |c: &str| -> Vec<String> { vec!["sh".into(), "-c".into(), c.into()] };
+        start(&name, &sh("exit 1"), Some(session), true, Some("true")).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert_eq!(find(&name).unwrap().wake_error, "");
+        note_wake_failure(&name, "@lead was not woken (connection refused)\nsecond line dropped").unwrap();
+        assert_eq!(find(&name).unwrap().wake_error, "@lead was not woken (connection refused)");
+        assert!(list().iter().any(|t| t.name == name && !t.wake_error.is_empty()), "list carries it too");
+        start(&name, &sh("sleep 300"), Some(session), true, None).unwrap();
+        assert_eq!(find(&name).unwrap().wake_error, "", "a new run starts clean");
+        let _ = tmux::kill_session(session);
     }
 
     #[test]

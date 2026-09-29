@@ -2288,6 +2288,66 @@ mod tests {
         assert_eq!(list.result.unwrap()["wakes"], serde_json::json!([]), "a fired wake is no longer pending");
     }
 
+    /// Board #275 (validator 09:31): a wake follows the project through a
+    /// rename. After A → B the list, the card hover and cancel find it under
+    /// B; after A → B → C (A no longer resolves) it fires ONCE into the real
+    /// pane of the project's current session and room.
+    #[test]
+    fn a_wake_follows_two_renames_and_fires_once_into_the_real_pane() {
+        crate::projects::tests::use_test_store();
+        let tag = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
+        let session = format!("tmm-wren-{tag}");
+        let ws = std::env::temp_dir().join(format!("tmm-wren-ws-{tag}"));
+        let home = ws.join(".tmm/agents/dev");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("launch.json"), serde_json::json!({ "backend": "kiro", "cmd": "kiro-cli chat --agent dev", "team": "" }).to_string()).unwrap();
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "-n", "dev", "-c", &ws.to_string_lossy(), "cat"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            let _ = std::fs::remove_dir_all(&ws);
+            return;
+        }
+        let (b, c) = (format!("tmm-wren-b-{tag}"), format!("tmm-wren-c-{tag}"));
+        let _cleanup = KillOnDrop(session.clone(), ws.clone());
+        let _cleanup_b = KillOnDrop(b.clone(), ws.clone());
+        let _cleanup_c = KillOnDrop(c.clone(), ws.clone());
+        crate::projects::adopt(&session, Some("wake-rename-test")).expect("adopt project");
+        let id = crate::projects::project_for_session(&session).unwrap().expect("tracked").id;
+        let call = |m: &str, params: serde_json::Value| handle_hub_request(&req(m, params), None);
+        let now = crate::projects::now() as i64;
+        let keep = call("hub_wake_add", serde_json::json!({ "session": session, "from": "lead", "body": "@dev after two renames", "due": now + 3600 }));
+        let gone = call("hub_wake_add", serde_json::json!({ "session": session, "from": "lead", "body": "@dev to cancel", "due": now + 3600 }));
+        let keep: crate::projects::store::Wake = serde_json::from_value(keep.result.expect("scheduled")).unwrap();
+        let gone_id = gone.result.expect("scheduled")["id"].as_i64().unwrap();
+
+        crate::projects::rename(&id, &b).expect("rename to B");
+        let listed = call("hub_wake_list", serde_json::json!({ "session": b })).result.unwrap();
+        assert_eq!(listed["wakes"].as_array().map(|a| a.len()), Some(2), "B lists both: {listed}");
+        let hover = agent_states(&b);
+        let dev = hover["agents"].as_array().unwrap().iter().find(|a| a["name"] == "dev").cloned().unwrap();
+        assert_eq!(dev["wake"]["from"], "lead", "the card hover still names it: {dev}");
+        assert!(call("hub_wake_cancel", serde_json::json!({ "session": b, "id": gone_id, "by": "lead" })).error.is_none(), "cancel in B");
+
+        crate::projects::rename(&id, &c).expect("rename to C");
+        assert!(crate::projects::project_for_session(&session).unwrap().is_none(), "A no longer resolves");
+        let w = crate::projects::wakes::pending(None).into_iter().find(|w| w.id == keep.id).expect("still pending");
+        assert_eq!(w.session, c, "the row followed both renames");
+        fire_wake(&w);
+        fire_wake(&w);
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let pane = crate::tmux::capture_pane_plain(&format!("{c}:dev"), Some(0)).unwrap_or_default();
+        assert!(pane.contains("lead: [wake] @dev after two renames"), "typed into the real pane: {pane:?}");
+        assert_eq!(crate::projects::telemetry::owed_rows(&c, "dev").len(), 1, "once");
+        let room: Vec<String> = call("hub_log", serde_json::json!({ "session": c })).result
+            .and_then(|v| v.get("messages").and_then(|m| m.as_array()).cloned()).unwrap_or_default()
+            .iter().filter_map(|m| m.get("body").and_then(|b| b.as_str()).map(str::to_string)).filter(|b| b.starts_with("[wake]")).collect();
+        assert_eq!(room, vec!["[wake] @dev after two renames".to_string()], "one record, in the project's room");
+    }
+
     /// Board #250 (validator 17:35): `hub_command` to `all` where one pane is
     /// in copy-mode and the other is not. The one that took it is recorded
     /// and answered as success; the refused one gets the same immediate plain

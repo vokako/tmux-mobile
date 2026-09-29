@@ -239,6 +239,11 @@ impl Store {
                 params![session, prev],
             )
             .map_err(|e| format!("rename board session: {e}"))?;
+            // Scheduled wakes are project-scoped the same way (board #275):
+            // they follow the rename in this transaction, or list/cancel/hover
+            // lose them and two renames fire them into a room nobody reads.
+            tx.execute("UPDATE wakes SET session = ?1 WHERE session = ?2", params![session, prev])
+                .map_err(|e| format!("rename wakes session: {e}"))?;
         }
         tx.commit().map_err(|e| format!("commit session rename: {e}"))?;
         Ok(n > 0)

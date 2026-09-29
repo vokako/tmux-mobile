@@ -367,7 +367,13 @@ async fn main() {
             let due = chrono::Local::now().timestamp();
             match try_rpc(&ctx, "hub_wake_add", json!({ "session": session, "from": from, "body": body, "due": due })).await {
                 Ok(w) => println!("✓ wake #{} for @{to}", w["id"]),
-                Err((_, e)) => eprintln!("tmm: task {name} ended but the wake was not sent: {e}"),
+                // Fail-soft and VISIBLE (orchestrator 09:33): recorded on the
+                // task, said by `tmm task status|list|logs`; exit 0, no retry.
+                Err((_, e)) => {
+                    let why = format!("@{to} was not woken ({})", e.lines().next().unwrap_or(""));
+                    let _ = tasks::note_wake_failure(&name, &why);
+                    eprintln!("tmm: task {name} ended but {why}");
+                }
             }
         }
         // Scheduled wakes (board #275): list and cancel; `send --in/--at` adds.
@@ -1067,7 +1073,10 @@ fn cmd_task(rest: &[String], cmdv: &[String], flags: &Flags, json: bool) {
                 let to = rest.get(2).and_then(|w| w.strip_prefix('@')).map(str::to_string).or_else(|| starter.clone())
                     .unwrap_or_else(|| fail(EXIT_USAGE, "--wake needs someone to wake: tmm task start build --wake @lead -- make"));
                 let exe = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "tmm".into());
-                wake_shell(name, &to, &project, starter.as_deref(), &exe, env("XDG_CONFIG_HOME").as_deref(), env("TMM_SERVER").as_deref())
+                // The server this task was started against, flag or env
+                // (validator 09:31): the wake must reach the same one.
+                let server = flags.get("server").cloned().flatten().or_else(|| env("TMM_SERVER"));
+                wake_shell(name, &to, &project, starter.as_deref(), &exe, env("XDG_CONFIG_HOME").as_deref(), server.as_deref())
             });
             let t = tasks::start(name, cmdv, session.as_deref(), flags.contains_key("replace"), wake.as_deref())
                 .unwrap_or_else(|e| task_fail(e));
@@ -1097,6 +1106,9 @@ fn cmd_task(rest: &[String], cmdv: &[String], flags: &Flags, json: bool) {
                         "{:<16} {:<11} {:>4}  {:<18} {}",
                         t.name, t.state_str(), tasks::fmt_age(t.age(now)), t.target(), t.cmd
                     );
+                    if !t.wake_error.is_empty() {
+                        println!("{:<16} wake not sent: {}", "", t.wake_error);
+                    }
                 }
             }
         }
@@ -1116,6 +1128,9 @@ fn cmd_task(rest: &[String], cmdv: &[String], flags: &Flags, json: bool) {
                             t.target(),
                             t.pid
                         );
+                        if !t.wake_error.is_empty() {
+                            println!("wake not sent: {}", t.wake_error);
+                        }
                     }
                 }
                 None => {
@@ -1147,6 +1162,12 @@ fn cmd_task(rest: &[String], cmdv: &[String], flags: &Flags, json: bool) {
                 println!("{}", json!({ "name": name, "lines": lines }));
             } else if !text.is_empty() {
                 println!("{text}");
+            }
+            // A --wake that could not be sent is said where the task is read.
+            if !json {
+                if let Some(t) = tasks::find(name).filter(|t| !t.wake_error.is_empty()) {
+                    eprintln!("tmm: wake not sent: {}", t.wake_error);
+                }
             }
             reap_at_the_door(Some(name), json);
         }
@@ -1203,6 +1224,7 @@ fn task_value(t: &tasks::Task) -> Value {
     json!({
         "name": t.name,
         "state": t.state_str(),
+        "wake_error": if t.wake_error.is_empty() { Value::Null } else { Value::from(t.wake_error.as_str()) },
         "exit_code": match &t.state {
             tasks::State::Exited(code) => Some(*code),
             _ => None,
