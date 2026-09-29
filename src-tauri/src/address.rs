@@ -56,6 +56,41 @@ pub fn mention_names(body: &str) -> Vec<String> {
     out
 }
 
+/// A body that is a SLASH COMMAND for an agent's CLI (board #274): optionally
+/// one leading `@name` (ASCII word characters, `.`, `-`) or `@all`, then a
+/// first token `/word` — a letter, then letters, digits, `_` or `-` — ending
+/// at whitespace or the end. `(to, command)`; `to` is empty when there is no
+/// address. `None` for prose, a path (`/usr/bin`) or two addresses.
+///
+/// This is the composer's `slashCommand` (hub.ts), mirrored case for case:
+/// `hub.test.ts` reads `a_slash_command_is_read_like_the_composer` out of
+/// this file and runs the client over the same rows, so `tmm send` and the
+/// composer cannot disagree about what `@bob /compact` is.
+pub fn slash_command(text: &str) -> Option<(String, String)> {
+    let body = text.trim();
+    let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let (to, rest) = match body.strip_prefix('@') {
+        Some(after) if after.starts_with(word) => {
+            let end = after.find(|c: char| !(word(c) || c == '.' || c == '-')).unwrap_or(after.len());
+            let tail = &after[end..];
+            if !tail.starts_with(char::is_whitespace) {
+                return None;
+            }
+            (&after[..end], tail.trim())
+        }
+        _ => ("", body),
+    };
+    let cmd = rest.strip_prefix('/')?;
+    if !cmd.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    let end = cmd.find(|c: char| !(word(c) || c == '-')).unwrap_or(cmd.len());
+    if !cmd[end..].is_empty() && !cmd[end..].starts_with(char::is_whitespace) {
+        return None;
+    }
+    Some((to.to_string(), rest.to_string()))
+}
+
 /// Senders of stamped chat REQUESTS in a submitted prompt — the ONE reading
 /// of whom a turn's final reply is owed to (#256, #257). Every stamped line
 /// `[tmm chat …] sender: body` counts once, in order; the human, automatic
@@ -125,6 +160,36 @@ mod tests {
             ("@bobͅ hi", vec!["bobͅ"]),
         ] {
             assert_eq!(mention_names(body), tokens, "{body:?}");
+        }
+    }
+
+    /// Board #274: the ONE case table for `slash_command` and the composer's
+    /// `slashCommand` — `hub.test.ts` reads these rows out of this file, so
+    /// keep each on one line, `("<body>", "<to>", "<command>"),`; an empty
+    /// command means "not a command".
+    #[test]
+    fn a_slash_command_is_read_like_the_composer() {
+        for (body, to, command) in [
+            ("@kiro /compact", "kiro", "/compact"),
+            ("/compact", "", "/compact"),
+            ("  @kiro   /compact  ", "kiro", "/compact"),
+            ("@kiro /model claude-opus-5.5", "kiro", "/model claude-opus-5.5"),
+            ("@all /compact", "all", "/compact"),
+            ("@kiro-2 /clear", "kiro-2", "/clear"),
+            ("@kiro /goal ship it\nthen stop", "kiro", "/goal ship it\nthen stop"),
+            ("@kiro hi /compact", "", ""),
+            ("@a @b /compact", "", ""),
+            ("@kiro", "", ""),
+            ("@kiro/compact", "", ""),
+            ("/usr/bin/ls", "", ""),
+            ("@kiro /usr/bin", "", ""),
+            ("/7up", "", ""),
+            ("/", "", ""),
+            ("hello /compact", "", ""),
+            ("@请 /compact", "", ""),
+        ] {
+            let want = (!command.is_empty()).then(|| (to.to_string(), command.to_string()));
+            assert_eq!(slash_command(body), want, "{body:?}");
         }
     }
 }

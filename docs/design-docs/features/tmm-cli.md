@@ -30,6 +30,7 @@ this reference stays one screen.
 ```
 # the room (context from $TMM_PROJECT / $TMM_AGENT, exported by the launcher)
 tmm send "@name <text>"              send to one or more recipients (@all, @human)
+tmm send "@name /command [args]"     typed VERBATIM into its CLI, like the composer (#274)
 tmm send "<text>" --status           ambient progress; room-only, interrupts nobody
 tmm send … --image <path|url>        attach an image by REFERENCE (repeatable)
 tmm log [--since <ts>] [--limit N] [-f]      read chat; --since exclusive (ms), -f follows
@@ -352,6 +353,7 @@ a teammate:
 |---|---|---|
 | Agent | `tmm agent interrupt\|stop\|restart\|remove <name>` | roster card/context menu: Watch / Interrupt / Restart / Stop / Remove |
 | Input mode | `tmm agent mode <name> queue\|steer` | kiro card context menu: Switch to Steer / Switch to Queue (#271) |
+| CLI command | `tmm send "@name /compact"` (`@all` = everyone else) | composer: `@name /compact` (#274, one rule: `address::slash_command` ⇄ `slashCommand`) |
 | Project | `tmm project up\|down\|archive\|delete <session>` | header: Open / Close / Delete (archive is the list's own action) |
 
 `remove` is the eject button next to stop's pause button: it kills the window,

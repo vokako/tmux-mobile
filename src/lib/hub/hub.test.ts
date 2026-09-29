@@ -1378,6 +1378,19 @@ test('mentionTokens reads an address by the server\'s one rule (#248)', () => {
   }
 });
 
+test('slashCommand reads a command by the server\'s one rule (#274)', () => {
+  // ONE table: address.rs `a_slash_command_is_read_like_the_composer`, read
+  // here so `tmm send "@bob /compact"` and the composer cannot disagree.
+  const rust = readFileSync(new URL('../../../src-tauri/src/address.rs', import.meta.url), 'utf8');
+  const table = rust.slice(rust.indexOf('fn a_slash_command_is_read_like_the_composer'));
+  const rows = [...table.matchAll(/^\s*\(("(?:[^"\\]|\\.)*"), ("(?:[^"\\]|\\.)*"), ("(?:[^"\\]|\\.)*")\),$/gmu)];
+  assert.ok(rows.length >= 15, `the shared table was found: ${rows.length} rows`);
+  for (const [, body, to, command] of rows) {
+    const [text = '', want = '', cmd = ''] = [body, to, command].map((q) => JSON.parse(q!) as string);
+    assert.deepEqual(slashCommand(text), cmd ? { to: want, command: cmd } : null, text);
+  }
+});
+
 test('mentionsAgent parses addresses the way deliver_mentions does', () => {
   assert.ok(mentionsAgent('@builder fix it', 'builder'));
   assert.ok(mentionsAgent('please @builder: now', 'builder'), 'trailing punctuation trimmed');

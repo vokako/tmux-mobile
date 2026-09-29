@@ -168,3 +168,26 @@ test('every valid @ in a bubble is marked, an invalid one is not, in both direct
   assert.deepEqual(marked('.msg:not(.me)'), ['@data', '@human'], "an agent's bubble reads the same way");
   assert.equal(tree.querySelector('.msg.me code')?.textContent, '@data', 'the code span keeps its text, unmarked');
 });
+
+
+test("an agent's /command is ITS bubble, not the human's (#274)", { timeout: RENDER_TIMEOUT_MS }, async () => {
+  const Feed = (await h.load('/src/lib/hub/Feed.svelte')).default;
+  const { createRawSnippet } = await h.load('svelte');
+  const messages = [
+    { id: 'a', ts: 1, from: 'lead', body: '[tmm] /compact → dev' },
+    { id: 'h', ts: 2, from: 'human', body: '[tmm] /clear → lead' },
+  ];
+  const tree = h.fragment(h.render(Feed, { props: {
+    selected: 'fixture', roomReady: true, agents: [], managedNames: ['lead', 'dev'],
+    blocks: feedBlocks(messages, [], 'chat', (n) => n),
+    stepsRows: 5, following: false, newBelow: false,
+    emptyFeed: createRawSnippet(() => ({ render: () => '<div></div>' })),
+  } }).body as string);
+  const bubbles = [...tree.querySelectorAll('.msg')];
+  assert.equal(bubbles.length, 2);
+  assert.ok(!bubbles[0]!.classList.contains('me'), 'the agent sent it: an incoming bubble');
+  assert.equal(bubbles[0]!.querySelector('.m-head')?.textContent?.trim(), 'lead', 'named by its sender');
+  assert.equal(bubbles[0]!.querySelector('.m-to')?.textContent, '@dev');
+  assert.equal(bubbles[0]!.querySelector('code')?.textContent, '/compact');
+  assert.ok(bubbles[1]!.classList.contains('me'), "the human's command is still the human's own bubble");
+});

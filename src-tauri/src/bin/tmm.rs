@@ -37,6 +37,8 @@ const USAGE: &str = r#"tmm — talk to the tmux-mobile project hub
 
 USAGE (agent):
   tmm send "@name message"            send a message to one or more recipients
+  tmm send "@name /command [args]"    type a CLI command (e.g. /compact) into a teammate's
+                                      pane verbatim, like the composer (@all = everyone else)
   tmm send <text> --status            record ambient progress in the project room
                     [--image <path|url>]   attach an image by REFERENCE (repeatable);
                                       a local path is resolved by the client
@@ -250,6 +252,27 @@ async fn main() {
             }
             let session = need_project(&ctx);
             let from = ctx.agent.clone().unwrap_or_else(|| "human".into());
+            // A `/command` goes to the CLI, not its model — the composer's
+            // rule, read by the same `address::slash_command` (board #274):
+            // typed verbatim through hub_command, no chat stamp. Text only;
+            // an image or --status makes it an ordinary message.
+            if !is_status && images.is_empty() {
+                if let Some((to, command)) = tmux_mobile::address::slash_command(&body).filter(|(to, _)| !to.is_empty()) {
+                    if to == from {
+                        fail(EXIT_USAGE, &format!("{from} cannot send a command to itself"));
+                    }
+                    let r = rpc(&ctx, "hub_command", json!({
+                        "session": session, "agent": to, "text": command, "from": from
+                    })).await;
+                    if ctx.json {
+                        println!("{r}");
+                    } else {
+                        let sent = r["sent"].as_array().map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default();
+                        println!("✓ {} → {sent}", command.split_whitespace().next().unwrap_or(&command));
+                    }
+                    return;
+                }
+            }
             let r = rpc(&ctx, "hub_post", json!({
                 "session": session, "from": from, "body": body, "status": is_status
             })).await;

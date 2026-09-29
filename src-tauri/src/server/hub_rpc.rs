@@ -101,6 +101,15 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
             if !text.starts_with('/') {
                 return Err(RpcError::InvalidParams("a command must start with '/'".into()));
             }
+            // Who sent it (board #274): the composer omits it (the human),
+            // `tmm send "@bob /compact"` passes the calling agent. An agent's
+            // command to itself is refused — it would be typed into the very
+            // turn that sent it — and `all` skips the sender for the same
+            // reason.
+            let from = p.get("from").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or("human");
+            if agent == from {
+                return Err(RpcError::InvalidParams(format!("'{from}' cannot send a command to itself")));
+            }
             let ws = crate::projects::project_for_session(session).ok().flatten().map(|pr| pr.path);
             let panes = crate::tmux::list_panes(session).unwrap_or_default();
             // The room line's id exists before the typing (board #264): each
@@ -117,7 +126,7 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
                 if !seen.insert(pane.window) || !pane.active {
                     continue;
                 }
-                if agent != "all" && pane.window_name != agent {
+                if (agent != "all" && pane.window_name != agent) || pane.window_name == from {
                     continue;
                 }
                 // Same managed-only gate as delivery: typing into a window the
@@ -157,7 +166,7 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
             if sent.is_empty() {
                 return Err(RpcError::InvalidParams(format!("no managed agent named '{agent}' in session '{session}'")));
             }
-            let _ = rooms::post_routed_as(&room, &msg_id, "human", &format!("[tmm] {} → {}", text, sent.join(", ")), &[]);
+            let _ = rooms::post_routed_as(&room, &msg_id, from, &format!("[tmm] {} → {}", text, sent.join(", ")), &[]);
             Ok(serde_json::json!({ "sent": sent, "command": text }))
         }
 
@@ -2074,6 +2083,74 @@ mod tests {
         assert_eq!(owed.len(), 1, "only the /goal receipt is a typed row; /effort has none: {owed:?}");
         assert_eq!(owed[0].line, "goal next step", "kiro's declared echo");
         assert_eq!(owed[0].command, Some(crate::projects::store::CommandLife::Queued), "typed into a running turn");
+    }
+
+    /// Board #274: a command an AGENT sends (`tmm send "@bob /compact"`)
+    /// is recorded under that agent, never under "human"; `all` reaches every
+    /// OTHER managed agent, not the sender's own pane; and a command to
+    /// itself is refused before anything is typed. Control: the composer's
+    /// call (no `from`) still records as the human.
+    #[test]
+    fn an_agents_command_names_it_skips_it_and_is_refused_to_itself() {
+        crate::projects::tests::use_test_store();
+        let session = format!("tmm-cmd-from-{}", uuid::Uuid::new_v4());
+        let ws = std::env::temp_dir().join(format!("tmm-cmd-from-ws-{}", uuid::Uuid::new_v4()));
+        for name in ["lead", "dev"] {
+            let home = ws.join(".tmm/agents").join(name);
+            std::fs::create_dir_all(&home).unwrap();
+            std::fs::write(
+                home.join("launch.json"),
+                serde_json::json!({ "backend": "kiro", "cmd": format!("kiro-cli chat --agent {name}"), "team": "" }).to_string(),
+            )
+            .unwrap();
+        }
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "-n", "lead", "-c", &ws.to_string_lossy(), "cat"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            let _ = std::fs::remove_dir_all(&ws);
+            return;
+        }
+        let _cleanup = KillOnDrop(session.clone(), ws.clone());
+        std::process::Command::new("tmux")
+            .args(["new-window", "-d", "-t", &session, "-n", "dev", "-c", &ws.to_string_lossy(), "cat"])
+            .status()
+            .unwrap();
+        crate::projects::adopt(&session, Some("cmd-from-test")).expect("adopt project");
+        let call = |params: serde_json::Value| handle_hub_request(&req("hub_command", params), None);
+        let one = call(serde_json::json!({ "session": session, "agent": "dev", "text": "/compact", "from": "lead" }));
+        let all = call(serde_json::json!({ "session": session, "agent": "all", "text": "/clear", "from": "lead" }));
+        let own = call(serde_json::json!({ "session": session, "agent": "lead", "text": "/compact", "from": "lead" }));
+        let human = call(serde_json::json!({ "session": session, "agent": "lead", "text": "/effort medium" }));
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let lead_text = crate::tmux::capture_pane_plain(&format!("{session}:lead"), Some(0)).unwrap_or_default();
+        let dev_text = crate::tmux::capture_pane_plain(&format!("{session}:dev"), Some(0)).unwrap_or_default();
+        let room: Vec<(String, String)> = handle_hub_request(&req("hub_log", serde_json::json!({ "session": session })), None)
+            .result
+            .and_then(|v| v.get("messages").and_then(|m| m.as_array()).cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|m| Some((m.get("from")?.as_str()?.to_string(), m.get("body")?.as_str()?.to_string())))
+            .collect();
+        assert!(one.error.is_none(), "{:?}", one.error.map(|e| e.message));
+        assert_eq!(all.result.as_ref().and_then(|v| v.get("sent")).cloned(), Some(serde_json::json!(["dev"])), "all = everyone but the sender");
+        assert!(own.error.as_ref().is_some_and(|e| e.message.contains("cannot send a command to itself")), "{:?}", own.error.map(|e| e.message));
+        assert!(human.error.is_none(), "{:?}", human.error.map(|e| e.message));
+        assert!(dev_text.contains("/compact") && dev_text.contains("/clear"), "{dev_text:?}");
+        assert!(!lead_text.contains("/compact") && !lead_text.contains("/clear"), "nothing typed into the sender: {lead_text:?}");
+        assert!(lead_text.contains("/effort medium"), "the human's command still reaches lead: {lead_text:?}");
+        assert_eq!(
+            room,
+            vec![
+                ("lead".to_string(), "[tmm] /compact → dev".to_string()),
+                ("lead".to_string(), "[tmm] /clear → dev".to_string()),
+                ("human".to_string(), "[tmm] /effort medium → lead".to_string()),
+            ],
+            "one line per command, under its sender; the refused one records nothing"
+        );
     }
 
     /// Board #250 (validator 17:35): `hub_command` to `all` where one pane is
