@@ -1263,15 +1263,16 @@ fn next_wake(wakes: &[crate::projects::store::Wake], name: &str) -> serde_json::
 }
 
 /// Fire one scheduled wake (board #275), called by `projects::wakes::run`
-/// on a blocking thread. Claim first, so a wake posts at most once; then the
+/// on a blocking thread with the wake's id. Claim first, so a wake posts at
+/// most once, and fire with the row the claim read — its CURRENT session,
+/// whatever renames happened while the sleeper waited; then the
 /// ordinary post-and-deliver path as its scheduler, with the sender included
 /// (a self-wake reaches its own pane). The project is resolved NOW, so a
 /// rename since scheduling still finds it; recipients are read NOW.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub(super) fn fire_wake(w: &crate::projects::store::Wake) {
-    if !crate::projects::wakes::claim(w) {
-        return;
-    }
+pub(super) fn fire_wake(id: i64) {
+    let Some(w) = crate::projects::wakes::claim(id) else { return };
+    let w = &w;
     let session = crate::projects::project_for_session(&w.session)
         .ok()
         .flatten()
@@ -2260,8 +2261,8 @@ mod tests {
         let now = crate::projects::now() as i64;
         let add = handle_hub_request(&req("hub_wake_add", serde_json::json!({ "session": session, "from": "dev", "body": "@dev check the build", "due": now })), None);
         let w: crate::projects::store::Wake = serde_json::from_value(add.result.expect("scheduled")).unwrap();
-        fire_wake(&w);
-        fire_wake(&w);
+        fire_wake(w.id);
+        fire_wake(w.id);
         std::thread::sleep(std::time::Duration::from_millis(400));
         let dev = crate::tmux::capture_pane_plain(&format!("{session}:dev"), Some(0)).unwrap_or_default();
         let lead = crate::tmux::capture_pane_plain(&format!("{session}:lead"), Some(0)).unwrap_or_default();
@@ -2321,7 +2322,10 @@ mod tests {
         let now = crate::projects::now() as i64;
         let keep = call("hub_wake_add", serde_json::json!({ "session": session, "from": "lead", "body": "@dev after two renames", "due": now + 3600 }));
         let gone = call("hub_wake_add", serde_json::json!({ "session": session, "from": "lead", "body": "@dev to cancel", "due": now + 3600 }));
+        // The sleeper's view, taken BEFORE the renames (validator 09:54): it
+        // must not decide where the wake goes.
         let keep: crate::projects::store::Wake = serde_json::from_value(keep.result.expect("scheduled")).unwrap();
+        assert_eq!(keep.session, session, "the snapshot says A");
         let gone_id = gone.result.expect("scheduled")["id"].as_i64().unwrap();
 
         crate::projects::rename(&id, &b).expect("rename to B");
@@ -2336,8 +2340,8 @@ mod tests {
         assert!(crate::projects::project_for_session(&session).unwrap().is_none(), "A no longer resolves");
         let w = crate::projects::wakes::pending(None).into_iter().find(|w| w.id == keep.id).expect("still pending");
         assert_eq!(w.session, c, "the row followed both renames");
-        fire_wake(&w);
-        fire_wake(&w);
+        fire_wake(keep.id);
+        fire_wake(keep.id);
         std::thread::sleep(std::time::Duration::from_millis(400));
         let pane = crate::tmux::capture_pane_plain(&format!("{c}:dev"), Some(0)).unwrap_or_default();
         assert!(pane.contains("lead: [wake] @dev after two renames"), "typed into the real pane: {pane:?}");

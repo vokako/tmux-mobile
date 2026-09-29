@@ -268,6 +268,9 @@ pub fn start(
     // keep a previous run's hook. Measured on tmux 3.6a: `pane-died` fires
     // once per death with the status or signal, and not for a command that
     // `respawn -k` replaces.
+    // A new run starts clean: an earlier run's recorded wake failure is
+    // cleared on EVERY start, with or without --wake (validator 09:54).
+    let _ = tmux::run_tmux(&["set-option", "-w", "-u", "-t", &pane, OPT_WAKE_ERR]);
     match wake {
         Some(shell) => {
             tmux::run_tmux(&["set-option", "-p", "-t", &pane, OPT_WAKE, shell]).map_err(Error::Tmux)?;
@@ -911,8 +914,11 @@ mod tests {
         note_wake_failure(&name, "@lead was not woken (connection refused)\nsecond line dropped").unwrap();
         assert_eq!(find(&name).unwrap().wake_error, "@lead was not woken (connection refused)");
         assert!(list().iter().any(|t| t.name == name && !t.wake_error.is_empty()), "list carries it too");
+        start(&name, &sh("sleep 300"), Some(session), true, Some("true")).unwrap();
+        assert_eq!(find(&name).unwrap().wake_error, "", "a new run WITH --wake starts clean (validator 09:54)");
+        note_wake_failure(&name, "@lead was not woken (again)").unwrap();
         start(&name, &sh("sleep 300"), Some(session), true, None).unwrap();
-        assert_eq!(find(&name).unwrap().wake_error, "", "a new run starts clean");
+        assert_eq!(find(&name).unwrap().wake_error, "", "and without it");
         let _ = tmux::kill_session(session);
     }
 

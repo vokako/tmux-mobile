@@ -99,9 +99,13 @@ pub fn fired_body(w: &Wake, now: i64) -> String {
     }
 }
 
-/// Claim wake `w` for firing; true for exactly one caller.
-pub fn claim(w: &Wake) -> bool {
-    super::with_store(|s| s.claim_wake(w.id, now())).unwrap_or(false)
+/// Claim wake `id` for firing and return its row AS IT IS NOW — for exactly
+/// one caller. The claim and the read are one store transaction-free step
+/// under the store lock, so a rename (which moves the row's session in its
+/// own transaction) lands wholly before or after; the fire uses what this
+/// returns, never the sleeper's earlier snapshot (validator 09:54).
+pub fn claim(id: i64) -> Option<Wake> {
+    super::with_store(|s| if s.claim_wake(id, now())? { s.wake_row(id) } else { Ok(None) }).ok().flatten()
 }
 
 fn notify() -> &'static tokio::sync::Notify {
@@ -115,22 +119,22 @@ fn kick() {
 }
 
 /// The one sleeper: waits until the earliest pending wake is due (or a
-/// schedule / cancel changes that), then hands it to `fire` on a blocking
-/// thread. No tick. At start the earliest rows are already due, so a restart
-/// fires every missed wake once, in due order.
-pub async fn run(fire: fn(&Wake)) {
+/// schedule / cancel changes that), then hands its ID to `fire` on a
+/// blocking thread. It holds only the id and the due time; `fire` claims the
+/// row and reads it (`claim`). No tick. At start the earliest rows are
+/// already due, so a restart fires every missed wake once, in due order.
+pub async fn run(fire: fn(i64)) {
     loop {
         let changed = notify().notified();
         tokio::pin!(changed);
         changed.as_mut().enable();
         let next = tokio::task::spawn_blocking(|| pending(None).into_iter().next()).await.ok().flatten();
-        match next {
+        match next.map(|w| (w.id, w.due_at)) {
             None => changed.await,
-            Some(w) => {
-                let wait = w.due_at - now();
+            Some((id, due_at)) => {
+                let wait = due_at - now();
                 if wait <= 0 {
-                    let id = w.id;
-                    let _ = tokio::task::spawn_blocking(move || fire(&w)).await;
+                    let _ = tokio::task::spawn_blocking(move || fire(id)).await;
                     // A fire that could not claim (a store error) leaves the
                     // row pending: back off instead of spinning on it.
                     let stuck = tokio::task::spawn_blocking(move || pending(None).first().is_some_and(|n| n.id == id)).await.unwrap_or(false);
@@ -190,8 +194,8 @@ mod tests {
     }
 
     static FIRED: std::sync::Mutex<Vec<i64>> = std::sync::Mutex::new(Vec::new());
-    fn record(w: &Wake) {
-        if claim(w) {
+    fn record(id: i64) {
+        if let Some(w) = claim(id) {
             FIRED.lock().unwrap().push(w.id);
         }
     }

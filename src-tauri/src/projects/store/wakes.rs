@@ -90,6 +90,16 @@ impl Store {
             .map_err(|e| format!("claim wake: {e}"))
     }
 
+    /// A wake by id whatever its state: the row a fire reads AFTER claiming
+    /// it (#275), so it posts with the row's CURRENT session, never a
+    /// snapshot a rename has since moved.
+    pub fn wake_row(&self, id: i64) -> Result<Option<Wake>, String> {
+        self.conn
+            .query_row(&format!("SELECT {COLS} FROM wakes WHERE id = ?1"), params![id], wake_row)
+            .optional()
+            .map_err(|e| format!("read wake: {e}"))
+    }
+
     /// Cancel a pending wake: true when this call cancelled it.
     pub fn cancel_wake(&self, id: i64, now: i64) -> Result<bool, String> {
         self.conn
