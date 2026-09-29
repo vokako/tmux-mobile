@@ -194,7 +194,8 @@ pub struct ActivityEvent {
     /// Epoch MILLISECONDS to merge directly with bus message timestamps.
     pub ts: u64,
     pub window: String,
-    /// tool | status | notif | prompt | warn
+    /// tool | status | notif | prompt | warn | steered (#276: lines typed
+    /// into a busy steer turn, owed no echo; `deliveries[].msg` names them)
     pub kind: String,
     pub text: String,
     /// `tool` events only: the tool's NAME, kept apart from its argument so the
@@ -975,12 +976,11 @@ pub fn record_steered(session: &str, window: &str, line: &str, msgs: &[&str]) {
     push_full(session, window, "steered", truncate_chars(line, 160), String::new(), String::new(), refs);
 }
 
-/// Drop delivery rows that are owed nothing (#276: released rows steered
-/// into a running turn).
-pub fn forget_deliveries(ids: &[i64]) {
-    for id in ids {
-        forget_delivery(*id);
-    }
+/// Retire held rows that will be steered into a running turn (#276): they
+/// owe no echo. ONE transaction, all or nothing, and only rows still held —
+/// the caller types nothing unless this succeeded.
+pub fn retire_held(ids: &[i64]) -> Result<(), String> {
+    queue(|s| s.delete_held_deliveries(ids))
 }
 
 pub fn record_undelivered(session: &str, window: &str, line: &str, reason: &str) {

@@ -503,6 +503,22 @@ impl Store {
         tx.commit().map_err(|e| format!("commit delivery batch: {e}"))
     }
 
+    /// Delete a batch of HELD rows in one transaction (#276: steered into a
+    /// running turn, owed no echo). Every id must still be held, else nothing
+    /// changes.
+    pub fn delete_held_deliveries(&mut self, ids: &[i64]) -> Result<(), String> {
+        let tx = self.conn.transaction().map_err(|e| format!("delivery retire transaction: {e}"))?;
+        for id in ids {
+            let n = tx
+                .execute("DELETE FROM deliveries WHERE id = ?1 AND held = 1", rusqlite::params![id])
+                .map_err(|e| format!("retire held delivery: {e}"))?;
+            if n != 1 {
+                return Err(format!("delivery {id} is not held"));
+            }
+        }
+        tx.commit().map_err(|e| format!("commit delivery retire: {e}"))
+    }
+
     /// Outstanding TYPED lines, in the order they were typed (row id). Held
     /// lines (board #257) are not outstanding yet: nothing was typed, so no
     /// echo can carry them and the sweep has nothing to report. `window`

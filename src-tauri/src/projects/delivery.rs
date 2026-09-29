@@ -220,7 +220,8 @@ fn deliver_with(session: &str, window: &str, target: &str, line: &str, msg_id: &
     // existing `undelivered` warn says so.
     if let Err(e) = telemetry::record_held(session, window, line, msg_id) {
         eprintln!("⚠️  could not hold a delivery for {session}:{window} ({e}); typing it now");
-        return type_now(session, window, target, line, msg_id);
+        // Into a steer turn it is steered, owing no echo (validator, #276).
+        return if steered { type_steered(session, window, target, line, msg_id) } else { type_now(session, window, target, line, msg_id) };
     }
     if !busy || overdue(&held) {
         flush_locked(session, window, target, steered);
@@ -328,6 +329,9 @@ fn flush_locked(session: &str, window: &str, target: &str, steered: bool) {
     let batch = &rows[..take];
     let ids: Vec<i64> = batch.iter().map(|r| r.id).collect();
     let text = batch.iter().map(|r| r.line.as_str()).collect::<Vec<_>>().join(SEPARATOR);
+    if steered {
+        return flush_steered(session, window, target, batch, &ids, &text);
+    }
     // The batch flips as ONE transaction; if it cannot, nothing is typed and
     // every row stays held for the next trigger (orchestrator 04:49).
     if let Err(e) = telemetry::release_held(&ids) {
@@ -335,16 +339,7 @@ fn flush_locked(session: &str, window: &str, target: &str, steered: bool) {
         return;
     }
     match type_text(target, &text) {
-        Ok(()) => {
-            // Steered into a running turn (#276): the released rows are owed
-            // no echo; the event names their messages instead.
-            if steered {
-                telemetry::forget_deliveries(&ids);
-                let msgs: Vec<&str> = batch.iter().map(|r| r.msg_id.as_str()).collect();
-                telemetry::record_steered(session, window, &text, &msgs);
-            }
-            super::vitals::sniff_window_soon(session, window)
-        }
+        Ok(()) => super::vitals::sniff_window_soon(session, window),
         Err(e) => {
             if let Err(err) = telemetry::rehold(&ids) {
                 eprintln!("⚠️  could not re-hold deliveries for {session}:{window} ({err})");
@@ -352,6 +347,28 @@ fn flush_locked(session: &str, window: &str, target: &str, steered: bool) {
             let reason = if e.trim() == crate::tmux::PANE_IN_MODE { "pane in copy mode".to_string() } else { e.trim().to_string() };
             telemetry::record_held_blocked(session, window, &rows, &reason);
         }
+    }
+}
+
+/// Held lines flushed into a turn that runs steer (#276; orchestrator 09:28:
+/// close the window by ORDER). They owe no echo, so their rows are RETIRED
+/// in one transaction BEFORE the keys go in: no moment exists in which a
+/// typed line has a pending row (a crash or restart after the retire leaves
+/// nothing to sweep). The retire failing types nothing — the rows stay held,
+/// typed at the turn's end like any queue line. Typing failing after it is a
+/// line that did not land: the #250 `undelivered` warn, no row to point at.
+fn flush_steered(session: &str, window: &str, target: &str, batch: &[super::store::DeliveryRow], ids: &[i64], text: &str) {
+    if let Err(e) = telemetry::retire_held(ids) {
+        eprintln!("⚠️  could not retire held deliveries for {session}:{window} ({e}); kept held for the turn's end");
+        return;
+    }
+    let msgs: Vec<&str> = batch.iter().map(|r| r.msg_id.as_str()).collect();
+    match type_text(target, text) {
+        Ok(()) => {
+            telemetry::record_steered(session, window, text, &msgs);
+            super::vitals::sniff_window_soon(session, window);
+        }
+        Err(e) => telemetry::record_undelivered(session, window, text, e.trim()),
     }
 }
 
@@ -926,6 +943,74 @@ mod tests {
         assert_eq!((held(&s, "dev"), pending(&s, "dev")), (0, 3));
         flush_at(&s, "dev", "t");
         assert_eq!(typed().len(), 1, "exactly once");
+    }
+
+    /// Board #276 (validator 09:26, orchestrator 09:28): held lines flushed
+    /// into a turn that now runs steer are RETIRED before typing. A retire
+    /// that fails types nothing and keeps every row held (the queue path,
+    /// typed at the turn's end); a retire that succeeded leaves no pending
+    /// row even if the process dies before the keys — nothing to sweep.
+    #[test]
+    fn held_lines_steered_in_are_retired_before_typing_or_not_typed() {
+        let s = setup("steer-retire");
+        busy(&s, "dev");
+        for tag in ["a", "retire-fault-b"] {
+            deliver_as(&s, "dev", "t", &format!("[tmm chat 03:00] lead: @dev {tag}"), &format!("m-{tag}"), true);
+        }
+        assert_eq!(held(&s, "dev"), 2);
+        // The session switched to steer mid-turn; the rows are overdue.
+        crate::projects::with_store(|st| st.backdate_deliveries(&s, crate::projects::now() - HOLD_MAX_SECS - 1)).unwrap();
+        sql("CREATE TEMP TRIGGER retire_fault BEFORE DELETE ON deliveries
+             WHEN OLD.line LIKE '%retire-fault-b%'
+             BEGIN SELECT RAISE(ABORT, 'locked'); END;");
+        flush_locked(&s, "dev", "t", true);
+        assert!(typed().is_empty(), "the retire failed: nothing typed");
+        assert_eq!((held(&s, "dev"), pending(&s, "dev")), (2, 0), "both rows still held (the first DELETE rolled back)");
+        sql("DROP TRIGGER retire_fault;");
+
+        // The retire succeeds, the "process dies" before typing: refuse the
+        // keys to stand in for the lost moment. No row is left to sweep.
+        refuse(Some("server gone"));
+        flush_locked(&s, "dev", "t", true);
+        assert_eq!((held(&s, "dev"), pending(&s, "dev")), (0, 0), "retired before the keys: nothing pending, ever");
+        let w = warns(&s);
+        assert_eq!(w.len(), 1, "a line that did not land is SAID once (#250): {w:?}");
+        assert!(w[0].starts_with("undelivered (server gone): "), "{w:?}");
+        end(&s, "dev");
+        telemetry::sweep_deliveries(&s);
+        assert_eq!(warns(&s).len(), 1, "and never an `unconfirmed` on top");
+
+        // Typed: one steered event names both messages.
+        let t = setup("steer-retire-ok");
+        busy(&t, "dev");
+        for tag in ["x", "y"] {
+            deliver_as(&t, "dev", "t", &format!("[tmm chat 03:05] lead: @dev {tag}"), &format!("m-{tag}"), true);
+        }
+        flush_locked(&t, "dev", "t", true);
+        assert_eq!(typed().len(), 1);
+        assert_eq!((held(&t, "dev"), pending(&t, "dev")), (0, 0));
+        let named: Vec<String> = telemetry::recent_events(&t, 0).into_iter().filter(|e| e.kind == "steered").flat_map(|e| e.deliveries).map(|d| d.msg).collect();
+        assert_eq!(named, vec!["m-x".to_string(), "m-y".to_string()]);
+    }
+
+    /// Board #276 (validator 09:26 finding 2): in a busy steer turn with
+    /// lines already held, a hold that cannot be written falls back to the
+    /// STEERED path — typed, owing no echo — not to an ordinary pending row.
+    #[test]
+    fn a_hold_that_fails_in_a_steer_turn_is_steered() {
+        let s = setup("steer-hold-fault");
+        busy(&s, "dev");
+        deliver_as(&s, "dev", "t", "[tmm chat 03:00] lead: @dev earlier", "m0", true);
+        assert_eq!(held(&s, "dev"), 1, "held while the session ran queue");
+        sql("CREATE TEMP TRIGGER steer_hold_fault BEFORE INSERT ON deliveries
+             WHEN NEW.held = 1 AND NEW.line LIKE '%steer-hold-fault%'
+             BEGIN SELECT RAISE(ABORT, 'disk full'); END;");
+        let line = "[tmm chat 03:01] lead: @dev steer-hold-fault now";
+        assert!(deliver_with(&s, "dev", "t", line, "m1", || Some("steer")));
+        sql("DROP TRIGGER steer_hold_fault;");
+        assert_eq!(typed(), vec![line.to_string()], "typed at once");
+        assert_eq!((held(&s, "dev"), pending(&s, "dev")), (1, 0), "no pending row for a steered line; the earlier one stays held");
+        assert!(telemetry::recent_events(&s, 0).iter().any(|e| e.kind == "steered" && e.deliveries.iter().any(|d| d.msg == "m1")));
     }
 
     /// The bound: whole lines, oldest first, the rest wait for the next end;
