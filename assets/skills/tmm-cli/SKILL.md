@@ -21,10 +21,11 @@ Context flags on every command: `--project <session>` (default
 ```bash
 tmm send "@name message"        # post to the project chat; @name types it into
                                 #   that agent's pane: idle, it starts a turn;
-                                #   busy, it waits for the turn's end (queue) or
-                                #   joins the running turn (steer). It never
-                                #   cancels a turn (that is `tmm agent
-                                #   interrupt`). @human addresses the operator
+                                #   busy, it waits for the turn's end or joins
+                                #   the running turn, by that CLI and its input
+                                #   mode (queue / steer). It never cancels a
+                                #   turn (that is `tmm agent interrupt`).
+                                #   @human addresses the operator
 tmm send "@name /compact"        # a CLI command, typed VERBATIM into that agent's
                                 #   CLI (not its model), like the composer; one
                                 #   @name or @all (= everyone but you); @human
@@ -36,8 +37,9 @@ tmm log --grep <text> [--grep …] [--global]  # search the FULL history (any-ma
                                 #   terms; --global = across every project)
 ```
 
-Normal final responses are recorded by hooks and automatically returned to the
-agent that started the turn. Use addressed `tmm send` only to start a new
+Normal final responses are recorded by hooks and automatically returned to
+every agent whose request the turn carried (never to the human's pane, never
+to yourself). Use addressed `tmm send` only to start a new
 question, decision or handoff. A send without a recipient is rejected unless
 it carries `--status`.
 
@@ -98,8 +100,9 @@ Conventions that keep the board honest:
   the human), so do not also `tmm send` it to them.
 - `move <id> review` when YOUR part is done — this is a HANDOFF, not a
   label: the issue's reporter is notified automatically (the line lands in
-  their pane) and reviews it. Only the reviewer moves it to `done`; if it
-  needs fixes they `note` what to fix and move it back to `doing`.
+  their pane) and reviews it. Whoever accepts the work (the reporter by
+  default, or the lead the team names) moves it to `done`; if it needs fixes
+  they `note` what to fix and move it back to `doing`.
 - Board status is the ISSUE's lifecycle; live agent state comes from hooks.
 - Every status change is recorded in the room (`[tmm] board #N a → b`),
   so the chat shows the flow without anyone narrating it.
@@ -107,8 +110,9 @@ Conventions that keep the board honest:
 The ideal loop (and who moves what): the human (or lead) files the issue →
 the lead assigns it (the assignment lands in the assignee's pane) → the
 assignee `take`s it (todo → doing) → finishes and `move review` (the
-reporter is notified) → the reporter accepts with `move done`, or `note`s
-fixes and moves it back to `doing`.
+reporter is notified) → whoever accepts the work (the reporter by default,
+or the lead the team names) accepts with `move done`, or `note`s fixes and
+moves it back to `doing`.
 
 ## Background tasks — LOCAL tmux, no server needed
 
@@ -146,9 +150,9 @@ Reuse names (`--replace`) instead of inventing a new one per run.
 
 ```bash
 tmm agent list                      # who is here and their derived states
-tmm agent interrupt <name>          # cancel the turn it is RUNNING
-                                    #   (types Escape into its pane — a chat
-                                    #   message is only read between turns)
+tmm agent interrupt <name>          # cancel the turn it is RUNNING (types
+                                    #   Escape into its pane); a chat line never
+                                    #   cancels a turn — it waits or joins it
 tmm agent mode <name> queue|steer   # kiro only: switch how a line typed while it
                                     #   is busy lands (queue = after the turn,
                                     #   steer = into it) for THIS session; a

@@ -1681,6 +1681,11 @@ mod tests {
         assert!(help.contains(&backends));
         assert!(skill.matches(backends.as_str()).count() >= 2, "project create and registry save list every spawnable backend: {backends}");
         assert!(!skill.contains("--can-hire"), "a retired flag (2026-09-26)");
+        // A chat line never cancels a turn, and a steered one IS read inside
+        // it (#276): the skill must not teach either myth (validator 10:27).
+        for myth in ["INTERRUPTS", "only read between turns"] {
+            assert!(!skill.contains(myth), "the skill still says {myth:?}");
+        }
         // Every address in an example is a PLACEHOLDER, a variable, all or
         // human (validator / orchestrator 10:21): an invented name such as
         // `@me` is typed to nobody, and an agent copying it is never woken.
