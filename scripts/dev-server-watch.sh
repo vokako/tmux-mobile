@@ -7,7 +7,7 @@
 # supported one (see AGENTS.md "Headless build"). What `tauri dev` would have
 # provided for the server half is exactly what this loop does:
 #
-#   1. build the release server, run it,
+#   1. build the release server AND the `tmm` CLI, run the server,
 #   2. restart it when it EXITS (crash or clean), 2s backoff,
 #   3. rebuild when Rust SOURCES CHANGE (mtime poll — no inotify dependency,
 #      NFS-safe; measured 4ms per scan over 46 files, so the 3s poll is a
@@ -20,7 +20,17 @@
 #      one poll interval (a checkout writes files for several seconds), and
 #   6. a failed rebuild keeps the last good binary running; retry next change.
 #
-# Run under `tmm task` so the log and state survive in a tmux window:
+# `tmm` ships with the server (board #282): it is the ONE CLI every agent and
+# the owner run (~/.local/bin/tmm -> target/release/tmm), and a verb the server
+# learned is useless until the CLI can say it. Built `--server` alone, tmm sat
+# at 09-26 for three days while agents were taught `task --wake`, `wake` and
+# `agent mode` it did not have. A rebuilt tmm restarts NOTHING: step 4 hashes
+# the server binary only, and each tmm run execs the file anew.
+#
+# Started by scripts/dev-stack.mjs (`npm run dev:all`); on the dev host that
+# runs as the systemd user unit tmux-mobile-dev.service, so do NOT also start
+# it as a task there (a second watcher and server). Elsewhere, a generic
+# example of running it alone so its log survives in a tmux window:
 #   tmm task start server --replace -- scripts/dev-server-watch.sh
 set -u
 cd "$(dirname "$0")/.."
@@ -41,8 +51,8 @@ stamp() {
 bin_hash() { [ -f "$BIN" ] && sha256sum "$BIN" | cut -d' ' -f1; }
 
 build() {
-  echo "[watch] building server ($(date +%H:%M:%S))"
-  cargo build --manifest-path "$MANIFEST" --no-default-features --release --bin server
+  echo "[watch] building server + tmm ($(date +%H:%M:%S))"
+  cargo build --manifest-path "$MANIFEST" --no-default-features --release --bins
 }
 
 pid=""

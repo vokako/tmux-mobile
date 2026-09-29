@@ -85,14 +85,27 @@ npm run test:rust        # the Rust tests
 ```
 
 **On this dev host the server is already supervised — do not tell the owner to
-restart it.** `scripts/dev-server-watch.sh` runs under `tmm task` (window
-`tmm-tasks:server`, started with
-`tmm task start server --replace -- scripts/dev-server-watch.sh`) and is what
+restart it.** The chain is the systemd user unit `tmux-mobile-dev.service`
+(`Restart=always`) → `scripts/dev-stack.mjs` (`npm run dev:all`: vite and the
+watcher) → `scripts/dev-server-watch.sh` → the server; it is NOT a `tmm task`
+(verified with `ps` and `systemctl --user status`, 2026-09-29, board #282).
+Starting `tmm task start server -- scripts/dev-server-watch.sh` here would run
+a SECOND watcher and server beside it. A bash script is read when it starts, so
+an edit to the watcher takes effect only when the dev stack itself restarts
+(`systemctl --user restart tmux-mobile-dev.service`), which restarts the server
+and vite too: the owner authorizes that separately; a reviewer or an issue
+never does it. The watcher is what
 `tauri dev` would have given us for the server half, which cannot build here (no
 webkit2gtk-4.1, no DISPLAY): it restarts the server when it EXITS (2 s backoff),
 polls Rust source mtimes every 3 s (no inotify — NFS-safe, ~4 ms per scan),
-rebuilds release after the tree has been quiet for one interval, and restarts
-ONLY when the rebuilt binary's BYTES differ — cargo fingerprints by mtime, so a
+rebuilds release (`--bins`: the server AND `tmm`) after the tree has been quiet
+for one interval, and restarts ONLY when the rebuilt SERVER binary's BYTES
+differ. `tmm` is rebuilt with it because it is the one CLI every agent and the
+owner run (`~/.local/bin/tmm` → `target/release/tmm`); built alone, the server
+learned verbs (`task --wake`, `wake`, `agent mode`) that a three-day-old `tmm`
+could not say (board #282). A rebuilt `tmm` restarts nothing: each run execs
+the file anew. `scripts/dev-server-watch.test.ts` pins both halves. Restarting
+only when the bytes differ matters — cargo fingerprints by mtime, so a
 `touch`, a checkout, or a comment-only edit relinks an identical binary and
 dropping every client for that would be noise. A failed rebuild keeps the last
 good binary running and retries on the next change. So an edit is live within
