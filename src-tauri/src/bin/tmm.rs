@@ -1681,6 +1681,28 @@ mod tests {
         assert!(help.contains(&backends));
         assert!(skill.matches(backends.as_str()).count() >= 2, "project create and registry save list every spawnable backend: {backends}");
         assert!(!skill.contains("--can-hire"), "a retired flag (2026-09-26)");
+        // Every address in an example is a PLACEHOLDER, a variable, all or
+        // human (validator / orchestrator 10:21): an invented name such as
+        // `@me` is typed to nobody, and an agent copying it is never woken.
+        let placeholders = ["name", "who", "all", "human", "$TMM_AGENT"];
+        let mut bad = Vec::new();
+        for (i, _) in skill.match_indices('@') {
+            if skill[..i].chars().next_back().is_some_and(|c| c.is_ascii_alphanumeric() || "_.-".contains(c)) {
+                continue; // an email / host, not an address
+            }
+            let token: String = skill[i + 1..].chars().take_while(|c| c.is_ascii_alphanumeric() || "_-$".contains(*c)).collect();
+            if !token.is_empty() && !placeholders.contains(&token.as_str()) {
+                bad.push(token);
+            }
+        }
+        assert!(bad.is_empty(), "the skill addresses names that exist nowhere: {bad:?}");
+        // The self-wake example resolves to the SENDER: with TMM_AGENT=dev the
+        // shell turns it into an address the server reads as `dev` (the
+        // delivery rule, address::mention_names), which a fired wake types
+        // into dev's own pane.
+        let example = skill.lines().find(|l| l.contains("--in 10m")).expect("a self-wake example");
+        let body = example.split('"').nth(1).expect("quoted body").replace("$TMM_AGENT", "dev");
+        assert_eq!(tmux_mobile::address::mention_names(&body), vec!["dev".to_string()], "{example}");
     }
 
     #[test]

@@ -19,9 +19,12 @@ Context flags on every command: `--project <session>` (default
 ## Chat (the basics, for completeness)
 
 ```bash
-tmm send "@name message"        # post to the project chat; @name types into
-                                #   that agent's pane and INTERRUPTS them,
-                                #   @human addresses the operator
+tmm send "@name message"        # post to the project chat; @name types it into
+                                #   that agent's pane: idle, it starts a turn;
+                                #   busy, it waits for the turn's end (queue) or
+                                #   joins the running turn (steer). It never
+                                #   cancels a turn (that is `tmm agent
+                                #   interrupt`). @human addresses the operator
 tmm send "@name /compact"        # a CLI command, typed VERBATIM into that agent's
                                 #   CLI (not its model), like the composer; one
                                 #   @name or @all (= everyone but you); @human
@@ -48,10 +51,12 @@ message, delivered like one sent at that moment.
 tmm task start build --wake -- make all  # most waits are for an END: when the
                                 #   task ends by itself, you get "[wake] task
                                 #   build exited:<code> after <age>" + its last
-                                #   lines (--wake @lead wakes someone else;
+                                #   lines (--wake @who wakes someone else;
                                 #   `task stop` wakes nobody)
-tmm send "@me check the deploy" --in 10m   # or a TIME: --in 90s|10m|2h|1h30m|1d,
-tmm send "@lead standup" --at 14:30        #   --at HH:MM (next occurrence) or
+tmm send "@$TMM_AGENT check the deploy" --in 10m   # or a TIME, to yourself
+                                #   (your own name, expanded by the shell; no
+                                #   alias names you) or anyone: --in 90s|10m|2h|1h30m|1d,
+tmm send "@name standup" --at 14:30        #   --at HH:MM (next occurrence) or
                                 #   "YYYY-MM-DD HH:MM"; prints the resolved time
                                 #   and wake id; at most 7 days ahead
 tmm wake list [--all]           # pending wakes (this project / every project)
@@ -59,8 +64,8 @@ tmm wake cancel <id>            # yours, or any if you are the human
 ```
 
 A wake arrives as `[wake] <text>` from whoever set it, so when you wake a
-teammate its reply comes back to you; a wake to yourself returns no reply to
-yourself. A `/command` cannot be scheduled. If the server was down at the due
+teammate its reply comes back to you; a wake to yourself is delivered to your
+own pane and returns no reply to yourself. A `/command` cannot be scheduled. If the server was down at the due
 time the wake fires once when it is back, marked late; a task wake that could
 not be sent shows as `wake not sent: …` in `tmm task status|list|logs`.
 
