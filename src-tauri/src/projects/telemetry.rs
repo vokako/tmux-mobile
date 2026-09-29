@@ -1260,6 +1260,20 @@ pub fn retain_windows(session: &str, live: &[String]) {
     }
 }
 
+/// Is a line typed into this window still on its way to a turn (board
+/// #281)? True while it owes an echo that has not come yet: a pending,
+/// unreported chat-line row younger than the ack window. Derived from the
+/// ONE deliveries table (tenet 8), no marker of its own: the prompt edge
+/// settles the row, after which `turn_busy` answers; a line that never
+/// echoes stops counting when the sweep's clock would report it.
+pub fn line_in_flight(session: &str, window: &str) -> bool {
+    let now = now();
+    queue(|s| s.pending_deliveries(session, Some(window)))
+        .unwrap_or_default()
+        .iter()
+        .any(|r| r.command.is_none() && !r.warned && now.saturating_sub(r.ts) < DELIVERY_ACK_SECS)
+}
+
 /// Test-only: a window's outstanding (typed, unsettled) rows, in typed order.
 #[cfg(test)]
 pub fn owed_rows(session: &str, window: &str) -> Vec<super::store::DeliveryRow> {

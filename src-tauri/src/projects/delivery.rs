@@ -195,6 +195,10 @@ fn deliver_as(session: &str, window: &str, target: &str, line: &str, msg_id: &st
 /// verify (validator 04:48) — so the line is decided against the mode before
 /// a switch or after it, never between.
 ///
+/// A steer window is also "open" while a line typed into it idle has not
+/// echoed yet (#281): the turn has started in the CLI before its prompt
+/// hook reached us, so a second line inside that span is steered.
+///
 /// Three outcomes for a window whose turn is open: QUEUE holds the line
 /// (#257); STEER types it into the running turn and owes no echo (#276:
 /// a steered line fires no `userPromptSubmit`, so a pending row could only
@@ -204,7 +208,13 @@ fn deliver_with(session: &str, window: &str, target: &str, line: &str, msg_id: &
     let _guard = lock.lock().unwrap();
     let held = telemetry::held_rows(session, window);
     let mode = mode();
-    let open = mode.is_some() && telemetry::turn_busy(session, window);
+    // A steer window whose last line was typed idle but has not echoed yet
+    // is already IN that turn (board #281): kiro took the first line, so a
+    // second one lands in the running turn — steered, no hook. The owed
+    // row itself says so (`line_in_flight`); queue mode waits for the edge
+    // as before (its lines echo on their own turn).
+    let open = mode.is_some()
+        && (telemetry::turn_busy(session, window) || (mode == Some("steer") && telemetry::line_in_flight(session, window)));
     let busy = open && mode == Some("queue");
     let steered = open && mode == Some("steer");
     if steered && held.is_empty() {
@@ -706,6 +716,47 @@ mod tests {
         assert_eq!((pending(&s, "a"), pending(&s, "b")), (0, 1), "a owes nothing; b's echo is still owed (and swept if it never comes)");
         assert!(record_prompt(&s, "b", line), "b's hook settles its row");
         assert_eq!(pending(&s, "b"), 0);
+    }
+
+    /// Board #281 (live, lingting 10:14–11:00: five leaks): two lines reach
+    /// one IDLE steer window inside the hook latency. The first starts the
+    /// turn and owes its echo; the second lands in that turn before the
+    /// prompt edge reaches us, so it is steered — no row. One echo settles
+    /// the first; no warn after the turn. Queue is unchanged: its second
+    /// line still owes (it gets its own turn). A row that never echoes stops
+    /// counting as in flight after the ack window.
+    #[test]
+    fn a_second_line_before_the_first_echo_is_steered_in_steer_mode() {
+        let s = setup("inflight");
+        let first = "[tmm chat 10:14] data: [board #13 reply] first";
+        let second = "[tmm chat 10:14] data: [board #12 reply] second";
+        assert!(deliver_with(&s, "dev", "t", first, "m1", || Some("steer")));
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(deliver_with(&s, "dev", "t", second, "m2", || Some("steer")));
+        assert_eq!(typed().len(), 2, "both typed at once");
+        assert_eq!(pending(&s, "dev"), 1, "only the first owes an echo");
+        let steered: Vec<String> = telemetry::recent_events(&s, 0).into_iter().filter(|e| e.kind == "steered").flat_map(|e| e.deliveries).map(|d| d.msg).collect();
+        assert_eq!(steered, vec!["m2".to_string()], "the second is named steered");
+        assert!(record_prompt(&s, "dev", first), "the one echo settles the first");
+        assert_eq!(pending(&s, "dev"), 0);
+        end(&s, "dev");
+        telemetry::sweep_deliveries(&s);
+        assert!(warns(&s).is_empty(), "{:?}", warns(&s));
+
+        // Queue control: the second line owes too (it will be its own turn).
+        let q = setup("inflight-queue");
+        assert!(deliver_with(&q, "dev", "t", first, "q1", || Some("queue")));
+        assert!(deliver_with(&q, "dev", "t", second, "q2", || Some("queue")));
+        assert_eq!(pending(&q, "dev"), 2, "queue mode is unchanged");
+
+        // A first line that never echoes (the CLI did not take it) stops
+        // steering later lines once the sweep's clock would report it.
+        let a = setup("inflight-aged");
+        assert!(deliver_with(&a, "dev", "t", first, "a1", || Some("steer")));
+        crate::projects::with_store(|st| st.backdate_deliveries(&a, crate::projects::now() - 46)).unwrap();
+        assert!(!telemetry::line_in_flight(&a, "dev"));
+        assert!(deliver_with(&a, "dev", "t", second, "a2", || Some("steer")));
+        assert_eq!(pending(&a, "dev"), 2, "past the ack window the window reads idle again: the line owes");
     }
 
     /// The owner's case: a burst of 10 to a busy queue-mode agent is ONE
