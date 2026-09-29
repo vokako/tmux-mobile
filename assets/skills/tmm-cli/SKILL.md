@@ -1,6 +1,6 @@
 ---
 name: tmm-cli
-description: The full tmm CLI reference — project chat, the task board, agent/project self-management, the central registry, and tmm task for work that must outlive the turn (dev servers, watchers, deploys, remote jobs — NOT ordinary commands, which run in the foreground). Use when you need a tmm capability beyond the basics your system prompt teaches (send/log), e.g. spawning a teammate, restarting a stuck agent, managing projects and registry definitions, or keeping a long-running process alive in the background.
+description: The full tmm CLI reference — project chat, the task board, agent/project self-management, the central registry, and tmm task for work that must outlive the turn (dev servers, watchers, deploys, remote jobs — NOT ordinary commands, which run in the foreground). Use when you need a tmm capability beyond the basics your system prompt teaches (send/log), e.g. spawning a teammate, restarting a stuck agent, sending a teammate a /command, waking yourself or someone later instead of sleeping, managing projects and registry definitions, or keeping a long-running process alive in the background.
 ---
 
 # The tmm CLI
@@ -22,6 +22,10 @@ Context flags on every command: `--project <session>` (default
 tmm send "@name message"        # post to the project chat; @name types into
                                 #   that agent's pane and INTERRUPTS them,
                                 #   @human addresses the operator
+tmm send "@name /compact"        # a CLI command, typed VERBATIM into that agent's
+                                #   CLI (not its model), like the composer; one
+                                #   @name or @all (= everyone but you); @human
+                                #   stays a chat message; unknown name = exit 4
 tmm send "progress" --status     # ambient room progress; nobody is interrupted
 tmm send "..." --image <path|url>   # attach an image by REFERENCE (repeatable)
 tmm log [--since <ts>] [--limit N] [-f]   # read chat; -f follows
@@ -33,6 +37,32 @@ Normal final responses are recorded by hooks and automatically returned to the
 agent that started the turn. Use addressed `tmm send` only to start a new
 question, decision or handoff. A send without a recipient is rejected unless
 it carries `--status`.
+
+## Wake later — instead of sleeping
+
+Never `sleep` to wait for something: a sleep blocks your turn and burns
+context. End the turn and let tmm wake you (or anyone) with an ordinary
+message, delivered like one sent at that moment.
+
+```bash
+tmm task start build --wake -- make all  # most waits are for an END: when the
+                                #   task ends by itself, you get "[wake] task
+                                #   build exited:<code> after <age>" + its last
+                                #   lines (--wake @lead wakes someone else;
+                                #   `task stop` wakes nobody)
+tmm send "@me check the deploy" --in 10m   # or a TIME: --in 90s|10m|2h|1h30m|1d,
+tmm send "@lead standup" --at 14:30        #   --at HH:MM (next occurrence) or
+                                #   "YYYY-MM-DD HH:MM"; prints the resolved time
+                                #   and wake id; at most 7 days ahead
+tmm wake list [--all]           # pending wakes (this project / every project)
+tmm wake cancel <id>            # yours, or any if you are the human
+```
+
+A wake arrives as `[wake] <text>` from whoever set it, so when you wake a
+teammate its reply comes back to you; a wake to yourself returns no reply to
+yourself. A `/command` cannot be scheduled. If the server was down at the due
+time the wake fires once when it is back, marked late; a task wake that could
+not be sent shows as `wake not sent: …` in `tmm task status|list|logs`.
 
 ## The task board — shared kanban, humans and agents alike
 
@@ -91,6 +121,8 @@ logs survive the command exiting. It works even when the server is down.
 tmm task start <name> -- <cmd...>   # run detached in its own tmux window
       [--session <s>]               # default: your session, else "tmm-tasks"
       [--replace]                   # take over a name a live task holds
+      [--wake [@who]]               # wake @who (default: you) when it ends by
+                                    #   itself — see "Wake later" above
 tmm task list                       # every task, in every session, + state
 tmm task status <name>              # running | exited:<code>  (exit 4 if gone)
 tmm task logs <name> [--limit N] [--grep <text>]   # default 50 lines, tail
@@ -112,6 +144,10 @@ tmm agent list                      # who is here and their derived states
 tmm agent interrupt <name>          # cancel the turn it is RUNNING
                                     #   (types Escape into its pane — a chat
                                     #   message is only read between turns)
+tmm agent mode <name> queue|steer   # kiro only: switch how a line typed while it
+                                    #   is busy lands (queue = after the turn,
+                                    #   steer = into it) for THIS session; a
+                                    #   restart returns to the configured mode
 tmm agent stop <name>               # stop the process (slot survives)
 tmm agent restart <name>            # bring it back, resuming its conversation
 tmm agent remove <name>             # eject: stop + forget slot + delete home
@@ -123,7 +159,7 @@ tmm spawn <registry-name> [--brief "<text>"]   # hire a teammate into this
 
 ```bash
 tmm project list
-tmm project create <path> [--name n] [--session s] [--with-agent kiro|claude|codex|grok]
+tmm project create <path> [--name n] [--session s] [--with-agent kiro|claude|codex|grok|omp|kimi]
 tmm project up <session>            # bring the tmux session up (recreates
                                     #   missing windows, relaunches agents)
 tmm project down <session>          # kill the session, KEEP the declaration
@@ -136,9 +172,12 @@ tmm project delete <session>        # forget it AND delete its agents' homes
 
 ```bash
 tmm registry list
-tmm registry save --name <n> --backend <kiro|claude|codex|grok>
+tmm registry save --name <n> --backend <kiro|claude|codex|grok|omp|kimi>
       [--system <text>] [--model m] [--effort low|...|high]
-      [--skills a,b] [--mcp <json>] [--can-hire]
+      [--skills a,b] [--mcp <json>] [--input-mode queue|steer]
+                                    # steer (kiro, codex): a line typed while
+                                    #   busy enters the running turn; applied
+                                    #   on restart
 tmm registry delete <name>
 tmm skills list                     # the app-managed skill store
 tmm skills save --name <n> --source <abs dir|github url>   # import files

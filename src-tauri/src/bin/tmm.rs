@@ -40,13 +40,13 @@ USAGE (agent):
   tmm send "@name /command [args]"    type a CLI command (e.g. /compact) into a teammate's
                                       pane verbatim, like the composer (@all = everyone else)
   tmm send <text> --status            record ambient progress in the project room
+                    [--image <path|url>]   attach an image by REFERENCE (repeatable);
+                                      a local path is resolved by the client
   tmm send "@name text" --in 10m | --at 14:30   schedule it: delivered then as a
                                       "[wake] …" line, like one sent now (you may wake
                                       yourself); prints the resolved time and wake id
   tmm wake list [--all]               pending wakes (this project, or every project)
   tmm wake cancel <id>                cancel one you set (the human may cancel any)
-                    [--image <path|url>]   attach an image by REFERENCE (repeatable);
-                                      a local path is resolved by the client
   tmm log [--since <ts>] [--limit N] [-f]   read chat; --since is exclusive, -f follows
                     [--grep <text>]   search the FULL history instead (repeatable = any-match)
                     [--global]        …across EVERY project's room, hits name their room
@@ -1662,6 +1662,25 @@ mod tests {
         let shell = wake_shell("build", "lead", "my proj", Some("dev"), "/bin/tmm", None, None);
         assert_eq!(shell, "TMM_PROJECT='my proj' TMM_AGENT='dev' '/bin/tmm' task wake 'build' --to 'lead' --code '#{pane_dead_status}' --signal '#{pane_dead_signal}' >/dev/null 2>&1");
         assert!(wake_shell("a#b", "x", "p", None, "/t", None, None).contains("'a##b'"), "a literal # is escaped for tmux");
+    }
+
+    /// Board #277: the built-in tmm-cli skill is how an agent learns tmm, so
+    /// every verb and flag `tmm --help` teaches for these capabilities must
+    /// appear there too — else agents keep sleeping instead of waking.
+    /// A name here that the help drops is caught too.
+    #[test]
+    fn the_tmm_cli_skill_teaches_what_the_help_teaches() {
+        let skill = include_str!("../../../assets/skills/tmm-cli/SKILL.md");
+        let help = usage();
+        for term in ["tmm wake list", "tmm wake cancel", "--wake", "--in ", "--at ", "/compact", "tmm agent mode", "--input-mode"] {
+            assert!(help.contains(term), "help lost {term:?}");
+            assert!(skill.contains(term), "the tmm-cli skill does not teach {term:?}");
+        }
+        // The backend list is the ONE derived list, in the skill as in the help.
+        let backends = backends_help();
+        assert!(help.contains(&backends));
+        assert!(skill.matches(backends.as_str()).count() >= 2, "project create and registry save list every spawnable backend: {backends}");
+        assert!(!skill.contains("--can-hire"), "a retired flag (2026-09-26)");
     }
 
     #[test]
