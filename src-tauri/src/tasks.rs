@@ -43,6 +43,12 @@ pub const FALLBACK_SESSION: &str = "tmm-tasks";
 const OPT_TASK: &str = "@tmm_task";
 const OPT_CMD: &str = "@tmm_cmd";
 const OPT_STARTED: &str = "@tmm_started";
+/// The shell command a `--wake` task runs when it dies (board #275), kept in
+/// a pane option and expanded by the hook with `E:`: no user text ever goes
+/// through tmux's command parser, and `#{pane_dead_status}` /
+/// `#{pane_dead_signal}` inside it are filled in at death.
+const OPT_WAKE: &str = "@tmm_wake_cmd";
+const WAKE_HOOK: &str = "run-shell -b \"#{E:@tmm_wake_cmd}\"";
 
 /// How long a FINISHED task's window outlives its process before a `tmm task`
 /// verb reaps it (board #206). The env override exists for tests and for an
@@ -209,6 +215,7 @@ pub fn start(
     argv: &[String],
     session: Option<&str>,
     replace: bool,
+    wake: Option<&str>,
 ) -> Result<Task> {
     validate_name(name)?;
     if argv.is_empty() {
@@ -250,6 +257,17 @@ pub fn start(
     set_opt(&pane, OPT_TASK, name)?;
     set_opt(&pane, OPT_CMD, &cmd)?;
     set_opt(&pane, OPT_STARTED, &now.to_string())?;
+    // The wake hook is set or cleared on EVERY start: a reused window must not
+    // keep a previous run's hook. Measured on tmux 3.6a: `pane-died` fires
+    // once per death with the status or signal, and not for a command that
+    // `respawn -k` replaces.
+    match wake {
+        Some(shell) => {
+            tmux::run_tmux(&["set-option", "-p", "-t", &pane, OPT_WAKE, shell]).map_err(Error::Tmux)?;
+            tmux::run_tmux(&["set-hook", "-p", "-t", &pane, "pane-died", WAKE_HOOK]).map_err(Error::Tmux)?;
+        }
+        None => clear_wake(&pane),
+    }
     tmux::run_tmux(&["respawn-window", "-k", "-t", &pane, &cmd]).map_err(Error::Tmux)?;
 
     find(name).ok_or_else(|| Error::Tmux(format!("started '{name}' but it vanished from tmux")))
@@ -299,6 +317,8 @@ pub struct Stopped {
 
 pub fn stop(name: &str, keep: bool) -> Result<Stopped> {
     let task = need(name)?;
+    // Whoever stops a task already knows it ended: no wake (board #275).
+    clear_wake(&task.pane);
     let dead = if task.is_running() { end_process(&task)? } else { task };
     let tail = if keep { String::new() } else { logs(name, STOP_TAIL_LINES, None).unwrap_or_default() };
     let closed = !keep && tmux::kill_window(&dead.pane).is_ok();
@@ -401,6 +421,18 @@ fn create_window(session: &str, name: &str, cwd: &str) -> Result<String> {
         args.push(cwd);
     }
     Ok(tmux::run_tmux(&args).map_err(Error::Tmux)?.trim().to_string())
+}
+
+/// `text` as a literal inside a tmux format (the wake command is one): `#`
+/// doubled, so only the caller's own `#{…}` placeholders are expanded.
+pub fn format_literal(text: &str) -> String {
+    text.replace('#', "##")
+}
+
+/// Drop a pane's wake hook and command (no-op when it has none).
+fn clear_wake(pane: &str) {
+    let _ = tmux::run_tmux(&["set-hook", "-p", "-u", "-t", pane, "pane-died"]);
+    let _ = tmux::run_tmux(&["set-option", "-p", "-u", "-t", pane, OPT_WAKE]);
 }
 
 fn set_opt(pane: &str, name: &str, value: &str) -> Result<()> {
@@ -684,7 +716,7 @@ mod tests {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let task = start(&name, &argv, Some(session), true).expect("task starts");
+        let task = start(&name, &argv, Some(session), true, None).expect("task starts");
         assert!(task.is_running());
         // Find the sleep: the wrapper's only child. Give bash a moment to fork it.
         let mut child = String::new();
@@ -753,9 +785,9 @@ mod tests {
         let live = format!("tmm-test-live-{pid}");
         let shielded = format!("tmm-test-shield-{pid}");
         let sh = |c: &str| -> Vec<String> { vec!["sh".into(), "-c".into(), c.into()] };
-        start(&done, &sh("exit 0"), Some(session), true).expect("done starts");
-        start(&shielded, &sh("exit 0"), Some(session), true).expect("shielded starts");
-        let running = start(&live, &sh("sleep 300"), Some(session), true).expect("live starts");
+        start(&done, &sh("exit 0"), Some(session), true, None).expect("done starts");
+        start(&shielded, &sh("exit 0"), Some(session), true, None).expect("shielded starts");
+        let running = start(&live, &sh("sleep 300"), Some(session), true, None).expect("live starts");
         // A plain window that dies with remain-on-exit but no @tmm_task: not ours.
         let plain = tmux::run_tmux(&["new-window", "-d", "-t", session, "-n", "plain", "-P", "-F", "#{pane_id}"])
             .expect("plain window").trim().to_string();
@@ -799,8 +831,8 @@ mod tests {
         let closing = format!("tmm-test-close-{pid}");
         let kept = format!("tmm-test-keep-{pid}");
         let sh = |c: &str| -> Vec<String> { vec!["sh".into(), "-c".into(), c.into()] };
-        start(&closing, &sh("echo line-one; echo line-two; sleep 300"), Some(session), true).unwrap();
-        start(&kept, &sh("echo kept-output; sleep 300"), Some(session), true).unwrap();
+        start(&closing, &sh("echo line-one; echo line-two; sleep 300"), Some(session), true, None).unwrap();
+        start(&kept, &sh("echo kept-output; sleep 300"), Some(session), true, None).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(400));
 
         let out = stop(&closing, false).expect("stop reports");
@@ -818,6 +850,32 @@ mod tests {
         let again = stop(&kept, false).expect("stop on a finished task");
         assert!(again.closed && find(&kept).is_none());
         let _ = tmux::kill_session(session);
+    }
+
+    /// Board #275: a `--wake` task runs its wake command exactly once when it
+    /// ends by itself, with its exit status filled in; a restart without
+    /// `--wake` on the same window clears the hook, and `stop` never wakes.
+    #[test]
+    fn a_wake_task_runs_its_command_once_at_its_own_end() {
+        let _server = PrivateTmux::start("wake");
+        let session = "tmm-test-wake";
+        let pid = std::process::id();
+        let log = std::env::temp_dir().join(format!("tmm-test-wake-{pid}.log"));
+        let _ = std::fs::remove_file(&log);
+        let wake = format!("echo \"$0 status=#{{pane_dead_status}} sig=#{{pane_dead_signal}} {}\" >> {}", format_literal("#x"), log.display());
+        let sh = |c: &str| -> Vec<String> { vec!["sh".into(), "-c".into(), c.into()] };
+        let (ended, stopped, cleared) = (format!("tmm-test-w1-{pid}"), format!("tmm-test-w2-{pid}"), format!("tmm-test-w3-{pid}"));
+        start(&ended, &sh("sleep 0.3; exit 7"), Some(session), true, Some(&wake)).unwrap();
+        start(&stopped, &sh("sleep 300"), Some(session), true, Some(&wake)).unwrap();
+        start(&cleared, &sh("sleep 300"), Some(session), true, Some(&wake)).unwrap();
+        start(&cleared, &sh("sleep 0.3; exit 3"), Some(session), true, None).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        stop(&stopped, true).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        let lines: Vec<String> = std::fs::read_to_string(&log).unwrap_or_default().lines().map(str::to_string).collect();
+        let _ = std::fs::remove_file(&log);
+        let _ = tmux::kill_session(session);
+        assert_eq!(lines, vec!["sh status=7 sig= #x".to_string()], "one wake, for the task that ended by itself; a literal # survives");
     }
 
     #[test]

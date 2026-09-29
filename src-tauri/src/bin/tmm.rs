@@ -67,6 +67,8 @@ USAGE (background tasks — LOCAL tmux only, no server needed, never exits 2):
                     [--session <s>]   where to put it (default: the session you
                                       are in, else "tmm-tasks")
                     [--replace]       take over a name a live task holds
+                    [--wake [@who]]   when it ends by itself, wake @who (default: you)
+                                      with its exit code and last lines (not on stop)
   tmm task list                       every task, in every session, + state
   tmm task status <name>              running | exited:<code>  (exit 4 if gone)
   tmm task logs <name> [--limit N] [--grep <text>]   default 50 lines, from the end
@@ -192,7 +194,8 @@ async fn main() {
     // Local tmux subtree, dispatched before anything else: `Config::load()`
     // below seeds a token / machine id / team defaults into config.toml, and a
     // command that only talks to tmux has no business doing that.
-    if pos[0] == "task" {
+    // `task wake` is the one task verb that talks to the server (board #275).
+    if pos[0] == "task" && pos.get(1).map(String::as_str) != Some("wake") {
         cmd_task(&pos[1..], &cmdv, &flags, json);
         return;
     }
@@ -347,6 +350,26 @@ async fn main() {
         // The project task board: the human writes issues on the board page,
         // agents keep their status current here. Identity = the caller
         // (TMM_AGENT, else "human"), same as chat.
+        // A `--wake` task ended (board #275): run by its pane-died hook, with
+        // the project and the starter in the environment. Schedules a wake due
+        // now; fail-soft (the hook discards output, the exit is in task list).
+        ("task", rest) => {
+            let name = rest.get(1).cloned().unwrap_or_default();
+            let Some(to) = flags.get("to").cloned().flatten() else { fail(EXIT_USAGE, "task wake <name> --to <who>") };
+            let session = need_project(&ctx);
+            let from = ctx.agent.clone().unwrap_or_else(|| "human".into());
+            let code = flags.get("code").cloned().flatten().unwrap_or_default();
+            let signal = flags.get("signal").cloned().flatten().unwrap_or_default();
+            let task = tasks::find(&name);
+            let age = task.as_ref().and_then(|t| t.age(tasks::unix_now()));
+            let tail = tasks::logs(&name, WAKE_TAIL_LINES, None).unwrap_or_default();
+            let body = task_end_body(&to, &name, &code, &signal, age, &tail);
+            let due = chrono::Local::now().timestamp();
+            match try_rpc(&ctx, "hub_wake_add", json!({ "session": session, "from": from, "body": body, "due": due })).await {
+                Ok(w) => println!("✓ wake #{} for @{to}", w["id"]),
+                Err((_, e)) => eprintln!("tmm: task {name} ended but the wake was not sent: {e}"),
+            }
+        }
         // Scheduled wakes (board #275): list and cancel; `send --in/--at` adds.
         ("wake", rest) => {
             let session = need_project(&ctx);
@@ -1034,13 +1057,28 @@ fn cmd_task(rest: &[String], cmdv: &[String], flags: &Flags, json: bool) {
                 fail(EXIT_USAGE, "task start needs a command after `--`: tmm task start dev -- npm run dev");
             }
             let session = flags.get("session").cloned().flatten();
-            let t = tasks::start(name, cmdv, session.as_deref(), flags.contains_key("replace"))
+            // `--wake [@who]` (board #275): when the task ends by itself, the
+            // server gets a wake for @who (default: the agent starting it).
+            let wake = flags.contains_key("wake").then(|| {
+                let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+                let project = flags.get("project").cloned().flatten().or_else(|| env("TMM_PROJECT"))
+                    .unwrap_or_else(|| fail(EXIT_USAGE, "--wake needs a project: run it as an agent, or pass --project"));
+                let starter = flags.get("agent").cloned().flatten().or_else(|| env("TMM_AGENT"));
+                let to = rest.get(2).and_then(|w| w.strip_prefix('@')).map(str::to_string).or_else(|| starter.clone())
+                    .unwrap_or_else(|| fail(EXIT_USAGE, "--wake needs someone to wake: tmm task start build --wake @lead -- make"));
+                let exe = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "tmm".into());
+                wake_shell(name, &to, &project, starter.as_deref(), &exe, env("XDG_CONFIG_HOME").as_deref(), env("TMM_SERVER").as_deref())
+            });
+            let t = tasks::start(name, cmdv, session.as_deref(), flags.contains_key("replace"), wake.as_deref())
                 .unwrap_or_else(|e| task_fail(e));
             if json {
                 println!("{}", task_value(&t));
             } else {
                 println!("✓ started {} in {} (pane {}, pid {})", t.name, t.target(), t.pane, t.pid);
                 println!("  logs: tmm task logs {}", t.name);
+                if wake.is_some() {
+                    println!("  wakes the agent when it ends by itself (not on tmm task stop)");
+                }
             }
             reap_at_the_door(Some(name), json);
         }
@@ -1220,7 +1258,7 @@ fn split_flags(args: &[String]) -> (std::collections::HashMap<String, Option<Str
     const VALUED: &[&str] = &["project", "agent", "server", "output", "since", "limit", "brief",
                           "name", "session", "with-agent", "backend", "model", "effort", "input-mode", "system", "skills", "mcp",
                           "ref", "source", "description", "def", "grep", "image", "body", "assignee", "team", "file",
-                          "in", "at"];
+                          "in", "at", "to", "code", "signal"];
     let mut flags = std::collections::HashMap::new();
     let mut pos = Vec::new();
     let mut repeats: Vec<(String, String)> = Vec::new();
@@ -1399,6 +1437,41 @@ async fn follow_log(ctx: &Ctx, session: &str, mut since: i64, limit: i64) {
     }
 }
 
+/// The last lines of a finished task a wake carries (board #275).
+const WAKE_TAIL_LINES: usize = 15;
+
+/// The hook's shell command for a `--wake` task (board #275): `tmm task wake`
+/// with the project, the starter and where the server is, and the exit
+/// status / signal left as tmux placeholders filled in at death. Every
+/// literal is shell-quoted and `#`-escaped for tmux's format expansion; the
+/// token is NOT carried (tmm reads it from config, as an agent's tmm does).
+fn wake_shell(name: &str, to: &str, project: &str, starter: Option<&str>, exe: &str, config: Option<&str>, server: Option<&str>) -> String {
+    let q = |v: &str| tasks::format_literal(&tmux_mobile::shell::quote_always(v));
+    let mut env = vec![format!("TMM_PROJECT={}", q(project))];
+    if let Some(a) = starter { env.push(format!("TMM_AGENT={}", q(a))); }
+    if let Some(c) = config { env.push(format!("XDG_CONFIG_HOME={}", q(c))); }
+    if let Some(s) = server { env.push(format!("TMM_SERVER={}", q(s))); }
+    format!(
+        "{} {} task wake {} --to {} --code '#{{pane_dead_status}}' --signal '#{{pane_dead_signal}}' >/dev/null 2>&1",
+        env.join(" "), q(exe), q(name), q(to)
+    )
+}
+
+/// The wake a finished task sends: who, which task, how it ended, after how
+/// long, and its last lines. An `@` in the output is defused (a zero-width
+/// space after it), so a log line never addresses someone (board #275).
+fn task_end_body(to: &str, name: &str, code: &str, signal: &str, age: Option<u64>, tail: &str) -> String {
+    let how = if !signal.is_empty() { format!("killed:{signal}") } else { format!("exited:{code}") };
+    let after = age.map(|a| format!(" after {}", tasks::fmt_age(Some(a)))).unwrap_or_default();
+    let lines: Vec<String> = tail.lines().map(|l| l.chars().take(200).collect::<String>().replace('@', "@\u{200b}")).collect();
+    let tail = lines.join("\n");
+    if tail.trim().is_empty() {
+        format!("@{to} task {name} {how}{after}")
+    } else {
+        format!("@{to} task {name} {how}{after}; last lines:\n```\n{tail}\n```")
+    }
+}
+
 /// `--in` (board #275): `10s`, `10m`, `2h`, `1d`, or a sum such as `1h30m`;
 /// at least 10 seconds. Seconds.
 fn parse_in(text: &str) -> Result<i64, String> {
@@ -1556,6 +1629,17 @@ mod tests {
         assert_eq!(until(40), "in 40s");
         assert_eq!(until(21000), "in 5h 50m");
         assert_eq!(until(-5), "overdue");
+    }
+
+    #[test]
+    fn a_task_end_wake_says_how_it_ended_and_addresses_only_its_target() {
+        let body = task_end_body("lead", "build", "7", "", Some(125), "ok\nmail dev@x and @all please\n");
+        assert!(body.starts_with("@lead task build exited:7 after 2m; last lines:\n```\n"), "{body}");
+        assert_eq!(tmux_mobile::address::mention_names(&body), vec!["lead".to_string()], "the log's @all addresses nobody: {body}");
+        assert_eq!(task_end_body("dev", "t", "", "15", None, ""), "@dev task t killed:15");
+        let shell = wake_shell("build", "lead", "my proj", Some("dev"), "/bin/tmm", None, None);
+        assert_eq!(shell, "TMM_PROJECT='my proj' TMM_AGENT='dev' '/bin/tmm' task wake 'build' --to 'lead' --code '#{pane_dead_status}' --signal '#{pane_dead_signal}' >/dev/null 2>&1");
+        assert!(wake_shell("a#b", "x", "p", None, "/t", None, None).contains("'a##b'"), "a literal # is escaped for tmux");
     }
 
     #[test]
