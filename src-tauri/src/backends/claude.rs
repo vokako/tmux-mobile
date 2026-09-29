@@ -453,3 +453,33 @@ pub(crate) fn is_idle_nudge(payload: &Value) -> bool {
     payload.get("hook_event_name").and_then(Value::as_str) == Some("Notification")
         && payload.get("notification_type").and_then(Value::as_str) == Some("idle_prompt")
 }
+// ---- transient model errors: the auto-continue shapes (projects/recovery.rs, board #280) ----
+
+/// Claude Code's shape (Claude Code 2.1.284 on Amazon Bedrock, board #280,
+/// 2026-09-29): `● API Error: 503 Bedrock is unable to process your request.
+/// This is a server-side issue, usually temporary — try again in a moment.
+/// If it persists, check your Amazon Bedrock service status.`, the `●`
+/// bullet flush-left and the rest hard-wrapped with two-space indents
+/// (captured at 100 and 57 columns). It carries no request id, so the block
+/// must be EXACTLY this text with only whitespace collapsed; its own words
+/// say it is transient ("usually temporary — try again"). The status code is
+/// the only variable part, and it must be a 5xx.
+const CLAUDE_BEDROCK_5XX: (&str, &str) = (
+    "● API Error: ",
+    " Bedrock is unable to process your request. This is a server-side issue, usually temporary — try again in a moment. If it persists, check your Amazon Bedrock service status.",
+);
+
+/// Is this block, its lines joined with spaces, exactly Claude Code's
+/// transient Bedrock server error?
+fn claude_bedrock_5xx(spaced: &str) -> bool {
+    let flat = spaced.split_whitespace().collect::<Vec<_>>().join(" ");
+    let Some(rest) = flat.strip_prefix(CLAUDE_BEDROCK_5XX.0) else { return false };
+    let Some(code) = rest.strip_suffix(CLAUDE_BEDROCK_5XX.1) else { return false };
+    code.len() == 3 && code.starts_with('5') && code.chars().all(|c| c.is_ascii_digit())
+}
+
+
+/// Is this reassembled paint block Claude Code's OWN transient-error shape?
+pub(crate) fn transient_error(_glued: &str, spaced: &str) -> bool {
+    claude_bedrock_5xx(spaced)
+}

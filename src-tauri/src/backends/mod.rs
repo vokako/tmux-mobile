@@ -142,6 +142,19 @@ impl Backend {
         }
     }
 
+    /// Does this reassembled pane paint block show one of THIS backend's own
+    /// transient model errors (auto-continue, `projects/recovery.rs`)? Each
+    /// backend owns its measured shapes in its own file (board #280): one
+    /// CLI's text inside another's pane is never a hit. `false` where none
+    /// was measured.
+    pub fn transient_error(self, glued: &str, spaced: &str) -> bool {
+        match self {
+            Backend::Kiro => kiro::transient_error(glued, spaced),
+            Backend::Claude => claude::transient_error(glued, spaced),
+            _ => false,
+        }
+    }
+
     /// The named key that switches queue/steer in a RUNNING session (#271),
     /// where one was measured; `None` = the mode is fixed at launch (codex's
     /// keymap is a launch-line override) or does not exist.
@@ -370,6 +383,17 @@ impl Backend {
         }
     }
 }
+
+/// Lowercase alphanumerics only: the pane wraps the error blob at arbitrary
+/// points (and pads with box furniture), so whitespace and punctuation carry
+/// no signal.
+pub(crate) fn canonical(line: &str) -> String {
+    line.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
+}
+
 
 #[cfg(test)]
 mod tests {

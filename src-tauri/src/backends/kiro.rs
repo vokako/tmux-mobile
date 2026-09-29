@@ -906,6 +906,77 @@ pub(crate) fn is_user_prompt_submit(payload: &Value) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case("userpromptsubmit"))
 }
 
+// ---- transient model errors: the auto-continue shapes (projects/recovery.rs, board #280) ----
+
+/// The error's own header, canonicalized. Everything kiro streams out of a
+/// dead turn starts with this sentence — and since ~2026-08-31 (board #24)
+/// kiro HARD-wraps the paint: header flush-left, the struct dump indented on
+/// real newlines that capture -J cannot rejoin, so the transient markers sit
+/// many physical lines below the header. Detection therefore matches the
+/// reassembled paint BLOCK, and the header must OPEN it (`starts_with`, not
+/// `contains`) — quoted copies always paint under a stamp or bullet head.
+const HEADER: &str = "anunexpectederroroccurred";
+/// Transient markers — the reasons that mean "try again later", canonicalized.
+pub(crate) const TRANSIENT: [&str; 3] = [
+    "unexpectedlyhighload",
+    "modeltemporarilyunavailable",
+    "pleasetryagain",
+];
+/// Second kiro shape (owner, 2026-08-26): `The model you've selected is
+/// temporarily unavailable. Please use '/model' to select a different model
+/// and try again. (request_id: …)`. No "unexpected error" header — the whole
+/// first sentence IS the header, and it is specific enough on its own: it
+/// self-contains the transient reason ("temporarily unavailable"), so a block
+/// opening with it needs no second marker.
+const MODEL_UNAVAILABLE: &str = "themodelyouveselectedistemporarilyunavailable";
+/// Third kiro shape (kiro-cli 2.22.1, `--agent-engine v3`, board #267,
+/// 2026-09-28): `● <model> is experiencing high traffic. Try again, or select
+/// another model. (Request ID: <uuid>)`, hard-wrapped under the `●` bullet
+/// head that v3 also gives its prose and tool calls. It has no header of its
+/// own, so the block must be EXACTLY the error, punctuation included, with
+/// only whitespace collapsed (a hard wrap is a space): the bullet, a short
+/// model name, this sentence, a canonical 8-4-4-4-12 uuid and the closing
+/// `)` at block end. Letters alone are not enough (validator 15:04): a
+/// rewording without the parenthesis, the colon or the close paren is prose
+/// ABOUT the error, and a false hit types `continue` into a working agent.
+const HIGH_TRAFFIC: &str = " is experiencing high traffic. Try again, or select another model. (Request ID: ";
+/// "Claude Opus 4.1 (1M context)" is five.
+const MODEL_NAME_WORDS: usize = 5;
+
+/// `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`, hex digits only.
+fn is_uuid(id: &str) -> bool {
+    let parts: Vec<&str> = id.split('-').collect();
+    parts.len() == 5
+        && parts.iter().zip([8, 4, 4, 4, 12]).all(|(p, n)| p.len() == n && p.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// Is this block, its lines joined with spaces, exactly the high-traffic error?
+fn high_traffic(spaced: &str) -> bool {
+    let flat = spaced.split_whitespace().collect::<Vec<_>>().join(" ");
+    let Some(body) = flat.strip_prefix("● ") else { return false };
+    let Some(at) = body.find(HIGH_TRAFFIC) else { return false };
+    let name = &body[..at];
+    let words = name.split(' ').count();
+    if name.is_empty()
+        || words > MODEL_NAME_WORDS
+        || !name.chars().all(|c| c.is_ascii_alphanumeric() || " .-()".contains(c))
+    {
+        return false;
+    }
+    body[at + HIGH_TRAFFIC.len()..].strip_suffix(')').is_some_and(is_uuid)
+}
+
+
+/// Is this reassembled paint block one of kiro's OWN transient-error shapes
+/// (board #280: each backend owns its shapes)? `glued` is the block with its
+/// lines joined without separators, `spaced` with spaces.
+pub(crate) fn transient_error(glued: &str, spaced: &str) -> bool {
+    let c = super::canonical(glued);
+    (c.starts_with(HEADER) && TRANSIENT.iter().any(|m| c.contains(m)))
+        || c.starts_with(MODEL_UNAVAILABLE)
+        || high_traffic(spaced)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
