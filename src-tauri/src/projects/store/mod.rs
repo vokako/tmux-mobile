@@ -26,10 +26,12 @@ mod projects;
 mod registry;
 mod rooms;
 mod schema;
+mod wakes;
 pub use activity::{ActivityRow, CommandLife, DeliveryRow, TurnFact, TurnFacts};
 pub use projects::{Project, Slot, SlotKind};
 pub use registry::{RegAgent, RegMcp, RegSkill, RegTeam};
 pub use rooms::HubMsg;
+pub use wakes::Wake;
 
 pub struct Store {
     conn: Connection,
@@ -126,7 +128,8 @@ impl Store {
         self.ensure_input_mode()?;
         self.ensure_delivery_held()?;
         self.ensure_activity_requesters()?;
-        self.ensure_delivery_command()
+        self.ensure_delivery_command()?;
+        self.ensure_wakes()
     }
 
     // ---- archived messages ----------------------------------------------

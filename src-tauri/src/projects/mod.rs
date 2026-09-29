@@ -35,6 +35,7 @@ pub mod store;
 pub mod teams;
 pub mod telemetry;
 pub mod vitals;
+pub mod wakes;
 
 // Every path a caller names stays `projects::X` (board #152).
 pub use board::{BOARD_STATUSES, ISSUE_REF_CHARS, board_counts, board_delete, board_get, board_list, board_note, board_save, issue_ref};

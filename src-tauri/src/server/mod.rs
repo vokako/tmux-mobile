@@ -166,6 +166,8 @@ pub async fn start_with_socket(
         // Lines held for a busy queue-mode agent (board #257) whose turn a
         // restart finds over are typed now, not at the first feed read.
         tokio::task::spawn_blocking(crate::projects::delivery::flush_on_start);
+        // Scheduled wakes (board #275): one sleeper; missed ones fire once now.
+        tokio::spawn(crate::projects::wakes::run(hub_rpc::fire_wake));
     }
 
     // Load TLS config if cert+key provided

@@ -124,7 +124,10 @@ When a managed window's stop hook fires, `maybe_auto_post` always records the
 final response in the room. `TeamRoomPoster` then types
 `[tmm chat <ts>] <agent>: [reply] <final>` into each stored sender's pane with
 the ordinary delivery-receipt bookkeeping. The `[reply]` marker makes delivery
-one hop, so two stop hooks cannot ping-pong.
+one hop, so two stop hooks cannot ping-pong. An agent is never its own reply
+target (board #275): a prompt it sent itself, a self-wake, returns nothing,
+because the answer would be typed back into the same pane
+(`an_agent_is_never_its_own_reply_target`).
 
 The managed-home gate excludes hand-started agents, final text is capped at
 `MAX_REPLY_CHARS = 6144`, and reply targets are removed when used. If the

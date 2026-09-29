@@ -40,6 +40,11 @@ USAGE (agent):
   tmm send "@name /command [args]"    type a CLI command (e.g. /compact) into a teammate's
                                       pane verbatim, like the composer (@all = everyone else)
   tmm send <text> --status            record ambient progress in the project room
+  tmm send "@name text" --in 10m | --at 14:30   schedule it: delivered then as a
+                                      "[wake] …" line, like one sent now (you may wake
+                                      yourself); prints the resolved time and wake id
+  tmm wake list [--all]               pending wakes (this project, or every project)
+  tmm wake cancel <id>                cancel one you set (the human may cancel any)
                     [--image <path|url>]   attach an image by REFERENCE (repeatable);
                                       a local path is resolved by the client
   tmm log [--since <ts>] [--limit N] [-f]   read chat; --since is exclusive, -f follows
@@ -252,6 +257,28 @@ async fn main() {
             }
             let session = need_project(&ctx);
             let from = ctx.agent.clone().unwrap_or_else(|| "human".into());
+            // Later, not now (board #275): a wake, fired by the server.
+            let at = flags.get("at").cloned().flatten();
+            let within = flags.get("in").cloned().flatten();
+            if at.is_some() || within.is_some() || flags.contains_key("at") || flags.contains_key("in") {
+                if is_status {
+                    fail(EXIT_USAGE, "--status is ambient progress now; it cannot be scheduled");
+                }
+                let now = chrono::Local::now();
+                let due = match (within.as_deref(), at.as_deref()) {
+                    (Some(d), None) => parse_in(d).map(|s| now.timestamp() + s),
+                    (None, Some(t)) => parse_at(t, now),
+                    _ => Err("give one of --in <10m|2h|1h30m> or --at <14:30|2026-09-30 09:00>".into()),
+                }
+                .unwrap_or_else(|e| fail(EXIT_USAGE, &e));
+                let w = rpc(&ctx, "hub_wake_add", json!({ "session": session, "from": from, "body": body, "due": due })).await;
+                if ctx.json {
+                    println!("{w}");
+                } else {
+                    println!("✓ wake #{} at {} ({}) — cancel: tmm wake cancel {}", w["id"], local_time(due), until(due - now.timestamp()), w["id"]);
+                }
+                return;
+            }
             // A `/command` goes to the CLI, not its model — the composer's
             // rule, read by the same `address::slash_command` (board #274):
             // typed verbatim through hub_command, no chat stamp.
@@ -320,6 +347,40 @@ async fn main() {
         // The project task board: the human writes issues on the board page,
         // agents keep their status current here. Identity = the caller
         // (TMM_AGENT, else "human"), same as chat.
+        // Scheduled wakes (board #275): list and cancel; `send --in/--at` adds.
+        ("wake", rest) => {
+            let session = need_project(&ctx);
+            let who = ctx.agent.clone().unwrap_or_else(|| "human".into());
+            match rest.first().map(String::as_str).unwrap_or("list") {
+                "list" => {
+                    let all = flags.contains_key("all");
+                    let r = rpc(&ctx, "hub_wake_list", json!({ "session": session, "all": all })).await;
+                    if ctx.json {
+                        println!("{r}");
+                        return;
+                    }
+                    let rows = r["wakes"].as_array().cloned().unwrap_or_default();
+                    if rows.is_empty() {
+                        println!("no pending wakes");
+                    }
+                    let now = chrono::Local::now().timestamp();
+                    for w in rows {
+                        let due = w["due_at"].as_i64().unwrap_or(0);
+                        let body: String = w["body"].as_str().unwrap_or("").chars().take(60).collect();
+                        let place = if all { format!("{} ", w["session"].as_str().unwrap_or("")) } else { String::new() };
+                        println!("#{:<4} {} ({:>7})  {place}{}: {body}", w["id"], local_time(due), until(due - now), w["sender"].as_str().unwrap_or(""));
+                    }
+                }
+                "cancel" => {
+                    let Some(id) = rest.get(1).and_then(|s| s.trim_start_matches('#').parse::<i64>().ok()) else {
+                        fail(EXIT_USAGE, "wake cancel <id>  (the id from tmm wake list)");
+                    };
+                    let r = rpc(&ctx, "hub_wake_cancel", json!({ "session": session, "id": id, "by": who })).await;
+                    if ctx.json { println!("{r}") } else { println!("✓ cancelled wake #{id}") }
+                }
+                other => fail(EXIT_USAGE, &format!("unknown wake verb '{other}': list | cancel <id>")),
+            }
+        }
         ("board", rest) => {
             let session = need_project(&ctx);
             let who = ctx.agent.clone().unwrap_or_else(|| "human".into());
@@ -1158,7 +1219,8 @@ fn has_address(body: &str) -> bool {
 fn split_flags(args: &[String]) -> (std::collections::HashMap<String, Option<String>>, Vec<String>, Vec<(String, String)>) {
     const VALUED: &[&str] = &["project", "agent", "server", "output", "since", "limit", "brief",
                           "name", "session", "with-agent", "backend", "model", "effort", "input-mode", "system", "skills", "mcp",
-                          "ref", "source", "description", "def", "grep", "image", "body", "assignee", "team", "file"];
+                          "ref", "source", "description", "def", "grep", "image", "body", "assignee", "team", "file",
+                          "in", "at"];
     let mut flags = std::collections::HashMap::new();
     let mut pos = Vec::new();
     let mut repeats: Vec<(String, String)> = Vec::new();
@@ -1337,6 +1399,67 @@ async fn follow_log(ctx: &Ctx, session: &str, mut since: i64, limit: i64) {
     }
 }
 
+/// `--in` (board #275): `10s`, `10m`, `2h`, `1d`, or a sum such as `1h30m`;
+/// at least 10 seconds. Seconds.
+fn parse_in(text: &str) -> Result<i64, String> {
+    let bad = || format!("--in '{text}': use a duration such as 90s, 10m, 2h, 1h30m or 1d");
+    let (mut total, mut n) = (0i64, String::new());
+    for c in text.trim().chars() {
+        if c.is_ascii_digit() {
+            n.push(c);
+            continue;
+        }
+        let unit = match c { 's' => 1, 'm' => 60, 'h' => 3600, 'd' => 86400, _ => return Err(bad()) };
+        total += n.parse::<i64>().map_err(|_| bad())?.checked_mul(unit).ok_or_else(bad)?;
+        n.clear();
+    }
+    if !n.is_empty() || total == 0 {
+        return Err(bad());
+    }
+    if total < 10 {
+        return Err(format!("--in '{text}': at least 10s"));
+    }
+    Ok(total)
+}
+
+/// `--at` (board #275, orchestrator 08:20 C): `HH:MM` is its NEXT
+/// occurrence — today, or tomorrow when already past; a full local
+/// `YYYY-MM-DD HH:MM` (or with `T`) is taken as written. Unix seconds.
+fn parse_at(text: &str, now: chrono::DateTime<chrono::Local>) -> Result<i64, String> {
+    use chrono::{Local, NaiveDateTime, NaiveTime, TimeZone};
+    let t = text.trim();
+    let local = |naive: NaiveDateTime| {
+        Local.from_local_datetime(&naive).earliest().map(|d| d.timestamp()).ok_or_else(|| format!("--at '{t}': no such local time"))
+    };
+    if let Ok(time) = NaiveTime::parse_from_str(t, "%H:%M") {
+        let today = local(now.date_naive().and_time(time))?;
+        return if today > now.timestamp() { Ok(today) } else { local((now.date_naive() + chrono::Days::new(1)).and_time(time)) };
+    }
+    for f in ["%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M"] {
+        if let Ok(naive) = NaiveDateTime::parse_from_str(t, f) {
+            return local(naive);
+        }
+    }
+    Err(format!("--at '{t}': use 14:30 or 2026-09-30 09:00"))
+}
+
+fn local_time(unix: i64) -> String {
+    chrono::DateTime::from_timestamp(unix, 0)
+        .map(|d| d.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_default()
+}
+
+/// "in 5h 50m" / "in 40s" / "overdue".
+fn until(secs: i64) -> String {
+    match secs {
+        s if s < 0 => "overdue".into(),
+        s if s < 60 => format!("in {s}s"),
+        s if s < 3600 => format!("in {}m", s / 60),
+        s if s < 86400 => format!("in {}h {}m", s / 3600, s % 3600 / 60),
+        s => format!("in {}d {}h", s / 86400, s % 86400 / 3600),
+    }
+}
+
 /// Where `tmm send` takes a body (board #274). `plain` = no `--status` and
 /// no image: only plain text can be a command, as in the composer.
 #[derive(Debug, PartialEq, Eq)]
@@ -1398,6 +1521,41 @@ mod tests {
         assert_eq!(send_route("@dev please /compact", "lead", true), SendRoute::Post);
         assert_eq!(send_route("@dev /usr/bin/ls", "lead", true), SendRoute::Post);
         assert_eq!(send_route("/compact", "lead", true), SendRoute::Post, "no target: a message, as in the composer");
+    }
+
+    /// `--in` / `--at` take a value; were they boolean, "10m" would join the text.
+    #[test]
+    fn in_and_at_are_valued_flags() {
+        let args: Vec<String> = ["send", "@dev check", "--in", "10m", "--at", "14:30"].iter().map(|s| s.to_string()).collect();
+        let (flags, pos, _) = split_flags(&args);
+        assert_eq!(pos, vec!["send", "@dev check"]);
+        assert_eq!(flags.get("in").cloned().flatten().as_deref(), Some("10m"));
+        assert_eq!(flags.get("at").cloned().flatten().as_deref(), Some("14:30"));
+    }
+
+    /// Board #275: the two time doors.
+    #[test]
+    fn in_and_at_resolve_to_one_absolute_time() {
+        assert_eq!(parse_in("90s"), Ok(90));
+        assert_eq!(parse_in("10m"), Ok(600));
+        assert_eq!(parse_in("1h30m"), Ok(5400));
+        assert_eq!(parse_in("2d"), Ok(172800));
+        for bad in ["", "10", "5s", "m", "10x", "1.5h", "-3m"] {
+            assert!(parse_in(bad).is_err(), "{bad:?}");
+        }
+        use chrono::TimeZone;
+        let now = chrono::Local.with_ymd_and_hms(2026, 9, 29, 8, 30, 0).unwrap();
+        let at = |y, mo, d, h, mi| chrono::Local.with_ymd_and_hms(y, mo, d, h, mi, 0).unwrap().timestamp();
+        assert_eq!(parse_at("14:30", now), Ok(at(2026, 9, 29, 14, 30)), "later today");
+        assert_eq!(parse_at("08:00", now), Ok(at(2026, 9, 30, 8, 0)), "already past today: tomorrow (orchestrator 08:20 C)");
+        assert_eq!(parse_at("08:30", now), Ok(at(2026, 9, 30, 8, 30)), "now is not the future");
+        assert_eq!(parse_at("2026-10-01 09:15", now), Ok(at(2026, 10, 1, 9, 15)));
+        assert_eq!(parse_at("2026-10-01T09:15", now), Ok(at(2026, 10, 1, 9, 15)));
+        assert!(parse_at("25:00", now).is_err());
+        assert!(parse_at("tomorrow", now).is_err());
+        assert_eq!(until(40), "in 40s");
+        assert_eq!(until(21000), "in 5h 50m");
+        assert_eq!(until(-5), "overdue");
     }
 
     #[test]

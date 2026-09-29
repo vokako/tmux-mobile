@@ -805,7 +805,11 @@ export interface HubAgent {
   /** queue|steer the session RUNS now, derived from its pane (board #271);
    * null where the backend has no such choice. */
   input_mode?: 'queue' | 'steer' | null;
+  /** The soonest pending wake addressed to this agent (board #275): when
+   * (unix seconds), who set it, how many more follow; null when none. */
+  wake?: HubWake | null;
 }
+export interface HubWake { due_at: number; from: string; more: number }
 export const hubPost = (session: string, body: string, from = 'human') =>
   call('hub_post', { session, body, from });
 /** Type a slash command into an agent's pane VERBATIM — no stamp, no sender, no

@@ -198,7 +198,7 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
             if !record_only {
                 let seq = msg.get("seq").and_then(|v| v.as_i64());
                 let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-                deliver_mentions(session, from, &body, &room, seq, id);
+                deliver_mentions(session, from, &body, &room, seq, id, false);
             }
             Ok(msg)
         }
@@ -622,6 +622,27 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
         // when the pane already runs `mode`, and after ONE key the screen
         // must show the new mode, or the call fails — never a blind second
         // press that could toggle it back.
+        // Scheduled wakes (board #275): `tmm send "@name text" --in/--at`
+        // declares one; the server's sleeper fires it (`fire_wake`).
+        "hub_wake_add" => {
+            let from = p.get("from").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or("human");
+            let body = param(p, "body")?;
+            let due = p.get("due").and_then(|v| v.as_i64()).ok_or_else(|| RpcError::InvalidParams("missing required param: due".into()))?;
+            let w = crate::projects::wakes::schedule(session, from, body, due).map_err(RpcError::InvalidParams)?;
+            Ok(serde_json::to_value(&w).unwrap_or_default())
+        }
+        "hub_wake_list" => {
+            let all = p.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
+            let wakes = crate::projects::wakes::pending(if all { None } else { Some(session) });
+            Ok(serde_json::json!({ "wakes": wakes }))
+        }
+        "hub_wake_cancel" => {
+            let id = p.get("id").and_then(|v| v.as_i64()).ok_or_else(|| RpcError::InvalidParams("missing required param: id".into()))?;
+            let by = p.get("by").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or("human");
+            crate::projects::wakes::cancel(session, id, by).map_err(RpcError::InvalidParams)?;
+            Ok(serde_json::json!({ "id": id, "cancelled": true }))
+        }
+
         "hub_agent_input_mode" => {
             let agent = param(p, "agent")?;
             let mode = param(p, "mode")?;
@@ -1148,6 +1169,7 @@ fn deliver_mentions(
     room: &str,
     before_seq: Option<i64>,
     msg_id: &str,
+    to_sender: bool,
 ) {
     use crate::projects::agents;
 
@@ -1190,7 +1212,10 @@ fn deliver_mentions(
             continue;
         }
         let is_agent = agents::detect_pane(ws.as_deref(), p).is_some();
-        if !is_agent || p.window_name == from {
+        // The sender is skipped: a line is never typed back into the pane
+        // that sent it. A fired wake is the one exception (`to_sender`,
+        // board #275): an agent that scheduled "@me later" must be woken.
+        if !is_agent || (p.window_name == from && !to_sender) {
             continue;
         }
         // MANAGED windows only. `@all` would otherwise type into a kiro the user
@@ -1221,6 +1246,44 @@ fn deliver_mentions(
         // it (#250, copy mode) is said in the feed.
         crate::projects::delivery::deliver(session, &p.window_name, &target, &line, msg_id);
     }
+}
+
+/// The soonest pending wake addressed to `name` (an `@name` or `@all` in
+/// its body), for the card's hover: `{due_at, from, more}` where `more` is
+/// how many others follow; null when none (board #275).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn next_wake(wakes: &[crate::projects::store::Wake], name: &str) -> serde_json::Value {
+    let mut mine = wakes
+        .iter()
+        .filter(|w| crate::address::mention_names(&w.body).iter().any(|m| m == name || m == "all"));
+    match mine.next() {
+        Some(w) => serde_json::json!({ "due_at": w.due_at, "from": w.sender, "more": mine.count() }),
+        None => serde_json::Value::Null,
+    }
+}
+
+/// Fire one scheduled wake (board #275), called by `projects::wakes::run`
+/// on a blocking thread. Claim first, so a wake posts at most once; then the
+/// ordinary post-and-deliver path as its scheduler, with the sender included
+/// (a self-wake reaches its own pane). The project is resolved NOW, so a
+/// rename since scheduling still finds it; recipients are read NOW.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub(super) fn fire_wake(w: &crate::projects::store::Wake) {
+    if !crate::projects::wakes::claim(w) {
+        return;
+    }
+    let session = crate::projects::project_for_session(&w.session)
+        .ok()
+        .flatten()
+        .map(|p| p.session)
+        .unwrap_or_else(|| w.session.clone());
+    let room = project_room(&session);
+    let body = crate::projects::wakes::fired_body(w, crate::projects::now() as i64);
+    let recipients = crate::address::mention_names(&body);
+    let Ok(msg) = crate::projects::rooms::post_routed(&room, &w.sender, &body, &recipients) else { return };
+    let seq = msg.get("seq").and_then(|v| v.as_i64());
+    let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+    deliver_mentions(&session, &w.sender, &body, &room, seq, id, true);
 }
 
 /// One row per live window: name, command, agent detection, derived status,
@@ -1260,6 +1323,9 @@ fn agent_states(session: &str) -> serde_json::Value {
 
     // Each window's pane id: the live input mode is remembered per pane (#271).
     let pane_ids: std::collections::HashMap<String, String> = crate::tmux::list_named_windows(session).into_iter().collect();
+    // Pending wakes, soonest first (board #275): each card's hover names the
+    // next one addressed to it.
+    let wakes = crate::projects::wakes::pending(Some(session));
     let rows: Vec<serde_json::Value> = windows
         .values()
         .map(|p| {
@@ -1316,6 +1382,7 @@ fn agent_states(session: &str) -> serde_json::Value {
                 "vitals": if vitals.is_empty() { serde_json::Value::Null } else { serde_json::to_value(&vitals).unwrap_or(serde_json::Value::Null) },
                 // queue|steer this session runs, where the backend has the choice (#271).
                 "input_mode": input_mode,
+                "wake": if managed { next_wake(&wakes, &p.window_name) } else { serde_json::Value::Null },
             })
         })
         .collect();
@@ -2151,6 +2218,74 @@ mod tests {
             ],
             "one line per command, under its sender; the refused one records nothing"
         );
+    }
+
+    /// Board #275: a fired wake is posted ONCE, as its scheduler, and typed
+    /// into the scheduler's own pane when it names itself — the one exception
+    /// to "never back into the sender". Controls in the same test: an
+    /// ordinary `hub_post` from dev to `@dev` types nothing, and a second
+    /// fire of the same wake does nothing (claimed).
+    #[test]
+    fn a_fired_wake_reaches_its_own_sender_once() {
+        crate::projects::tests::use_test_store();
+        let session = format!("tmm-wake-{}", uuid::Uuid::new_v4());
+        let ws = std::env::temp_dir().join(format!("tmm-wake-ws-{}", uuid::Uuid::new_v4()));
+        for name in ["dev", "lead"] {
+            let home = ws.join(".tmm/agents").join(name);
+            std::fs::create_dir_all(&home).unwrap();
+            std::fs::write(
+                home.join("launch.json"),
+                serde_json::json!({ "backend": "kiro", "cmd": format!("kiro-cli chat --agent {name}"), "team": "" }).to_string(),
+            )
+            .unwrap();
+        }
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "-n", "dev", "-c", &ws.to_string_lossy(), "cat"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            let _ = std::fs::remove_dir_all(&ws);
+            return;
+        }
+        let _cleanup = KillOnDrop(session.clone(), ws.clone());
+        std::process::Command::new("tmux")
+            .args(["new-window", "-d", "-t", &session, "-n", "lead", "-c", &ws.to_string_lossy(), "cat"])
+            .status()
+            .unwrap();
+        crate::projects::adopt(&session, Some("wake-test")).expect("adopt project");
+        let control = handle_hub_request(&req("hub_post", serde_json::json!({ "session": session, "from": "dev", "body": "@dev note to self now" })), None);
+        assert!(control.error.is_none(), "{:?}", control.error.map(|e| e.message));
+        let now = crate::projects::now() as i64;
+        let add = handle_hub_request(&req("hub_wake_add", serde_json::json!({ "session": session, "from": "dev", "body": "@dev check the build", "due": now })), None);
+        let w: crate::projects::store::Wake = serde_json::from_value(add.result.expect("scheduled")).unwrap();
+        fire_wake(&w);
+        fire_wake(&w);
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let dev = crate::tmux::capture_pane_plain(&format!("{session}:dev"), Some(0)).unwrap_or_default();
+        let lead = crate::tmux::capture_pane_plain(&format!("{session}:lead"), Some(0)).unwrap_or_default();
+        let room: Vec<(String, String)> = handle_hub_request(&req("hub_log", serde_json::json!({ "session": session })), None)
+            .result
+            .and_then(|v| v.get("messages").and_then(|m| m.as_array()).cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|m| Some((m.get("from")?.as_str()?.to_string(), m.get("body")?.as_str()?.to_string())))
+            .collect();
+        assert!(!dev.contains("note to self now"), "an ordinary line is never typed back into its sender: {dev:?}");
+        assert!(dev.contains("dev: [wake] @dev check the build"), "the wake reaches its own sender: {dev:?}");
+        // Once: `cat` shows a typed line twice (tty echo + its output), so the
+        // count is the delivery row the one typing recorded.
+        let owed = crate::projects::telemetry::owed_rows(&session, "dev");
+        assert_eq!(owed.len(), 1, "typed once, not per fire: {owed:?}");
+        assert!(!lead.contains("[wake]"), "nobody else was addressed: {lead:?}");
+        assert_eq!(
+            room.iter().filter(|(_, b)| b.starts_with("[wake]")).cloned().collect::<Vec<_>>(),
+            vec![("dev".to_string(), "[wake] @dev check the build".to_string())],
+            "one room record, at fire time, under its scheduler"
+        );
+        let list = handle_hub_request(&req("hub_wake_list", serde_json::json!({ "session": session })), None);
+        assert_eq!(list.result.unwrap()["wakes"], serde_json::json!([]), "a fired wake is no longer pending");
     }
 
     /// Board #250 (validator 17:35): `hub_command` to `all` where one pane is

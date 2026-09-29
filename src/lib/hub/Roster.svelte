@@ -5,7 +5,7 @@
   import { untrack } from 'svelte';
   import { ALL_TARGET, targetMembers, targetTeam, teamTarget } from './hub-composer.ts';
   import { backendIcon } from '../core/agents.ts';
-  import { backendColor, stateDotColor, stateIsLive, chipExtras, ctxColor, fmtElapsed, modelLabel, namedGroup, rosterGroups, rosterMarker, sortAgentsForRoster } from './hub.ts';
+  import { backendColor, stateDotColor, stateIsLive, chipExtras, ctxColor, fmtElapsed, wakeLine, modelLabel, namedGroup, rosterGroups, rosterMarker, sortAgentsForRoster } from './hub.ts';
   import { hoverInfo } from '../ui/hover.ts';
   import { longpress } from '../ui/longpress.ts';
   import { anchorOf } from '../ui/placement.ts';
@@ -186,6 +186,7 @@
     if (model) lines.push({ label: t('hubHoverModel'), value: model });
     if (a.vitals?.context_pct != null) lines.push({ label: t('hubHoverCtx'), value: `${a.vitals.context_pct}%` });
     if (a.input_mode) lines.push({ label: t('hubHoverMode'), value: a.input_mode === 'steer' ? 'Steer' : 'Queue' });
+    if (a.wake) lines.push({ label: t('hubHoverWake'), value: wakeLine(a.wake) });
     if (a.since) lines.push({ label: t('hubHoverSince'), value: fmtElapsed(a.since, tick) });
     if (a.team) lines.push({ label: t('teamsTitle'), value: a.team });
     lines.push({ label: t('hubHoverTarget'), value: `${selected}:${a.window}` });

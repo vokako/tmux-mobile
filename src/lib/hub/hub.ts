@@ -1103,6 +1103,18 @@ export function isSessionStart(text: string | null | undefined): boolean {
   return /^\[[^\]]+\]\s*\(session start\)$/.test(t) || /^\[[^\]]+\]\s*Start now:/.test(t);
 }
 
+/** The card hover's wake row (board #275): the soonest pending wake for
+ * this agent as local `HH:MM` (with the date when not today), who set it,
+ * and `+N` for the others waiting behind it. Pure. */
+export function wakeLine(wake: { due_at: number; from: string; more: number }, now = new Date()): string {
+  const at = new Date(wake.due_at * 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  const sameDay = at.toDateString() === now.toDateString();
+  const when = sameDay ? time : `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${time}`;
+  return [when, wake.from].join(' · ') + (wake.more > 0 ? ` +${wake.more}` : '');
+}
+
 /** The card menu's queue ⇄ steer item for one agent (board #271), or null
  * when there is none to offer: the server must report the mode the session
  * RUNS (`input_mode`, derived from the pane) and the backend must switch it

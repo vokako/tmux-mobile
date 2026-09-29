@@ -139,9 +139,15 @@ impl AgentNotificationHub {
         self.state.lock().unwrap().reply_targets.contains_key(&window_key(session, window))
     }
 
+    /// The reply edge's targets at the turn's end — never the agent itself
+    /// (board #275): a self-wake's prompt names the agent as its own sender,
+    /// and replying to it would type the answer back into the same pane, a
+    /// loop. True in general, not a wake special case.
     fn take_reply_targets(&self, session: &str, window: &str) -> Vec<String> {
         let epoch = turn_epoch(session, window);
-        self.current_members(session, window, epoch)
+        let mut targets = self.current_members(session, window, epoch);
+        targets.retain(|t| t != window);
+        targets
     }
 
     /// The open turn's members: the memo when it was built in THIS epoch,
@@ -738,6 +744,24 @@ fn unix_seconds() -> u64 {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Board #275: an agent is never its own reply target. A self-wake's
+    /// prompt names the agent as its sender; replying would type the answer
+    /// back into the same pane, a loop. Control: the same prompt from a
+    /// teammate still returns the reply to it.
+    #[test]
+    fn an_agent_is_never_its_own_reply_target() {
+        crate::projects::tests::use_test_store();
+        let session = format!("tmm-self-reply-{}", uuid::Uuid::new_v4());
+        let own = "[tmm chat 2026-09-29 08:50] dev: [wake] @dev check the build";
+        let (hub, root) = AgentNotificationHub::scratch_with_turn(&session, "dev", own);
+        assert!(hub.take_reply_targets(&session, "dev").is_empty(), "no edge back into itself");
+        let _ = std::fs::remove_dir_all(root);
+        let mixed = format!("{own}\n\n[tmm chat 2026-09-29 08:51] lead: @dev and then this");
+        let (hub, root) = AgentNotificationHub::scratch_with_turn(&session, "dev", &mixed);
+        assert_eq!(hub.take_reply_targets(&session, "dev"), vec!["lead".to_string()], "a teammate in the same turn still gets it");
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     /// A legacy build's unread.json is REMOVED at load (the retired unread
     /// inbox must not leave stale reply summaries on disk for ever), and the

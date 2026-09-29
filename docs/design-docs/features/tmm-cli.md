@@ -33,6 +33,9 @@ tmm send "@name <text>"              send to one or more recipients (@all, @huma
 tmm send "@name /command [args]"     typed VERBATIM into its CLI, like the composer (#274);
                                      @name must be a managed agent (else exit 4, nothing
                                      recorded); "@human /x" is a chat message to the person
+tmm send "@name <text>" --in 10m | --at 14:30   a WAKE: delivered then as "[wake] <text>"
+                                     (yourself included); prints the time and wake id (#275)
+tmm wake list [--all] · tmm wake cancel <id>   pending wakes; the setter or the human cancels
 tmm send "<text>" --status           ambient progress; room-only, interrupts nobody
 tmm send … --image <path|url>        attach an image by REFERENCE (repeatable)
 tmm log [--since <ts>] [--limit N] [-f]      read chat; --since exclusive (ms), -f follows
@@ -324,6 +327,18 @@ can get wrong to save three characters.
 - The `tmm-tasks` fallback session keeps one idle shell window (the one tmux
   creates with the session). Harmless, and it keeps the session alive between
   tasks.
+
+## Waking an agent later (`--in` / `--at`, board #275)
+
+Owner, 2026-09-29 08:04: agents running very long jobs sat in `sleep`, which blocks the turn and burns context. `tmm send "@name text" --in 10m` (or `--at 14:30`) lets the agent end its turn instead. The server types the line later, through the same path as a line sent now. No CLI has a native way to do this (measured: kiro-cli 2.22.1 and codex-cli 0.154.0 have nothing; Claude Code 2.1.284's background sessions cannot type into another pane), so one mechanism serves every backend.
+
+- **A declaration.** Each wake is a row of `wakes` (state.db v29, `projects/store/wakes.rs`). It is not a `deliveries` row: a delivery is one line already typed for one window, waiting for its echo, and a wake's recipients are resolved only when it fires. One sleeper (`projects::wakes::run`) waits until the earliest due time; a schedule or cancel wakes it. There is no tick.
+- **At most once.** `fire_wake` claims the row (`fired_at`) before posting, so a second fire does nothing. A crash between the claim and the post loses that one wake rather than doubling it. At server start every past-due row fires once, in due order, and says `(late: was due …)`; there is no drop window, because the 7-day limit already caps the delay (orchestrator 08:20 B).
+- **One fire path, one record.** The fire posts `[wake] <text>` as the SCHEDULER, in the `[reply]` marker shape, and delivers it with `deliver_mentions`. So busy/queue/steer holding and team context apply exactly as for a line sent now, and when A wakes B, B's reply returns to A. The room records it once, when it fires; nothing is posted at scheduling.
+- **Self-wake: two rules.** (1) `deliver_mentions` never types a line back into its sender, except a fired wake (`to_sender`), so "@me later" reaches me. (2) An agent is never its own reply target (`take_reply_targets`): replying to its own wake would type the answer back into the same pane, a loop. Rule 2 holds for every prompt, not only wakes.
+- **Limits.** `--in` is at least 10 s, with units s/m/h/d that can be summed (`1h30m`). `--at HH:MM` is its next occurrence: today, or tomorrow when already past (orchestrator 08:20 C). `YYYY-MM-DD HH:MM` is taken as written. The CLI always prints the resolved local time and the wake id. A wake is at most 7 days ahead, at most 50 are pending per project, and it needs an addressee. A `/command` cannot be scheduled yet (orchestrator 08:20).
+- **See and cancel.** `tmm wake list [--all]` and `tmm wake cancel <id>`. Only the scheduler or the human may cancel, so a teammate cannot drop your reminder (orchestrator 08:20 A). The UI shows the next wake as one hover row on the addressee's card, `wake 14:30 · builder +2` (`hub_agents.wake`, `wakeLine`). There is no badge and no UI cancel (tenet 11).
+- **Pinned by** `a_fired_wake_reaches_its_own_sender_once` (real tmux: an ordinary self-addressed post types nothing, the wake reaches its sender, a second fire types nothing more, one room record), `an_agent_is_never_its_own_reply_target`, `the_sleeper_fires_missed_wakes_once_then_new_ones_on_time`, the store claim/cancel test and the CLI parse tests. Negative controls: dropping the `to_sender` exception, the self-target filter or the claim each fails its test.
 
 ## Server side — where each verb's design lives
 

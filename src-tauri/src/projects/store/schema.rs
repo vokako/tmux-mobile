@@ -9,7 +9,7 @@ use super::registry::{DEFAULT_KIMI_SYSTEM, DEFAULT_OMP_MODEL, DEFAULT_OMP_SYSTEM
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 28;
+const SCHEMA_VERSION: i64 = 29;
 
 impl Store {
     /// Ensure the durable half of Board editability exists, then
@@ -691,6 +691,10 @@ impl Store {
             // v28 (board #264): a delivery row can be a slash command's
             // expected echo, with its own lifetime. Existing rows are lines: 0.
             self.ensure_delivery_command()?;
+        }
+        if version < 29 {
+            // v29 (board #275): scheduled wakes, a declaration per row.
+            self.ensure_wakes()?;
         }
         Ok(())
     }
