@@ -626,7 +626,8 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
                 RpcError::InvalidParams(format!("'{agent}' cannot switch queue/steer while it runs"))
             })?;
             // The delivery target, so the switch serializes with every line
-            // typed into this pane (the same send lock, validator 04:31).
+            // typed into this pane: the window's delivery lock (the one the
+            // mode is read under, validator 04:48), then its send lock (04:31).
             let Some(target) = crate::projects::delivery::agent_target(session, agent) else {
                 return Err(RpcError::InvalidParams(format!("no live window named '{agent}' in session '{session}'")));
             };

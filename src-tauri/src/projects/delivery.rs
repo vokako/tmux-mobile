@@ -113,12 +113,17 @@ pub fn input_mode(session: &str, window: &str) -> Option<&'static str> {
 }
 
 /// Switch the session to `want` with the CLI's live toggle `key` (board
-/// #271), as ONE step under the pane's send lock (validator 04:31): two
-/// clients asking for the same mode at once must not both read the old mode
-/// and both press, toggling it back. Idempotent — nothing is typed when the
-/// pane already runs `want` — and verified: after the one key the pane must
-/// show `want` within `VERIFY`, else an error, never a second press.
-/// `Ok(true)` = switched, `Ok(false)` = was already there.
+/// #271), as ONE step under the window's delivery lock and then the pane's
+/// send lock — the order every delivery takes them in (window → pane), so
+/// the two can never deadlock. The window lock is the one `deliver` reads
+/// the mode under (validator 04:48): a line decides queue-or-type against
+/// the mode before a switch or after it, never between the read and the
+/// hold. The send lock keeps two clients asking for the same mode at once
+/// from both reading the old mode and both pressing, toggling it back
+/// (validator 04:31). Idempotent — nothing is typed when the pane already
+/// runs `want` — and verified: after the one key the pane must show `want`
+/// within `VERIFY`, else an error, never a second press. `Ok(true)` =
+/// switched, `Ok(false)` = was already there.
 pub fn switch_input_mode(session: &str, window: &str, target: &str, want: &'static str, key: &str) -> Result<bool, String> {
     // The pane id keys the remembered reading, as for every other caller.
     let pane = crate::tmux::find_window_by_name(session, window).unwrap_or_default();
@@ -126,19 +131,23 @@ pub fn switch_input_mode(session: &str, window: &str, target: &str, want: &'stat
         let screen = crate::tmux::capture_pane_plain(target, Some(0)).unwrap_or_default();
         input_mode_seen(session, window, &pane, &screen)
     };
-    switch_with(target, want, read, || crate::tmux::send_keys(target, key, false), SWITCH_VERIFY)
+    switch_with(session, window, target, want, read, || crate::tmux::send_keys(target, key, false), SWITCH_VERIFY)
 }
 
 const SWITCH_VERIFY: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// The switch's logic with its screen and its key injected (tested).
 fn switch_with(
+    session: &str,
+    window: &str,
     target: &str,
     want: &'static str,
     read: impl Fn() -> Option<&'static str>,
     press: impl FnOnce() -> Result<(), String>,
     verify: std::time::Duration,
 ) -> Result<bool, String> {
+    let lock = window_lock(session, window);
+    let _window = lock.lock().unwrap();
     crate::tmux::with_pane_send_lock(target, || {
         if read() == Some(want) {
             return Ok(false);
@@ -160,7 +169,9 @@ fn switch_with(
 /// Does this window hold lines while busy (board #257)? Only a session
 /// that runs QUEUE does: a line held for a steering kiro would wait for an
 /// echo a steered line never produces. Read at typing time from the live
-/// mode, so a Ctrl+S pressed in the terminal a moment ago is honoured (#271).
+/// mode, so a Ctrl+S pressed in the terminal a moment ago is honoured (#271),
+/// and read under the window's lock (`deliver_with`), so a switch from the
+/// app lands wholly before the decision or wholly after it.
 pub fn coalesces(session: &str, window: &str) -> bool {
     input_mode(session, window) == Some("queue")
 }
@@ -179,14 +190,24 @@ pub fn agent_target(session: &str, window: &str) -> Option<String> {
 /// True when it was typed or held; false when the pane refused it (said in
 /// the feed as `undelivered`, board #250).
 pub fn deliver(session: &str, window: &str, target: &str, line: &str, msg_id: &str) -> bool {
-    deliver_as(session, window, target, line, msg_id, coalesces(session, window))
+    deliver_with(session, window, target, line, msg_id, || coalesces(session, window))
 }
 
+/// Tests' shorthand: deliver with the mode decided up front.
+#[cfg(test)]
 fn deliver_as(session: &str, window: &str, target: &str, line: &str, msg_id: &str, coalesce: bool) -> bool {
+    deliver_with(session, window, target, line, msg_id, || coalesce)
+}
+
+/// `deliver` with the mode reading injected. `coalesce` is asked INSIDE the
+/// window's lock — the lock `switch_input_mode` holds across its key and its
+/// verify (validator 04:48) — so the line is decided against the mode before
+/// a switch or after it, never between.
+fn deliver_with(session: &str, window: &str, target: &str, line: &str, msg_id: &str, coalesce: impl FnOnce() -> bool) -> bool {
     let lock = window_lock(session, window);
     let _guard = lock.lock().unwrap();
     let held = telemetry::held_rows(session, window);
-    let busy = coalesce && telemetry::turn_busy(session, window);
+    let busy = coalesce() && telemetry::turn_busy(session, window);
     if !busy && held.is_empty() {
         return type_now(session, window, target, line, msg_id);
     }
@@ -426,7 +447,7 @@ mod tests {
                     });
                     Ok(())
                 };
-                switch_with(&target, "steer", read, press, std::time::Duration::from_secs(2))
+                switch_with("switch-s", &target, &target, "steer", read, press, std::time::Duration::from_secs(2))
             })
         };
         let a = run(target.clone(), presses.clone(), mode.clone());
@@ -442,12 +463,117 @@ mod tests {
     fn a_switch_the_pane_never_confirms_is_an_error_after_one_key() {
         let target = format!("switch-test-{}", uuid::Uuid::new_v4());
         let presses = std::cell::Cell::new(0);
-        let r = switch_with(&target, "steer", || Some("queue"), || { presses.set(presses.get() + 1); Ok(()) }, std::time::Duration::from_millis(200));
+        let r = switch_with("switch-s", &target, &target, "steer", || Some("queue"), || { presses.set(presses.get() + 1); Ok(()) }, std::time::Duration::from_millis(200));
         assert_eq!(presses.get(), 1, "never a blind second press");
         assert!(r.unwrap_err().contains("did not confirm steer"));
-        assert_eq!(switch_with(&target, "queue", || Some("queue"), || panic!("no key when already there"), std::time::Duration::from_millis(10)), Ok(false));
-        assert!(switch_with(&target, "steer", || None, || Err("tmux says no".into()), std::time::Duration::from_millis(10)).is_err(),
+        assert_eq!(switch_with("switch-s", &target, &target, "queue", || Some("queue"), || panic!("no key when already there"), std::time::Duration::from_millis(10)), Ok(false));
+        assert!(switch_with("switch-s", &target, &target, "steer", || None, || Err("tmux says no".into()), std::time::Duration::from_millis(10)).is_err(),
             "a key tmux refused is an error, not a success");
+    }
+
+    /// A fake kiro pane for the switch: its mode, and a key that flips it
+    /// only after `delay` — kiro repaints a beat after Ctrl+S.
+    fn slow_pane(mode: &Arc<Mutex<&'static str>>, delay: u64) -> impl FnOnce() -> Result<(), String> {
+        let mode = mode.clone();
+        move || {
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(delay));
+                let mut m = mode.lock().unwrap();
+                *m = if *m == "queue" { "steer" } else { "queue" };
+            });
+            Ok(())
+        }
+    }
+
+    /// Board #271 (validator 04:48), switch first: a line for a busy kiro
+    /// that arrives while a switch to steer is between its key and its
+    /// verify waits for the switch and is decided against STEER — typed now,
+    /// not held for a turn end a steered line never echoes. The negative
+    /// control is the pre-fix shape (mode read before the window lock): the
+    /// same interleaving reads the old queue and holds it.
+    #[test]
+    fn a_line_during_a_switch_to_steer_is_decided_after_it() {
+        for read_inside_lock in [true, false] {
+            let s = setup("switch-first");
+            busy(&s, "dev");
+            let mode = Arc::new(Mutex::new("queue"));
+            let (pressed_tx, pressed) = std::sync::mpsc::channel();
+            let switch = {
+                let (s, mode) = (s.clone(), mode.clone());
+                std::thread::spawn(move || {
+                    let flip = slow_pane(&mode, 150);
+                    let press = move || { pressed_tx.send(()).unwrap(); flip() };
+                    switch_with(&s, "dev", "t-switch-first", "steer", || Some(*mode.lock().unwrap()), press, std::time::Duration::from_secs(2))
+                })
+            };
+            pressed.recv().unwrap();
+            let line = "[tmm chat 2026-09-29 05:00] lead: @dev during the switch";
+            if read_inside_lock {
+                assert!(deliver_with(&s, "dev", "t", line, "", || *mode.lock().unwrap() == "queue"));
+            } else {
+                let stale = *mode.lock().unwrap() == "queue";
+                assert!(deliver_as(&s, "dev", "t", line, "", stale));
+            }
+            assert_eq!(switch.join().unwrap(), Ok(true));
+            if read_inside_lock {
+                assert_eq!((typed().len(), held(&s, "dev")), (1, 0), "decided against steer: typed now");
+            } else {
+                assert_eq!((typed().len(), held(&s, "dev")), (0, 1), "control: a read outside the lock holds it as queue");
+            }
+        }
+    }
+
+    /// The other direction: a switch asked for while a delivery is between
+    /// its mode read and its hold waits for the hold. The line was decided
+    /// against queue and is held under it; the key goes in only after —
+    /// never a queue decision with a steer pane. The control is the pre-fix
+    /// switch (the pane send lock only), which presses during the pause.
+    #[test]
+    fn a_switch_during_a_delivery_waits_for_its_hold() {
+        for switch_takes_window_lock in [true, false] {
+            let s = setup("deliver-first");
+            busy(&s, "dev");
+            let mode = Arc::new(Mutex::new("queue"));
+            let held_at_press = Arc::new(Mutex::new(None));
+            let (read_tx, read) = std::sync::mpsc::channel::<()>();
+            let switch = {
+                let (s, mode, held_at_press) = (s.clone(), mode.clone(), held_at_press.clone());
+                std::thread::spawn(move || {
+                    read.recv().unwrap();
+                    let flip = slow_pane(&mode, 50);
+                    let press = {
+                        let (s, held_at_press) = (s.clone(), held_at_press.clone());
+                        move || { *held_at_press.lock().unwrap() = Some(held(&s, "dev")); flip() }
+                    };
+                    let current = || Some(*mode.lock().unwrap());
+                    let verify = std::time::Duration::from_secs(2);
+                    if switch_takes_window_lock {
+                        switch_with(&s, "dev", "t-deliver-first", "steer", current, press, verify)
+                    } else {
+                        crate::tmux::with_pane_send_lock("t-deliver-first", || {
+                            press().unwrap();
+                            while current() != Some("steer") { std::thread::sleep(std::time::Duration::from_millis(20)); }
+                            Ok(true)
+                        })
+                    }
+                })
+            };
+            let line = "[tmm chat 2026-09-29 05:01] lead: @dev before the switch";
+            assert!(deliver_with(&s, "dev", "t", line, "", || {
+                let queue = *mode.lock().unwrap() == "queue";
+                read_tx.send(()).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                queue
+            }));
+            assert_eq!(switch.join().unwrap(), Ok(true));
+            assert_eq!(held(&s, "dev"), 1, "decided against queue: held");
+            let at_press = held_at_press.lock().unwrap().unwrap();
+            if switch_takes_window_lock {
+                assert_eq!(at_press, 1, "the key went in only after the hold");
+            } else {
+                assert_eq!(at_press, 0, "control: without the window lock the key lands between read and hold");
+            }
+        }
     }
 
     /// Board #271: the running mode is the SCREEN's, then what the screen
