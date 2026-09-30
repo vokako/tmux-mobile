@@ -2,7 +2,7 @@ import test from 'node:test';
 import { ALL_TARGET, teamTarget } from './hub-composer.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { wakeLine, localWhen, gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markMentions, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand, foldedCommandArgs, inputModeSwitch } from './hub.ts';
+import { wakeLine, localWhen, gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markMentions, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, HUMAN, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand, foldedCommandArgs, inputModeSwitch } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 import { mentionPalette, rosterGroups, rosterMarker, sortAgentsForRoster, stoppedGroups } from './hub.ts';
 
@@ -1451,6 +1451,31 @@ test('the recipient chip appends the body\u2019s extra deliveries, live', () => 
   assert.deepEqual(chipExtras('@bob note', '', roster), ['bob'], 'a room note that @-mentions someone reaches them');
   assert.deepEqual(chipExtras('x@bob.com @ghost', 'alice', roster), [], 'an email address or a stranger reaches nobody');
   assert.deepEqual(chipExtras('@all', 'alice', []), [], '@all over an empty roster is nobody');
+});
+
+test('filterBlocks with the human is Only mine: my words, what is recorded to me, and @human (board #289)', () => {
+  const msg = (from: string, body: string, to?: string[]) => ({ type: 'msg', ts: 1, delivered: true, msg: { from, body, ...(to ? { to } : {}) } });
+  const blocks = [
+    msg('human', '@dev ship it'),
+    msg('dev', 'shipped', ['human']),
+    msg('dev', 'done, and lead has the diff', ['lead', 'human']),
+    msg('lead', '@dev looks good', ['dev']),
+    msg('dev', 'thanks', ['lead']),
+    msg('lead', '@human decide please'),
+    msg('lead', '@all heads up'),
+    msg('dev', 'an old reply with no route'),
+    { type: 'sys', ts: 1, key: 's', items: ['spawned dev', 'human interrupted dev'] },
+    { type: 'prompt', ts: 1, window: 'dev', text: 'x' },
+    { type: 'progress', ts: 1, window: 'dev', state: 'working', text: 'y' },
+  ];
+  const out = filterBlocks(blocks as never, HUMAN);
+  assert.deepEqual(out.filter((b) => b.type === 'msg').map((b) => (b as { msg: { body: string } }).msg.body),
+    ['@dev ship it', 'shipped', 'done, and lead has the diff', '@human decide please'],
+    'agent-to-agent talk, @all and a pre-#289 reply are out');
+  assert.deepEqual(out.filter((b) => b.type === 'sys').map((b) => (b as { items: string[] }).items), [['human interrupted dev']]);
+  assert.ok(!out.some((b) => b.type === 'prompt' || b.type === 'progress'), 'the human has no window');
+  // An agent's filter is unchanged: @all still reaches every agent.
+  assert.ok(filterBlocks(blocks as never, 'dev', 'dev').some((b) => b.type === 'msg' && (b as { msg: { body: string } }).msg.body === '@all heads up'));
 });
 
 test('filterBlocks keeps one agent\u2019s world and nobody else\u2019s (board #3)', () => {

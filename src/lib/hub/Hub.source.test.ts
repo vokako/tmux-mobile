@@ -258,6 +258,14 @@ test('the filter and the detail level are reachable from menus, not only from a 
   assert.match(lv, /hubPrefs\.feedLevel === level \? 'check' : 'circle'/u, 'radio semantics through the menu\u2019s own icons');
   assert.match(lv, /hubPrefs\.setFeedLevel\(level\)/u, 'and it writes the one pref Settings reads');
   assert.ok(!source.includes('cycleFeedLevel'), 'the dead cycle control stays gone');
+  // Board #289: "Only mine" sits beside the detail levels and is the SAME
+  // filter state, so it and an agent filter exclude each other and Back
+  // clears it; the roster never shows it as an agent's filter mark.
+  assert.match(source, /\.\.\.\(withView \? \[\.\.\.feedLevelItems\(\), onlyMineItem\(\)\] : \[\]\)/u);
+  assert.match(source, /label: t\('hubOnlyMine'\), icon: filterAgent === HUMAN \? 'check' : 'circle', onselect: \(\) => toggleFilter\(HUMAN\)/u);
+  assert.match(source, /if \(filterAgent && filterAgent !== HUMAN && !managedAgents\.some/u, 'the human is not an agent that can leave the room');
+  assert.match(source, /filterAgent=\{filterAgent === HUMAN \? '' : filterAgent\}/u, 'no agent card wears the Only-mine mark');
+  assert.match(source, /backLayers\.register\('filter', \(\) => \{ if \(filterAgent\) \{ filterAgent = ''; return true; \}/u, 'Back peels it like any filter');
 });
 
 test('agent restart remains one parent action for roster and context menu (board #89)', async () => {

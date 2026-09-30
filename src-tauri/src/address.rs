@@ -132,16 +132,24 @@ pub fn shown(text: &str, ask_at: usize) -> String {
     }
 }
 
-/// Senders of stamped chat REQUESTS in a submitted prompt — the ONE reading
-/// of whom a turn's final reply is owed to (#256, #257). Every stamped line
-/// `[tmm chat …] sender: body` counts once, in order; the human, automatic
-/// `[reply]` and legacy `[done]` deliveries are results, not requests. The
-/// reply edge parses a live prompt with it, and the activity log stores its
-/// answer beside the (display-truncated) prompt text, so recovery after a
-/// restart reads the same senders even when a combined prompt of held lines
-/// runs past the log's text limit.
+/// Senders of the REQUESTS in a submitted prompt — the ONE reading of whom a
+/// turn's final reply is addressed to (#256, #257). Every stamped line
+/// `[tmm chat …] sender: body` counts once, in order; automatic `[reply]`
+/// and legacy `[done]` deliveries are results, not requests. The reply edge
+/// parses a live prompt with it, and the activity log stores its answer
+/// beside the (display-truncated) prompt text, so recovery after a restart
+/// reads the same senders even when a combined prompt of held lines runs
+/// past the log's text limit.
+///
+/// The human is a requester too (board #289, owner 2026-09-30: filter the
+/// room to what is addressed to me): a stamped `human:` line (the composer,
+/// a human `tmm send`), and a prompt with no stamp at all, which only a
+/// person typing into the pane produces — except a `/command` (the app types
+/// those for any sender, #274) and the legacy spawn kick. The reply is
+/// RECORDED to the human (`to`); it is never typed anywhere (`RoomPoster`).
 pub fn requesters(prompt: &str) -> Vec<String> {
     let mut targets = Vec::new();
+    let mut stamped = false;
     for line in prompt.lines() {
         let Some(after_stamp) = line
             .strip_prefix("[tmm chat] ")
@@ -149,11 +157,11 @@ pub fn requesters(prompt: &str) -> Vec<String> {
         else {
             continue;
         };
+        stamped = true;
         let Some((sender, body)) = after_stamp.split_once(": ") else { continue };
         let sender = sender.trim();
         let body = body.trim_start();
         if sender.is_empty()
-            || sender == "human"
             || body.starts_with("[reply]")
             || body.starts_with("[done]")
             || targets.iter().any(|s| s == sender)
@@ -162,7 +170,28 @@ pub fn requesters(prompt: &str) -> Vec<String> {
         }
         targets.push(sender.to_string());
     }
+    if !stamped && typed_in_the_pane(prompt) {
+        targets.push(HUMAN.to_string());
+    }
     targets
+}
+
+/// The human's identity in a room: no pane, never typed into.
+pub const HUMAN: &str = "human";
+
+/// An unstamped prompt a person typed into the pane: not empty, not a
+/// `/command`, not a legacy spawn kick (`[YYYY-MM-DD HH:MM] (session start)`
+/// or `[…] Start now: …`, the client's `isSessionStart`).
+fn typed_in_the_pane(prompt: &str) -> bool {
+    let t = prompt.trim();
+    let kick = t.starts_with('[') && (t.ends_with("(session start)") || t.split_once("] ").is_some_and(|(_, r)| r.starts_with("Start now:")));
+    !t.is_empty() && !t.starts_with('/') && !kick
+}
+
+/// The reply edge's targets that have a pane to type into (board #289): the
+/// human is recorded as a recipient, never typed to.
+pub fn pane_targets(reply_to: &[String]) -> impl Iterator<Item = &String> {
+    reply_to.iter().filter(|t| *t != HUMAN)
 }
 
 #[cfg(test)]
@@ -232,6 +261,23 @@ mod tests {
             let want = (!command.is_empty()).then(|| (to.to_string(), command.to_string()));
             assert_eq!(slash_command(body), want, "{body:?}");
         }
+    }
+
+    /// Board #289: the human is a requester — a stamped `human:` line or an
+    /// unstamped prompt (a person typing in the pane) — but never a pane
+    /// target. A `/command`, a spawn kick, `[reply]` and `[done]` ask nothing.
+    #[test]
+    fn the_human_is_a_requester_but_never_a_pane_target() {
+        let v = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(requesters("[tmm chat 2026-09-30 10:53] human: @dev ship it"), v(&["human"]));
+        assert_eq!(requesters("fix the flaky test please"), v(&["human"]), "typed straight into the pane");
+        assert_eq!(requesters("[tmm chat 2026-09-30 10:53] human: @dev a\n\n[tmm chat 2026-09-30 10:54] lead: @dev b"), v(&["human", "lead"]));
+        assert_eq!(requesters("[tmm chat 2026-09-30 10:54] lead: @dev b"), v(&["lead"]));
+        for none in ["/compact", "  ", "[2026-08-17 16:31] (session start)", "[2026-08-17 16:31] Start now: read the brief", "[tmm chat 2026-09-30 10:55] lead: [reply] done", "[tmm chat 2026-09-30 10:55] w: [done] old"] {
+            assert!(requesters(none).is_empty(), "{none:?}");
+        }
+        let edge = v(&["human", "lead"]);
+        assert_eq!(pane_targets(&edge).collect::<Vec<_>>(), vec!["lead"], "recorded to the human, typed only to lead");
     }
 
     /// Board #279 (orchestrator 13:24): the producer's parts in, the typed

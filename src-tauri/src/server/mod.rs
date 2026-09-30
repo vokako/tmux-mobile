@@ -35,7 +35,9 @@ impl crate::agent_notifications::RoomPoster for HubRoomPoster {
     fn post_final(&self, session: &str, agent: &str, body: &str, reply_to: &[String]) {
         let room = hub_rpc::project_room(session);
         let _ = crate::projects::rooms::post_routed(&room, agent, body, reply_to);
-        for target in reply_to {
+        // Recorded to the human (board #289), never typed: the human has no
+        // pane, and reads the room.
+        for target in crate::address::pane_targets(reply_to) {
             let line = format!("[tmm chat {}] {agent}: [reply] {body}", hub_rpc::stamp_now());
             hub_rpc::deliver_chat_line(session, target, &line);
         }

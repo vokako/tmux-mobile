@@ -36,7 +36,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { stateDotColor, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, pickDrawerAgent, addressed, addressedTeam, mentionedAgents, unreadSenders, stoppedAgents, slashCommand, uploadImagePath, uploadFilePath, imageId, inputModeSwitch } from './hub.ts';
+  import { HUMAN, stateDotColor, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, pickDrawerAgent, addressed, addressedTeam, mentionedAgents, unreadSenders, stoppedAgents, slashCommand, uploadImagePath, uploadFilePath, imageId, inputModeSwitch } from './hub.ts';
   import { resolvePathRef } from '../core/path-links.ts';
   import { ALL_TARGET, attachmentBody, attachToken, busyTargetsFor, targetMembers, targetTeam, teamTarget } from './hub-composer.ts';
   import { walkFeedGap } from './hub-history.ts';
@@ -846,7 +846,7 @@
      from the room takes the filter with it; otherwise the feed stayed filtered
      with no visible mode and no way out (#241, validator). */
   $effect(() => {
-    if (filterAgent && !managedAgents.some((a) => a.name === filterAgent) && !stopped.includes(filterAgent)) filterAgent = '';
+    if (filterAgent && filterAgent !== HUMAN && !managedAgents.some((a) => a.name === filterAgent) && !stopped.includes(filterAgent)) filterAgent = '';
   });
   const filterItem = (name) => ({
     label: filterAgent === name ? t('hubFilterExit') : t('hubFilterItem'),
@@ -1615,7 +1615,7 @@
       ...(row?.live ? [] : [{ label: t('projectUp'), icon: 'zap', onselect: () => { selectProject(session); setTimeout(bringUp, 0); } }]),
       { label: t('projectRename'), icon: 'edit',
         onselect: () => { selectProject(session); setTimeout(startRename, 0); } },
-      ...(withView ? feedLevelItems() : []),
+      ...(withView ? [...feedLevelItems(), onlyMineItem()] : []),
       ...(row?.live ? [{ label: t('projectDown'), icon: 'stop', danger: true, onselect: () => askAction('down', name, session) }] : []),
       { label: t('projectDelete'), icon: 'trash', danger: true,
         onselect: () => askAction('delete', name, session) },
@@ -1636,6 +1636,13 @@
       icon: hubPrefs.feedLevel === level ? 'check' : 'circle',
       onselect: () => hubPrefs.setFeedLevel(level),
     }));
+  }
+  /** "Only mine" (board #289): the SAME reading filter as an agent card's
+   * "Only its messages", with the human as the subject (filterBlocks). One
+   * filter at a time, scoped to the room, Back clears it — all of that is
+   * toggleFilter's already. A toggle, ticked while on. */
+  function onlyMineItem() {
+    return { label: t('hubOnlyMine'), icon: filterAgent === HUMAN ? 'check' : 'circle', onselect: () => toggleFilter(HUMAN) };
   }
 
 
@@ -1947,7 +1954,7 @@
         registerActions={registerFeedActions} />
 
       <Roster {selected} {compact} {managedAgents} {stopped} {stoppedTeams} {selectedRow}
-        {recipient} {filterAgent} {composerText} {managedNames} {busyNames} {interrupting}
+        {recipient} filterAgent={filterAgent === HUMAN ? '' : filterAgent} {composerText} {managedNames} {busyNames} {interrupting}
         {unread} {acting} {tick} {roomReady} {justLoaded} {rosterBase}
         expanded={rosterExpanded} onexpand={toggleRoster}
         allMenuOpen={!!ctxAt?.allSession && ctxAt.allSession === selected} onall={activateAll}

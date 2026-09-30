@@ -1555,6 +1555,9 @@ export function chipExtras(body: string, recipient: string, names: readonly stri
   return mentionedAgents(body, names).filter((n) => n !== recipient);
 }
 
+/** The human's identity in a room (the server's `address::HUMAN`). */
+export const HUMAN = 'human';
+
 /** The feed narrowed to ONE agent (board #3: 双击卡片 "筛选跟某个agent有关的
  * 消息"). "Related" is defined here, once, and tested:
  * - a message FROM the agent (its replies, its `[tmm status]`/`[tmm done]`
@@ -1566,6 +1569,12 @@ export function chipExtras(body: string, recipient: string, names: readonly stri
  * - sys capsules keep only the lifecycle LINES that name the agent as a whole
  *   word (`spawned builder-2` must not surface for `builder`), and disappear
  *   when none do.
+ * `name` = HUMAN is "Only mine" (board #289, owner 2026-09-30: "过滤所有
+ * to human 的消息"): the human's own messages, a message whose recorded `to`
+ * names the human (an agent's final reply to a turn the human asked in, or
+ * an `@human` send), and a body that says `@human`. `@all` is every AGENT, so
+ * it does not count; the human has no window, so no telemetry block does.
+ * Rows recorded before #289 carry no `to` for a reply and are not matched.
  * Pure so the rules are testable without a DOM. */
 export function filterBlocks(blocks: FeedBlock[], name: string, window?: string): FeedBlock[] {
   const word = new RegExp(`(?<![\\w-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'u');
@@ -1574,7 +1583,10 @@ export function filterBlocks(blocks: FeedBlock[], name: string, window?: string)
     if (b.type === 'msg') {
       const from = b.msg?.from ?? '';
       const body = b.msg?.body ?? '';
-      if (from === name || mentionsAgent(body, name)) out.push(b);
+      const addressed = name === HUMAN
+        ? (Array.isArray(b.msg?.to) && b.msg.to.includes(HUMAN)) || mentionTokens(body).includes(HUMAN)
+        : mentionsAgent(body, name);
+      if (from === name || addressed) out.push(b);
       continue;
     }
     if (b.type === 'sys') {

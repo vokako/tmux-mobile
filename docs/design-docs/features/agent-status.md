@@ -84,8 +84,26 @@ codex 0.153.4 runs `spawn_agent` children as threads INSIDE the parent's process
 ### Hook-sourced final replies carry one reply edge
 
 `userPromptSubmit` parses stamped `[tmm chat …] sender:` envelopes and stores
-the non-human senders for the current turn. A normal request creates the edge;
-an automatic `[reply]` or legacy `[done]` envelope does not.
+the senders for the current turn (`address::requesters`). A normal request
+creates the edge; an automatic `[reply]` or legacy `[done]` envelope does not.
+
+**The human is on the edge too, as a RECORD, never a delivery** (board #289,
+owner 2026-09-30: "过滤所有 to human 的消息"). Before, `requesters` dropped
+`human`, so an agent's answer to the human was stored with `to = []` and "was
+this reply to me" could not be read back. Now a stamped `human:` line counts,
+and so does a prompt with no stamp at all, which only a person typing into the
+pane produces (a `/command`, which the app types for any sender, and the legacy
+spawn kick excepted). The final reply's room row therefore names `human` in
+`to`; `HubRoomPoster` types `[reply]` only to `address::pane_targets`, which
+drops the human, because the human has no pane and reads the room. The live
+edge and the recovery path read the same parser and the same stored
+`activity.requesters`, so they agree; rows recorded before #289 keep their old
+`to` (no human) and are not rewritten. Pinned by
+`the_human_is_a_requester_but_never_a_pane_target` (address.rs) and the human
+rows of `a_stop_payload_posts_the_agents_final_answer_to_the_room` and
+`a_later_input_in_the_same_turn_joins_the_reply_edge` (live and recovered).
+Negative controls: dropping `human` in `requesters`, or typing to every edge
+target, fails them.
 
 **The edge accumulates within a turn** (#256). An input that arrives while the
 window's turn is open (codex steer, anything typed mid-turn) ADDS its senders,

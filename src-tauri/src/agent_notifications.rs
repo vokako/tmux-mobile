@@ -1355,7 +1355,8 @@ mod tests {
         let hub = AgentNotificationHub::load_at(root.clone());
         hub.set_room_poster(spy.clone());
         let (_, win, _) = crate::tmux::resolve_pane_id(&pane_id).expect("pane resolves");
-        hub.start_turn(&session, &win, "[tmm chat 2026-09-08 08:00] lead: @dev fix it");
+        // Board #289: the human asks in the same turn (one combined prompt).
+        hub.start_turn(&session, &win, "[tmm chat 2026-09-08 08:00] lead: @dev fix it\n\n[tmm chat 2026-09-08 08:00] human: @dev and add a test");
         std::fs::create_dir_all(root.join("inbox")).unwrap();
         // Exactly the payload measured from kiro-cli 2.16.2.
         std::fs::write(
@@ -1380,7 +1381,7 @@ mod tests {
             assert_eq!(s, &session);
             assert_eq!(agent, "dev", "posted as the agent, by window name");
             assert!(body.contains("Fixed the flaky test"), "the answer itself: {body:?}");
-            assert_eq!(reply_to, &vec!["lead".to_string()]);
+            assert_eq!(reply_to, &vec!["lead".to_string(), "human".to_string()], "recorded to both (#289)");
         } else {
             eprintln!("could not adopt a project — skipped the assertions");
         }
@@ -1635,7 +1636,7 @@ mod tests {
             ),
             vec!["lead", "reviewer"]
         );
-        assert!(reply_targets("[tmm chat 2026-09-08 08:03] human: @dev ship it").is_empty());
+        assert_eq!(reply_targets("[tmm chat 2026-09-08 08:03] human: @dev ship it"), vec!["human"], "recorded to the human (#289)");
         assert!(reply_targets("[tmm chat 2026-09-08 08:04] lead: [reply] looks good").is_empty());
         assert!(reply_targets("[tmm chat 2026-09-08 08:05] worker: [done] old completion").is_empty());
     }
@@ -1764,8 +1765,8 @@ mod tests {
         input(&hub, "[tmm chat 2026-09-27 20:49] human: @validator thanks");
         assert_eq!(
             hub.take_reply_targets(&session, "v"),
-            vec!["orchestrator", "lead"],
-            "every requester once, in order; [reply] and human add nobody"
+            vec!["orchestrator", "lead", "human"],
+            "every requester once, in order; [reply] adds nobody; the human is recorded (#289)"
         );
         record_notification(&session, "v", "completed", unix_seconds());
 
@@ -1800,10 +1801,11 @@ mod tests {
             input(&hub, &format!("[tmm chat 2026-09-27 23:01] human: @validator note {i}"));
         }
         let restarted = AgentNotificationHub::load_at(root.clone());
-        assert_eq!(restarted.take_reply_targets(&session, "v"), vec!["orchestrator"], "recovered at the stop");
+        // Recovery agrees with the live edge: the human's notes count (#289).
+        assert_eq!(restarted.take_reply_targets(&session, "v"), vec!["orchestrator", "human"], "recovered at the stop");
         let restarted = AgentNotificationHub::load_at(root.clone());
         input(&restarted, "[tmm chat 2026-09-27 23:02] lead: @validator one more");
-        assert_eq!(restarted.take_reply_targets(&session, "v"), vec!["orchestrator", "lead"], "recovered at the next input");
+        assert_eq!(restarted.take_reply_targets(&session, "v"), vec!["orchestrator", "human", "lead"], "recovered at the next input");
         record_notification(&session, "v", "completed", unix_seconds());
 
         // Tool-only turns (validator, orchestrator 03:07): the turn is OPEN

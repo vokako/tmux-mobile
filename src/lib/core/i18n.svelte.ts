@@ -113,6 +113,7 @@ const msgs: Record<string, Record<string, string>> = {
     hubFeedChat: 'Chat',
     hubFeedStatus: '+ Status',
     hubFeedTools: '+ Tools',
+    hubOnlyMine: 'Only mine',
     hubStepsRows: 'Tool rows',
     // The prompt hook echoed our line back, so the CLI accepted it as input.
     hubDeliveredHint: 'Delivered',
@@ -728,6 +729,7 @@ const msgs: Record<string, Record<string, string>> = {
     hubFeedChat: '会话',
     hubFeedStatus: '+ 状态',
     hubFeedTools: '+ 工具',
+    hubOnlyMine: '只看我的',
     hubStepsRows: '工具行数',
     hubDeliveredHint: '已送达',
     hubPendingHint: '已排队',
