@@ -5,7 +5,7 @@
   import { untrack } from 'svelte';
   import { ALL_TARGET, targetMembers, targetTeam, teamTarget } from './hub-composer.ts';
   import { backendIcon } from '../core/agents.ts';
-  import { backendColor, stateDotColor, stateIsLive, chipExtras, ctxColor, fmtElapsed, wakeLine, modelLabel, namedGroup, rosterGroups, rosterMarker, sortAgentsForRoster } from './hub.ts';
+  import { backendColor, stateDotColor, stateIsLive, chipExtras, ctxColor, fmtElapsed, wakeLine, modelLabel, namedGroup, rosterGroups, rosterMarker, sortAgentsForRoster, stoppedGroups } from './hub.ts';
   import { hoverInfo } from '../ui/hover.ts';
   import { longpress } from '../ui/longpress.ts';
   import { anchorOf } from '../ui/placement.ts';
@@ -16,7 +16,7 @@
   import { tabShape } from './tab-shape.ts';
 
   let {
-    selected = '', compact = false, managedAgents = [], stopped = [], selectedRow = null,
+    selected = '', compact = false, managedAgents = [], stopped = [], stoppedTeams = {}, selectedRow = null,
     recipient = '', filterAgent = '', unread = new Set(), acting = false, tick = Date.now(),
     roomReady = false, justLoaded = false, rosterBase = null,
     composerText = '', managedNames = [], busyNames = [], interrupting = [],
@@ -109,6 +109,10 @@
     return [...heldOrder.names.map((name) => current.get(name)).filter(Boolean), ...ranked.filter((a) => !held.has(a.name))];
   });
   const groups = $derived(rosterGroups(orderedAgents));
+  /* A team every member of which is stopped still has a place and a menu
+     (board #287): its stopped cards sit under its name, like a live team's. */
+  const offTeams = $derived(stoppedGroups(stopped, stoppedTeams, managedAgents));
+  const offLoose = $derived(stopped.filter((name) => !offTeams.some((g) => g.members.includes(name))));
   /* The ONE marker's destination (motion principle 14): the whole group under
      All (and while All previews), the lit team, or the lit card. Empty when
      nothing in the strip is the recipient (the room itself). */
@@ -347,12 +351,34 @@
       <!-- The measurement box for All: the group's own extent. -->
       <span class="tabs-extent" aria-hidden="true"></span>
       </div>
-      {#each stopped as name (name)}
-        {@const backend = slotBackend(name)}
-        <!-- A stopped identity offers context actions, never a card-wide restart.
-             Owner, 2026-09-05: "头像应该使用我们正常设定的 Agent 头像，并且变成灰色". -->
-        <div class="acard off" data-agent={name} class:filtered={filterAgent === name} class:appear-pop={!!rosterBase && !rosterBase.has(name)}
+      {#each offTeams as group (group.team)}
+        <!-- A stopped team (board #287): its name opens the team menu, whose
+             Start brings the team back from its current definition. Not a
+             destination — nobody is running to talk to. -->
+        <div class="roster-cluster team off" data-team={group.team} role="group" aria-label={`${t('teamsTitle')} ${group.team} · ${t('hubStopped')}`}
           animate:flip={{ duration: moveMs() }}>
+          <button type="button" class="team-label" aria-haspopup="menu" disabled={acting}
+            aria-label={`${group.team} · ${t('hubStopped')}`}
+            use:hoverInfo={() => ({ title: group.team, lines: [{ label: t('hubHoverState'), value: t('hubStopped') }] })}
+            onclick={(e) => onteamcontext(cardAnchor(e.currentTarget), group.team)}
+            oncontextmenu={(e) => { e.preventDefault(); onteamcontext(pointOf(e), group.team); }}
+            use:longpress={{ onlongpress: (at) => onteamcontext(at, group.team) }}>
+            <span class="team-name">{group.team}</span>
+          </button>
+          {#each group.members as name (name)}
+            <div class="acard off" data-agent={name} class:filtered={filterAgent === name} class:appear-pop={!!rosterBase && !rosterBase.has(name)} animate:flip={{ duration: moveMs() }}>{@render offSelect(name)}</div>
+          {/each}
+        </div>
+      {/each}
+      {#each offLoose as name (name)}
+        <div class="acard off" data-agent={name} class:filtered={filterAgent === name} class:appear-pop={!!rosterBase && !rosterBase.has(name)} animate:flip={{ duration: moveMs() }}>{@render offSelect(name)}</div>
+      {/each}
+      <!-- A stopped identity offers context actions, never a card-wide restart.
+           Owner, 2026-09-05: "头像应该使用我们正常设定的 Agent 头像，并且变成灰色".
+           One card body for a loose stopped identity and a stopped team's
+           member (#287); `animate:` must stay on the each's own child. -->
+      {#snippet offSelect(name)}
+        {@const backend = slotBackend(name)}
           <button type="button" class="agent-select" disabled={acting}
             aria-label={[name, t('hubStopped'), filterAgent === name ? t('hubFilterItem') : ''].filter(Boolean).join(' · ')} aria-haspopup="menu"
             use:hoverInfo={() => offCardInfo(name)}
@@ -365,8 +391,7 @@
             <span class="a-name">{name}</span>
             {#if filterAgent === name}<span class="agent-filter" aria-hidden="true"><Icon name="filter" size={12} /></span>{/if}
           </button>
-        </div>
-      {/each}
+      {/snippet}
       <!-- Spawning opens a closed project too; keep its entry even in an empty room. -->
       <div class="roster-add">
         <CommandButton icon="plus" variant="icon" label={t('hubSpawn')} onclick={onadd} />
@@ -489,6 +514,7 @@
   .team-label:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
   .roster.compact .team-label { min-width: var(--control-height); min-height: var(--control-height); max-width: calc(2 * var(--control-height)); }
   .team-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .roster-cluster.team.off .team-label { color: var(--text3); }
   /* The wrapped (expanded) list is a list: there a lit team is a closed
      rounded box of its own, and its member cards draw no border inside it. In
      the single-row strip the marker below carries the enclosure. */

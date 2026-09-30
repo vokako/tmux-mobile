@@ -1460,16 +1460,29 @@ fn agent_states(session: &str) -> serde_json::Value {
 /// stopped card carries no row in `hub_agents`, and a team's "Start stopped"
 /// needs to know which stopped identities are its members. Read off each
 /// home's launch recipe — the same `team_of` a live row uses; a solo agent,
-/// or a home without a recipe, is simply absent.
+/// or a home without a recipe, is simply absent. So is a member the team's
+/// CURRENT definition no longer has (board #287, validator 06:53): its recipe
+/// still names the team, but starting the team must not bring it back.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn stopped_teams(ws: Option<&str>, live: &[String]) -> serde_json::Map<String, serde_json::Value> {
+    stopped_teams_in(ws, live, crate::projects::spawn::in_current_team)
+}
+
+/// `stopped_teams` with the membership test injected (`current(path, member)`).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn stopped_teams_in(ws: Option<&str>, live: &[String], current: impl Fn(&str, &str) -> bool) -> serde_json::Map<String, serde_json::Value> {
     ws.and_then(|w| std::fs::read_dir(std::path::Path::new(w).join(".tmm").join("agents")).ok())
         .into_iter()
         .flatten()
         .flatten()
         .filter_map(|entry| entry.file_name().into_string().ok())
         .filter(|name| !live.contains(name))
-        .filter_map(|name| crate::projects::team_of(ws, &name).map(|team| (name, team.into())))
+        .filter_map(|name| {
+            let team = crate::projects::team_of(ws, &name)?;
+            let member = crate::projects::member_of(ws, &name);
+            // A pre-#113 recipe names no member: kept, as before.
+            (member.is_empty() || current(&team, &member)).then(|| (name, team.into()))
+        })
         .collect()
 }
 
@@ -1498,15 +1511,18 @@ mod tests {
     #[test]
     fn stopped_teams_names_each_stopped_member_by_its_recipe_team() {
         let ws = std::env::temp_dir().join(format!("tmm-stopped-teams-{}", uuid::Uuid::new_v4()));
-        for (name, team) in [("qa", "squad"), ("sub", "squad/inner"), ("solo", ""), ("lead", "squad")] {
+        for (name, team, member) in [("qa", "squad", "qa"), ("sub", "squad/inner", "sub"), ("solo", "", ""), ("lead", "squad", "lead"), ("gone", "squad", "archivist"), ("old", "squad", "")] {
             let home = ws.join(".tmm/agents").join(name);
             std::fs::create_dir_all(&home).unwrap();
-            std::fs::write(home.join("launch.json"), serde_json::json!({ "team": team }).to_string()).unwrap();
+            std::fs::write(home.join("launch.json"), serde_json::json!({ "team": team, "member": member }).to_string()).unwrap();
         }
-        let map = super::stopped_teams(ws.to_str(), &["lead".to_string()]);
+        // Board #287: `archivist` left the team's definition; a pre-#113
+        // recipe (no member) is kept.
+        let current = |_: &str, m: &str| m != "archivist";
+        let map = super::stopped_teams_in(ws.to_str(), &["lead".to_string()], current);
         let mut got: Vec<(String, String)> = map.into_iter().map(|(k, v)| (k, v.as_str().unwrap().to_string())).collect();
         got.sort();
-        assert_eq!(got, vec![("qa".into(), "squad".into()), ("sub".into(), "squad/inner".into())]);
+        assert_eq!(got, vec![("old".into(), "squad".into()), ("qa".into(), "squad".into()), ("sub".into(), "squad/inner".into())]);
         assert!(super::stopped_teams(None, &[]).is_empty());
         let _ = std::fs::remove_dir_all(ws);
     }

@@ -2256,6 +2256,45 @@ test('right-click on All opens the group verbs at any time, counted, destructive
   } finally { await app.close(); }
 });
 
+test('a team with nobody running stays in the roster; its name opens Start and Configure, and Start is one team restart (#287)', { timeout: 60000 }, async (context) => {
+  const teamCalls: unknown[][] = [];
+  const perAgent: string[] = [];
+  const opened: unknown[][] = [];
+  const app = await groupFixture(context, {
+    projectList: async () => ({ projects: [{
+      project: { id: 'fixture', name: 'Fixture', session: 'fixture', path: '/fixture' }, live: true,
+      slots: [{ window_name: 'qa', kind: 'agent', command: 'kiro' }, { window_name: 'qb', kind: 'agent', command: 'kiro' }, { window_name: 'loner', kind: 'agent', command: 'codex' }],
+    }] }),
+    hubAgents: async () => ({
+      agents: [{ name: 'solo', window: 2, managed: true, agent: 'codex', state: 'idle' }],
+      stopped_teams: { qa: 'squad', qb: 'squad/sub' },
+    }),
+    hubAgentRestart: async (_s: string, name: string) => { perAgent.push(name); return {}; },
+    hubTeamRestart: async (...args: unknown[]) => { teamCalls.push(args.filter((a) => a !== undefined)); return { team: 'squad', restarted: ['qa', 'qb'], stopped: [], spawned: [], errors: [] }; },
+  }, (...args) => { opened.push(args); });
+  try {
+    for (let i = 0; i < 30 && !app.document.querySelector('.roster-cluster.team.off'); i++) await app.flush();
+    const group = app.document.querySelector('.roster-cluster.team.off[data-team="squad"]')!;
+    assert.ok(group, 'the stopped team is drawn');
+    assert.deepEqual([...group.querySelectorAll('.acard.off')].map((c) => c.getAttribute('data-agent')), ['qa', 'qb'], 'its stopped members sit under its name');
+    assert.ok(app.document.querySelector('.acard.off[data-agent="loner"]'), 'a stopped agent with no team stays a loose card');
+    assert.equal(app.document.querySelectorAll('.acard.off[data-agent="qa"]').length, 1, 'never twice');
+    group.querySelector<HTMLButtonElement>('.team-label')!.click();
+    await app.flush();
+    assert.deepEqual(app.labels(), ['Start stopped (2)', 'Configure team'], 'not a destination: no talk row, nothing to stop');
+    await app.pick('Start stopped (2)');
+    for (let i = 0; i < 10 && !teamCalls.length; i++) await app.flush();
+    assert.deepEqual(teamCalls, [['fixture', 'squad']], 'one alignment with the current definition');
+    assert.deepEqual(perAgent, [], 'no per-member replay');
+    const label = () => app.document.querySelector<HTMLButtonElement>('.roster-cluster.team.off[data-team="squad"] .team-label')!;
+    for (let i = 0; i < 20 && label().disabled; i++) await app.flush();
+    label().click();
+    await app.flush();
+    await app.pick('Configure team');
+    assert.deepEqual(opened, [['squad', 'team']]);
+  } finally { await app.close(); }
+});
+
 test('a team name menu is scoped to its members, stopped ones by their recipe team, and opens its editor (#258)', { timeout: 60000 }, async (context) => {
   const restarts: string[] = [];
   const opened: unknown[][] = [];

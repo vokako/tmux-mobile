@@ -69,10 +69,23 @@ pub fn agent_remove(session: &str, agent: &str) -> Result<Value, String> {
 /// recipe — `None` for a solo agent or a pre-recipe home. The Hub groups
 /// same-team cards on this.
 pub fn team_of(workspace: Option<&str>, window_name: &str) -> Option<String> {
-    let recipe = agents::home_dir(workspace?, window_name)?.join("launch.json");
-    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(recipe).ok()?).ok()?;
-    let t = v.get("team")?.as_str()?.trim().to_string();
+    let t = recipe_field(workspace, window_name, "team");
     (!t.is_empty()).then_some(t)
+}
+
+/// The team member a window was spawned as (`launch.json` `member`, board
+/// #113); '' for a solo agent or a pre-#113 recipe.
+pub fn member_of(workspace: Option<&str>, window_name: &str) -> String {
+    recipe_field(workspace, window_name, "member")
+}
+
+fn recipe_field(workspace: Option<&str>, window_name: &str, key: &str) -> String {
+    let Some(recipe) = workspace.and_then(|w| agents::home_dir(w, window_name)).map(|h| h.join("launch.json")) else { return String::new() };
+    std::fs::read_to_string(recipe)
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| v.get(key).and_then(|x| x.as_str()).map(|s| s.trim().to_string()))
+        .unwrap_or_default()
 }
 
 /// The isolated home of a MANAGED agent, or `None` when this window is not one.

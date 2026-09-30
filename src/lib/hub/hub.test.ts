@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { wakeLine, localWhen, gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markMentions, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand, foldedCommandArgs, inputModeSwitch } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
-import { mentionPalette, rosterGroups, rosterMarker, sortAgentsForRoster } from './hub.ts';
+import { mentionPalette, rosterGroups, rosterMarker, sortAgentsForRoster, stoppedGroups } from './hub.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
   ts: 0, window: 'w1', kind: 'tool', text: '', ...e,
@@ -140,6 +140,14 @@ test('rosterGroups: team and sub-team stay together at their most active member'
   ]);
   assert.deepEqual(ranked, sortAgentsForRoster(agents), 'grouping never changes the sorting authority');
   assert.equal(groups[1]?.members[0], agents[1], 'the group holds the original agent objects');
+});
+
+test('stoppedGroups: a team with nobody running keeps a group of its stopped members (#287)', () => {
+  const teams = { qa: 'squad', qb: 'squad/sub', lone: 'solo-team', x: 'live-team', y: 'live-team' };
+  const live = [ag({ name: 'lead', team: 'live-team/inner' }), ag({ name: 'free' })];
+  assert.deepEqual(stoppedGroups(['qa', 'loner', 'x', 'qb', 'lone', 'y'], teams, live), [{ team: 'squad', members: ['qa', 'qb'] }],
+    'nested paths share the root; a team with a live member keeps its live group; one stopped member is its own card; no team, no group');
+  assert.deepEqual(stoppedGroups([], teams, live), []);
 });
 
 test('rosterGroups: empty or missing team paths do not create false groups', () => {

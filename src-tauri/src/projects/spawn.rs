@@ -439,6 +439,16 @@ pub fn team_plan(homes: &[(String, String, String)], current: &[(String, String)
     plan
 }
 
+/// Does the CURRENT definition of the team at `team_path`'s root still have
+/// `member` at that path (board #287)? False for a deleted team.
+pub fn in_current_team(team_path: &str, member: &str) -> bool {
+    let Some(root) = team_path.split('/').next() else { return false };
+    let Ok(Some(team)) = super::team_get(root) else { return false };
+    super::teams::expand(&team, &|n| super::team_get(n), SPAWN_CAP)
+        .map(|flat| flat.iter().any(|f| f.path == team_path && f.member.name.trim() == member))
+        .unwrap_or(false)
+}
+
 /// The inputs of `team_plan` for `team_name` in `session`, read from the
 /// registry, the recipes and tmux.
 pub fn team_plan_for(session: &str, team_name: &str) -> Result<TeamPlan, String> {
@@ -2021,6 +2031,9 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         }
         save_team(r#"[{"name":"dev","base":"tpbase","role":"implement"},{"name":"rev","base":"tpbase","role":"review"}]"#);
 
+        assert!(in_current_team("tpteam", "dev") && in_current_team("tpteam", "rev"));
+        assert!(!in_current_team("tpteam", "old"), "left the definition (#287)");
+        assert!(!in_current_team("no-such-team", "dev"));
         let plan = team_plan_for(&session, "tpteam").unwrap();
         assert_eq!(plan, TeamPlan { restart: vec!["dev".into()], stop: vec![], spawn: vec![("tpteam".into(), "rev".into())] },
             "no window is live: old is already stopped, so nothing to stop");

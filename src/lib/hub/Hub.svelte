@@ -1318,7 +1318,11 @@
     commandFeedbackAnchor = composer?.feedbackAnchor() ?? null;
     acting = true;
     try {
-      const failed = action.verb === 'restart'
+      // Starting a team with nobody running is a team restart (board #287):
+      // one alignment with the CURRENT definition, as `tmm spawn --team`
+      // would start it, never a replay of each stopped member alone.
+      const wholeTeam = action.verb === 'start' && !!targetTeam(target) && !targetMembers(target, agents).length;
+      const failed = action.verb === 'restart' || wholeTeam
         ? await restartGroup(action.names, targetTeam(target), session)
         : await runGroup(action.names, (member) => hubAgentRestart(session, member));
       if (failed.length && selected === session) commandFeedbackLifetime.update(feedbackToken, {
@@ -1504,10 +1508,15 @@
   function teamItems(session, team, menuId) {
     const target = teamTarget(team);
     const current = () => selected === session && ctxAt?.teamMenuId === menuId;
-    return [
+    // A team with nobody running (board #287) is not a destination: no
+    // talk row, only Start and its configuration.
+    const talk = !targetMembers(target, agents).length ? [] : [
       recipient === target
         ? { label: t('hubRecordOnly'), icon: 'chat', onselect: () => { if (current() && recipient === target) setRecipient(''); } }
         : { label: t('hubTalkToTeam'), icon: 'chat', onselect: () => { if (current()) setRecipient(target); } },
+    ];
+    return [
+      ...talk,
       ...groupItems(target, 'team', team, session).map((item) => ({
         ...item, onselect: () => { if (current()) return item.onselect(); },
       })),
@@ -1937,7 +1946,7 @@
         }}
         registerActions={registerFeedActions} />
 
-      <Roster {selected} {compact} {managedAgents} {stopped} {selectedRow}
+      <Roster {selected} {compact} {managedAgents} {stopped} {stoppedTeams} {selectedRow}
         {recipient} {filterAgent} {composerText} {managedNames} {busyNames} {interrupting}
         {unread} {acting} {tick} {roomReady} {justLoaded} {rosterBase}
         expanded={rosterExpanded} onexpand={toggleRoster}

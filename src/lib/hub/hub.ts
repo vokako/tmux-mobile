@@ -227,6 +227,30 @@ export function rosterGroups(agents: readonly HubAgent[]): { key: string; team: 
   return groups;
 }
 
+/** Teams with NO live member, from the stopped identities (board #287,
+ * owner 2026-09-30: after "team stop" the team vanished and could only be
+ * started member by member). `stoppedTeams` is hub_agents' map (stopped name
+ * -> team path). A team that still has a live member keeps its live group
+ * and menu; one drawn from stopped members follows `namedGroup` (two or
+ * more), a lone stopped member being its own card. Order: first appearance
+ * in `stopped`. Pure. */
+export function stoppedGroups(
+  stopped: readonly string[],
+  stoppedTeams: Readonly<Record<string, string>>,
+  live: readonly { team?: string | null }[],
+): { team: string; members: string[] }[] {
+  const alive = new Set(live.map((a) => teamRoot(a.team)).filter(Boolean));
+  const out: { team: string; members: string[] }[] = [];
+  for (const name of stopped) {
+    const team = teamRoot(stoppedTeams[name]);
+    if (!team || alive.has(team)) continue;
+    const g = out.find((x) => x.team === team);
+    if (g) g.members.push(name);
+    else out.push({ team, members: [name] });
+  }
+  return out.filter((g) => namedGroup(g));
+}
+
 /** Does the strip draw this group AS a team (label, baseline, one lit
  * enclosure)? A team with one live member is drawn as that member's plain
  * card. The ONE definition: the markup and the selection marker both read it,

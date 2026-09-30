@@ -134,6 +134,9 @@ height-bounded list, with project-owned persistence through `hubPrefs`.
 Hub's existing `withReadingAnchor` encloses each expand/collapse mutation;
 neither the list nor its height gets a second reading or motion mechanism.
 Secondary card actions, including filtering and restart, use only ContextMenu.
+A team with nobody running keeps its place in the strip (board #287): its name
+over its dimmed stopped cards, the name opening the team menu (`Start stopped`,
+`Configure team`); see hub-composer.md § Group verbs.
 The fixed tap menu and double-click filter shortcut no longer exist.
 
 Feed itself is unchanged: direct child rows, following/newBelow, the three

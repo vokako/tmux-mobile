@@ -145,7 +145,9 @@ test('native selection owns hover and context; stopped slots never select or res
   assert.match(source, /const touchInfo = \(get\) => \(coarsePointer\(\) \? get\(\) : null\);/u);
   assert.match(source, /oncontextmenu=\{\(e\) => \{ e\.preventDefault\(\); oncontext\(pointOf\(e\), a\.name, touchInfo\(\(\) => cardInfo\(a\)\)\); \}\}/u);
   assert.match(source, /use:longpress=\{\{ onlongpress: \(at\) => oncontext\(at, a\.name, touchInfo\(\(\) => cardInfo\(a\)\)\) \}\}/u);
-  const off = source.slice(source.indexOf('class="acard off"'), source.indexOf('{/each}', source.indexOf('class="acard off"')));
+  // One stopped-card body (the offSelect snippet, #287) for a loose stopped
+  // identity and a stopped team's member.
+  const off = source.slice(source.indexOf('{#snippet offSelect(name)}'), source.indexOf('{/snippet}', source.indexOf('{#snippet offSelect(name)}')));
   assert.match(off, /onclick=\{\(e\) => stoppedMenu\(e, name\)\}/u);
   assert.match(off, /disabled=\{acting\}/u);
   assert.doesNotMatch(off, /selectTarget|interrupt\(|startAgent|a-start|aria-pressed/u);
@@ -189,7 +191,9 @@ test('identity, readiness and motion retain their existing authorities', () => {
     'owner 07:09 retains state wording in accessible/hover facts only');
   assert.match(source, /\{#each groups as group \(group\.key\)\}/u);
   assert.match(source, /\{#each group\.members as a \(a\.name\)\}/u);
-  assert.equal([...source.matchAll(/animate:flip=\{\{ duration: moveMs\(\) \}\}/gu)].length, 3);
+  // Live groups, their cards, stopped teams (#287), and each place a stopped
+  // card sits: the each's own child, as svelte requires.
+  assert.equal([...source.matchAll(/animate:flip=\{\{ duration: moveMs\(\) \}\}/gu)].length, 5);
   assert.doesNotMatch(source, /^\s*\.st \{/mu, 'the shared Hub dot box is not copied');
   assert.match(source, /const slotBackend = \(name\) => \(selectedRow\?\.slots \?\? \[\]\)\.find\(\(s\) => s\.window_name === name\)\?\.command;/u);
   assert.match(source, /img class="ava dim" src=\{backendIcon\(backend\)\}/u);
@@ -408,4 +412,13 @@ test('expanding exists only while the single row overflows (#266)', () => {
     'the chevron column stays reserved: the row width must not depend on the answer');
   assert.match(source, /\.cards:not\(\.expanded\) \.ctx-value \{ display: none; \}/u,
     'the probe reads the single row without the wrapped list\'s figures');
+});
+
+test('a team with nobody running keeps its place: a name that opens the team menu over its stopped cards (#287)', () => {
+  assert.match(source, /const offTeams = \$derived\(stoppedGroups\(stopped, stoppedTeams, managedAgents\)\);/u, 'drawn from hub_agents\u2019 stopped_teams');
+  assert.match(source, /<div class="roster-cluster team off" data-team=\{group\.team\}/u);
+  const off = source.slice(source.indexOf('{#each offTeams'), source.indexOf('{#each offLoose'));
+  assert.match(off, /onclick=\{\(e\) => onteamcontext\(cardAnchor\(e\.currentTarget\), group\.team\)\}/u, 'its name opens the team menu');
+  assert.doesNotMatch(off, /setRecipient|aria-pressed/u, 'not a destination: nobody is running to talk to');
+  assert.equal(source.match(/\{@render offSelect\(name\)\}/gu)?.length, 2, 'one stopped-card body, for a loose identity and a team member');
 });
