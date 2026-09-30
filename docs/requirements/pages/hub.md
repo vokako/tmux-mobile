@@ -126,8 +126,11 @@ completion).
 - **Group verbs** (board #258): right-click or long-press on the All tab or
   a team name opens a menu that restarts, starts the stopped, interrupts or
   stops every member at once (counts in the labels; Stop always confirms,
-  Restart confirms only when a member is working). A team's menu also opens
-  its configuration. Removing agents stays per agent.
+  Restart confirms only when a member is working). A team's Restart first
+  brings the team in line with its current definition: members removed from
+  it are stopped (their homes kept), members added to it are started, and the
+  rest restart (board #286). A team's menu also opens its configuration.
+  Removing agents stays per agent.
   The empty-room preset lists configured teams as
   one-tap starts beside the single agents, and the "Start a team" picker
   offers them above the ad-hoc pick (the brief applies to every member).

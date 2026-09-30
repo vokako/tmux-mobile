@@ -1202,10 +1202,11 @@
         // Every member once; a retry after a partial failure runs only the
         // ones that failed — a success is never repeated (board #258).
         const failed = kind === 'groupRestart'
-          ? await restartGroup(act.names, act.team, session)
+          ? await restartGroup(act.names, act.team, session, act.retry)
           : await runGroup(act.names, (member) => hubAgentStop(session, member));
         if (failed.length) {
           act.names = failed;
+          act.retry = true;
           throw new Error(t('hubGroupFailedNames').replace('{names}', failed.join(', ')));
         }
       } else {
@@ -1333,11 +1334,11 @@
   /** Restart a group; the names that failed. A TEAM is aligned with its
    * current definition in one server step (board #286: the members it
    * dropped stop, the ones it gained start, the rest restart from it), so an
-   * edited team takes effect. All restarts each live member. A retry of a
-   * team restart re-runs the alignment. */
-  async function restartGroup(names, team, session) {
+   * edited team takes effect. All restarts each live member. A retry runs
+   * only the names that failed (#258: a success is never retried). */
+  async function restartGroup(names, team, session, retry = false) {
     if (!team) return runGroup(names, (member) => hubAgentRestart(session, member));
-    const r = await hubTeamRestart(session, team);
+    const r = await hubTeamRestart(session, team, retry ? [...names] : undefined);
     return (r.errors ?? []).map((e) => e.name);
   }
 

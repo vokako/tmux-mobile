@@ -2282,7 +2282,7 @@ test('Restart team aligns the team with its current definition in one server ste
   const app = await groupFixture(context, {
     hubAgentRestart: async (_s: string, name: string) => { perAgent.push(name); return {}; },
     hubTeamRestart: async (...args: unknown[]) => {
-      teamCalls.push(args);
+      teamCalls.push(args.filter((a) => a !== undefined));
       const errors = fail ? [{ name: 'reviewer', error: 'spawn failed' }] : [];
       fail = false;
       return { team: 'squad', restarted: ['lead', 'dev'], stopped: ['archivist'], spawned: [], errors };
@@ -2300,7 +2300,7 @@ test('Restart team aligns the team with its current definition in one server ste
     assert.match(app.document.querySelector('.dlg-error')?.textContent ?? '', /reviewer/u, 'a member that failed is named');
     app.document.querySelector<HTMLButtonElement>('.dlg.confirm .primary')!.click();
     for (let i = 0; i < 10 && app.document.querySelector('.dlg.confirm'); i++) await app.flush();
-    assert.equal(teamCalls.length, 2, 'a retry re-runs the alignment');
+    assert.equal(JSON.stringify(teamCalls), JSON.stringify([['fixture', 'squad'], ['fixture', 'squad', ['reviewer']]]), `a retry runs only the member that failed; lead and dev are not restarted again: ${JSON.stringify(teamCalls)}`);
     assert.equal(app.document.querySelector('.dlg.confirm'), null);
   } finally { await app.close(); }
 });

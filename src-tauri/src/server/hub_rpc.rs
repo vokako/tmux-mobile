@@ -720,9 +720,17 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
         // gained are spawned, and every member it still has is restarted
         // from the definition (a stopped one is started). Per-agent restart
         // stays a recipe replay. One room line per member, as ever.
+        // `only` (a retry, validator 06:53): the names a previous run reported
+        // failed — members by window, a spawn by member name. Everything else
+        // succeeded and is never run again (#258: a success is never retried).
         "hub_team_restart" => {
             let team = param(p, "team")?;
+            let only: Option<Vec<String>> = p.get("only").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect());
             let plan = crate::projects::spawn::team_plan_for(session, team).map_err(RpcError::InvalidParams)?;
+            let plan = match &only {
+                Some(names) => crate::projects::spawn::only_names(plan, names),
+                None => plan,
+            };
             let mut errors = Vec::new();
             let mut stopped = Vec::new();
             for w in &plan.stop {
@@ -737,7 +745,8 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
             // New members first, so the restarted members' rosters name them.
             let mut spawned = Vec::new();
             if !plan.spawn.is_empty() {
-                let r = crate::projects::spawn::spawn_team_members(session, team, "", "", true).map_err(RpcError::InvalidParams)?;
+                let wanted: Vec<String> = plan.spawn.iter().map(|(_, m)| m.clone()).collect();
+                let r = crate::projects::spawn::spawn_team_members(session, team, "", "", true, Some(&wanted)).map_err(RpcError::InvalidParams)?;
                 for m in r.get("spawned").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
                     let win = m.get("window_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
                     let _ = rooms::post(&room, &win, &format!("[tmm] spawned {win} — team {team}"));

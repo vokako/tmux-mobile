@@ -393,7 +393,7 @@ fn uniquify(name: &str, taken: &std::collections::HashSet<&str>) -> Result<Strin
 /// not stop the others and is reported in `errors`. Returns
 /// `{ team, spawned: [{name, window_name, pane}], errors: [..] }`.
 pub fn spawn_team(session: &str, team_name: &str, brief: &str, by: &str) -> Result<Value, String> {
-    spawn_team_members(session, team_name, brief, by, false)
+    spawn_team_members(session, team_name, brief, by, false, None)
 }
 
 /// What a team restart does to this workspace's members (board #286): the
@@ -409,6 +409,17 @@ pub struct TeamPlan {
     pub restart: Vec<String>,
     pub stop: Vec<String>,
     pub spawn: Vec<(String, String)>,
+}
+
+/// A retry's plan (validator 06:53): only the names the previous run
+/// reported failed — a restart or stop by window, a spawn by member name.
+/// Pure.
+pub fn only_names(plan: TeamPlan, names: &[String]) -> TeamPlan {
+    TeamPlan {
+        restart: plan.restart.into_iter().filter(|w| names.contains(w)).collect(),
+        stop: plan.stop.into_iter().filter(|w| names.contains(w)).collect(),
+        spawn: plan.spawn.into_iter().filter(|(_, m)| names.contains(m)).collect(),
+    }
 }
 
 pub fn team_plan(homes: &[(String, String, String)], current: &[(String, String)], live: &[String]) -> TeamPlan {
@@ -448,7 +459,8 @@ pub fn team_plan_for(session: &str, team_name: &str) -> Result<TeamPlan, String>
 /// only the members with no home in this workspace yet, and names the
 /// others by the windows their recipes record, so every prompt's roster is
 /// the team as it will stand.
-pub fn spawn_team_members(session: &str, team_name: &str, brief: &str, by: &str, only_new: bool) -> Result<Value, String> {
+/// `only` narrows the members spawned to those names (a retry).
+pub fn spawn_team_members(session: &str, team_name: &str, brief: &str, by: &str, only_new: bool, only: Option<&[String]>) -> Result<Value, String> {
     let team = super::team_get(team_name)?
         .ok_or_else(|| format!("no team named '{team_name}'"))?;
     // Nested teams flatten here (board #74 follow-up): every leaf remembers
@@ -460,7 +472,8 @@ pub fn spawn_team_members(session: &str, team_name: &str, brief: &str, by: &str,
     let panes = tmux::list_panes(session).unwrap_or_default();
     let homes = if only_new { team_windows_from_recipes(&project.path, &team.name) } else { Default::default() };
     let has_home = |f: &super::teams::Flat| homes.get(&(f.path.clone(), f.member.name.trim().to_string())).cloned();
-    let new = flat.iter().filter(|f| has_home(f).is_none()).count();
+    let wanted = |f: &super::teams::Flat| has_home(f).is_none() && only.is_none_or(|o| o.iter().any(|n| n == f.member.name.trim()));
+    let new = flat.iter().filter(|f| wanted(f)).count();
     // Team expansion counts its LEAVES against the same cap, as before.
     let existing = managed_window_count(&project.path, &panes);
     if existing + new > SPAWN_CAP {
@@ -486,7 +499,7 @@ pub fn spawn_team_members(session: &str, team_name: &str, brief: &str, by: &str,
     let mut spawned = Vec::new();
     let mut errors = Vec::new();
     for (f, (w, _, path)) in flat.iter().zip(roster.iter()) {
-        if has_home(f).is_some() {
+        if !wanted(f) {
             continue;
         }
         let m = &f.member;
@@ -784,6 +797,12 @@ mod team_plan_tests {
             spawn: vec![("dev-squad".into(), "reviewer".into()), ("dev-squad".into(), "rev".into())],
         });
         assert_eq!(team_plan(&[], &[], &[]), TeamPlan::default());
+        // A retry keeps only what failed (validator 06:53).
+        assert_eq!(super::only_names(plan, &s(&["validator", "reviewer"])), TeamPlan {
+            restart: s(&["validator"]),
+            stop: vec![],
+            spawn: vec![("dev-squad".into(), "reviewer".into())],
+        });
     }
 }
 
