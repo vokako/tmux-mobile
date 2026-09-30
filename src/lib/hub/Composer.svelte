@@ -472,8 +472,11 @@
      #288, owner 2026-09-30: "输入框和下边的菜单中间会有一个小小的缝隙，在其他页面
      没有"). Measured at 390px: the band's bottom edge (796px) sat on the
      bar's (797px), two 1px lines of different shade read as a seam; every
-     other page meets the bar with its one line. `.touch-layout` is the ONE
-     condition the bar is drawn under (App.svelte), so no bar, no change. */
-  :global(main.touch-layout) .composer { border-bottom: 0; }
+     other page meets the bar with its one line. The selector is exactly when
+     the bar SHOWS (App.svelte): drawn under `main.touch-layout`, hidden while
+     the soft keyboard is up (`html.keyboard-open`) and in Files' reading mode
+     (`main.immersive`). Under a hidden bar the band keeps its own edge, so
+     typing never leaves its floor open (validator 06:19). */
+  :global(html:not(.keyboard-open) main.touch-layout:not(.immersive)) .composer { border-bottom: 0; }
   :global(.hub-root.compact) .c-input { max-height: calc(28vh / var(--ui-zoom, 1)); }
 </style>

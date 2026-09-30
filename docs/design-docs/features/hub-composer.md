@@ -818,9 +818,12 @@ Over the phone's tab bar the band has no bottom border (board #288, owner
 2026-09-30: "输入框和下边的菜单中间会有一个小小的缝隙，在其他页面没有"): at
 390px the band's 1px `--bubble-line` edge sat directly on the bar's 1px
 `--border` top line, two lines of different shade that read as a seam, while
-every other page meets the bar with its one line. The rule is keyed to
-`main.touch-layout`, the condition App.svelte draws the bar under, so a
-desktop window keeps the band's closed edge.
+every other page meets the bar with its one line. The rule applies exactly
+while the bar SHOWS: `html:not(.keyboard-open) main.touch-layout:not(.immersive)`
+(App.svelte draws the bar under `touch-layout` and hides it while the soft
+keyboard is up and in Files' reading mode). Under a hidden bar (typing on
+the phone, a desktop window) the band keeps its own bottom edge (validator
+06:19).
 The owner's 09:38 report of a WHITE LINE while switching tabs exposed two
 transient join faults. Chromium 152 at 390px measured the incoming bottom
 inset at 6px immediately after selection, 3.14px after 64ms and -1px only
