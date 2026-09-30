@@ -33,14 +33,42 @@ struct HubRoomPoster;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl crate::agent_notifications::RoomPoster for HubRoomPoster {
     fn post_final(&self, session: &str, agent: &str, body: &str, reply_to: &[String]) {
-        let room = hub_rpc::project_room(session);
-        let _ = crate::projects::rooms::post_routed(&room, agent, body, reply_to);
-        // Recorded to the human (board #289), never typed: the human has no
-        // pane, and reads the room.
-        for target in crate::address::pane_targets(reply_to) {
-            let line = format!("[tmm chat {}] {agent}: [reply] {body}", hub_rpc::stamp_now());
-            hub_rpc::deliver_chat_line(session, target, &line);
-        }
+        post_final_with(session, agent, body, reply_to, |target, line| {
+            hub_rpc::deliver_chat_line(session, target, line);
+        });
+    }
+}
+
+/// `post_final` with the typing injected (board #289, validator 11:34: the
+/// rule must be pinned where it is applied, not only in `pane_targets`).
+/// Recorded to every edge target; typed only to the ones with a pane — the
+/// human has none, and reads the room.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn post_final_with(session: &str, agent: &str, body: &str, reply_to: &[String], mut deliver: impl FnMut(&str, &str)) {
+    let room = hub_rpc::project_room(session);
+    let _ = crate::projects::rooms::post_routed(&room, agent, body, reply_to);
+    for target in crate::address::pane_targets(reply_to) {
+        let line = format!("[tmm chat {}] {agent}: [reply] {body}", hub_rpc::stamp_now());
+        deliver(target, &line);
+    }
+}
+
+#[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
+mod reply_edge_tests {
+    /// Board #289: a final reply to a turn the human and lead asked in is
+    /// RECORDED to both and TYPED only to lead.
+    #[test]
+    fn a_reply_is_recorded_to_the_human_and_typed_only_to_agents() {
+        crate::projects::tests::use_test_store();
+        let session = format!("tmm-reply-rec-{}", uuid::Uuid::new_v4());
+        let mut typed = Vec::new();
+        let edge = vec!["lead".to_string(), "human".to_string()];
+        super::post_final_with(&session, "dev", "done", &edge, |target, line| typed.push((target.to_string(), line.to_string())));
+        assert_eq!(typed.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), vec!["lead"], "never typed to the human");
+        assert!(typed[0].1.ends_with("dev: [reply] done"));
+        let room = super::hub_rpc::project_room(&session);
+        let page = crate::projects::rooms::history_page(&room, None, 5);
+        assert_eq!(page["messages"][0]["to"], serde_json::json!(["lead", "human"]), "recorded to both");
     }
 }
 

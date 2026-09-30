@@ -93,17 +93,24 @@ owner 2026-09-30: "过滤所有 to human 的消息"). Before, `requesters` dropp
 this reply to me" could not be read back. Now a stamped `human:` line counts,
 and so does a prompt with no stamp at all, which only a person typing into the
 pane produces (a `/command`, which the app types for any sender, and the legacy
-spawn kick excepted). The final reply's room row therefore names `human` in
-`to`; `HubRoomPoster` types `[reply]` only to `address::pane_targets`, which
-drops the human, because the human has no pane and reads the room. The live
+spawn kick excepted). That reading rests on one premise: everything the app
+itself types into a pane carries a `[tmm chat …]` stamp (chat lines, board
+notices, wakes, briefs; validator 11:34 checked each). A new automatic input
+without a stamp would be recorded as the human's request, so it must be
+stamped too. The final reply's room row therefore names `human` in
+`to`; `HubRoomPoster` (`server::post_final_with`) types `[reply]` only to
+`address::pane_targets`, which drops the human, because the human has no pane
+and reads the room. The live
 edge and the recovery path read the same parser and the same stored
 `activity.requesters`, so they agree; rows recorded before #289 keep their old
 `to` (no human) and are not rewritten. Pinned by
-`the_human_is_a_requester_but_never_a_pane_target` (address.rs) and the human
-rows of `a_stop_payload_posts_the_agents_final_answer_to_the_room` and
+`the_human_is_a_requester_but_never_a_pane_target` (address.rs),
+`a_reply_is_recorded_to_the_human_and_typed_only_to_agents` (server/mod.rs:
+the poster itself, recorded to both, typed to lead only), and the human rows of
+`a_stop_payload_posts_the_agents_final_answer_to_the_room` and
 `a_later_input_in_the_same_turn_joins_the_reply_edge` (live and recovered).
-Negative controls: dropping `human` in `requesters`, or typing to every edge
-target, fails them.
+Negative controls, each measured: dropping `human` in `requesters` fails three
+of them; the poster typing to every edge target fails the poster test.
 
 **The edge accumulates within a turn** (#256). An input that arrives while the
 window's turn is open (codex steer, anything typed mid-turn) ADDS its senders,
