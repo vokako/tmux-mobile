@@ -37,8 +37,9 @@ const USAGE: &str = r#"tmm — talk to the tmux-mobile project hub
 
 USAGE (agent):
   tmm send "@name message"            send a message to one or more recipients
-                                      a line to yourself reaches you only from a script
-                                      you left running (nohup, cron), not from your turn
+                                      a line to yourself reaches you only from a script whose
+                                      shell has exited (nohup/setsid/cron) — never from your
+                                      turn or your CLI's own background run (use task --wake)
   tmm send "@name /command [args]"    type a CLI command (e.g. /compact) into a teammate's
                                       pane verbatim, like the composer (@all = everyone else)
   tmm send <text> --status            record ambient progress in the project room
