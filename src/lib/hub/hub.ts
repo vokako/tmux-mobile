@@ -1555,6 +1555,26 @@ export function chipExtras(body: string, recipient: string, names: readonly stri
   return mentionedAgents(body, names).filter((n) => n !== recipient);
 }
 
+/** A reply's quote token (board #290): the server writes it
+ * (`address::quote_token`) from the row it quotes, right after the body's
+ * leading addresses — `@builder [re <sender> <HH:MM>: 「<first line>」] text`.
+ * Inside the excerpt `@` is the full-width `＠` and `」` is `”`, so no mention
+ * parser reads an address in it and the first `」]` always ends it. `text` is
+ * the body without the token (its addresses kept); `null` when there is no
+ * token there. Pure; its case table lives in address.rs. */
+export function parseQuote(body: string | null | undefined): { from: string; time: string; excerpt: string; text: string } | null {
+  const b = body ?? '';
+  const m = /^((?:@\S+\s+)*)\[re (\S+) (\d{1,2}:\d{2}): 「([^\n]*?)」\] ?/u.exec(b);
+  if (!m) return null;
+  return { from: m[2]!, time: m[3]!, excerpt: m[4]!, text: m[1]! + b.slice(m[0].length) };
+}
+
+/** The preview a reply chip shows before the server builds the token: the
+ * quoted body's first non-empty line, squashed. Display only. Pure. */
+export function quotePreview(body: string | null | undefined): string {
+  return (body ?? '').split('\n').map((l) => l.trim()).find(Boolean)?.replace(/\s+/gu, ' ') ?? '';
+}
+
 /** The human's identity in a room (the server's `address::HUMAN`). */
 export const HUMAN = 'human';
 

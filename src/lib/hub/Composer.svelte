@@ -16,7 +16,7 @@
     onstage: stageFiles = async () => {}, onremove: removeAttachment = () => {},
     onmodels: modelsList = async () => ({ models: [] }), oninterrupt = async (_target) => {},
     onpreview = () => {}, onfocus = () => {}, onheightchange = () => {},
-    registerBack = null,
+    registerBack = null, replyTo = null, onclearreply = () => {},
   } = $props();
 
   // Hub owns transport and capture-listener ordering; the palette is the
@@ -331,8 +331,20 @@
       disabled={!selected || attaching || failed || !sendable} onclick={send} />
   </div>
   </div>
-  {#if pending.length}
+  {#if pending.length || replyTo}
     <div class="pend-row">
+      {#if replyTo}
+        <!-- The reply chip (board #290): the pending-chip species, the
+             sender and the quoted line's preview; × drops the quote. -->
+        <span class="pend-chip reply appear-pop" title={replyTo.preview}>
+          <Icon name="arc-left" size={12} />
+          <span class="pend-name">{t('hubReplyTo').replace('{name}', replyTo.from)}</span>
+          <span class="pend-why">{replyTo.preview}</span>
+          <button class="pend-x" aria-label={t('hubReplyClear')} onclick={onclearreply}>
+            <Icon name="x" size={11} />
+          </button>
+        </span>
+      {/if}
       {#each pending as a, i (a.key)}
         {#if a.error}
           <span class="pend-chip err appear-pop" title={`${a.name} — ${a.error}`}>

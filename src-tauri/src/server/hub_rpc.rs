@@ -174,6 +174,23 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
             let raw_body = param(p, "body")?;
             let from = p.get("from").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or("human");
             let is_status = p.get("status").and_then(|v| v.as_bool()).unwrap_or(false);
+            // A reply (board #290): `re` names a message of THIS room by id or
+            // seq, and the quote token is built here, from the stored row —
+            // one formatter for the composer and `tmm send --re`, the sender
+            // and time from the record, never the client.
+            let quote = match p.get("re").and_then(|v| v.as_str().map(str::to_string).or_else(|| v.as_i64().map(|n| n.to_string()))) {
+                Some(re) if !re.trim().is_empty() => {
+                    let m = rooms::message_by_ref(&room, re.trim())
+                        .ok_or_else(|| RpcError::InvalidParams(format!("no message '{re}' in this room")))?;
+                    let hhmm = m["ts"].as_i64().and_then(chrono::DateTime::from_timestamp_millis)
+                        .map(|t| t.with_timezone(&chrono::Local).format("%H:%M").to_string())
+                        .unwrap_or_default();
+                    crate::address::quote_token(m["from"].as_str().unwrap_or("?"), &hhmm, m["body"].as_str().unwrap_or(""))
+                }
+                _ => String::new(),
+            };
+            let raw_body = if quote.is_empty() { raw_body.to_string() } else { quote_into(&quote, raw_body) };
+            let raw_body = raw_body.as_str();
             let body = if is_status {
                 format!("[tmm status working] {raw_body}")
             } else {
@@ -905,6 +922,21 @@ pub(super) async fn hub_push_loop(out_tx: tokio::sync::mpsc::UnboundedSender<sup
             Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
         }
     }
+}
+
+/// Put a reply's quote after the body's leading addresses (board #290):
+/// `@builder [re …] text` — the addresses stay first, where every reader of
+/// a delivered line looks for them.
+fn quote_into(quote: &str, body: &str) -> String {
+    let mut rest = body.trim_start();
+    let mut head: Vec<&str> = Vec::new();
+    while rest.starts_with('@') {
+        let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        head.push(&rest[..end]);
+        rest = rest[end..].trim_start();
+    }
+    let head = if head.is_empty() { String::new() } else { format!("{} ", head.join(" ")) };
+    format!("{head}{quote}{rest}")
 }
 
 /// Local wall-clock stamp for a line an agent will read: `2026-08-17 16:31`.
@@ -2014,6 +2046,34 @@ mod tests {
         assert!(!context.contains("old task"));
         assert!(!context.contains("archived task"));
         assert!(context.contains("writer -> @lead: @lead new work"));
+    }
+
+    /// Board #290: a reply's quote goes after the leading addresses, and
+    /// `re` must name a message of THIS room (orchestrator 11:30).
+    #[test]
+    fn a_reply_quotes_a_message_of_its_own_room_after_the_addresses() {
+        assert_eq!(quote_into("[re a 1:00: 「x」] ", "@builder @lead which one?"), "@builder @lead [re a 1:00: 「x」] which one?");
+        assert_eq!(quote_into("[re a 1:00: 「x」] ", "no address"), "[re a 1:00: 「x」] no address");
+        assert_eq!(quote_into("[re a 1:00: 「x」] ", "@dev"), "@dev [re a 1:00: 「x」] ");
+        crate::projects::tests::use_test_store();
+        let s = format!("tmm-quote-{}", uuid::Uuid::new_v4());
+        let other = format!("tmm-quote-other-{}", uuid::Uuid::new_v4());
+        let post = |session: &str, body: &str, re: Option<serde_json::Value>| {
+            let mut p = serde_json::json!({ "session": session, "from": "lead", "body": body, "record_only": true });
+            if let Some(re) = re { p["re"] = re; }
+            handle_hub_request(&req("hub_post", p), None)
+        };
+        let first = post(&s, "@lead please review #289\nsecond line", None).result.expect("posted");
+        let there = post(&other, "elsewhere", None).result.expect("posted");
+        let by_id = post(&s, "@builder which P1?", Some(first["id"].clone())).result.expect("reply by id");
+        let body = by_id["body"].as_str().unwrap();
+        assert!(body.starts_with("@builder [re lead ") && body.contains(": 「＠lead please review #289」] which P1?"), "{body}");
+        assert_eq!(by_id["to"], serde_json::json!(["builder"]), "the quoted @lead delivers to nobody");
+        let by_seq = post(&s, "and this", Some(serde_json::json!(first["seq"].as_i64().unwrap()))).result.expect("reply by seq");
+        assert!(by_seq["body"].as_str().unwrap().starts_with("[re lead "));
+        let cross = post(&s, "x", Some(there["id"].clone()));
+        assert!(cross.error.as_ref().is_some_and(|e| e.message.contains("in this room")), "another room's message is refused");
+        assert!(post(&s, "x", Some(serde_json::json!("nope"))).error.is_some());
     }
 
     /// Board #279 (orchestrator 13:24): the producer's parts in, the display

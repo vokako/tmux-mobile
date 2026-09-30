@@ -2,7 +2,7 @@ import test from 'node:test';
 import { ALL_TARGET, teamTarget } from './hub-composer.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { wakeLine, localWhen, gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markMentions, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, HUMAN, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand, foldedCommandArgs, inputModeSwitch } from './hub.ts';
+import { wakeLine, localWhen, gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markMentions, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, HUMAN, parseQuote, quotePreview, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand, foldedCommandArgs, inputModeSwitch } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 import { mentionPalette, rosterGroups, rosterMarker, sortAgentsForRoster, stoppedGroups } from './hub.ts';
 
@@ -1413,6 +1413,28 @@ test('slashCommand reads a command by the server\'s one rule (#274)', () => {
     const [text = '', want = '', cmd = ''] = [body, to, command].map((q) => JSON.parse(q!) as string);
     assert.deepEqual(slashCommand(text), cmd ? { to: want, command: cmd } : null, text);
   }
+});
+
+test('parseQuote reads the server\u2019s quote token, and a quote addresses nobody (#290)', () => {
+  // ONE table: address.rs `a_quote_token_carries_the_first_line_and_addresses_nobody`.
+  const rust = readFileSync(new URL('../../../src-tauri/src/address.rs', import.meta.url), 'utf8');
+  const from = rust.indexOf('fn a_quote_token_carries_the_first_line_and_addresses_nobody');
+  const table = rust.slice(from, rust.indexOf('\n    fn ', from + 3));
+  const rows = [...table.matchAll(/^\s*\(("(?:[^"\\]|\\.)*"), ("(?:[^"\\]|\\.)*"), ("(?:[^"\\]|\\.)*")\),$/gmu)];
+  assert.ok(rows.length >= 5, `the shared table was found: ${rows.length} rows`);
+  for (const [, s, b, tok] of rows) {
+    const [sender = '', body = '', token = ''] = [s, b, tok].map((q) => JSON.parse(q!) as string);
+    const reply = `@builder ${token}which one?`;
+    const q = parseQuote(reply);
+    assert.ok(q, `parsed: ${token}`);
+    assert.equal(q!.from, sender);
+    assert.equal(q!.time, '10:41');
+    assert.equal(q!.text, '@builder which one?', 'the reply keeps its own addresses and text');
+    assert.deepEqual(mentionTokens(reply), ['builder'], `the quoted body (${JSON.stringify(body)}) addresses nobody`);
+  }
+  assert.equal(parseQuote('plain text'), null);
+  assert.equal(parseQuote('see [re lead 10:41: 「x」] later'), null, 'only at the head, after addresses');
+  assert.equal(quotePreview('\n  first   line \nsecond'), 'first line');
 });
 
 test('mentionsAgent parses addresses the way deliver_mentions does', () => {

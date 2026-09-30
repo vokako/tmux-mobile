@@ -196,6 +196,19 @@ impl Store {
             .map_err(|e| format!("hub message by id: {e}"))
     }
 
+    /// ONE message by its room seq (board #290: `tmm send --re <seq>`).
+    pub fn hub_message_by_seq(&self, room: &str, seq: i64) -> Result<Option<HubMsg>, String> {
+        self.conn
+            .query_row(
+                "SELECT seq, id, ts, room, sender, to_json, kind, body FROM hub_msgs
+                 WHERE room = ?1 AND seq = ?2",
+                rusqlite::params![room, seq],
+                hub_msg_row,
+            )
+            .optional()
+            .map_err(|e| format!("hub message by seq: {e}"))
+    }
+
     /// The newest `limit` messages matching ANY of `terms` (substring,
     /// ASCII-case-insensitive, body or sender), oldest first. `room = None`
     /// searches every room.

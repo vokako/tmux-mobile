@@ -1696,6 +1696,55 @@ test('Composer post and command failures never restore into the next room', { ti
   }
 });
 
+test('Reply quotes a message: a chip, the id rides the send, the quoted agent is seated, and a quote renders as a blockquote (#290)', { timeout: 60000 }, async (context) => {
+  const fixture = await compiledHub();
+  const { rpc } = roomFixture();
+  const posts: unknown[][] = [];
+  const quoted = '[re alice 10:41: 「＠bob please check」] fixed';
+  const app = await fixture.mount(context, {
+    props: { visible: true },
+    setup(window) {
+      window.Element.prototype.getAnimations = () => [];
+      window.HTMLCanvasElement.prototype.getContext = () => null;
+    },
+    modules: [{
+      ...rpc,
+      hubAgents: async () => ({ agents: [{ name: 'alice', window: 0, managed: true, agent: 'kiro', state: 'idle' }] }),
+      modelsList: async () => ({ models: [] }),
+      hubLog: async () => ({ messages: [
+        { id: 'm1', seq: 1, ts: 100, from: 'alice', body: '@bob please check\nthe second line' },
+        { id: 'm2', seq: 2, ts: 200, from: 'human', body: `@alice ${quoted}` },
+      ], has_more: false }),
+      hubActivity: async () => ({ events: [], has_more: false }),
+      hubPost: async (...args: unknown[]) => { posts.push(args.filter((a) => a !== undefined)); return {}; },
+    }],
+  });
+  try {
+    for (let i = 0; i < 12 && app.document.querySelectorAll('.msg').length !== 2; i++) await app.flush();
+    const mine = app.document.querySelector<HTMLElement>('.msg.me')!;
+    assert.equal(mine.querySelector('.m-quote')?.textContent?.replace(/\s+/gu, ' ').trim(), 'alice · 10:41 ＠bob please check', 'the quote is a blockquote');
+    assert.ok(!mine.querySelector('.m-body p')?.textContent?.includes('[re '), 'the token never renders as text');
+    const theirs = app.document.querySelector<HTMLElement>('.msg:not(.me)')!;
+    theirs.querySelector<HTMLElement>('.bubble')!.click();
+    await app.flush();
+    theirs.querySelector<HTMLButtonElement>('.m-acts button[aria-label="Reply"]')!.click();
+    await app.flush();
+    const chip = app.document.querySelector('.pend-chip.reply');
+    assert.ok(chip, 'the reply chip');
+    assert.match(chip!.textContent ?? '', /Replying to alice/u);
+    assert.match(chip!.textContent ?? '', /@bob please check/u, 'the preview is the first line');
+    const input = app.document.querySelector<HTMLTextAreaElement>('.c-input')!;
+    input.value = 'on it';
+    input.dispatchEvent(new app.window.Event('input', { bubbles: true }));
+    await app.flush();
+    app.document.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.click();
+    for (let i = 0; i < 10 && !posts.length; i++) await app.flush();
+    assert.deepEqual(posts, [['fixture', '@alice on it', 'human', 'm1']], 'the id rides the send; the quoted agent is the recipient');
+    for (let i = 0; i < 10 && app.document.querySelector('.pend-chip.reply'); i++) await app.flush();
+    assert.equal(app.document.querySelector('.pend-chip.reply'), null, 'one quote per send');
+  } finally { await app.close(); }
+});
+
 test('Feed keeps native selection, Copy/Raw dismissal, path intents and room-local choices', { timeout: 60000 }, async (context) => {
   const fixture = await compiledHub();
   const { rpc, pushed } = roomFixture();
@@ -1759,11 +1808,11 @@ test('Feed keeps native selection, Copy/Raw dismissal, path intents and room-loc
     bubble().click();
     await app.flush();
     assert.ok(actions());
-    const rawButton = actions()!.querySelector<HTMLButtonElement>('button:last-child')!;
+    const rawButton = actions()!.querySelector<HTMLButtonElement>('button[aria-label="Raw"]')!;
     assert.ok(rawButton.classList.contains('command-button'), '#166: shared command states, not private bubble paint');
-    assert.equal(rawButton.getAttribute('aria-label'), 'Raw');
     assert.equal(rawButton.getAttribute('aria-pressed'), 'false');
-    actions()!.querySelector<HTMLElement>('button:last-child')!.click();
+    assert.deepEqual([...actions()!.querySelectorAll('button')].map((b) => b.getAttribute('aria-label')), ['Copy', 'Raw', 'Reply'], 'Reply joins the one action row (#290)');
+    rawButton.click();
     await app.flush();
     assert.equal(reply().querySelector('.raw')?.textContent, body);
     assert.equal(rawButton.getAttribute('aria-pressed'), 'true');

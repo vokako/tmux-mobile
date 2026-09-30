@@ -176,6 +176,32 @@ pub fn requesters(prompt: &str) -> Vec<String> {
     targets
 }
 
+/// A reply's quote token (board #290, owner 2026-09-30: 引用一条消息去回复，
+/// 发给 Agent 时带上引用的内容). The quote rides IN the delivered line, so the
+/// agent needs no lookup and the record is self-contained (reference by
+/// content, not by index): `[re <sender> <HH:MM>: 「<excerpt>」] `. The
+/// excerpt is the quoted body's first non-empty line, whitespace squashed,
+/// cut to `QUOTE_CHARS` characters with `…`. Two characters are replaced
+/// inside it, and only there: `@` → `＠`, because every mention parser (this
+/// file's `mention_names`, the client's `mentionTokens`) reads ASCII `@`
+/// only, so quoting "@lead please" never delivers to lead; `」` → `”`, so
+/// the first `」]` always ends the token (`parseQuote`, hub.ts). The ONE
+/// formatter: `hub_post`'s `re` builds it from the server's own row for the
+/// composer and `tmm send --re` alike.
+pub fn quote_token(sender: &str, hhmm: &str, body: &str) -> String {
+    let first = body.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let squashed: String = first.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut excerpt: String = squashed.chars().take(QUOTE_CHARS).collect();
+    if squashed.chars().count() > QUOTE_CHARS {
+        excerpt = format!("{}…", excerpt.trim_end());
+    }
+    let excerpt = excerpt.replace('@', "＠").replace('」', "”");
+    format!("[re {sender} {hhmm}: 「{excerpt}」] ")
+}
+
+/// How much of the quoted line a reply carries.
+pub const QUOTE_CHARS: usize = 120;
+
 /// The human's identity in a room: no pane, never typed into.
 pub const HUMAN: &str = "human";
 
@@ -231,6 +257,32 @@ mod tests {
         ] {
             assert_eq!(mention_names(body), tokens, "{body:?}");
         }
+    }
+
+    /// Board #290: the ONE quote case table. `hub.test.ts` reads these rows
+    /// out of this file and runs `parseQuote` and `mentionTokens` over them,
+    /// so both sides agree: keep each row on one line,
+    /// `("<sender>", "<body>", "<token>"),`.
+    #[test]
+    fn a_quote_token_carries_the_first_line_and_addresses_nobody() {
+        let cases: &[(&str, &str, &str)] = &[
+            ("lead", "@lead please review #289\nsecond line", "[re lead 10:41: 「＠lead please review #289」] "),
+            ("human", "\n\n  spaced   out  \n", "[re human 10:41: 「spaced out」] "),
+            ("dev", "a 」] trick @all", "[re dev 10:41: 「a ”] trick ＠all」] "),
+            ("dev", "", "[re dev 10:41: 「」] "),
+            ("dev", "@builder-2 see mail a@b.dev", "[re dev 10:41: 「＠builder-2 see mail a＠b.dev」] "),
+        ];
+        let long = "字".repeat(130);
+        assert_eq!(quote_token("dev", "10:41", &long), format!("[re dev 10:41: 「{}…」] ", "字".repeat(120)), "cut at QUOTE_CHARS with …");
+        for (sender, body, want) in cases {
+            let got = quote_token(sender, "10:41", body);
+            assert_eq!(&got, want, "{body:?}");
+            assert!(mention_names(&got).is_empty(), "a quote addresses nobody: {got}");
+            assert_eq!(got.matches("」]").count(), 1, "one end: {got}");
+        }
+        // A reply's own addresses still work around the quote.
+        let reply = format!("@builder {}which P1?", quote_token("lead", "10:41", "@lead ok"));
+        assert_eq!(mention_names(&reply), vec!["builder".to_string()]);
     }
 
     /// Board #274: the ONE case table for `slash_command` and the composer's

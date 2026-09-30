@@ -210,6 +210,7 @@ test('Back keeps the original priority and current live guards in one dispatcher
     create: 'if (createOpen) { createOpen = false; return true; }',
     rename: 'if (renaming) { renaming = false; return true; }',
     filter: "if (filterAgent) { filterAgent = ''; return true; }",
+    reply: 'if (replyTo) { replyTo = null; return true; }',
     files: "if (termOpen && drawerView === 'files' && drawerFilesBack?.()) return true;",
     drawer: 'if (termOpen) { closeDrawer(); return true; }',
     sidebar: 'if (compact && !sideOpen) { sideOpen = true; return true; }',
@@ -220,7 +221,7 @@ test('Back keeps the original priority and current live guards in one dispatcher
     assert.ok(region.includes(`backLayers.register('${layer}', () => { ${guard}${suffix} })`),
       `${layer} keeps its current guard/action inside a live callback`);
   }
-  assert.equal([...region.matchAll(/backLayers\.register\(/g)].length, 11);
+  assert.equal([...region.matchAll(/backLayers\.register\(/g)].length, 12, 'the reply chip (#290) peels after the filter');
   assert.match(source, /registerBack=\{onGoBack \? backLayers\.register : null\}/u,
     'Composer registers its remaining palette slot with the same registry');
   assert.match(region, /onGoBack\(backLayers\.back\);/u);
@@ -575,15 +576,15 @@ test('a stage job dies with its room, and nothing sends while one is in flight (
   // The post goes to the CAPTURED room; per-room state mutates only if the
   // user is still there; and a failed post must not restore the old room's
   // draft/attachments into the new one.
-  assert.match(sendFn, /await hubPost\(room, text\);/u, 'the post names its room, not whatever is on screen');
+  assert.match(sendFn, /await hubPost\(room, text, 'human', re\);/u, 'the post names its room, not whatever is on screen');
   assert.equal([...sendFn.matchAll(/if \(selected !== room\) return;/g)].length, 2,
     'BOTH branches (command, message) stop their success path at the room boundary');
-  const postIdx = sendFn.indexOf('await hubPost(room, text);');
+  const postIdx = sendFn.indexOf("await hubPost(room, text, 'human', re);");
   const guardIdx = sendFn.indexOf('if (selected !== room) return;', postIdx);
   const seqIdx = sendFn.indexOf('attachSeq = 1;');
   assert.ok(guardIdx > postIdx && seqIdx > guardIdx,
     'the message-path guard sits BETWEEN the post and the per-room mutations (attachSeq/loadFeed/scroll)');
-  assert.match(sendFn, /if \(selected === room\) \{ pending = atts; composerText = raw; \}/u,
+  assert.match(sendFn, /if \(selected === room\) \{ pending = atts; composerText = raw; if \(re && !replyTo\) replyTo = quoteBack; \}/u,
     'a failed post restores only into its own room');
   // The slash-command branch is the same function, same race, same rule.
   assert.match(sendFn, /await hubCommand\(room, cmdTarget, cmd\.command\);/u);
@@ -745,4 +746,14 @@ test('the phone Chat head is ONE dense tool group and the name may run up to it 
   // path compresses to its scrollable floor first.
   assert.ok(!source.includes('.hub-root.compact .title-group'), 'no compact override left — there is no cap to lift');
   assert.match(source, /\{#if !compact\}<span class="path"/u, 'the path is desktop-only');
+});
+
+test('a reply sends the quoted message\u2019s id; the server builds the quote, one per send (#290)', () => {
+  assert.match(source, /const re = replyTo\?\.id;\s*const quoteBack = replyTo;\s*composerText = '';\s*pending = \[\];\s*replyTo = null;/u, 'taken, then cleared, before the RPC');
+  assert.match(source, /await hubPost\(room, text, 'human', re\);/u);
+  assert.match(source, /if \(re && !replyTo\) replyTo = quoteBack;/u, 'a failed post keeps the quote with the draft');
+  assert.match(source, /if \(!recipient && m\.from && managedAgents\.some\(\(a\) => a\.name === m\.from\)\) setRecipient\(m\.from\);/u, 'seats the quoted agent only when nobody is chosen');
+  assert.match(source, /replyTo = null; \/\/ a quote belongs to the room it was taken in/u);
+  assert.match(source, /backLayers\.register\('reply', \(\) => \{ if \(replyTo\) \{ replyTo = null; return true; \}/u, 'Back drops it');
+  assert.doesNotMatch(source, /\[re /u, 'no second formatter in the client');
 });

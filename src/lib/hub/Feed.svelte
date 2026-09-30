@@ -16,7 +16,7 @@
   import { boxFromOffsets } from '../ui/indicator.ts';
   import { heldAnchor, readingDirection, refoldEligible, sameReadingSize } from './hub-reading.ts';
   import { FONT_CHANGE_EVENT } from '../app/fonts.svelte.ts';
-  import { TAIL_GAP, bottomGap, tailAfterScroll, markMentions, mentionedAgents, splitImages, toolColor, pickAnchor, toolEventParts, elideTail, foldedCommandArgs, foldLines, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, perLineOf, STEPS_ROWS, stateIsLive } from './hub.ts';
+  import { parseQuote, TAIL_GAP, bottomGap, tailAfterScroll, markMentions, mentionedAgents, splitImages, toolColor, pickAnchor, toolEventParts, elideTail, foldedCommandArgs, foldLines, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, perLineOf, STEPS_ROWS, stateIsLive } from './hub.ts';
 
   let {
     blocks = [], agents = [], managedNames = [], selected = '', visible = false, compact = false,
@@ -25,7 +25,7 @@
     following = $bindable(true), newBelow = $bindable(false),
     stateLabel = (state) => state, emptyFeed = null,
     onseen: markSeen = () => {}, onolder: loadOlder = async () => {},
-    onpath: routePathRef = () => {}, onboard = () => {}, onimage = () => {},
+    onpath: routePathRef = () => {}, onboard = () => {}, onimage = () => {}, onreply = null,
     registerActions = null,
   } = $props();
 
@@ -678,7 +678,8 @@
            second visual species for the same thing is what made it read as
            telemetry in the first place. -->
       {@const note = statusNote(m.body)}
-      {@const parts = splitImages(note ? note.text : m.body)}
+      {@const quote = parseQuote(note ? note.text : m.body)}
+      {@const parts = splitImages(quote ? quote.text : note ? note.text : m.body)}
         <!-- Every user message can become the landmark, but exactly ONE
              does. The real bubble enters with the feed, then that SAME
              element catches the edge as it is about to leave; there is no
@@ -745,6 +746,11 @@
               <div class="m-head">{m.from}{#if note}<span class="m-note-state" style:color={noteStateColor(note.state)}><span class="mns-dot" aria-hidden="true"></span>{stateLabel(note.state)}</span>{/if}</div>
             {/if}
             <div class="m-body" lang={hanLang(m.body ?? '')}>
+              <!-- A reply's quote (board #290): the bubble's own markdown
+                   blockquote, the sender and time over the quoted line. -->
+              {#if quote && rawOpen !== key}
+                <blockquote class="m-quote"><span class="m-quote-who">{quote.from} · {quote.time}</span> {quote.excerpt}</blockquote>
+              {/if}
               {#if b.command && rawOpen !== key}
                 <!-- The command in the bubble's own atoms, as plain text (no
                      markdown: arguments are data): the recipients in the
@@ -811,6 +817,10 @@
                 label={messageActs.copied ? t('hubCopied') : t('hubCopy')} onclick={(event) => copyMsg(key, m.body, event.currentTarget)} />
               <CommandButton iconOnly icon="code" label={t('hubRaw')} pressed={rawOpen === key}
                 onclick={() => { rawOpen = rawOpen === key ? '' : key; }} />
+              {#if onreply && m.id}
+                <CommandButton iconOnly icon="arc-left" label={t('hubReply')}
+                  onclick={() => { setMessageActions(-1); onreply(m); }} />
+              {/if}
             </div>
           {/if}
         </div>
@@ -1052,6 +1062,9 @@
      inline `color` — border and dot follow through currentColor. A pill with
      a dot reads as a state the agent ENTERED; the first cut's arrow read as
      an addressee (owner, 2026-08-20). Pushed to the row's right edge. */
+  /* A reply's quote rides the bubble's own .md blockquote (board #290); its
+     head is the meta ink, like the time. */
+  .m-quote-who { color: var(--text3); font-size: var(--fs-meta); }
   .m-head .m-note-state {
     display: inline-flex; align-items: center; gap: 4px;
     margin-left: auto; padding: 0 5px; border-radius: 4px;

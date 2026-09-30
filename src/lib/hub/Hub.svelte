@@ -36,7 +36,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { HUMAN, stateDotColor, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, pickDrawerAgent, addressed, addressedTeam, mentionedAgents, unreadSenders, stoppedAgents, slashCommand, uploadImagePath, uploadFilePath, imageId, inputModeSwitch } from './hub.ts';
+  import { HUMAN, quotePreview, stateDotColor, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, pickDrawerAgent, addressed, addressedTeam, mentionedAgents, unreadSenders, stoppedAgents, slashCommand, uploadImagePath, uploadFilePath, imageId, inputModeSwitch } from './hub.ts';
   import { resolvePathRef } from '../core/path-links.ts';
   import { ALL_TARGET, attachmentBody, attachToken, busyTargetsFor, targetMembers, targetTeam, teamTarget } from './hub-composer.ts';
   import { walkFeedGap } from './hub-history.ts';
@@ -343,6 +343,7 @@
     // "no members known" is not "no members". loadAgents drops a stale team
     // once the fresh roster answers (#241, validator: a refresh wiped it).
     filterAgent = ''; // a filter is a reading choice, scoped to its room
+    replyTo = null; // a quote belongs to the room it was taken in
     // The drawer follows the project (board #23, owner: "chat的右侧边栏打开
     // 哪个的状态前端帮我记住，这样我切换不同的 project 回来原来的视图还在"):
     // whichever partition was open when the user LEFT this room reopens on
@@ -627,12 +628,15 @@
     // path reset attachSeq into a room that had meanwhile staged its own
     // attachments, colliding token numbers, and refreshed the wrong feed).
     const room = selected;
+    const re = replyTo?.id;
+    const quoteBack = replyTo;
     composerText = '';
     pending = [];
+    replyTo = null;
     following = true;
     scrollFeed(true);
     try {
-      await hubPost(room, text);
+      await hubPost(room, text, 'human', re);
       // The thumbs belong to the delivered attachments — dead either way.
       for (const a of atts) if (a.thumb) URL.revokeObjectURL(a.thumb);
       if (selected !== room) return; // the new room's numbering/feed are not ours
@@ -645,7 +649,7 @@
       // the old room's draft/attachments into the new one. The refs are
       // already uploaded; the draft is lost with the failed post — losing it
       // beats corrupting another room.
-      if (selected === room) { pending = atts; composerText = raw; }
+      if (selected === room) { pending = atts; composerText = raw; if (re && !replyTo) replyTo = quoteBack; }
       else for (const a of atts) if (a.thumb) URL.revokeObjectURL(a.thumb);
     }
   }
@@ -834,6 +838,19 @@
   // on every keystroke: one small JSON string, and the alternative (a debounce)
   // loses the last few characters exactly when the tab goes away.
   $effect(() => { hubPrefs.setDraft(selected, composerText); });
+
+  /** The message the next send replies to (board #290): its id, sender and
+   * a preview line for the chip. The quote itself is built by the server
+   * from its own row (`hub_post` `re`). One per send; the room switch, ×,
+   * Escape and Back clear it. */
+  let replyTo = $state(null);
+  function replyToMessage(m) {
+    if (!m?.id) return;
+    replyTo = { id: String(m.id), from: m.from ?? '', preview: quotePreview(m.body) };
+    // A reply to an agent goes to that agent unless a recipient was chosen.
+    if (!recipient && m.from && managedAgents.some((a) => a.name === m.from)) setRecipient(m.from);
+    composer?.focus();
+  }
 
   // Roster owns card interaction; Hub owns the resulting reading filter.
   let filterAgent = $state('');
@@ -1553,6 +1570,7 @@
       backLayers.register('create', () => { if (createOpen) { createOpen = false; return true; } return false; }),
       backLayers.register('rename', () => { if (renaming) { renaming = false; return true; } return false; }),
       backLayers.register('filter', () => { if (filterAgent) { filterAgent = ''; return true; } return false; }),
+      backLayers.register('reply', () => { if (replyTo) { replyTo = null; return true; } return false; }),
       backLayers.register('files', () => { if (termOpen && drawerView === 'files' && drawerFilesBack?.()) return true; return false; }),
       backLayers.register('drawer', () => { if (termOpen) { closeDrawer(); return true; } return false; }),
       backLayers.register('sidebar', () => { if (compact && !sideOpen) { sideOpen = true; return true; } return false; }),
@@ -1663,6 +1681,7 @@
       if (e.key !== 'Escape') return;
       feedActions?.escape(e);
       composer?.dismissEscape(e);
+      if (replyTo && !e.defaultPrevented) replyTo = null;
     };
     window.addEventListener('pointerdown', onDown, true);
     window.addEventListener('keydown', onKey, true);
@@ -1946,6 +1965,7 @@
         stepsRows={hubPrefs.stepsRows} {stateLabel} {emptyFeed} bind:following bind:newBelow
         onseen={markSeen} onolder={loadOlder} onpath={routePathRef}
         onimage={(url) => { shotView = url; }}
+        onreply={replyToMessage}
         onboard={(id) => {
           if (mobile || compact) { openBoardTab?.(selected, id); return; }
           drawerIssueReq = { session: selected, id, n: (drawerIssueReq?.n ?? 0) + 1 };
@@ -1966,7 +1986,8 @@
 
       <Composer bind:this={composer} bind:composerText {selected} {compact} {recipient}
         {roomReady}
-        {agents} {pending} {attaching} {failed} {sendable} {interruptible}
+        {agents} {pending} {attaching} {failed} {sendable} {interruptible} {replyTo}
+        onclearreply={() => { replyTo = null; composer?.focus(); }}
         onsend={send} onstage={stageFiles} onremove={removeAttachment}
         onmodels={modelsList} oninterrupt={interrupt} onpreview={(path) => { shotView = path; }}
         onfocus={() => { following = true; scrollFeed(true); setTimeout(() => scrollFeed(true), 300); }}

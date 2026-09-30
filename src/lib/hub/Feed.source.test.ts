@@ -473,3 +473,12 @@ test('a font change is a layout mutation through the ONE reading transaction (bo
   const fonts = readFileSync(new URL('../app/fonts.svelte.ts', import.meta.url), 'utf8');
   assert.match(fonts, /document\.dispatchEvent\(new CustomEvent\(FONT_CHANGE_EVENT/u, 'apply() announces the swap');
 });
+
+test('a reply quote renders as the bubble\u2019s own blockquote; Reply sits in the one action row (#290)', () => {
+  assert.match(source, /\{@const quote = parseQuote\(note \? note\.text : m\.body\)\}/u, 'the one parser');
+  assert.match(source, /\{@const parts = splitImages\(quote \? quote\.text : note \? note\.text : m\.body\)\}/u, 'the token never renders as text');
+  assert.match(source, /\{#if quote && rawOpen !== key\}\s*<blockquote class="m-quote"><span class="m-quote-who">\{quote\.from\} · \{quote\.time\}<\/span> \{quote\.excerpt\}<\/blockquote>/u,
+    'the .md blockquote dialect, no new component; Raw shows the token as sent');
+  const acts = source.slice(source.indexOf('<div class="m-acts appear">'), source.indexOf('</div>', source.indexOf('<div class="m-acts appear">')));
+  assert.match(acts, /\{#if onreply && m\.id\}\s*<CommandButton iconOnly icon="arc-left" label=\{t\('hubReply'\)\}/u, 'Reply beside Copy and Raw');
+});

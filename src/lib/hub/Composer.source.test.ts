@@ -225,3 +225,10 @@ test('double Ctrl+C has only a timestamp and asks the parent about the current r
   assert.equal([...source.matchAll(/oninterrupt\(/gu)].length, 1, 'one keyboard dispatch site, never a send-button path');
   assert.match(source, /void selected; void recipient; void composerText; void interruptible; ctrlCTapAt = null;/u);
 });
+
+test('a reply is a removable chip in the pending row, never text in the field (#290)', () => {
+  assert.match(source, /\{#if pending\.length \|\| replyTo\}\s*<div class="pend-row">\s*\{#if replyTo\}/u);
+  assert.match(source, /<span class="pend-chip reply appear-pop" title=\{replyTo\.preview\}>/u, 'the pending-chip species');
+  assert.match(source, /<button class="pend-x" aria-label=\{t\('hubReplyClear'\)\} onclick=\{onclearreply\}>/u);
+  assert.doesNotMatch(source, /\[re /u, 'the composer never writes the token: the server builds it');
+});

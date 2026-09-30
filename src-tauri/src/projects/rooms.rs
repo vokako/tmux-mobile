@@ -116,6 +116,16 @@ pub fn message_by_id(room: &str, id: &str) -> Option<serde_json::Value> {
         .map(|m| message_json(&m))
 }
 
+/// ONE message of `room` by its id or, when `re` is all digits, its seq
+/// (board #290). A message of another room is not found.
+pub fn message_by_ref(room: &str, re: &str) -> Option<serde_json::Value> {
+    let found = match re.parse::<i64>() {
+        Ok(seq) => with_store(|s| s.hub_message_by_seq(room, seq)),
+        Err(_) => with_store(|s| s.hub_message_by_id(room, re)),
+    };
+    found.ok().flatten().map(|m| message_json(&m))
+}
+
 /// The newest `limit` messages matching ANY of `terms`, oldest first:
 /// `{ "messages": [...] }`. `room = None` searches EVERY room; each hit's
 /// `room` field says where it was said.

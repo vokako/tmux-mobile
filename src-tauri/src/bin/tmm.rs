@@ -42,6 +42,9 @@ USAGE (agent):
                                       turn or your CLI's own background run (use task --wake)
   tmm send "@name /command [args]"    type a CLI command (e.g. /compact) into a teammate's
                                       pane verbatim, like the composer (@all = everyone else)
+  tmm send "@name text" --re <seq|id>  reply quoting a room message: the line carries
+                                      [re sender HH:MM: 「its first line」] (tmm log --output json
+                                      shows each message's seq and id)
   tmm send <text> --status            record ambient progress in the project room
                     [--image <path|url>]   attach an image by REFERENCE (repeatable);
                                       a local path is resolved by the client
@@ -269,7 +272,14 @@ async fn main() {
             // Later, not now (board #275): a wake, fired by the server.
             let at = flags.get("at").cloned().flatten();
             let within = flags.get("in").cloned().flatten();
+            let re = flags.get("re").cloned().flatten().filter(|r| !r.trim().is_empty());
+            if flags.contains_key("re") && re.is_none() {
+                fail(EXIT_USAGE, "--re needs the quoted message's seq or id (tmm log --output json shows both)");
+            }
             if at.is_some() || within.is_some() || flags.contains_key("at") || flags.contains_key("in") {
+                if re.is_some() {
+                    fail(EXIT_USAGE, "--re quotes a message now; a scheduled wake cannot carry a quote");
+                }
                 if is_status {
                     fail(EXIT_USAGE, "--status is ambient progress now; it cannot be scheduled");
                 }
@@ -291,7 +301,8 @@ async fn main() {
             // A `/command` goes to the CLI, not its model — the composer's
             // rule, read by the same `address::slash_command` (board #274):
             // typed verbatim through hub_command, no chat stamp.
-            match send_route(&body, &from, !is_status && images.is_empty()) {
+            // A quoted reply is a message, never a /command (board #290).
+            match send_route(&body, &from, !is_status && images.is_empty() && re.is_none()) {
                 SendRoute::Post => {}
                 SendRoute::ToSelf => fail(EXIT_USAGE, &format!("{from} cannot send a command to itself")),
                 SendRoute::Command { to, command } => {
@@ -354,7 +365,8 @@ async fn main() {
                 eprintln!("note: your own copy (@{from}) is not typed into your pane{unknown}");
             }
             let r = rpc(&ctx, "hub_post", json!({
-                "session": session, "from": from, "body": body, "status": is_status, "detached": detached
+                "session": session, "from": from, "body": body, "status": is_status, "detached": detached,
+                "re": re
             })).await;
             if ctx.json {
                 println!("{r}");
@@ -1356,7 +1368,7 @@ fn split_flags(args: &[String]) -> (std::collections::HashMap<String, Option<Str
     const VALUED: &[&str] = &["project", "agent", "server", "output", "since", "limit", "brief",
                           "name", "session", "with-agent", "backend", "model", "effort", "input-mode", "system", "skills", "mcp",
                           "ref", "source", "description", "def", "grep", "image", "body", "assignee", "team", "file",
-                          "in", "at", "to", "code", "signal"];
+                          "in", "at", "to", "code", "signal", "re"];
     let mut flags = std::collections::HashMap::new();
     let mut pos = Vec::new();
     let mut repeats: Vec<(String, String)> = Vec::new();
@@ -1825,6 +1837,11 @@ mod tests {
         assert_eq!(pos, vec!["send", "@dev check"]);
         assert_eq!(flags.get("in").cloned().flatten().as_deref(), Some("10m"));
         assert_eq!(flags.get("at").cloned().flatten().as_deref(), Some("14:30"));
+        // Board #290: --re takes the quoted message's seq or id.
+        let args: Vec<String> = ["send", "@lead which one?", "--re", "4127"].iter().map(|s| s.to_string()).collect();
+        let (flags, pos, _) = split_flags(&args);
+        assert_eq!(pos, vec!["send", "@lead which one?"]);
+        assert_eq!(flags.get("re").cloned().flatten().as_deref(), Some("4127"));
     }
 
     /// Board #275: the two time doors.
@@ -1872,7 +1889,7 @@ mod tests {
         let skill = include_str!("../../../assets/skills/tmm-cli/SKILL.md");
         let help = usage();
         assert!(!help.contains("session unchanged"), "a rename moves the session (#278)");
-        for term in ["tmm wake list", "tmm wake cancel", "--wake", "--in ", "--at ", "/compact", "tmm agent mode", "--input-mode", "tmm agent restart --team"] {
+        for term in ["tmm wake list", "tmm wake cancel", "--wake", "--in ", "--at ", "/compact", "tmm agent mode", "--input-mode", "tmm agent restart --team", "--re "] {
             assert!(help.contains(term), "help lost {term:?}");
             assert!(skill.contains(term), "the tmm-cli skill does not teach {term:?}");
         }

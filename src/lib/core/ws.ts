@@ -810,8 +810,10 @@ export interface HubAgent {
   wake?: HubWake | null;
 }
 export interface HubWake { due_at: number; from: string; more: number }
-export const hubPost = (session: string, body: string, from = 'human') =>
-  call('hub_post', { session, body, from });
+/** `re` (board #290): the id or seq of a message of this room to quote;
+ * the server puts its quote token after the body's leading addresses. */
+export const hubPost = (session: string, body: string, from = 'human', re?: string) =>
+  call('hub_post', re ? { session, body, from, re } : { session, body, from });
 /** Type a slash command into an agent's pane VERBATIM — no stamp, no sender, no
  * @address. `/model`, `/clear`, `/compact` are interpreted by the agent's CLI and
  * only when they are the whole line, so they cannot go through hub_post's

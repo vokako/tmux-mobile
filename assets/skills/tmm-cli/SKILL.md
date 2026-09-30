@@ -30,6 +30,9 @@ tmm send "@name /compact"        # a CLI command, typed VERBATIM into that agent
                                 #   CLI (not its model), like the composer; one
                                 #   @name or @all (= everyone but you); @human
                                 #   stays a chat message; unknown name = exit 4
+tmm send "@name text" --re <seq|id>   # reply QUOTING a room message: the line
+                                  #   carries [re sender HH:MM: 「its first
+                                  #   line」]; seq/id from tmm log --output json
 tmm send "progress" --status     # ambient room progress; nobody is interrupted
 tmm send "..." --image <path|url>   # attach an image by REFERENCE (repeatable)
 tmm log [--since <ts>] [--limit N] [-f]   # read chat; -f follows
