@@ -1151,22 +1151,27 @@ fn cmd_task(rest: &[String], cmdv: &[String], flags: &Flags, json: bool) {
                 fail(EXIT_USAGE, "task start needs a command after `--`: tmm task start dev -- npm run dev");
             }
             let session = flags.get("session").cloned().flatten();
+            // Who is starting it (board #291): the task and its wake both run
+            // as this starter — one definition, `tasks::starter_env`.
+            let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+            let project = flags.get("project").cloned().flatten().or_else(|| env("TMM_PROJECT")).filter(|v| !v.is_empty());
+            let starter = flags.get("agent").cloned().flatten().or_else(|| env("TMM_AGENT")).filter(|v| !v.is_empty());
+            // The server this task was started against, flag or env
+            // (validator 09:31): its sends and its wake reach the same one.
+            let server = flags.get("server").cloned().flatten().or_else(|| env("TMM_SERVER"));
+            let starter_env = tasks::starter_env(project.as_deref(), starter.as_deref(), env("XDG_CONFIG_HOME").as_deref(), server.as_deref());
             // `--wake [@who]` (board #275): when the task ends by itself, the
             // server gets a wake for @who (default: the agent starting it).
             let wake = flags.contains_key("wake").then(|| {
-                let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
-                let project = flags.get("project").cloned().flatten().or_else(|| env("TMM_PROJECT"))
-                    .unwrap_or_else(|| fail(EXIT_USAGE, "--wake needs a project: run it as an agent, or pass --project"));
-                let starter = flags.get("agent").cloned().flatten().or_else(|| env("TMM_AGENT"));
+                if project.is_none() {
+                    fail(EXIT_USAGE, "--wake needs a project: run it as an agent, or pass --project");
+                }
                 let to = rest.get(2).and_then(|w| w.strip_prefix('@')).map(str::to_string).or_else(|| starter.clone())
                     .unwrap_or_else(|| fail(EXIT_USAGE, "--wake needs someone to wake: tmm task start build --wake @lead -- make"));
                 let exe = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "tmm".into());
-                // The server this task was started against, flag or env
-                // (validator 09:31): the wake must reach the same one.
-                let server = flags.get("server").cloned().flatten().or_else(|| env("TMM_SERVER"));
-                wake_shell(name, &to, &project, starter.as_deref(), &exe, env("XDG_CONFIG_HOME").as_deref(), server.as_deref())
+                wake_shell(name, &to, &exe, &starter_env)
             });
-            let t = tasks::start(name, cmdv, session.as_deref(), flags.contains_key("replace"), wake.as_deref())
+            let t = tasks::start(name, cmdv, session.as_deref(), flags.contains_key("replace"), wake.as_deref(), &starter_env)
                 .unwrap_or_else(|e| task_fail(e));
             if json {
                 println!("{}", task_value(&t));
@@ -1551,16 +1556,14 @@ async fn follow_log(ctx: &Ctx, session: &str, mut since: i64, limit: i64) {
 const WAKE_TAIL_LINES: usize = 15;
 
 /// The hook's shell command for a `--wake` task (board #275): `tmm task wake`
-/// with the project, the starter and where the server is, and the exit
-/// status / signal left as tmux placeholders filled in at death. Every
-/// literal is shell-quoted and `#`-escaped for tmux's format expansion; the
-/// token is NOT carried (tmm reads it from config, as an agent's tmm does).
-fn wake_shell(name: &str, to: &str, project: &str, starter: Option<&str>, exe: &str, config: Option<&str>, server: Option<&str>) -> String {
+/// run as the task's starter (`tasks::starter_env`, board #291 — the same
+/// environment the task command itself has), and the exit status / signal
+/// left as tmux placeholders filled in at death. Every literal is
+/// shell-quoted and `#`-escaped for tmux's format expansion; the token is NOT
+/// carried (tmm reads it from config, as an agent's tmm does).
+fn wake_shell(name: &str, to: &str, exe: &str, env: &[(String, String)]) -> String {
     let q = |v: &str| tasks::format_literal(&tmux_mobile::shell::quote_always(v));
-    let mut env = vec![format!("TMM_PROJECT={}", q(project))];
-    if let Some(a) = starter { env.push(format!("TMM_AGENT={}", q(a))); }
-    if let Some(c) = config { env.push(format!("XDG_CONFIG_HOME={}", q(c))); }
-    if let Some(s) = server { env.push(format!("TMM_SERVER={}", q(s))); }
+    let env: Vec<String> = env.iter().map(|(k, v)| format!("{k}={}", q(v))).collect();
     format!(
         "{} {} task wake {} --to {} --code '#{{pane_dead_status}}' --signal '#{{pane_dead_signal}}' >/dev/null 2>&1",
         env.join(" "), q(exe), q(name), q(to)
@@ -1875,9 +1878,11 @@ mod tests {
         assert!(body.starts_with("@lead task build exited:7 after 2m; last lines:\n```\n"), "{body}");
         assert_eq!(tmux_mobile::address::mention_names(&body), vec!["lead".to_string()], "the log's @all addresses nobody: {body}");
         assert_eq!(task_end_body("dev", "t", "", "15", None, ""), "@dev task t killed:15");
-        let shell = wake_shell("build", "lead", "my proj", Some("dev"), "/bin/tmm", None, None);
+        let shell = wake_shell("build", "lead", "/bin/tmm", &tasks::starter_env(Some("my proj"), Some("dev"), None, None));
         assert_eq!(shell, "TMM_PROJECT='my proj' TMM_AGENT='dev' '/bin/tmm' task wake 'build' --to 'lead' --code '#{pane_dead_status}' --signal '#{pane_dead_signal}' >/dev/null 2>&1");
-        assert!(wake_shell("a#b", "x", "p", None, "/t", None, None).contains("'a##b'"), "a literal # is escaped for tmux");
+        let human = wake_shell("a#b", "x", "/t", &tasks::starter_env(Some("p"), None, Some("/c"), Some("ws://s")));
+        assert!(human.contains("'a##b'"), "a literal # is escaped for tmux");
+        assert!(human.starts_with("TMM_PROJECT='p' TMM_AGENT='' XDG_CONFIG_HOME='/c' TMM_SERVER='ws://s' "), "{human}");
     }
 
     /// Board #277: the built-in tmm-cli skill is how an agent learns tmm, so

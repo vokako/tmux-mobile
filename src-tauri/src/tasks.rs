@@ -217,12 +217,17 @@ pub fn find(name: &str) -> Option<Task> {
 /// `remain-on-exit` option has to be in place BEFORE the command runs — a
 /// command that exits in milliseconds would otherwise take its window (and its
 /// output) down with it.
+///
+/// `env` is set on the command's process (`respawn-window -e`), so the task
+/// runs as whoever started it (board #291): a fresh or reused window otherwise
+/// has the tmux SERVER's environment, not the starter's.
 pub fn start(
     name: &str,
     argv: &[String],
     session: Option<&str>,
     replace: bool,
     wake: Option<&str>,
+    env: &[(String, String)],
 ) -> Result<Task> {
     validate_name(name)?;
     if argv.is_empty() {
@@ -278,7 +283,13 @@ pub fn start(
         }
         None => clear_wake(&pane),
     }
-    tmux::run_tmux(&["respawn-window", "-k", "-t", &pane, &cmd]).map_err(Error::Tmux)?;
+    let pairs: Vec<String> = env.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    let mut args = vec!["respawn-window", "-k"];
+    for pair in &pairs {
+        args.extend(["-e", pair.as_str()]);
+    }
+    args.extend(["-t", pane.as_str(), cmd.as_str()]);
+    tmux::run_tmux(&args).map_err(Error::Tmux)?;
 
     find(name).ok_or_else(|| Error::Tmux(format!("started '{name}' but it vanished from tmux")))
 }
@@ -431,6 +442,23 @@ fn create_window(session: &str, name: &str, cwd: &str) -> Result<String> {
         args.push(cwd);
     }
     Ok(tmux::run_tmux(&args).map_err(Error::Tmux)?.trim().to_string())
+}
+
+/// Who started a task, as the environment its processes run with (board
+/// #291): the ONE definition both the task command (`start`'s `env`) and its
+/// `--wake` hook carry. `TMM_PROJECT` and `TMM_AGENT` are always present, EMPTY
+/// when the starter has none (tmm reads empty as unset), so a stale identity in
+/// the tmux server's environment never leaks in: a task the human starts
+/// speaks as the human. Config dir and server travel only when the starter has
+/// them — an empty `TMM_SERVER` would be read as a server address.
+pub fn starter_env(project: Option<&str>, agent: Option<&str>, config: Option<&str>, server: Option<&str>) -> Vec<(String, String)> {
+    let mut env = vec![
+        ("TMM_PROJECT".to_string(), project.unwrap_or_default().to_string()),
+        ("TMM_AGENT".to_string(), agent.unwrap_or_default().to_string()),
+    ];
+    if let Some(c) = config { env.push(("XDG_CONFIG_HOME".into(), c.into())); }
+    if let Some(s) = server { env.push(("TMM_SERVER".into(), s.into())); }
+    env
 }
 
 /// `text` as a literal inside a tmux format (the wake command is one): `#`
@@ -737,7 +765,7 @@ mod tests {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let task = start(&name, &argv, Some(session), true, None).expect("task starts");
+        let task = start(&name, &argv, Some(session), true, None, &[]).expect("task starts");
         assert!(task.is_running());
         // Find the sleep: the wrapper's only child. Give bash a moment to fork it.
         let mut child = String::new();
@@ -806,9 +834,9 @@ mod tests {
         let live = format!("tmm-test-live-{pid}");
         let shielded = format!("tmm-test-shield-{pid}");
         let sh = |c: &str| -> Vec<String> { vec!["sh".into(), "-c".into(), c.into()] };
-        start(&done, &sh("exit 0"), Some(session), true, None).expect("done starts");
-        start(&shielded, &sh("exit 0"), Some(session), true, None).expect("shielded starts");
-        let running = start(&live, &sh("sleep 300"), Some(session), true, None).expect("live starts");
+        start(&done, &sh("exit 0"), Some(session), true, None, &[]).expect("done starts");
+        start(&shielded, &sh("exit 0"), Some(session), true, None, &[]).expect("shielded starts");
+        let running = start(&live, &sh("sleep 300"), Some(session), true, None, &[]).expect("live starts");
         // A plain window that dies with remain-on-exit but no @tmm_task: not ours.
         let plain = tmux::run_tmux(&["new-window", "-d", "-t", session, "-n", "plain", "-P", "-F", "#{pane_id}"])
             .expect("plain window").trim().to_string();
@@ -852,8 +880,8 @@ mod tests {
         let closing = format!("tmm-test-close-{pid}");
         let kept = format!("tmm-test-keep-{pid}");
         let sh = |c: &str| -> Vec<String> { vec!["sh".into(), "-c".into(), c.into()] };
-        start(&closing, &sh("echo line-one; echo line-two; sleep 300"), Some(session), true, None).unwrap();
-        start(&kept, &sh("echo kept-output; sleep 300"), Some(session), true, None).unwrap();
+        start(&closing, &sh("echo line-one; echo line-two; sleep 300"), Some(session), true, None, &[]).unwrap();
+        start(&kept, &sh("echo kept-output; sleep 300"), Some(session), true, None, &[]).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(400));
 
         let out = stop(&closing, false).expect("stop reports");
@@ -886,10 +914,10 @@ mod tests {
         let wake = format!("echo \"$0 status=#{{pane_dead_status}} sig=#{{pane_dead_signal}} {}\" >> {}", format_literal("#x"), log.display());
         let sh = |c: &str| -> Vec<String> { vec!["sh".into(), "-c".into(), c.into()] };
         let (ended, stopped, cleared) = (format!("tmm-test-w1-{pid}"), format!("tmm-test-w2-{pid}"), format!("tmm-test-w3-{pid}"));
-        start(&ended, &sh("sleep 0.3; exit 7"), Some(session), true, Some(&wake)).unwrap();
-        start(&stopped, &sh("sleep 300"), Some(session), true, Some(&wake)).unwrap();
-        start(&cleared, &sh("sleep 300"), Some(session), true, Some(&wake)).unwrap();
-        start(&cleared, &sh("sleep 0.3; exit 3"), Some(session), true, None).unwrap();
+        start(&ended, &sh("sleep 0.3; exit 7"), Some(session), true, Some(&wake), &[]).unwrap();
+        start(&stopped, &sh("sleep 300"), Some(session), true, Some(&wake), &[]).unwrap();
+        start(&cleared, &sh("sleep 300"), Some(session), true, Some(&wake), &[]).unwrap();
+        start(&cleared, &sh("sleep 0.3; exit 3"), Some(session), true, None, &[]).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(300));
         stop(&stopped, true).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(1500));
@@ -908,17 +936,47 @@ mod tests {
         let session = "tmm-test-wakefail";
         let name = format!("tmm-test-wf-{}", std::process::id());
         let sh = |c: &str| -> Vec<String> { vec!["sh".into(), "-c".into(), c.into()] };
-        start(&name, &sh("exit 1"), Some(session), true, Some("true")).unwrap();
+        start(&name, &sh("exit 1"), Some(session), true, Some("true"), &[]).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(300));
         assert_eq!(find(&name).unwrap().wake_error, "");
         note_wake_failure(&name, "@lead was not woken (connection refused)\nsecond line dropped").unwrap();
         assert_eq!(find(&name).unwrap().wake_error, "@lead was not woken (connection refused)");
         assert!(list().iter().any(|t| t.name == name && !t.wake_error.is_empty()), "list carries it too");
-        start(&name, &sh("sleep 300"), Some(session), true, Some("true")).unwrap();
+        start(&name, &sh("sleep 300"), Some(session), true, Some("true"), &[]).unwrap();
         assert_eq!(find(&name).unwrap().wake_error, "", "a new run WITH --wake starts clean (validator 09:54)");
         note_wake_failure(&name, "@lead was not woken (again)").unwrap();
-        start(&name, &sh("sleep 300"), Some(session), true, None).unwrap();
+        start(&name, &sh("sleep 300"), Some(session), true, None, &[]).unwrap();
         assert_eq!(find(&name).unwrap().wake_error, "", "and without it");
+        let _ = tmux::kill_session(session);
+    }
+
+    /// Board #291: a task runs as its starter — `TMM_PROJECT`/`TMM_AGENT`
+    /// from `starter_env` reach the command, over whatever the tmux server's
+    /// environment says, in a fresh window and in a reused one; a task the
+    /// human starts has an empty `TMM_AGENT`, never a stale one.
+    #[test]
+    fn a_task_runs_with_its_starters_identity() {
+        let _server = PrivateTmux::start("starter");
+        let session = "tmm-test-starter";
+        let name = format!("tmm-test-id-{}", std::process::id());
+        let sh = |c: &str| -> Vec<String> { vec!["sh".into(), "-c".into(), c.into()] };
+        let print = sh("echo \"agent=[$TMM_AGENT] project=[$TMM_PROJECT] server=[$TMM_SERVER]\"; sleep 300");
+        let said = |name: &str| {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            logs(name, 5, Some("agent=")).unwrap()
+        };
+        tmux::ensure_session(session, "/tmp").unwrap();
+        tmux::run_tmux(&["set-environment", "-g", "TMM_AGENT", "stale"]).unwrap();
+        tmux::run_tmux(&["set-environment", "-g", "TMM_PROJECT", "stale"]).unwrap();
+
+        let dev = starter_env(Some("my proj#x"), Some("dev"), None, Some("ws://h:1"));
+        start(&name, &print, Some(session), true, None, &dev).unwrap();
+        assert!(said(&name).contains("agent=[dev] project=[my proj#x] server=[ws://h:1]"), "{}", said(&name));
+
+        let human = starter_env(Some("blog"), None, None, None);
+        start(&name, &print, Some(session), true, None, &human).unwrap();
+        let out = said(&name);
+        assert!(out.lines().last().unwrap_or("").contains("agent=[] project=[blog] server=[]"), "a reused window, the human: {out}");
         let _ = tmux::kill_session(session);
     }
 

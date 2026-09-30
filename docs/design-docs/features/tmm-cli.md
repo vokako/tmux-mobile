@@ -294,6 +294,34 @@ target is shielded, a running task and a dead non-task window are untouched,
 a fresh death is not expired at the default TTL; `stop` closes with its tail,
 `--keep` keeps, and `stop` on a finished task closes.
 
+### A task runs as whoever started it (board #291, 2026-09-30)
+
+Owner (14:55, LingTing): a line `@architect [queue-watch from data] …` showed
+as the HUMAN's outgoing bubble, though the human never sent it. `data` had
+started the watcher with `tmm task start lingting-queue-watch -- …`. A tmux
+window starts with the tmux SERVER's environment, not the caller's, so the
+task had no `TMM_AGENT` (its script exported `TMM_PROJECT` by hand) and every
+`tmm send` inside fell back to `human`. Meanwhile the `--wake` hook of the same
+task did carry the starter. One mechanism had two answers.
+
+Now `tasks::starter_env` is the ONE definition of the starter, and both
+consumers take it: the task command gets it as `respawn-window -e KEY=VAL`
+(tmux's own door, set on every start, so a reused window gets it too), and
+`wake_shell` prefixes the wake with it. It holds `TMM_PROJECT` (`--project`,
+else `$TMM_PROJECT`) and `TMM_AGENT` (`--agent`, else `$TMM_AGENT`). Both are
+always set, and empty when the starter has none, because tmm reads empty as
+unset: a stale identity in the server's environment cannot leak in, and a task
+the human starts speaks as the human. `XDG_CONFIG_HOME` and `TMM_SERVER`
+travel only when the starter has them, because an empty `TMM_SERVER` would be
+read as an address. A task pane is not its starter's turn (board #285), so a
+task's `@<starter>` send reaches the starter too. A task no longer has to
+export `TMM_PROJECT`/`TMM_AGENT` itself. Rows already recorded as `human`
+(state.db seq 10820, 10962, 11123) are not rewritten. Pinned by
+`a_task_runs_with_its_starters_identity` (`tasks.rs`, real tmux: a stale
+server env, a fresh window as an agent, a reused window as the human).
+Negative control: dropping the `-e` fails it with `agent=[stale]
+project=[stale]`, which is the bug.
+
 ### Two things that read as bugs and are not
 
 **`logs` filters tmux's own `Pane is dead (…)` line.** tmux writes it into the
