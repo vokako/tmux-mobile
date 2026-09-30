@@ -9,7 +9,7 @@
      terminal and Files. */
   import { boardList, boardGet, boardSave, boardNote, boardDelete, boardCounts, projectList, hubAgents, hubPost, hubRooms, type BoardIssue, type BoardCountRow, type HubAgent } from '../core/ws.ts';
   import { projectAgeLabel, sortRows } from '../projects/projects.ts';
-  import { boardStatusColor } from './hub.ts';
+  import { boardStatusColor, localWhen } from './hub.ts';
   import type { ProjectRow } from '../projects/projects.ts';
   import { t, hanLang } from '../core/i18n.svelte.ts';
   import { onDestroy, untrack } from 'svelte';
@@ -607,23 +607,20 @@
   const cols = $derived(chipCols(winsW, Math.max(...chipWs), CHIP_GAP_X));
   const col = (s: string) => issues.filter((i) => i.status === s);
   const noteCount = (i: BoardIssue) => (typeof i.notes === 'number' ? i.notes : i.notes.length);
-  /** The card's hover card (motion.md principle 16): the facts the card
-   * abbreviates, in full, through the same formatters (`ago`, statusLabel).
-   * The body preview follows the card's own rule — only when there is a real
-   * title, since a titleless issue already wears its body as the title. */
+  /** The card's hover card (motion.md principle 16; board #284, owner
+   * 2026-09-30: "不要做重复内容展示"): ONLY what the card does not say. The
+   * card already shows the title, the body preview, #N, reporter, assignee,
+   * the note count and the age; the column is the status. What it lacks is
+   * WHEN: it gives the update as a relative age and the creation not at all,
+   * so the hover gives both as absolute local times (`localWhen`, the wake
+   * row's form), the update only when it differs. A clamped body needs no
+   * hover: the card is the door to the detail (the preview's own rule). No
+   * time, nothing to say: no card. */
   function cardInfo(i: BoardIssue) {
-    const body = i.body && i.title?.trim() ? i.body.trim().replace(/\s+/gu, ' ') : '';
-    return {
-      title: `#${i.id} ${issueRef(i)}`,
-      text: body.length > 140 ? `${body.slice(0, 140)}…` : body || undefined,
-      lines: [
-        { label: t('boardHoverReporter'), value: i.created_by || '—' },
-        { label: t('boardHoverAssignee'), value: i.assignee ? `@${i.assignee}` : t('boardUnassigned'), tone: i.assignee ? ('accent' as const) : undefined },
-        { label: t('boardHoverStatus'), value: statusLabel(i.status) },
-        { label: t('boardHoverUpdated'), value: ago(i.updated_at) },
-        { label: t('boardHoverNotes'), value: String(noteCount(i)) },
-      ],
-    };
+    if (!i.created_at) return null;
+    const lines = [{ label: t('boardHoverCreated'), value: localWhen(i.created_at) }];
+    if (i.updated_at > i.created_at) lines.push({ label: t('boardHoverUpdated'), value: localWhen(i.updated_at) });
+    return { lines };
   }
   const ago = (ts: number) => {
     const d = Math.max(0, Date.now() / 1000 - ts);

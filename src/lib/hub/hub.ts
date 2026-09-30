@@ -1107,12 +1107,17 @@ export function isSessionStart(text: string | null | undefined): boolean {
  * this agent as local `HH:MM` (with the date when not today), who set it,
  * and `+N` for the others waiting behind it. Pure. */
 export function wakeLine(wake: { due_at: number; from: string; more: number }, now = new Date()): string {
-  const at = new Date(wake.due_at * 1000);
+  return [localWhen(wake.due_at, now), wake.from].join(' · ') + (wake.more > 0 ? ` +${wake.more}` : '');
+}
+
+/** An absolute moment (unix SECONDS) as local `HH:MM`, with the date
+ * `YYYY-MM-DD HH:MM` when it is not today — the one absolute form a hover
+ * card gives (wake rows #275, board cards #284). Pure. */
+export function localWhen(sec: number, now = new Date()): string {
+  const at = new Date(sec * 1000);
   const pad = (n: number) => String(n).padStart(2, '0');
   const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
-  const sameDay = at.toDateString() === now.toDateString();
-  const when = sameDay ? time : `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${time}`;
-  return [when, wake.from].join(' · ') + (wake.more > 0 ? ` +${wake.more}` : '');
+  return at.toDateString() === now.toDateString() ? time : `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${time}`;
 }
 
 /** The card menu's queue ⇄ steer item for one agent (board #271), or null

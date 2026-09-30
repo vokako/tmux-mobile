@@ -2,7 +2,7 @@ import test from 'node:test';
 import { ALL_TARGET, teamTarget } from './hub-composer.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { wakeLine, gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markMentions, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand, foldedCommandArgs, inputModeSwitch } from './hub.ts';
+import { wakeLine, localWhen, gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markMentions, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand, foldedCommandArgs, inputModeSwitch } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 import { mentionPalette, rosterGroups, rosterMarker, sortAgentsForRoster } from './hub.ts';
 
@@ -1814,6 +1814,14 @@ test('the card hover names the next wake: time, who set it, how many more (#275)
   assert.equal(wakeLine({ due_at: at(29, 14, 30), from: 'builder', more: 0 }, now), '14:30 · builder');
   assert.equal(wakeLine({ due_at: at(29, 9, 5), from: 'lead', more: 2 }, now), '09:05 · lead +2');
   assert.equal(wakeLine({ due_at: at(30, 8, 0), from: 'lead', more: 0 }, now), '2026-09-30 08:00 · lead', 'another day says the date');
+});
+
+test('localWhen is today\u2019s HH:MM, else the date too (#284: the board hover shares the wake row\u2019s form)', () => {
+  const now = new Date(2026, 8, 30, 3, 58);
+  const at = (d: number, h: number, m: number) => new Date(2026, 8, d, h, m).getTime() / 1000;
+  assert.equal(localWhen(at(30, 3, 5), now), '03:05');
+  assert.equal(localWhen(at(29, 13, 56), now), '2026-09-29 13:56');
+  assert.equal(localWhen(new Date(2025, 11, 31, 23, 59).getTime() / 1000, now), '2025-12-31 23:59');
 });
 
 test('the card offers the OTHER input mode only where the running CLI can switch (#271)', () => {

@@ -127,16 +127,21 @@ test('a board\u2019s first fill unfolds its columns; a poll is a cut (motion.md 
   assert.match(source, /ready = false; issues = \[\];[^\n]*\n\s*if \(justLoadedTimer\) clearTimeout\(justLoadedTimer\); justLoaded = false;/u, 'a switch mid-unfold cancels it');
 });
 
-test('a card opens the one hover card with the facts it abbreviates (motion.md wave 9)', () => {
+test('a card\u2019s hover card says only what the card does not (motion.md principle 16, board #284)', () => {
   assert.match(source, /<button class="card" animate:flip=\{\{ duration: moveMs\(\) \}\} onclick=\{\(\) => openIssue\(i\.id\)\} use:hoverInfo=\{\(\) => cardInfo\(i\)\}>/u,
     'the card wears use:hoverInfo');
   const info = /function cardInfo\(i: BoardIssue\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
-  assert.match(info, /title: `#\$\{i\.id\} \$\{issueRef\(i\)\}`/u, '#N title');
-  for (const k of ['boardHoverReporter', 'boardHoverAssignee', 'boardHoverStatus', 'boardHoverUpdated', 'boardHoverNotes']) {
-    assert.ok(info.includes(`t('${k}')`), `${k} row`);
+  assert.ok(info, 'cardInfo exists');
+  // Owner 2026-09-30: "不要做重复内容展示". The card already shows each of
+  // these; the hover repeats none (the column header is the status).
+  for (const dup of [/title:/u, /text:/u, /issueRef/u, /i\.body/u, /created_by/u, /assignee/u, /status/u, /noteCount|i\.notes/u, /\bago\(/u]) {
+    assert.ok(!dup.test(info), `the hover must not repeat the card: ${dup}`);
   }
-  assert.match(info, /ago\(i\.updated_at\)/u, 'the age goes through the file\u2019s one formatter');
-  assert.match(info, /i\.body && i\.title\?\.trim\(\)/u, 'the body preview follows the card\u2019s own titleless rule');
+  // What the card lacks: WHEN, absolute, in the one local form.
+  assert.match(info, /t\('boardHoverCreated'\), value: localWhen\(i\.created_at\)/u, 'created, absolute');
+  assert.match(info, /if \(i\.updated_at > i\.created_at\) lines\.push\(\{ label: t\('boardHoverUpdated'\), value: localWhen\(i\.updated_at\) \}\)/u,
+    'updated, absolute, only when it differs from created');
+  assert.match(info, /if \(!i\.created_at\) return null;/u, 'nothing to say, no card');
   assert.ok(!/<button class="card"[^>]*\stitle=/u.test(source), 'no native title beside the card');
 });
 
