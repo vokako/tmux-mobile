@@ -38,6 +38,12 @@ The environment the pane gets — `TMM_PROJECT` (the session) and `TMM_AGENT` (t
 window name) — is the whole of `tmm`'s identity story. There is no registration
 call and no handshake.
 
+Restarting one agent replays its recipe after refreshing its materials from its
+definition. Restarting a TEAM (`hub_team_restart`, board #286) first aligns the
+team with its current definition: members it dropped are stopped with their homes
+kept, members it gained are spawned, and the rest restart
+([agents-overview.md § Agent teams](agents-overview.md#agent-teams-board-74)).
+
 ## 2 · The turn opens
 
 An agent CLI boots into an interactive prompt and does **nothing** until spoken

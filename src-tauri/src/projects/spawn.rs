@@ -393,6 +393,62 @@ fn uniquify(name: &str, taken: &std::collections::HashSet<&str>) -> Result<Strin
 /// not stop the others and is reported in `errors`. Returns
 /// `{ team, spawned: [{name, window_name, pane}], errors: [..] }`.
 pub fn spawn_team(session: &str, team_name: &str, brief: &str, by: &str) -> Result<Value, String> {
+    spawn_team_members(session, team_name, brief, by, false)
+}
+
+/// What a team restart does to this workspace's members (board #286): the
+/// CURRENT definition decides. A member with a home here (its recipe names
+/// the team) that the definition still has is restarted (a stopped one is
+/// started, as `hub_agent_restart` does); one it no longer has is stopped
+/// if live, its home kept; a member the definition has and no home here
+/// is spawned. Pure: `homes` are (window, team path, member) off the
+/// recipes, `current` the definition's (path, member), `live` the windows
+/// running now.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct TeamPlan {
+    pub restart: Vec<String>,
+    pub stop: Vec<String>,
+    pub spawn: Vec<(String, String)>,
+}
+
+pub fn team_plan(homes: &[(String, String, String)], current: &[(String, String)], live: &[String]) -> TeamPlan {
+    let mut plan = TeamPlan::default();
+    for (window, path, member) in homes {
+        if current.iter().any(|(p, m)| p == path && m == member) {
+            plan.restart.push(window.clone());
+        } else if live.contains(window) {
+            plan.stop.push(window.clone());
+        }
+    }
+    for (path, member) in current {
+        if !homes.iter().any(|(_, p, m)| p == path && m == member) {
+            plan.spawn.push((path.clone(), member.clone()));
+        }
+    }
+    plan
+}
+
+/// The inputs of `team_plan` for `team_name` in `session`, read from the
+/// registry, the recipes and tmux.
+pub fn team_plan_for(session: &str, team_name: &str) -> Result<TeamPlan, String> {
+    let team = super::team_get(team_name)?.ok_or_else(|| format!("no team named '{team_name}'"))?;
+    let flat = super::teams::expand(&team, &|n| super::team_get(n), SPAWN_CAP)?;
+    let project = super::project_for_session(session)?.ok_or_else(|| format!("no project for session '{session}'"))?;
+    let mut homes: Vec<(String, String, String)> = team_windows_from_recipes(&project.path, &team.name)
+        .into_iter()
+        .map(|((path, member), window)| (window, path, member))
+        .collect();
+    homes.sort();
+    let current: Vec<(String, String)> = flat.iter().map(|f| (f.path.clone(), f.member.name.trim().to_string())).collect();
+    let live: Vec<String> = tmux::list_panes(session).unwrap_or_default().into_iter().map(|p| p.window_name).collect();
+    Ok(team_plan(&homes, &current, &live))
+}
+
+/// Spawn a team's members. `only_new` (a team restart, board #286) spawns
+/// only the members with no home in this workspace yet, and names the
+/// others by the windows their recipes record, so every prompt's roster is
+/// the team as it will stand.
+pub fn spawn_team_members(session: &str, team_name: &str, brief: &str, by: &str, only_new: bool) -> Result<Value, String> {
     let team = super::team_get(team_name)?
         .ok_or_else(|| format!("no team named '{team_name}'"))?;
     // Nested teams flatten here (board #74 follow-up): every leaf remembers
@@ -402,26 +458,37 @@ pub fn spawn_team(session: &str, team_name: &str, brief: &str, by: &str) -> Resu
     let project = super::project_for_session(session)?
         .ok_or_else(|| format!("no project for session '{session}'"))?;
     let panes = tmux::list_panes(session).unwrap_or_default();
+    let homes = if only_new { team_windows_from_recipes(&project.path, &team.name) } else { Default::default() };
+    let has_home = |f: &super::teams::Flat| homes.get(&(f.path.clone(), f.member.name.trim().to_string())).cloned();
+    let new = flat.iter().filter(|f| has_home(f).is_none()).count();
     // Team expansion counts its LEAVES against the same cap, as before.
     let existing = managed_window_count(&project.path, &panes);
-    if existing + flat.len() > SPAWN_CAP {
+    if existing + new > SPAWN_CAP {
         return Err(format!(
-            "team '{team_name}' expands to {} agents and the project already has {existing} (cap {SPAWN_CAP}) — stop some first",
-            flat.len()
+            "team '{team_name}' expands to {new} agents and the project already has {existing} (cap {SPAWN_CAP}) — stop some first",
         ));
     }
     // Final names first, so every member's prompt can name its teammates.
     let mut taken: std::collections::HashSet<String> = panes.iter().map(|p| p.window_name.clone()).collect();
+    taken.extend(homes.values().cloned());
     let mut roster: Vec<super::teams::RosterEntry> = Vec::new();
     for f in &flat {
-        let borrowed: std::collections::HashSet<&str> = taken.iter().map(String::as_str).collect();
-        let w = uniquify(f.member.name.trim(), &borrowed)?;
+        let w = match has_home(f) {
+            Some(w) => w,
+            None => {
+                let borrowed: std::collections::HashSet<&str> = taken.iter().map(String::as_str).collect();
+                uniquify(f.member.name.trim(), &borrowed)?
+            }
+        };
         taken.insert(w.clone());
         roster.push((w, f.member.role.clone(), f.path.clone()));
     }
     let mut spawned = Vec::new();
     let mut errors = Vec::new();
     for (f, (w, _, path)) in flat.iter().zip(roster.iter()) {
+        if has_home(f).is_some() {
+            continue;
+        }
         let m = &f.member;
         let base = if m.base.trim().is_empty() { None } else { super::registry_get(m.base.trim())? };
         let result = super::teams::effective_def(f, base.as_ref(), w, &roster).and_then(|def| {
@@ -688,6 +755,38 @@ mod relaunch_tests {
 // The per-backend render family lives on the backend files (board #128);
 // production code reaches it only through Backend's methods, so these
 // re-exports exist for the test module's `use super::*` alone.
+/// Board #286: the team restart plan. The owner's edit (archivist out,
+/// reviewer in) against a workspace where orchestrator runs, validator is
+/// stopped and archivist runs: orchestrator and validator restart (the
+/// stopped one starts), archivist stops, reviewer spawns. A home whose
+/// member left and is already stopped is left alone; a nested member is
+/// matched by path AND name.
+#[cfg(test)]
+mod team_plan_tests {
+    use super::{team_plan, TeamPlan};
+    #[test]
+    fn a_team_restart_aligns_with_the_current_definition() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let home = |w: &str, p: &str, m: &str| (w.to_string(), p.to_string(), m.to_string());
+        let homes = [
+            home("orchestrator", "dev-squad", "orchestrator"),
+            home("validator", "dev-squad", "validator"),
+            home("archivist", "dev-squad", "archivist"),
+            home("old", "dev-squad", "old"),
+            home("rev-2", "dev-squad/review", "rev"),
+        ];
+        let current = [("dev-squad", "orchestrator"), ("dev-squad", "validator"), ("dev-squad", "reviewer"), ("dev-squad", "rev"), ("dev-squad/review", "rev")]
+            .map(|(p, m)| (p.to_string(), m.to_string()));
+        let plan = team_plan(&homes, &current, &s(&["orchestrator", "archivist", "rev-2", "shell"]));
+        assert_eq!(plan, TeamPlan {
+            restart: s(&["orchestrator", "validator", "rev-2"]),
+            stop: s(&["archivist"]),
+            spawn: vec![("dev-squad".into(), "reviewer".into()), ("dev-squad".into(), "rev".into())],
+        });
+        assert_eq!(team_plan(&[], &[], &[]), TeamPlan::default());
+    }
+}
+
 #[cfg(test)]
 pub(crate) use crate::backends::claude::{claude_hooks, ensure_claude_state, merge_missing_claude_env, render_claude};
 #[cfg(test)]
@@ -1869,6 +1968,50 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         super::super::registry_delete("rfbase").ok();
         super::super::teams_delete("rfteam").ok();
         std::fs::remove_dir_all(&ws).ok();
+    }
+
+    /// Board #286 (owner 2026-09-30: an edited dev-squad kept its old roster):
+    /// a team spawned as {dev, old}, then edited to {dev, rev}. The plan,
+    /// read from the registry, the recipes and tmux, restarts dev, leaves
+    /// the stopped old alone, and spawns rev; and dev's refreshed prompt
+    /// already names @rev and no longer @old — the restart takes the edit.
+    #[test]
+    fn a_team_restart_plans_from_the_edited_definition_and_its_prompts_follow() {
+        super::super::tests::use_test_store();
+        let scratch = crate::tmux::Scratch::new("team-plan");
+        let ws_str = scratch.path();
+        let session = format!("tmm-test-team-plan-{}", std::process::id());
+        super::super::with_store(|st| st.insert_project(&super::super::Project {
+            id: session.clone(), name: session.clone(), path: ws_str.clone(), icon: None,
+            session: session.clone(), adopted: false, autostart: false, created_at: 1,
+            last_up_at: None, last_seen_at: None, archived: false, room: String::new(),
+        })).unwrap();
+        super::super::registry_save(&json!({
+            "name": "tpbase", "backend": "kiro", "model": "", "effort": "",
+            "system": "Base.", "skills": "[]", "mcp": "[]"
+        })).unwrap();
+        let save_team = |members: &str| super::super::teams_save(&json!({ "name": "tpteam", "description": "", "members": members })).unwrap();
+        save_team(r#"[{"name":"dev","base":"tpbase","role":"implement"},{"name":"old","base":"tpbase","role":"archive"}]"#);
+        let team = super::super::team_get("tpteam").unwrap().unwrap();
+        let flat = super::super::teams::expand(&team, &|n| super::super::team_get(n), SPAWN_CAP).unwrap();
+        let roster: Vec<super::super::teams::RosterEntry> = flat.iter().map(|f| (f.member.name.clone(), f.member.role.clone(), f.path.clone())).collect();
+        let base = super::super::registry_get("tpbase").unwrap();
+        for f in &flat {
+            let d = super::super::teams::effective_def(f, base.as_ref(), &f.member.name, &roster).unwrap();
+            materialize(&d, &f.member.name, &session, &ws_str, "", "", Some("tpteam"), "", &f.member.name).unwrap();
+        }
+        save_team(r#"[{"name":"dev","base":"tpbase","role":"implement"},{"name":"rev","base":"tpbase","role":"review"}]"#);
+
+        let plan = team_plan_for(&session, "tpteam").unwrap();
+        assert_eq!(plan, TeamPlan { restart: vec!["dev".into()], stop: vec![], spawn: vec![("tpteam".into(), "rev".into())] },
+            "no window is live: old is already stopped, so nothing to stop");
+        assert!(refresh_agent(&ws_str, &session, "dev"));
+        let prompt: Value = serde_json::from_str(&std::fs::read_to_string(agent_home(&ws_str, "dev").join("agents").join("dev.json")).unwrap()).unwrap();
+        let prompt = prompt["prompt"].as_str().unwrap();
+        assert!(prompt.contains("@rev") && !prompt.contains("@old"), "the restarted member's roster is the edited team: {prompt}");
+
+        super::super::registry_delete("tpbase").ok();
+        super::super::teams_delete("tpteam").ok();
     }
     /// Board #126: the cap counts MANAGED agents only. A project with a few
     /// plain windows (shells, hand-started agents) must not refuse a hire it

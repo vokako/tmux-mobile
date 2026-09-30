@@ -168,6 +168,9 @@ tmm agent mode <name> queue|steer   # kiro only: switch how a line typed while i
                                     #   restart returns to the configured mode
 tmm agent stop <name>               # stop the process (slot survives)
 tmm agent restart <name>            # bring it back, resuming its conversation
+tmm agent restart --team <team>     # align a team with its current definition:
+                                    #   restart who it still has, start who it
+                                    #   gained, stop who it dropped (home kept)
 tmm agent remove <name>             # eject: stop + forget slot + delete home
 tmm spawn <registry-name> [--brief "<text>"]   # hire a teammate into this
                                     #   project; no brief = it waits silently

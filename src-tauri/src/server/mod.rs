@@ -359,7 +359,8 @@ mod golden_errors {
         // at the source with its code.
         let src = include_str!("hub_rpc.rs");
         assert!(src.contains(r#"Response::err(id, ERR_INTERNAL, format!("restart failed: {e}"))"#)
-            || src.contains(r#"RpcError::Internal(format!("restart failed: {e}"))"#),
+            || src.contains(r#"RpcError::Internal(format!("restart failed: {e}"))"#)
+            || src.contains(r#".map_err(|e| RpcError::Internal(format!("restart failed: {e}")))"#),
             "the restart-failed literal moved or changed");
     }
 }

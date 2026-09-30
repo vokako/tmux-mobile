@@ -2275,6 +2275,36 @@ test('a team name menu is scoped to its members, stopped ones by their recipe te
   } finally { await app.close(); }
 });
 
+test('Restart team aligns the team with its current definition in one server step, never per member (#286)', { timeout: 60000 }, async (context) => {
+  const teamCalls: unknown[][] = [];
+  const perAgent: string[] = [];
+  let fail = true;
+  const app = await groupFixture(context, {
+    hubAgentRestart: async (_s: string, name: string) => { perAgent.push(name); return {}; },
+    hubTeamRestart: async (...args: unknown[]) => {
+      teamCalls.push(args);
+      const errors = fail ? [{ name: 'reviewer', error: 'spawn failed' }] : [];
+      fail = false;
+      return { team: 'squad', restarted: ['lead', 'dev'], stopped: ['archivist'], spawned: [], errors };
+    },
+  });
+  try {
+    const team = app.document.querySelector<HTMLButtonElement>('.roster-cluster[data-team="squad"] .team-label')!;
+    await app.contextmenu(team);
+    await app.pick('Restart team (2)');
+    assert.ok(app.document.querySelector('.dlg.confirm'), 'lead is running: the restart asks');
+    app.document.querySelector<HTMLButtonElement>('.dlg.confirm .primary')!.click();
+    for (let i = 0; i < 10 && !app.document.querySelector('.dlg-error'); i++) await app.flush();
+    assert.deepEqual(teamCalls, [['fixture', 'squad']], 'one alignment for the whole team');
+    assert.deepEqual(perAgent, [], 'no per-member recipe replay');
+    assert.match(app.document.querySelector('.dlg-error')?.textContent ?? '', /reviewer/u, 'a member that failed is named');
+    app.document.querySelector<HTMLButtonElement>('.dlg.confirm .primary')!.click();
+    for (let i = 0; i < 10 && app.document.querySelector('.dlg.confirm'); i++) await app.flush();
+    assert.equal(teamCalls.length, 2, 'a retry re-runs the alignment');
+    assert.equal(app.document.querySelector('.dlg.confirm'), null);
+  } finally { await app.close(); }
+});
+
 test('Stop all confirms, runs every member once, and a retry runs only the ones that failed (#258)', { timeout: 60000 }, async (context) => {
   const calls: string[] = [];
   let failDev = true;

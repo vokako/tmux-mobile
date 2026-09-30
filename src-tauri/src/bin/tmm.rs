@@ -87,6 +87,8 @@ USAGE (human or agent — self-management):
   tmm agent mode <name> queue|steer   switch a kiro agent's queue/steer mode for this session
                                       (its Ctrl+S; a restart returns to the configured mode)
   tmm agent stop|restart <name>       stop it, or bring it back resuming its conversation
+  tmm agent restart --team <team>     align a team with its CURRENT definition: restart who
+                                      it still has, start who it gained, stop who it dropped
   tmm agent remove <name>             eject it: stop + forget its slot + delete its home
   tmm project list                    all projects
   tmm project create <path> [--name n] [--session s] [--with-agent {backends}]
@@ -666,6 +668,30 @@ async fn main() {
         // Everything the chat UI can do to ONE agent, so an agent can do it too
         // (owner: parity between the buttons and the CLI). `remove` is the
         // eject button — stop + forget the slot + delete the isolated home.
+        // Board #286: a TEAM restart is one server step, aligned with the
+        // current definition — the same verb the team name's menu runs.
+        ("agent", rest) if rest.first().map(String::as_str) == Some("restart") && flags.get("team").cloned().flatten().is_some() => {
+            let session = need_project(&ctx);
+            let team = flags.get("team").cloned().flatten().unwrap_or_default();
+            let r = rpc(&ctx, "hub_team_restart", json!({ "session": session, "team": team })).await;
+            if ctx.json {
+                println!("{r}");
+            } else {
+                let list = |k: &str| r[k].as_array().map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default();
+                for (k, verb) in [("restarted", "restarted"), ("spawned", "started (new)"), ("stopped", "stopped (left the team)")] {
+                    if !list(k).is_empty() {
+                        println!("✓ {verb}: {}", list(k));
+                    }
+                }
+                let errors = r["errors"].as_array().cloned().unwrap_or_default();
+                for e in &errors {
+                    eprintln!("tmm: {}: {}", e["name"].as_str().unwrap_or("?"), e["error"].as_str().unwrap_or("?"));
+                }
+                if !errors.is_empty() {
+                    std::process::exit(1);
+                }
+            }
+        }
         ("agent", rest)
             if matches!(rest.first().map(String::as_str), Some("stop" | "restart" | "remove" | "interrupt")) =>
         {
@@ -1846,7 +1872,7 @@ mod tests {
         let skill = include_str!("../../../assets/skills/tmm-cli/SKILL.md");
         let help = usage();
         assert!(!help.contains("session unchanged"), "a rename moves the session (#278)");
-        for term in ["tmm wake list", "tmm wake cancel", "--wake", "--in ", "--at ", "/compact", "tmm agent mode", "--input-mode"] {
+        for term in ["tmm wake list", "tmm wake cancel", "--wake", "--in ", "--at ", "/compact", "tmm agent mode", "--input-mode", "tmm agent restart --team"] {
             assert!(help.contains(term), "help lost {term:?}");
             assert!(skill.contains(term), "the tmm-cli skill does not teach {term:?}");
         }

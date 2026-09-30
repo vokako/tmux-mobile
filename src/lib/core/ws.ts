@@ -979,6 +979,11 @@ export const hubAgentInputMode = (session: string, agent: string, mode: 'queue' 
  * conversation because the project declaration did not have it yet. */
 export const hubAgentRestart = (session: string, agent: string) =>
   call<{ restarted: string; resumed: boolean }>('hub_agent_restart', { session, agent }, 60000);
+/** Align a team with its CURRENT definition (board #286): restart the
+ * members it still has, spawn those it gained, stop those it dropped. */
+export const hubTeamRestart = (session: string, team: string) =>
+  call<{ team: string; restarted: string[]; stopped: string[]; spawned: string[]; errors: { name: string; error: string }[] }>(
+    'hub_team_restart', { session, team }, 180000);
 export interface RegAgent {
   name: string;
   backend: string;

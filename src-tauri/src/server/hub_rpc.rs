@@ -709,37 +709,59 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
                 let _ = rooms::post(&room, agent, &format!("[tmm] stopped {agent}"));
                 return Ok(serde_json::json!({ "stopped": agent }));
             }
-            // Recreate THIS slot from the declaration. A window younger than
-            // the capture loop's 120 s rule may not be in it yet, so fall back
-            // to a fresh spawn — that starts a new conversation instead of
-            // resuming one, which is still better than an agent that does not
-            // come back.
-            let mut resumed = false;
-            if let Ok(Some(project)) = crate::projects::project_for_session(session) {
-                // Bring the agent's materials up to date with the CURRENT
-                // definition + app-wide AGENTS.md first: the recipe replay is
-                // verbatim, so whatever is on disk now is what the agent will
-                // be. `refresh_agent` re-materializes prompt/config/recipe
-                // when the window name resolves to a registry def; when it
-                // cannot (a uniquified teammate, a team-role synthetic), the
-                // hooks refresh below still repairs observation, exactly as
-                // before.
-                if !crate::projects::spawn::refresh_agent(&project.path, session, agent) {
-                    crate::projects::spawn::refresh_hooks(&project.path, agent);
-                }
-                resumed = crate::projects::up_agent(&project.id, agent).unwrap_or(false)
-                    && window_of_agent(session, agent).is_some();
-            }
-            if !resumed {
-                let r = crate::projects::spawn::spawn(&crate::projects::spawn::SpawnRequest {
-                    session, agent, brief: "", by: "", resume: true, ..Default::default()
-                });
-                if let Err(e) = r {
-                    return Err(RpcError::Internal(format!("restart failed: {e}")));
-                }
-            }
+            let resumed = start_agent(session, agent).map_err(|e| RpcError::Internal(format!("restart failed: {e}")))?;
             let _ = rooms::post(&room, agent, &format!("[tmm] restarted {agent}"));
             Ok(serde_json::json!({ "restarted": agent, "resumed": resumed }))
+        }
+
+        // A team restart ALIGNS the team with its current definition (board
+        // #286, owner 2026-09-30: an edited dev-squad kept its old roster):
+        // members it no longer has are stopped (homes kept), members it
+        // gained are spawned, and every member it still has is restarted
+        // from the definition (a stopped one is started). Per-agent restart
+        // stays a recipe replay. One room line per member, as ever.
+        "hub_team_restart" => {
+            let team = param(p, "team")?;
+            let plan = crate::projects::spawn::team_plan_for(session, team).map_err(RpcError::InvalidParams)?;
+            let mut errors = Vec::new();
+            let mut stopped = Vec::new();
+            for w in &plan.stop {
+                match window_of_agent(session, w).map(|n| crate::tmux::kill_window(&format!("{session}:{n}"))) {
+                    Some(Err(e)) => errors.push(serde_json::json!({ "name": w, "error": e })),
+                    _ => {
+                        let _ = rooms::post(&room, w, &format!("[tmm] stopped {w} — no longer in team {team}"));
+                        stopped.push(w.clone());
+                    }
+                }
+            }
+            // New members first, so the restarted members' rosters name them.
+            let mut spawned = Vec::new();
+            if !plan.spawn.is_empty() {
+                let r = crate::projects::spawn::spawn_team_members(session, team, "", "", true).map_err(RpcError::InvalidParams)?;
+                for m in r.get("spawned").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
+                    let win = m.get("window_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let _ = rooms::post(&room, &win, &format!("[tmm] spawned {win} — team {team}"));
+                    spawned.push(win);
+                }
+                errors.extend(r.get("errors").and_then(|v| v.as_array()).cloned().unwrap_or_default());
+            }
+            let mut restarted = Vec::new();
+            for w in &plan.restart {
+                if let Some(n) = window_of_agent(session, w) {
+                    if let Err(e) = crate::tmux::kill_window(&format!("{session}:{n}")) {
+                        errors.push(serde_json::json!({ "name": w, "error": e }));
+                        continue;
+                    }
+                }
+                match start_agent(session, w) {
+                    Ok(_) => {
+                        let _ = rooms::post(&room, w, &format!("[tmm] restarted {w}"));
+                        restarted.push(w.clone());
+                    }
+                    Err(e) => errors.push(serde_json::json!({ "name": w, "error": format!("restart failed: {e}") })),
+                }
+            }
+            Ok(serde_json::json!({ "team": team, "restarted": restarted, "stopped": stopped, "spawned": spawned, "errors": errors }))
         }
 
         // Spawn a registry agent into this project (tmm spawn / the UI's
@@ -812,6 +834,38 @@ fn agent_backend(session: &str, agent: &str) -> Option<crate::backends::Backend>
     let panes = crate::tmux::list_panes(session).ok()?;
     let p = panes.iter().find(|p| p.window_name == agent && p.active)?;
     p.agent.and_then(crate::backends::Backend::parse)
+}
+
+/// Start a managed agent whose window is gone, from its CURRENT definition
+/// (the restart after the kill, or a start after a stop). Recreates THIS
+/// slot from the declaration; a window younger than the capture loop's
+/// 120 s rule may not be in it yet, so it falls back to a fresh spawn — a
+/// new conversation instead of a resumed one, still better than an agent
+/// that does not come back. True when it resumed; `Err` is the spawn's own
+/// error, which the caller reports as `restart failed: …`.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn start_agent(session: &str, agent: &str) -> Result<bool, String> {
+    let mut resumed = false;
+    if let Ok(Some(project)) = crate::projects::project_for_session(session) {
+        // Bring the agent's materials up to date with the CURRENT
+        // definition + app-wide AGENTS.md first: the recipe replay is
+        // verbatim, so whatever is on disk now is what the agent will
+        // be. `refresh_agent` re-materializes prompt/config/recipe
+        // when the window name resolves to a registry def; when it
+        // cannot (a uniquified teammate, a team-role synthetic), the
+        // hooks refresh below still repairs observation, exactly as
+        // before.
+        if !crate::projects::spawn::refresh_agent(&project.path, session, agent) {
+            crate::projects::spawn::refresh_hooks(&project.path, agent);
+        }
+        resumed = crate::projects::up_agent(&project.id, agent).unwrap_or(false) && window_of_agent(session, agent).is_some();
+    }
+    if !resumed {
+        crate::projects::spawn::spawn(&crate::projects::spawn::SpawnRequest {
+            session, agent, brief: "", by: "", resume: true, ..Default::default()
+        })?;
+    }
+    Ok(resumed)
 }
 
 fn window_of_agent(session: &str, agent: &str) -> Option<usize> {

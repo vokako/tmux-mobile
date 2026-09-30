@@ -32,6 +32,11 @@
 给这个 pane 的环境变量 —— `TMM_PROJECT`（session）和 `TMM_AGENT`（窗口名）——
 就是 `tmm` 全部的身份机制。没有注册调用，没有握手。
 
+重启单个 agent 时，会先按它的定义刷新材料，再照启动配方重放。重启整个 TEAM
+（`hub_team_restart`，board #286）时，先把 team 和当前定义对齐：已从定义里移除的
+成员停掉、保留 home，新加的成员启动，其余成员重启
+（[agents-overview.md § Agent teams](agents-overview.md#agent-teams-board-74)）。
+
 ## 2 · 一轮开始
 
 agent CLI 起来之后停在交互提示符上，**不被搭话就什么都不做**。system prompt 里

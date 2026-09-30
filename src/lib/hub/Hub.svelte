@@ -32,7 +32,7 @@
   import { t } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectDown, projectDelete, projectArchive, projectCreate, projectRename, listSessionsWithPanes,
-    hubPost, hubCommand, modelsList, hubLog, hubRooms, hubAgents, fsMkdir, fsUpload, fsCwd, hubSpawn, hubSpawnTeam, teamsList, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, hubAgentInputMode, registryList,
+    hubPost, hubCommand, modelsList, hubLog, hubRooms, hubAgents, fsMkdir, fsUpload, fsCwd, hubSpawn, hubSpawnTeam, teamsList, hubAgentStop, hubAgentRestart, hubTeamRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, hubAgentInputMode, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
@@ -1201,8 +1201,9 @@
       } else if (kind === 'groupStop' || kind === 'groupRestart') {
         // Every member once; a retry after a partial failure runs only the
         // ones that failed — a success is never repeated (board #258).
-        const one = kind === 'groupStop' ? hubAgentStop : hubAgentRestart;
-        const failed = await runGroup(act.names, (member) => one(session, member));
+        const failed = kind === 'groupRestart'
+          ? await restartGroup(act.names, act.team, session)
+          : await runGroup(act.names, (member) => hubAgentStop(session, member));
         if (failed.length) {
           act.names = failed;
           throw new Error(t('hubGroupFailedNames').replace('{names}', failed.join(', ')));
@@ -1309,14 +1310,16 @@
     if (action.confirm) {
       if (purging) return;
       actionError = '';
-      pendingAct = { kind: action.verb === 'stop' ? 'groupStop' : 'groupRestart', name: label, session, names: [...action.names] };
+      pendingAct = { kind: action.verb === 'stop' ? 'groupStop' : 'groupRestart', name: label, session, names: [...action.names], team: targetTeam(target) };
       return;
     }
     const feedbackToken = commandFeedbackLifetime.begin();
     commandFeedbackAnchor = composer?.feedbackAnchor() ?? null;
     acting = true;
     try {
-      const failed = await runGroup(action.names, (member) => hubAgentRestart(session, member));
+      const failed = action.verb === 'restart'
+        ? await restartGroup(action.names, targetTeam(target), session)
+        : await runGroup(action.names, (member) => hubAgentRestart(session, member));
       if (failed.length && selected === session) commandFeedbackLifetime.update(feedbackToken, {
         kind: 'error',
         message: t('hubGroupFailed').replace('{action}', t(action.verb === 'start' ? 'hubStartAgain' : 'hubRestart')).replace('{names}', failed.join(', ')),
@@ -1325,6 +1328,17 @@
     } finally {
       acting = false;
     }
+  }
+
+  /** Restart a group; the names that failed. A TEAM is aligned with its
+   * current definition in one server step (board #286: the members it
+   * dropped stop, the ones it gained start, the rest restart from it), so an
+   * edited team takes effect. All restarts each live member. A retry of a
+   * team restart re-runs the alignment. */
+  async function restartGroup(names, team, session) {
+    if (!team) return runGroup(names, (member) => hubAgentRestart(session, member));
+    const r = await hubTeamRestart(session, team);
+    return (r.errors ?? []).map((e) => e.name);
   }
 
   /** The group verbs as menu rows, in groupActions' order. `scope` is 'all'
