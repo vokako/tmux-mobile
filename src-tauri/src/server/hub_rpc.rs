@@ -182,10 +182,8 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
                 Some(re) if !re.trim().is_empty() => {
                     let m = rooms::message_by_ref(&room, re.trim())
                         .ok_or_else(|| RpcError::InvalidParams(format!("no message '{re}' in this room")))?;
-                    let hhmm = m["ts"].as_i64().and_then(chrono::DateTime::from_timestamp_millis)
-                        .map(|t| t.with_timezone(&chrono::Local).format("%H:%M").to_string())
-                        .unwrap_or_default();
-                    crate::address::quote_token(m["from"].as_str().unwrap_or("?"), &hhmm, m["body"].as_str().unwrap_or(""))
+                    let when = quote_when(m["ts"].as_i64().unwrap_or(0), chrono::Local::now());
+                    crate::address::quote_token(m["from"].as_str().unwrap_or("?"), &when, m["body"].as_str().unwrap_or(""))
                 }
                 _ => String::new(),
             };
@@ -922,6 +920,15 @@ pub(super) async fn hub_push_loop(out_tx: tokio::sync::mpsc::UnboundedSender<sup
             Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
         }
     }
+}
+
+/// When the quoted message was said (board #290, validator 12:23 P2):
+/// `HH:MM` today, `YYYY-MM-DD HH:MM` otherwise — the client's `localWhen`
+/// rule, so a quote from yesterday does not read as today. Pure over `now`.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn quote_when(ts_ms: i64, now: chrono::DateTime<chrono::Local>) -> String {
+    let Some(t) = chrono::DateTime::from_timestamp_millis(ts_ms).map(|t| t.with_timezone(&chrono::Local)) else { return String::new() };
+    if t.date_naive() == now.date_naive() { t.format("%H:%M").to_string() } else { t.format("%Y-%m-%d %H:%M").to_string() }
 }
 
 /// Put a reply's quote after the body's leading addresses (board #290):
@@ -2054,6 +2061,11 @@ mod tests {
     fn a_reply_quotes_a_message_of_its_own_room_after_the_addresses() {
         assert_eq!(quote_into("[re a 1:00: 「x」] ", "@builder @lead which one?"), "@builder @lead [re a 1:00: 「x」] which one?");
         assert_eq!(quote_into("[re a 1:00: 「x」] ", "no address"), "[re a 1:00: 「x」] no address");
+        use chrono::TimeZone;
+        let now = chrono::Local.with_ymd_and_hms(2026, 9, 30, 12, 0, 0).unwrap();
+        let at = |d, h, m| chrono::Local.with_ymd_and_hms(2026, 9, d, h, m, 0).unwrap().timestamp_millis();
+        assert_eq!(quote_when(at(30, 10, 41), now), "10:41", "today: the time");
+        assert_eq!(quote_when(at(29, 23, 5), now), "2026-09-29 23:05", "another day: the date too");
         assert_eq!(quote_into("[re a 1:00: 「x」] ", "@dev"), "@dev [re a 1:00: 「x」] ");
         crate::projects::tests::use_test_store();
         let s = format!("tmm-quote-{}", uuid::Uuid::new_v4());

@@ -1564,7 +1564,7 @@ export function chipExtras(body: string, recipient: string, names: readonly stri
  * token there. Pure; its case table lives in address.rs. */
 export function parseQuote(body: string | null | undefined): { from: string; time: string; excerpt: string; text: string } | null {
   const b = body ?? '';
-  const m = /^((?:@\S+\s+)*)\[re (\S+) (\d{1,2}:\d{2}): 「([^\n]*?)」\] ?/u.exec(b);
+  const m = /^((?:@\S+\s+)*)\[re (\S+) ((?:\d{4}-\d{2}-\d{2} )?\d{1,2}:\d{2}): 「([^\n]*?)」\] ?/u.exec(b);
   if (!m) return null;
   return { from: m[2]!, time: m[3]!, excerpt: m[4]!, text: m[1]! + b.slice(m[0].length) };
 }

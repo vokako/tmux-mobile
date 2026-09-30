@@ -1671,8 +1671,10 @@
   // INSIDE the layer are excluded so choosing an option is not also
   // "outside". Raw view is not a popup — an opened raw source stays until
   // retoggled or the project changes.
+  // The reply chip (#290) is a layer Escape peels too, after the two above
+  // (validator 12:23: with only the chip up, no listener was installed).
   $effect(() => {
-    if (!feedActions?.isOpen() && !composer?.hasTransient()) return;
+    if (!feedActions?.isOpen() && !composer?.hasTransient() && !replyTo) return;
     const onDown = (e) => {
       feedActions?.outside(e);
       composer?.dismissOutside(e);

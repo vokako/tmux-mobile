@@ -192,7 +192,8 @@ test('Hub keeps Composer transport and capture listeners at the coordinator boun
   assert.doesNotMatch(source, /recipientChanged|closeRecipient/u);
   assert.match(source, /hubPrefs\.setDraft\(selected, composerText\)/u);
   const drawer = source.indexOf("if (!termOpen || !visible) return;");
-  const transients = source.indexOf("if (!feedActions?.isOpen() && !composer?.hasTransient()) return;");
+  const transients = source.indexOf("if (!feedActions?.isOpen() && !composer?.hasTransient() && !replyTo) return;");
+  assert.ok(transients > 0, 'the dismissal effect also listens while a reply chip is up (#290)');
   assert.ok(drawer < transients, 'surviving capture effects keep their order after menu removal');
   assert.match(source, /feedActions\?\.outside\(e\);\s*composer\?\.dismissOutside\(e\);/u);
   assert.match(source, /feedActions\?\.escape\(e\);\s*composer\?\.dismissEscape\(e\);/u);

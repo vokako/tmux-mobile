@@ -1432,6 +1432,8 @@ test('parseQuote reads the server\u2019s quote token, and a quote addresses nobo
     assert.equal(q!.text, '@builder which one?', 'the reply keeps its own addresses and text');
     assert.deepEqual(mentionTokens(reply), ['builder'], `the quoted body (${JSON.stringify(body)}) addresses nobody`);
   }
+  const dated = parseQuote('[re lead 2026-09-29 23:05: 「old news」] still?');
+  assert.deepEqual(dated && [dated.from, dated.time, dated.excerpt, dated.text], ['lead', '2026-09-29 23:05', 'old news', 'still?'], 'a quote from another day carries its date');
   assert.equal(parseQuote('plain text'), null);
   assert.equal(parseQuote('see [re lead 10:41: 「x」] later'), null, 'only at the head, after addresses');
   assert.equal(quotePreview('\n  first   line \nsecond'), 'first line');

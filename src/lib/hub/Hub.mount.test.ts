@@ -1729,8 +1729,18 @@ test('Reply quotes a message: a chip, the id rides the send, the quoted agent is
     await app.flush();
     theirs.querySelector<HTMLButtonElement>('.m-acts button[aria-label="Reply"]')!.click();
     await app.flush();
-    const chip = app.document.querySelector('.pend-chip.reply');
+    let chip = app.document.querySelector('.pend-chip.reply');
     assert.ok(chip, 'the reply chip');
+    // Escape peels it when it is the only layer up (validator 12:23).
+    app.document.querySelector<HTMLTextAreaElement>('.c-input')!.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    for (let i = 0; i < 5 && app.document.querySelector('.pend-chip.reply'); i++) await app.flush();
+    assert.equal(app.document.querySelector('.pend-chip.reply'), null, 'Escape drops the quote');
+    theirs.querySelector<HTMLElement>('.bubble')!.click();
+    await app.flush();
+    theirs.querySelector<HTMLButtonElement>('.m-acts button[aria-label="Reply"]')!.click();
+    await app.flush();
+    chip = app.document.querySelector('.pend-chip.reply');
+    assert.ok(chip, 'quoted again');
     assert.match(chip!.textContent ?? '', /Replying to alice/u);
     assert.match(chip!.textContent ?? '', /@bob please check/u, 'the preview is the first line');
     const input = app.document.querySelector<HTMLTextAreaElement>('.c-input')!;
