@@ -37,6 +37,8 @@ const USAGE: &str = r#"tmm — talk to the tmux-mobile project hub
 
 USAGE (agent):
   tmm send "@name message"            send a message to one or more recipients
+                                      a line to yourself reaches you only from a script
+                                      you left running (nohup, cron), not from your turn
   tmm send "@name /command [args]"    type a CLI command (e.g. /compact) into a teammate's
                                       pane verbatim, like the composer (@all = everyone else)
   tmm send <text> --status            record ambient progress in the project room
@@ -318,7 +320,18 @@ async fn main() {
             // Whether anyone else gets it is read from the live roster, the
             // same `hub_agents` read a /command target is checked against
             // (#274; orchestrator 14:28): say only what is true.
-            if !is_status && names_self(&body, ctx.agent.as_deref()) {
+            //
+            // Unless the call is not the agent's turn at all (board #285): a
+            // watcher left behind with nohup inherits TMM_AGENT and even
+            // TMUX_PANE, so only the process tree tells them apart. Detached,
+            // its copy for the agent is exactly what the agent needs, and the
+            // server types it (`detached`); a turn talking to itself is
+            // refused or noted as before.
+            let wants_self = !is_status
+                && ctx.agent.as_deref().is_some_and(|me| me != "human")
+                && (names_self(&body, ctx.agent.as_deref()) || tmux_mobile::address::mention_names(&body).iter().any(|n| n == "all"));
+            let detached = wants_self && !from_own_pane(ctx.agent.as_deref().unwrap_or_default());
+            if !detached && !is_status && names_self(&body, ctx.agent.as_deref()) {
                 let me = ctx.agent.as_deref().unwrap_or_default();
                 let names = tmux_mobile::address::mention_names(&body);
                 let peers = if names.iter().all(|n| n == me) {
@@ -338,7 +351,7 @@ async fn main() {
                 eprintln!("note: your own copy (@{from}) is not typed into your pane{unknown}");
             }
             let r = rpc(&ctx, "hub_post", json!({
-                "session": session, "from": from, "body": body, "status": is_status
+                "session": session, "from": from, "body": body, "status": is_status, "detached": detached
             })).await;
             if ctx.json {
                 println!("{r}");
@@ -1626,6 +1639,47 @@ fn names_self(body: &str, agent: Option<&str>) -> bool {
     agent.is_some_and(|me| me != "human" && tmux_mobile::address::mention_names(body).iter().any(|n| n == me))
 }
 
+/// Is this `tmm` a descendant of the process in `agent`'s own pane — a call
+/// the agent's turn made (board #285)? `$TMUX_PANE` alone cannot say: a
+/// script started with nohup from that pane inherits it, then outlives the
+/// turn under init. No `$TMUX_PANE` (cron, a k8s hook), a pane that is gone,
+/// or a pane that is not `agent`'s window (a `tmm task` pane) is not the
+/// agent's pane.
+fn from_own_pane(agent: &str) -> bool {
+    let Ok(pane) = std::env::var("TMUX_PANE") else { return false };
+    match tmux_mobile::tmux::pane_window_and_pid(&pane) {
+        Ok((window, pid)) => window == agent && descends_from(std::process::id(), pid, parent_pid),
+        Err(_) => false,
+    }
+}
+
+/// Does `start`'s parent chain reach `target` (itself included)? Bounded:
+/// a malformed chain ends the walk, never loops. Pure over `parent`.
+fn descends_from(start: u32, target: u32, parent: impl Fn(u32) -> Option<u32>) -> bool {
+    let mut pid = start;
+    for _ in 0..64 {
+        if pid == target {
+            return true;
+        }
+        match parent(pid) {
+            Some(p) if p != pid && p > 0 => pid = p,
+            _ => return false,
+        }
+    }
+    false
+}
+
+/// A process's parent: `/proc/<pid>/stat` (the field after the `)` that
+/// ends the command name, which may itself hold spaces or parens), else
+/// `ps -o ppid=` where there is no /proc (macOS).
+fn parent_pid(pid: u32) -> Option<u32> {
+    if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+        return stat.rsplit_once(')')?.1.split_whitespace().nth(1)?.parse().ok();
+    }
+    let out = std::process::Command::new("ps").args(["-o", "ppid=", "-p", &pid.to_string()]).output().ok()?;
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
 /// For a message that names its sender `me`: does anyone ELSE get it, and
 /// which names reach nobody? `peers` are the room's managed agents. `@human`
 /// is a real recipient (the person reads the room); `@all` is one when there
@@ -1682,6 +1736,31 @@ mod tests {
         assert_eq!(send_route("@dev please /compact", "lead", true), SendRoute::Post);
         assert_eq!(send_route("@dev /usr/bin/ls", "lead", true), SendRoute::Post);
         assert_eq!(send_route("/compact", "lead", true), SendRoute::Post, "no target: a message, as in the composer");
+    }
+
+    /// Board #285: the pane test walks the parent chain; a chain that reaches
+    /// the pane's pid is the agent's turn, one that ends at init (a nohup'd
+    /// watcher) or cycles is not.
+    #[test]
+    fn a_call_is_the_agents_turn_only_when_it_descends_from_the_pane() {
+        let tree = |pairs: &'static [(u32, u32)]| move |pid: u32| pairs.iter().find(|(c, _)| *c == pid).map(|(_, p)| *p);
+        // tmm 50 <- zsh 40 <- kiro 30 <- pane zsh 20 <- tmux 10 <- systemd 1
+        let turn: &[(u32, u32)] = &[(50, 40), (40, 30), (30, 20), (20, 10), (10, 1)];
+        assert!(descends_from(50, 20, tree(turn)));
+        assert!(descends_from(20, 20, tree(turn)), "the pane's own process");
+        // The same watcher after its turn ended: reparented to systemd.
+        let orphan: &[(u32, u32)] = &[(60, 55), (55, 3789), (3789, 1)];
+        assert!(!descends_from(60, 20, tree(orphan)));
+        let cycle: &[(u32, u32)] = &[(70, 71), (71, 70)];
+        assert!(!descends_from(70, 20, tree(cycle)), "bounded");
+        assert!(!descends_from(80, 20, |_| None), "no parent known");
+        // The real process table: this test descends from itself and from
+        // its parent, and never from a pid it does not descend from.
+        let me = std::process::id();
+        assert!(descends_from(me, me, parent_pid));
+        let parent = parent_pid(me).expect("a parent");
+        assert!(descends_from(me, parent, parent_pid));
+        assert!(!descends_from(parent, me, parent_pid));
     }
 
     /// Board #283 (orchestrator 14:28): a send is refused when it names its

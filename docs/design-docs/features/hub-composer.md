@@ -970,7 +970,7 @@ description below omits broadcast; this dated rule corrects that omission.
 
 ### Three ways a message lands, and they are not shades of one thing
 
-a name (the default lead) types into ONE agent's input; `@all` types into EVERY managed agent's input, so every agent starts a turn at once; no recipient records it in the room and interrupts NOBODY (agents see it at their next `tmm log`). The third was once labelled "everyone", which was exactly backwards — it is the one that reaches nobody live.
+a name (the default lead) types into ONE agent's input; `@all` types into EVERY managed agent's input, so every agent starts a turn at once; no recipient records it in the room and interrupts NOBODY (agents see it at their next `tmm log`). A line is never typed back into the pane of the agent that sent it, except a fired wake and a post from a script that agent left running (board #285, tmm-cli.md § Self-wake). The third was once labelled "everyone", which was exactly backwards — it is the one that reaches nobody live.
 
 ### A busy queue-mode agent gets its lines combined at the turn's end (board #257, 2026-09-28)
 

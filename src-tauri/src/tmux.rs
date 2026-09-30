@@ -468,6 +468,23 @@ pub fn resolve_pane_id(pane_id: &str) -> Result<(String, String, usize), String>
     Ok((session, window, pane))
 }
 
+/// The window NAME a pane is in and the pid of the process tmux started in
+/// it (`#{pane_pid}`) — what `tmm send` needs to tell a call made by the
+/// agent's own turn (a descendant of that pid) from a script it left behind
+/// (board #285).
+pub fn pane_window_and_pid(pane_id: &str) -> Result<(String, u32), String> {
+    if !pane_id.starts_with('%') || !pane_id[1..].chars().all(|c| c.is_ascii_digit()) {
+        return Err("invalid tmux pane id".into());
+    }
+    let output = run_tmux(&["display-message", "-t", pane_id, "-p", "#{window_name}<TMM_SEP>#{pane_pid}"])?;
+    let (window, pid) = output.trim().split_once("<TMM_SEP>").ok_or("missing fields")?;
+    let pid = pid.parse().map_err(|_| "invalid pane pid")?;
+    if window.is_empty() {
+        return Err("missing window".into());
+    }
+    Ok((window.to_string(), pid))
+}
+
 /// Get current command of a pane
 pub fn pane_command(target: &str) -> Result<String, String> {
     run_tmux(&[

@@ -67,9 +67,11 @@ tmm wake cancel <id>            # yours, or any if you are the human
 
 A wake arrives as `[wake] <text>` from whoever set it, so when you wake a
 teammate its reply comes back to you; a wake to yourself is delivered to your
-own pane and returns no reply to yourself. A plain `tmm send "@<you> …"` is
-never typed into your pane (refused unless it names someone else real), so a background script that must
-tell you something uses `--in` (or `task start --wake`), never a bare send. A `/command` cannot be scheduled. If the server was down at the due
+own pane and returns no reply to yourself. A plain `tmm send "@<you> …"` from
+your own turn is never typed into your pane (refused unless it names someone
+else real). One sent by a script you left running in the background (nohup,
+cron) is not your turn, so it does reach you; `task start --wake` is still the
+simplest way to be told a job ended. A `/command` cannot be scheduled. If the server was down at the due
 time the wake fires once when it is back, marked late; a task wake that could
 not be sent shows as `wake not sent: …` in `tmm task status|list|logs`.
 

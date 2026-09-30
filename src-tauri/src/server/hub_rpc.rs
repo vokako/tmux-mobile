@@ -198,7 +198,12 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
             if !record_only {
                 let seq = msg.get("seq").and_then(|v| v.as_i64());
                 let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-                deliver_mentions(session, from, &body, &room, seq, id, false);
+                // `detached` (board #285): the CLI found the call is not the
+                // sender agent's own turn (a watcher it left behind, cron),
+                // so its copy is typed like a wake's. A courtesy flag, as
+                // `from` is: the skip only stops a turn looping into itself.
+                let detached = p.get("detached").and_then(|v| v.as_bool()).unwrap_or(false);
+                deliver_mentions(session, from, &body, &room, seq, id, detached);
             }
             Ok(msg)
         }
@@ -1210,7 +1215,8 @@ fn deliver_mentions(
         let is_agent = agents::detect_pane(ws.as_deref(), p).is_some();
         // The sender is skipped: a line is never typed back into the pane
         // that sent it. A fired wake is the one exception (`to_sender`,
-        // board #275): an agent that scheduled "@me later" must be woken.
+        // board #275): an agent that scheduled "@me later" must be woken;
+        // so is a post the CLI found detached from the sender's turn (#285).
         if !is_agent || (p.window_name == from && !to_sender) {
             continue;
         }
@@ -2323,6 +2329,16 @@ mod tests {
         );
         let list = handle_hub_request(&req("hub_wake_list", serde_json::json!({ "session": session })), None);
         assert_eq!(list.result.unwrap()["wakes"], serde_json::json!([]), "a fired wake is no longer pending");
+        // Board #285: a post the CLI found DETACHED from dev's turn (its
+        // watcher, left behind) reaches dev too, and @lead as ever.
+        let watcher = handle_hub_request(&req("hub_post", serde_json::json!({ "session": session, "from": "dev", "body": "@lead @dev [watcher] job done", "detached": true })), None);
+        assert!(watcher.error.is_none(), "{:?}", watcher.error.map(|e| e.message));
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let dev = crate::tmux::capture_pane_plain(&format!("{session}:dev"), Some(0)).unwrap_or_default();
+        let lead = crate::tmux::capture_pane_plain(&format!("{session}:lead"), Some(0)).unwrap_or_default();
+        assert!(dev.contains("dev: @lead @dev [watcher] job done"), "the detached copy reaches its sender: {dev:?}");
+        assert!(lead.contains("dev: @lead @dev [watcher] job done"), "{lead:?}");
+        assert!(!dev.contains("note to self now"), "the in-turn line still did not: {dev:?}");
     }
 
     /// Board #275 (validator 09:31): a wake follows the project through a
