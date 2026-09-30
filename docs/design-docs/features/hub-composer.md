@@ -814,6 +814,13 @@ under the strip got equal air above and below the field (6px, was 10px
 below; compact 3px, was 8px) and square lower corners — the band's sides
 meet the sidebar and the drawer, and the rounded corner left a notch
 against them ("左下角和右下角…两边的侧边栏应该都是直角…会有一个小缺口").
+Over the phone's tab bar the band has no bottom border (board #288, owner
+2026-09-30: "输入框和下边的菜单中间会有一个小小的缝隙，在其他页面没有"): at
+390px the band's 1px `--bubble-line` edge sat directly on the bar's 1px
+`--border` top line, two lines of different shade that read as a seam, while
+every other page meets the bar with its one line. The rule is keyed to
+`main.touch-layout`, the condition App.svelte draws the bar under, so a
+desktop window keeps the band's closed edge.
 The owner's 09:38 report of a WHITE LINE while switching tabs exposed two
 transient join faults. Chromium 152 at 390px measured the incoming bottom
 inset at 6px immediately after selection, 3.14px after 64ms and -1px only

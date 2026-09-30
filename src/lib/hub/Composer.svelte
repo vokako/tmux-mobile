@@ -468,5 +468,12 @@
   /* Keep the phone field's breathing room: compact the tab row above it,
      not the gap between the tab floor and the input (owner, 2026-09-23). */
   :global(.hub-root.compact) .composer { padding: 3px var(--composer-inset); }
+  /* Above the touch tab bar the bar's own top line closes the band (board
+     #288, owner 2026-09-30: "输入框和下边的菜单中间会有一个小小的缝隙，在其他页面
+     没有"). Measured at 390px: the band's bottom edge (796px) sat on the
+     bar's (797px), two 1px lines of different shade read as a seam; every
+     other page meets the bar with its one line. `.touch-layout` is the ONE
+     condition the bar is drawn under (App.svelte), so no bar, no change. */
+  :global(main.touch-layout) .composer { border-bottom: 0; }
   :global(.hub-root.compact) .c-input { max-height: calc(28vh / var(--ui-zoom, 1)); }
 </style>

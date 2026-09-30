@@ -183,6 +183,12 @@ test('measured signature actions reuse shared commands without hardcoded avoidan
   // (Roster), which the lit tab breaks — a border here would cross under it.
   assert.match(rule('.composer'), /background: var\(--bubble-in\);\n\s*border: 1px solid var\(--bubble-line\); border-top: 0;\n[\s\S]{0,320}?border-radius: 0;/u,
     'the band wears the agent bubble and closes the enclosure the lit tab opens');
+  // #288: over the touch tab bar the bar's top line is the band's floor — two
+  // stacked 1px lines read as a seam. Keyed to the bar's own condition.
+  assert.match(source, /:global\(main\.touch-layout\) \.composer \{ border-bottom: 0; \}/u, 'one line where the band meets the tab bar');
+  const app = await readFile(new URL('../../App.svelte', import.meta.url), 'utf8');
+  assert.match(app, /class:touch-layout=\{connected && layout\.isTouchDevice\}/u);
+  assert.match(app, /\{#if connected && layout\.isTouchDevice\}\s*<nav class="tabbar">/u, 'the bar is drawn under the same condition');
   assert.match(rule('.compose-shell'), /padding: var\(--tool-inset-block\) var\(--menu-item-padding-x\)/u);
   assert.match(source, /const paintInset = parseFloat\(actionsStyle\.getPropertyValue\('--control-paint-inset'\)\) \|\| 0;/u);
   assert.match(source, /const inkInset = Math\.max\(0, \(\(parseFloat\(style\.lineHeight\) \|\| 0\) - \(parseFloat\(style\.fontSize\) \|\| 0\)\) \/ 2\);/u);
