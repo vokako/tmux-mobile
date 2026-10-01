@@ -166,6 +166,7 @@ Owner, 14:18, after the promo video: "Agent 回复的消息里，Agent 的名字
 - After the name comes `runtimeLabel(agent)`: the backend, then `modelLabel` of the sniffed model, e.g. `kiro · claude-opus-5.5`, in `--fs-micro` mono `--text3`. It ellipsises first on a narrow phone. It is the SAME function as the roster hover's model line, read off the live hub_agents row, so a stopped or removed sender shows no label instead of a guess from history.
 - The status-note badge stays on the header row, pushed right.
 - The name's colour is `--who-ink`, set per name by `agentHue` (see design-language.md § Colour for the six tokens and the contrast table). The sysline's who and every `@mention` wear the same variable, so one agent has one colour across the feed, the roster and the composer's addresses.
+- The room's loading skeleton (`.sk-msg`) wears the same corners as the real bubbles, so the shape does not jump when the room arrives (board #294, validator's #292 P2). `Feed.source.test.ts` compares the two rules.
 - Measured at 390px: the action row (`.m-acts`) still straddles the bubble's bottom edge (centre = bubble bottom, before and after), buttons 44px. The held anchor is a human bubble, which has no header, so its clip is unchanged.
 
 ### Hub visual language is one Telegram-like adaptive surface, not another component tree

@@ -507,3 +507,12 @@ test('an agent bubble is headed from OUTSIDE by name + runtime, in one ink (boar
   // The bubble hangs from its name: the tight corner is top-left now.
   assert.match(source, /\n {2}\.bubble \{\n\s*position: relative;[^}]*border-radius: 6px 18px 18px 18px/u);
 });
+
+test('the loading skeleton wears the real bubbles\u2019 corners, so nothing jumps on load (board #294)', () => {
+  const corner = (re: RegExp) => source.match(re)?.[1];
+  const incoming = corner(/\n {2}\.bubble \{\n\s*position: relative;[^}]*border-radius: ([^;]+);/u);
+  const outgoing = corner(/\.msg\.me \.bubble \{[^}]*border-radius: ([^;]+);/u);
+  assert.ok(incoming && outgoing);
+  assert.equal(corner(/\.sk-msg \{[^}]*border-radius: ([^;]+);/u), incoming, 'incoming placeholder = incoming bubble');
+  assert.equal(corner(/\.sk-msg\.me \{[^}]*border-radius: ([^;]+);/u), outgoing, 'outgoing placeholder = outgoing bubble');
+});

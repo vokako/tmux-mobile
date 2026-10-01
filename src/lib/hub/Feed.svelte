@@ -962,7 +962,9 @@
 
   :global(.hub-root.compact) .s-head { min-height: 34px; }
   .sk-feed { margin-top: auto; display: flex; flex-direction: column; gap: 10px; }
-  .sk-msg { height: 44px; width: min(62%, 420px); border-radius: 18px 18px 18px 6px; align-self: flex-start; }
+  /* The placeholders wear the real bubbles' corners: an incoming bubble hangs
+     from its name since board #292, so its tight corner is top-left (#294). */
+  .sk-msg { height: 44px; width: min(62%, 420px); border-radius: 6px 18px 18px 18px; align-self: flex-start; }
   .sk-msg.me { height: 34px; width: min(44%, 300px); border-radius: 18px 18px 6px 18px; align-self: flex-end; }
 
   /* Chat canvas: one quiet tone derived from the theme. It had two radial
