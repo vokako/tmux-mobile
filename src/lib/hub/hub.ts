@@ -1435,7 +1435,9 @@ export function draftUpdate(
  * `note` is a single observed fact, `steps` is a collapsible run of tool calls
  * (the "what it did between two replies" pane). */
 export type FeedBlock =
-  | { type: 'msg'; ts: number; msg: any; delivered: boolean; command?: SentCommand; steered?: boolean }
+  /** `steps`: the tool-call group this reply closed for its OWN window
+   *  (board #295) — rendered inside the reply's card, folded by default. */
+  | { type: 'msg'; ts: number; msg: any; delivered: boolean; command?: SentCommand; steered?: boolean; steps?: Extract<FeedBlock, { type: 'steps' }> }
   | { type: 'sys'; ts: number; key: string; items: string[] }
   | { type: 'prompt'; ts: number; window: string; text: string }
   | { type: 'progress'; ts: number; window: string; state: string; text: string }
@@ -1761,6 +1763,12 @@ export function echoContains(canonEcho: string, body: string, truncated: boolean
  *    (w1, w2, w1, w2 …) and the feed read as churn (owner report, 2026-08-19).
  *    Duplicate consecutive tool lines are dropped per window first (pre+post
  *    fire for one call).
+ *    When the run is ended by THAT window's own reply, the group moves INTO
+ *    the reply (`msg.steps`, board #295, owner 2026-10-01: "工具调用的折叠框和
+ *    最近的那条消息回复合并到一起"): one card, the steps folded by default
+ *    because the answer is there. A run ended any other way — a prompt, a
+ *    note, a turn edge, another lane's reply, or a reply we cannot attribute —
+ *    or still open stays its own block.
  *
  * `windowOf` maps a message's sender to its window, which is how a reply is
  * attributed to the lane it ends. Without it a reply cannot be attributed, so
@@ -1949,7 +1957,16 @@ export function feedBlocks(
       const from = item.msg?.from ?? '';
       const w = from ? windowOf?.(from) : undefined;
       if (!windowOf) open.clear();
-      else if (w !== undefined) open.delete(w);
+      else if (w !== undefined) {
+        // Its own lane's run becomes part of this reply's card (#295). The
+        // human never has a lane, so only an agent's reply can carry one.
+        const run = open.get(w);
+        open.delete(w);
+        if (run && from !== HUMAN) {
+          out.splice(out.indexOf(run), 1);
+          item.steps = run;
+        }
+      }
       out.push(item);
       continue;
     }

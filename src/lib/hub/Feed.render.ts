@@ -195,3 +195,35 @@ test("an agent's /command is ITS bubble, not the human's (#274)", { timeout: REN
   assert.equal(bubbles[0]!.querySelector('code')?.textContent, '/compact');
   assert.ok(bubbles[1]!.classList.contains('me'), "the human's command is still the human's own bubble");
 });
+
+test('a run its reply ended rides in that reply, folded; a run still going stands alone, open (#295)', { timeout: RENDER_TIMEOUT_MS }, async () => {
+  const Feed = (await h.load('/src/lib/hub/Feed.svelte')).default;
+  const { createRawSnippet } = await h.load('svelte');
+  const agents = [
+    { name: 'dev', window: 0, managed: true, agent: 'kiro', state: 'idle' },
+    { name: 'ops', window: 1, managed: true, agent: 'codex', state: 'working' },
+  ];
+  const tool = (ts: number, window: string, text: string) => ({ id: ts, ts, window, kind: 'tool' as const, tool: 'Read', text });
+  const tree = h.fragment(h.render(Feed, { props: {
+    selected: 'fixture', roomReady: true, agents, managedNames: ['dev', 'ops'],
+    blocks: feedBlocks([{ id: 'r', ts: 30, from: 'dev', body: 'fixed it' }],
+      [tool(10, 'dev', 'a.rs'), tool(20, 'dev', 'b.rs'), tool(25, 'ops', 'c.rs')], 'tools', (n) => n),
+    stepsRows: 5, following: false, newBelow: false,
+    emptyFeed: createRawSnippet(() => ({ render: () => '<div></div>' })),
+  } }).body as string);
+  const reply = tree.querySelector('.msg:not(.me)')!;
+  const carried = reply.querySelector('.bubble > .steps.attached')!;
+  assert.ok(carried, 'the run is inside the reply\u2019s bubble, one card');
+  assert.ok(reply.querySelector('.bubble > .steps.attached + .m-body'), 'between the header and the words');
+  assert.equal(carried.classList.contains('open'), false, 'folded by default: the answer is there');
+  assert.equal(carried.querySelector('.s-head')?.getAttribute('aria-expanded'), 'false');
+  assert.equal(carried.querySelector('.s-who'), null, 'the bubble already names who');
+  assert.equal(carried.querySelector('.s-live'), null, 'a finished run never pulses');
+  assert.match(carried.querySelector('.s-count')?.textContent ?? '', /2/u);
+  // ops is still working and has no reply: its own block, open, live.
+  const lanes = [...tree.querySelectorAll('.feed > .steps')];
+  assert.equal(lanes.length, 1);
+  assert.ok(lanes[0]!.classList.contains('open'));
+  assert.ok(lanes[0]!.querySelector('.s-live.live-dot'));
+  assert.equal(tree.querySelectorAll('.steps').length, 2, 'two runs, one list markup each');
+});

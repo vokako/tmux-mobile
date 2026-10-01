@@ -2,6 +2,7 @@ import test from 'node:test';
 import { ALL_TARGET, teamTarget } from './hub-composer.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import type { FeedBlock } from './hub.ts';
 import { wakeLine, localWhen, gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markMentions, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, HUMAN, parseQuote, quotePreview, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, runtimeLabel, agentHue, AGENT_HUES, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand, foldedCommandArgs, inputModeSwitch } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 import { mentionPalette, rosterGroups, rosterMarker, sortAgentsForRoster, stoppedGroups } from './hub.ts';
@@ -267,11 +268,45 @@ test('a reply between tool calls splits the group in two', () => {
     ['steps', 'msg', 'steps'],
     'a group means "between two replies"',
   );
-  // With one, it ends the lane it came from — the same split, now for a reason.
-  assert.deepEqual(
-    feedBlocks(feed, activity, 'tools', (from) => (from === 'dev' ? 'w1' : undefined)).map((b) => b.type),
-    ['steps', 'msg', 'steps'],
-  );
+  // With one, it ends the lane it came from, and that run becomes part of
+  // the reply's card (board #295): the calls after it start a new group.
+  const attributed = feedBlocks(feed, activity, 'tools', (from) => (from === 'dev' ? 'w1' : undefined));
+  assert.deepEqual(attributed.map((b) => b.type), ['msg', 'steps']);
+  const reply = attributed[0]!;
+  assert.deepEqual(reply.type === 'msg' ? reply.steps?.events.map((e) => e.text) : null, ['Read a.rs'], 'the reply carries the run it ended');
+});
+
+test('a run ended by its own reply joins that reply; every other run stands alone (board #295)', () => {
+  const lanes = (from: string) => ({ dev: 'w1', ops: 'w2' } as Record<string, string>)[from];
+  const tools = [ev({ ts: 100, window: 'w1', text: 'Read a.rs' }), ev({ ts: 110, window: 'w1', text: 'Edit a.rs' })];
+  const carried = (b: FeedBlock | undefined) => (b?.type === 'msg' ? b.steps?.events.length ?? 0 : -1);
+  // Same window: one msg block carrying the group, no sibling steps block.
+  const one = feedBlocks([{ ts: 200, from: 'dev', body: 'fixed' }], tools, 'tools', lanes);
+  assert.deepEqual(one.map((b) => b.type), ['msg']);
+  assert.equal(carried(one[0]), 2);
+  assert.equal(one[0]?.type === 'msg' && one[0].steps?.key, 'ww1-100', 'the group keeps its key, so a choice made while it ran still applies');
+  // Another window's reply: untouched.
+  const other = feedBlocks([{ ts: 200, from: 'ops', body: 'unrelated' }], tools, 'tools', lanes);
+  assert.deepEqual(other.map((b) => b.type), ['steps', 'msg']);
+  assert.equal(carried(other[1]), 0);
+  // No reply (still running), or ended by a prompt: standalone.
+  assert.deepEqual(feedBlocks([], tools, 'tools', lanes).map((b) => b.type), ['steps']);
+  const prompted = feedBlocks([{ ts: 300, from: 'dev', body: 'later' }],
+    [...tools, ev({ ts: 200, window: 'w1', kind: 'prompt', text: 'go on' })], 'tools', lanes);
+  assert.deepEqual(prompted.map((b) => b.type), ['steps', 'prompt', 'msg'], 'a prompt closed it, so the later reply carries nothing');
+  assert.equal(carried(prompted[2]), 0);
+  // A human line never carries a run, even when a map would name a lane.
+  const human = feedBlocks([{ ts: 200, from: 'human', body: 'hi' }], tools, 'tools', (f) => (f === 'human' ? 'w1' : undefined));
+  assert.deepEqual(human.map((b) => b.type), ['steps', 'msg']);
+  // Two agents interleaved: each reply carries its own lane, in place.
+  const both = feedBlocks(
+    [{ ts: 150, from: 'ops', body: 'ops done' }, { ts: 200, from: 'dev', body: 'dev done' }],
+    [...tools, ev({ ts: 105, window: 'w2', text: 'Bash deploy' })], 'tools', lanes);
+  assert.deepEqual(both.map((b) => b.type), ['msg', 'msg']);
+  assert.deepEqual(both.map((b) => (b.type === 'msg' ? [b.msg.from, b.steps?.window, b.steps?.events.length] : null)),
+    [['ops', 'w2', 1], ['dev', 'w1', 2]]);
+  // The chat and status levels have no groups, so nothing to carry.
+  assert.equal(carried(feedBlocks([{ ts: 200, from: 'dev', body: 'fixed' }], tools, 'status', lanes)[0]), 0);
 });
 
 test('two agents working at once keep one lane each', () => {
@@ -303,8 +338,10 @@ test('two agents working at once keep one lane each', () => {
     (from) => (from === 'other' ? 'w2' : undefined),
   );
   const lanes = withReply.filter((b) => b.type === 'steps');
-  assert.equal(lanes.length, 3, 'window 2 was split by its own reply, window 1 was not');
+  assert.equal(lanes.length, 2, 'window 2 was split by its own reply (its first run rides in it, #295), window 1 was not');
   assert.equal(lanes[0]?.type === 'steps' && lanes[0].events.length, 3, 'window 1 stayed whole');
+  const reply = withReply.find((b) => b.type === 'msg');
+  assert.equal(reply?.type === 'msg' && reply.steps?.window, 'w2');
 });
 
 test('concurrent windows never share a tool group', () => {

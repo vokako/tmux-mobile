@@ -522,7 +522,9 @@
   const isRunning = (b) =>
     b.key === newestSteps[b.window] &&
     stateIsLive(agents.find((a) => a.name === b.window)?.state ?? '');
-  const stepsOpen = (b) => stepsChoice[b.key] ?? true;
+  // A run its reply carries is folded until someone opens it (#295): the
+  // answer is the thing to read, the steps are how it got there.
+  const stepsOpen = (b, attached = false) => stepsChoice[b.key] ?? !attached;
   const toggleSteps = (b, open) => { stepsChoice[b.key] = open; };
 
   /** Keep a capped step list showing its NEWEST row, the way a log tail does —
@@ -540,7 +542,10 @@
   /** Per window, the key of its LAST step group: only that one can be running. */
   const newestSteps = $derived.by(() => {
     const last = {};
-    for (const b of blocks) if (b.type === 'steps') last[b.window] = b.key;
+    for (const b of blocks) {
+      if (b.type === 'steps') last[b.window] = b.key;
+      else if (b.type === 'msg' && b.steps) last[b.steps.window] = b.steps.key;
+    }
     return last;
   });
   const blockKey = (b, i) =>
@@ -612,6 +617,68 @@
        (motion.md principle 4) — the body itself is a cut, never a slide
        (principle 10: the feed owns its scroll). stopPropagation keeps the
        bubble's own click (the action row) from firing on it. -->
+  <!-- Tool calls between two replies: one collapsible run per window (rule
+       3). The SAME list in both places it can live (board #295): a block of
+       its own while it runs or when nothing of its agent answered, and,
+       once its agent's reply ended it, a strip at the top of that reply's
+       bubble, folded by default because the answer is right below. -->
+  {#snippet lane(b, attached)}
+    {@const open = stepsOpen(b, attached)}
+      <div class="steps" class:open class:attached class:appear-rise={!attached && b.ts > openedAt}>
+        <button class="s-head" aria-expanded={open} onclick={(e) => { e.stopPropagation(); toggleSteps(b, !open); }}>
+          {#if !attached && isRunning(b)}
+            <span class="s-live live-dot" aria-hidden="true"></span>
+          {:else}
+            <span class="chev" class:open><Icon name="chevron-right" size={12} /></span>
+          {/if}
+          {#if !attached}<span class="s-who">{windowName(b.window)}</span>{/if}
+          <span class="s-count">{t('hubStepsN').replace('{n}', String(b.events.length))}</span>
+          {#if !open}
+            {@const last = b.events[b.events.length - 1]}
+            {@const lp = last ? toolEventParts(last) : { tool: '', text: '' }}
+            <span class="s-peek">{#if lp.tool}<span class="tname" style:color={toolColor(lp.tool)}>{lp.tool}</span> {/if}{lp.text}</span>
+          {/if}
+        </button>
+        {#if open}
+          {@const capped = !stepsAll[b.key] && b.events.length > stepsRows}
+          <!-- Every call is in the DOM; the CAP is a viewport on it, so a
+               live run stops growing the conversation after the configured
+               rows (stepsRows) and the tail stays where the eye
+               already is. -->
+          <div class="s-body" class:capped style:--steps-rows={stepsRows}
+            use:stickBottom={capped ? b.events.length : 0}>
+            {#each b.events as e, j (`${e.ts}-${j}`)}
+              {@const ep = toolEventParts(e)}
+              <div class="step">
+                <!-- The tool NAME is the scannable half: its own colour by
+                     what the tool does. toolEventParts splits the name off
+                     legacy events that glued it onto the text — those were
+                     the "still grey" rows. -->
+                {#if ep.tool}<span class="tname" style:color={toolColor(ep.tool)}>{ep.tool}</span>{/if}
+                <!-- The argument is the ONLY scrolling cell: the name and
+                     the time are ordinary flex children BESIDE it, so the
+                     panning text is clipped by this box and structurally
+                     cannot show through them or slide past the lane's edge.
+                     The sticky-column build could not guarantee that — a
+                     sticky column covers its own box but not the lane
+                     padding beside it, which is where the text bled through
+                     (owner, 2026-08-20: "参数穿模到工具名左侧了"). -->
+                <span class="st-scroll" tabindex="-1"><span class="st-text">{ep.text}</span></span>
+                <span class="st-ts">{fmtTime(e.ts)}</span>
+              </div>
+            {/each}
+          </div>
+          {#if b.events.length > stepsRows}
+            <!-- Outside the scroller on purpose: a control that scrolls
+                 away is a control you cannot find. -->
+            <button class="s-all" onclick={() => { stepsAll[b.key] = !stepsAll[b.key]; }}>
+              {capped ? t('hubStepsAll').replace('{n}', String(b.events.length)) : t('hubStepsCap')}
+            </button>
+          {/if}
+        {/if}
+      </div>
+  {/snippet}
+
   {#snippet unfold(key, folded)}
     <button class="m-unfold" onclick={(e) => { e.stopPropagation(); if (folded) expandMsg(key); else { const { [key]: _gone, ...rest } = expanded; expanded = rest; } }}>
       <span class="flip" class:on={!folded}><Icon name="chevron-down" size={11} /></span>{folded ? t('hubUnfold') : t('hubRefold')}
@@ -749,6 +816,7 @@
             oncontextmenu={(e) => { msgSelectionClicks.mark(e, key); }}
             onauxclick={openPathRef}
             onclick={(e) => { if (openPathRef(e)) return; if (msgSelectionClicks.consume(key)) return; if (typeof getSelection === 'function' && !(getSelection()?.isCollapsed ?? true)) return; setMessageActions(msgOpen === key ? -1 : key); }}>
+            {#if b.steps}{@render lane(b.steps, true)}{/if}
             <div class="m-body" lang={hanLang(m.body ?? '')}>
               <!-- A reply's quote (board #290): the bubble's own markdown
                    blockquote, the sender and time over the quoted line. -->
@@ -876,63 +944,7 @@
         <span class="n-ts">{fmtTime(b.ts)}</span>
       </div>
     {:else}
-      <!-- Tool calls between two replies: one collapsible run per window.
-           Open while the agent is working, closed once it is done, unless
-           the user has said otherwise for this group. -->
-      {@const open = stepsOpen(b)}
-      <div class="steps" class:open class:appear-rise={b.ts > openedAt}>
-        <button class="s-head" aria-expanded={open} onclick={() => toggleSteps(b, !open)}>
-          {#if isRunning(b)}
-            <span class="s-live live-dot" aria-hidden="true"></span>
-          {:else}
-            <span class="chev" class:open><Icon name="chevron-right" size={12} /></span>
-          {/if}
-          <span class="s-who">{windowName(b.window)}</span>
-          <span class="s-count">{t('hubStepsN').replace('{n}', String(b.events.length))}</span>
-          {#if !open}
-            {@const last = b.events[b.events.length - 1]}
-            {@const lp = last ? toolEventParts(last) : { tool: '', text: '' }}
-            <span class="s-peek">{#if lp.tool}<span class="tname" style:color={toolColor(lp.tool)}>{lp.tool}</span> {/if}{lp.text}</span>
-          {/if}
-        </button>
-        {#if open}
-          {@const capped = !stepsAll[b.key] && b.events.length > stepsRows}
-          <!-- Every call is in the DOM; the CAP is a viewport on it, so a
-               live run stops growing the conversation after the configured
-               rows (stepsRows) and the tail stays where the eye
-               already is. -->
-          <div class="s-body" class:capped style:--steps-rows={stepsRows}
-            use:stickBottom={capped ? b.events.length : 0}>
-            {#each b.events as e, j (`${e.ts}-${j}`)}
-              {@const ep = toolEventParts(e)}
-              <div class="step">
-                <!-- The tool NAME is the scannable half: its own colour by
-                     what the tool does. toolEventParts splits the name off
-                     legacy events that glued it onto the text — those were
-                     the "still grey" rows. -->
-                {#if ep.tool}<span class="tname" style:color={toolColor(ep.tool)}>{ep.tool}</span>{/if}
-                <!-- The argument is the ONLY scrolling cell: the name and
-                     the time are ordinary flex children BESIDE it, so the
-                     panning text is clipped by this box and structurally
-                     cannot show through them or slide past the lane's edge.
-                     The sticky-column build could not guarantee that — a
-                     sticky column covers its own box but not the lane
-                     padding beside it, which is where the text bled through
-                     (owner, 2026-08-20: "参数穿模到工具名左侧了"). -->
-                <span class="st-scroll" tabindex="-1"><span class="st-text">{ep.text}</span></span>
-                <span class="st-ts">{fmtTime(e.ts)}</span>
-              </div>
-            {/each}
-          </div>
-          {#if b.events.length > stepsRows}
-            <!-- Outside the scroller on purpose: a control that scrolls
-                 away is a control you cannot find. -->
-            <button class="s-all" onclick={() => { stepsAll[b.key] = !stepsAll[b.key]; }}>
-              {capped ? t('hubStepsAll').replace('{n}', String(b.events.length)) : t('hubStepsCap')}
-            </button>
-          {/if}
-        {/if}
-      </div>
+      {@render lane(b, false)}
     {/if}
   {/each}
   {#if !blocks.length && roomReady}
@@ -1280,6 +1292,12 @@
     background: var(--lane-bg); border: 1px solid var(--border2); border-radius: var(--ui-radius-panel);
     overflow: hidden;
   }
+  /* Inside its reply's bubble (#295): the same lane, a step in from the
+     bubble's own surface, above the words. */
+  .steps.attached { width: auto; margin: 2px 0 6px; cursor: default; overflow: hidden; }
+  /* An OPEN run needs the lane's width, not the reply's: the bubble grows to
+     the message cap while it is open, and the rows pan inside it as usual. */
+  .msg:has(.steps.attached.open) { width: var(--msg-max); }
   .s-head {
     display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
     background: none; border: none; border-radius: 0;

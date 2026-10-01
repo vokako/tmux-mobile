@@ -159,7 +159,8 @@ completion).
   capsule (dropped at the chat-only detail level), except a `/command` the
   person sent, which is their own bubble at every level (board #264); tool calls fold into one
   lane per turn (configurable row cap, middle column scrolls, never
-  truncated).
+  truncated); once that agent's reply ends the lane, the lane rides inside
+  the reply's bubble, folded until opened (board #295).
 - Long user messages fold at the rear (`elideTail`) with an in-bubble
   expand; ONE user-message anchor pins the reading position (never while
   expanded). The budget is rendered rows, not source newlines: each line is

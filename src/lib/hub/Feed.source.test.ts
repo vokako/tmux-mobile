@@ -516,3 +516,14 @@ test('the loading skeleton wears the real bubbles\u2019 corners, so nothing jump
   assert.equal(corner(/\.sk-msg \{[^}]*border-radius: ([^;]+);/u), incoming, 'incoming placeholder = incoming bubble');
   assert.equal(corner(/\.sk-msg\.me \{[^}]*border-radius: ([^;]+);/u), outgoing, 'outgoing placeholder = outgoing bubble');
 });
+
+test('a tool run has ONE markup, worn standalone or inside its reply, folded there by default (board #295)', () => {
+  assert.equal((source.match(/<div class="steps"/gu) ?? []).length, 1, 'one list species');
+  assert.match(source, /\{#snippet lane\(b, attached\)\}/u);
+  assert.match(source, /\{#if b\.steps\}\{@render lane\(b\.steps, true\)\}\{\/if\}\n\s*<div class="m-body"/u, 'inside the bubble, above the words');
+  assert.match(source, /\{@render lane\(b, false\)\}/u, 'and as its own block');
+  assert.match(source, /const stepsOpen = \(b, attached = false\) => stepsChoice\[b\.key\] \?\? !attached;/u,
+    'a choice, keyed by the group, wins; otherwise attached = folded, standalone = open (unchanged)');
+  assert.match(source, /onclick=\{\(e\) => \{ e\.stopPropagation\(\); toggleSteps\(b, !open\); \}\}/u, 'unfolding is not a tap on the message');
+  assert.match(source, /class:appear-rise=\{!attached && b\.ts > openedAt\}/u, 'the merged card rises once, as its bubble');
+});
