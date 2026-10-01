@@ -66,6 +66,8 @@ test('Feed renders direct rows, safe rich content, complete capped tools and the
   assert.equal(prompts[1]!.querySelector('.m-unfold'), null, 'nothing to unfold when it fits');
   assert.ok(tree.querySelector('.m-state.note .note-dot'));
   assert.ok(tree.querySelector('.katex'));
+  // The sender's runtime rides beside its name, from the live row (#292).
+  assert.equal(tree.querySelector('.m-head .m-runtime')?.textContent, 'kiro');
   assert.ok(tree.querySelector('.m-body strong'));
   assert.ok(tree.querySelector('a[href="/source.ts"]'));
   assert.equal(tree.querySelector('a[href^="javascript:"]'), null);
@@ -186,7 +188,9 @@ test("an agent's /command is ITS bubble, not the human's (#274)", { timeout: REN
   const bubbles = [...tree.querySelectorAll('.msg')];
   assert.equal(bubbles.length, 2);
   assert.ok(!bubbles[0]!.classList.contains('me'), 'the agent sent it: an incoming bubble');
-  assert.equal(bubbles[0]!.querySelector('.m-head')?.textContent?.trim(), 'lead', 'named by its sender');
+  assert.equal(bubbles[0]!.querySelector('.m-head .m-who')?.textContent?.trim(), 'lead', 'named by its sender');
+  assert.equal(bubbles[0]!.querySelector('.bubble .m-head'), null, 'from outside the bubble (#292)');
+  assert.equal(bubbles[0]!.querySelector('.m-runtime'), null, 'no live row, no runtime label');
   assert.equal(bubbles[0]!.querySelector('.m-to')?.textContent, '@dev');
   assert.equal(bubbles[0]!.querySelector('code')?.textContent, '/compact');
   assert.ok(bubbles[1]!.classList.contains('me'), "the human's command is still the human's own bubble");

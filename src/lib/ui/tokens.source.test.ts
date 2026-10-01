@@ -113,3 +113,27 @@ test('no button is a circle or a capsule: full-round shapes are the listed non-b
   }
   assert.deepEqual(offenders, [], `a button is a rounded rectangle (--ui-radius-control); list a non-button here by reason:\n${offenders.join('\n')}`);
 });
+
+// Board #292 (owner 2026-10-01, "名字多个颜色更好看"): agent NAME inks are six
+// theme-aware tokens, defined in both theme blocks and nowhere else, and only
+// `agentHue` (hub.ts) names them: a component painting --agent-3 by hand is
+// a second colour rule.
+test('agent name inks are exactly --agent-1..6 per theme, named only by agentHue', async () => {
+  const css = await readFile(new URL('app.css', SRC), 'utf8');
+  for (const theme of ['dark', 'light']) {
+    const start = css.indexOf(`html[data-theme="${theme}"] {`);
+    const block = css.slice(start, css.indexOf('\n}', start));
+    const defs = [...block.matchAll(/--agent-(\w+):\s*(#[0-9a-f]{6});/giu)].map((m) => m[1]);
+    assert.deepEqual(defs, ['1', '2', '3', '4', '5', '6'], `${theme}: six inks, in order`);
+  }
+  assert.equal([...css.matchAll(/--agent-\w+:/gu)].length, 12, 'twelve definitions, no seventh ink or third block');
+  const offenders: string[] = [];
+  for await (const file of walk(SRC)) {
+    const rel = file.href.slice(SRC.href.length);
+    if (rel === 'app.css') continue;
+    if ((await readFile(file, 'utf8')).includes('--agent-')) offenders.push(rel);
+  }
+  assert.deepEqual(offenders, [], 'only agentHue names an agent ink');
+  const hub = await readFile(new URL('lib/hub/hub.ts', SRC), 'utf8');
+  assert.equal([...hub.matchAll(/var\(--agent-/gu)].length, 1, 'agentHue is the one place that builds the name');
+});

@@ -227,6 +227,30 @@ danger semantics.
   = ended well, `--status-warn` = needs a person / a turn cut short,
   `--status-danger` = failed/destructive, grey = at rest. A literal colour is
   wrong; compute expressions with `color-mix` over tokens (`ctxColor`).
+- **Agent name inks are identity, the one exception to "one hue"** (board #292,
+  owner 2026-10-01: "名字多个颜色更好看，可以的"). Six theme-aware tokens
+  `--agent-1..6` in each theme block, chosen by ONE pure function,
+  `agentHue(name)` in hub.ts (FNV-1a hash of the name mod 6, so the same name
+  wears the same ink everywhere, with no table to maintain; the human and
+  `@all` keep `--accent`). It is applied through one variable, `--who-ink`,
+  in four places: the feed's name header, the sysline's who, a live roster
+  card's name, and an `@mention` (`.m-to`, still mixed 62% toward `--text`).
+  Nowhere else, and never on a state: dots, badges and rings keep the
+  status language. A component that names `--agent-3` by hand fails
+  `tokens.source.test.ts`. Contrast is WCAG, measured on the real surfaces (feed
+  canvas, incoming and outgoing bubble, roster tab frame, `--surface2` hover):
+
+  | token | dark | min ratio | light | min ratio |
+  |---|---|---|---|---|
+  | `--agent-1` | #22d3ee | 8.3 | #0e6a82 | 4.70 |
+  | `--agent-2` | #a78bfa | 5.5 | #6d28d9 | 5.41 |
+  | `--agent-3` | #4ade80 | 8.7 | #166c34 | 4.95 |
+  | `--agent-4` | #fbbf24 | 9.0 | #9a4a08 | 4.76 |
+  | `--agent-5` | #f472b6 | 5.7 | #be185d | 4.59 |
+  | `--agent-6` | #60a5fa | 5.9 | #1d4ed8 | 5.10 |
+
+  `--backend-*` stays the avatar fill and is NOT text ink: grok's #e2e8f0
+  vanishes on the light canvas and codex's #94a3b8 reads as meta grey.
 - **The at-rest grey is ACHROMATIC, and "in motion" is not colour alone**: the
   two states you most need to tell apart are running and idle, and at 5–7px a
   dot's hue is not enough — the owner reported them as indistinguishable twice

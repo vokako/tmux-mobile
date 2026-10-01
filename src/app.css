@@ -152,6 +152,14 @@ html {
 /* ─── Theme tokens ─────────────────────────────────────────────────────── */
 
 html[data-theme="dark"] {
+  /* Agent NAME inks (board #292, owner 2026-10-01 "名字多个颜色更好看"): six
+     identity hues, picked by `agentHue(name)` in hub.ts, never by hand.
+     Theme-aware because they are TEXT; contrast measured against every
+     surface a name sits on (feed canvas, both bubbles, the roster's tab
+     frame and hover wash): >= 5.5:1 here. Identity, not state: the state
+     language stays --status-* / .live-dot. */
+  --agent-1: #22d3ee; --agent-2: #a78bfa; --agent-3: #4ade80;
+  --agent-4: #fbbf24; --agent-5: #f472b6; --agent-6: #60a5fa;
   /* The BRAND canvas — the blue-leaning near-black triplet is the app's
      identity and stays (owner, 2026-08-21: "系统配色不要改，就用原来品牌色
      为主"; a 2026-08-20 attempt to neutralize it toward iOS dark was
@@ -218,6 +226,10 @@ html[data-theme="dark"] {
   --scroll-thumb: rgba(226,232,240,0.16); --scroll-thumb-hover: rgba(226,232,240,0.32);
 }
 html[data-theme="light"] {
+  /* The same six identities, darkened for the light canvas: >= 4.59:1 on
+     every name surface (design-language.md § Colour has the table). */
+  --agent-1: #0e6a82; --agent-2: #6d28d9; --agent-3: #166c34;
+  --agent-4: #9a4a08; --agent-5: #be185d; --agent-6: #1d4ed8;
   --bg: #f5f5f7; --bg2: #eeeef0; --bg3: #e8e8ec;
   --text: #1a1a2e; --text2: #5f636b; --text3: rgba(26,26,46,0.35);
   --border: rgba(0,0,0,0.08); --border2: rgba(0,0,0,0.05);

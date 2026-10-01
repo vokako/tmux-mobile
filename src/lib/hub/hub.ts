@@ -1113,7 +1113,7 @@ export function markMentions(html: string, names: readonly string[]): string {
     for (const { at, name } of mentionSpans(part)) {
       if (!valid(name)) continue;
       const end = at + 1 + name.length;
-      out += `${part.slice(from, at)}<span class="m-to">${part.slice(at, end)}</span>`;
+      out += `${part.slice(from, at)}<span class="m-to" style="--who-ink: ${agentHue(name)}">${part.slice(at, end)}</span>`;
       from = end;
     }
     return out + part.slice(from);
@@ -2139,6 +2139,32 @@ export function perLineOf(contentPx: number, glyphPx: number): number {
  * model whose identity happens to contain " on " passes unchanged. */
 const MODEL_PREFIXES = new Set(['openai', 'anthropic', 'xai', 'amazon', 'meta', 'us', 'eu', 'apac', 'global']);
 const MODEL_ROUTES = new Set(['bedrock', 'vertex', 'azure']);
+/** The six agent name inks (`--agent-1..6`, app.css), one per identity. */
+export const AGENT_HUES = 6;
+/** An agent's NAME ink (board #292): a stable FNV-1a hash of the name picks
+ * one of the six theme-aware `--agent-*` tokens, so the same name wears the
+ * same colour in every room, on every device, after every restart — and no
+ * table has to be kept. The ONE function behind the feed header, the
+ * sysline's who, the roster card name and an @mention; the human and @all
+ * are not agents and keep the accent. Identity, never state. */
+export function agentHue(name: string | null | undefined): string {
+  if (!name || name === HUMAN || name === 'all') return 'var(--accent)';
+  let h = 0x811c9dc5;
+  for (const ch of name) { h ^= ch.codePointAt(0)!; h = Math.imul(h, 0x01000193) >>> 0; }
+  return `var(--agent-${(h % AGENT_HUES) + 1})`;
+}
+
+/** What an agent RUNS on, for a reader: `kiro · claude-opus-5.5` — the
+ * backend, then the sniffed model through `modelLabel` (board #292). The ONE
+ * definition behind the roster card's hover model line and the grey label
+ * beside an agent's name over its bubble, read off the same hub_agents row.
+ * No row (a stopped or removed agent, the human) means no label: '' — never a
+ * guess from history. */
+export function runtimeLabel(agent: { agent?: string | null; vitals?: { model?: string | null } | null } | null | undefined): string {
+  if (!agent) return '';
+  return [agent.agent ?? '', agent.vitals?.model ? modelLabel(agent.vitals.model) : ''].filter(Boolean).join(' · ');
+}
+
 export function modelLabel(model: string): string {
   let s = model.trim();
   for (;;) {

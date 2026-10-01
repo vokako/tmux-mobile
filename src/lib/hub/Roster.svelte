@@ -5,7 +5,7 @@
   import { untrack } from 'svelte';
   import { ALL_TARGET, targetMembers, targetTeam, teamTarget } from './hub-composer.ts';
   import { backendIcon } from '../core/agents.ts';
-  import { backendColor, stateDotColor, stateIsLive, chipExtras, ctxColor, fmtElapsed, wakeLine, modelLabel, namedGroup, rosterGroups, rosterMarker, sortAgentsForRoster, stoppedGroups } from './hub.ts';
+  import { backendColor, stateDotColor, stateIsLive, chipExtras, ctxColor, fmtElapsed, wakeLine, modelLabel, runtimeLabel, agentHue, namedGroup, rosterGroups, rosterMarker, sortAgentsForRoster, stoppedGroups } from './hub.ts';
   import { hoverInfo } from '../ui/hover.ts';
   import { longpress } from '../ui/longpress.ts';
   import { anchorOf } from '../ui/placement.ts';
@@ -186,7 +186,7 @@
 
   function cardInfo(a) {
     const lines = [{ label: t('hubHoverState'), value: [stateLabel(a.state), a.detail].filter(Boolean).join(' · '), tone: stateTone(a.state) }];
-    const model = [a.agent, a.vitals?.model ? modelLabel(a.vitals.model) : ''].filter(Boolean).join(' · ');
+    const model = runtimeLabel(a);
     if (model) lines.push({ label: t('hubHoverModel'), value: model });
     if (a.vitals?.context_pct != null) lines.push({ label: t('hubHoverCtx'), value: `${a.vitals.context_pct}%` });
     if (a.input_mode) lines.push({ label: t('hubHoverMode'), value: a.input_mode === 'steer' ? 'Steer' : 'Queue' });
@@ -311,7 +311,7 @@
                   style:--ctx-amount={`${pct}%`} style:--ctx-color={ctxColor(a.vitals.context_pct)}></span>
               {/if}
             </span>
-            <span class="a-name">{a.name}<span class="ac-top"><span class="st" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span></span></span>
+            <span class="a-name" style:--who-ink={agentHue(a.name)}>{a.name}<span class="ac-top"><span class="st" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span></span></span>
             <span class="agent-marks" class:unmarked={!mentioned && !unread.has(a.name)}>
               {#if mentioned}<span class="agent-mention" aria-hidden="true">@</span>{/if}
               {#if unread.has(a.name)}<span class="unread appear-pop" aria-hidden="true"></span>{/if}
@@ -619,6 +619,10 @@
      2026-09-22: "选中和没有选中的…差异更明显一点"). The avatar, status dot and
      context ring keep their colours: they are live facts, not chrome. */
   .tabs:not(.all-lit) .acard:not(.sel):not(.off) { color: var(--text2); }
+  /* A live card's name wears its agent ink (agentHue, board #292); an unlit
+     tab keeps the dimming above by mixing that ink toward the same --text2. */
+  .acard:not(.off) .a-name { color: var(--who-ink, inherit); }
+  .tabs:not(.all-lit) .acard:not(.sel):not(.off) .a-name { color: color-mix(in srgb, var(--who-ink) 55%, var(--text2)); }
   .acard { transition: color var(--t-move) ease; }
   /* In the single-row strip the lit card paints NOTHING of its own — the
      marker carries the enclosure — and the hover wash stays on the unlit

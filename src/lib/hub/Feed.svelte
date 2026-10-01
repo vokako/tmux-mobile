@@ -16,7 +16,7 @@
   import { boxFromOffsets } from '../ui/indicator.ts';
   import { heldAnchor, readingDirection, refoldEligible, sameReadingSize } from './hub-reading.ts';
   import { FONT_CHANGE_EVENT } from '../app/fonts.svelte.ts';
-  import { parseQuote, TAIL_GAP, bottomGap, tailAfterScroll, markMentions, mentionedAgents, splitImages, toolColor, pickAnchor, toolEventParts, elideTail, foldedCommandArgs, foldLines, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, perLineOf, STEPS_ROWS, stateIsLive } from './hub.ts';
+  import { parseQuote, TAIL_GAP, bottomGap, tailAfterScroll, markMentions, mentionedAgents, splitImages, toolColor, pickAnchor, toolEventParts, elideTail, foldedCommandArgs, foldLines, statusNote, noteStateColor, runtimeLabel, agentHue, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, perLineOf, STEPS_ROWS, stateIsLive } from './hub.ts';
 
   let {
     blocks = [], agents = [], managedNames = [], selected = '', visible = false, compact = false,
@@ -660,7 +660,7 @@
           {@const p = sysParts(item)}
           {@const c = sysVerbColor(p.verb)}
           <div class="sys-item">
-            {#if p.who}<span class="sys-who">{p.who}</span>{/if}
+            {#if p.who}<span class="sys-who" style:--who-ink={agentHue(p.who)}>{p.who}</span>{/if}
             {#if p.verb}
               <span class="sys-verb" style:color={c}><span class="sv-dot" aria-hidden="true"></span>{p.verb}</span>
             {/if}
@@ -729,22 +729,26 @@
                the system's selection gesture and its compatibility
                click never open the row. The accessible path to the row
                is the meta-trailer button below. -->
+          {#if m.from !== 'human'}
+            <!-- The sender heads the bubble from OUTSIDE it (board #292,
+                 owner 2026-10-01: "Agent 的名字在气泡外边…名字后面有灰色的
+                 文字表示它是 runtime"): the name, then what it runs on in
+                 meta ink — `runtimeLabel`, the roster hover's own line, so
+                 a stopped or removed sender has none. A status note keeps
+                 the ordinary bubble, but its header says what the words are
+                 ABOUT. The first cut was `name → state`, and the arrow read
+                 as an ADDRESSEE — "像是这个 Agent 给另外一个 working 的人发的"
+                 (owner, 2026-08-20) — so the state is a BADGE in the app's
+                 existing state-pill dialect (.pg-tag): a dot + the state
+                 word in its own status colour, "entered this state". -->
+            {@const runtime = runtimeLabel(agents.find((a) => a.managed && a.name === m.from))}
+            <div class="m-head" style:--who-ink={agentHue(m.from)}><span class="m-who">{m.from}</span>{#if runtime}<span class="m-runtime">{runtime}</span>{/if}{#if note}<span class="m-note-state" style:color={noteStateColor(note.state)}><span class="mns-dot" aria-hidden="true"></span>{stateLabel(note.state)}</span>{/if}</div>
+          {/if}
           <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
           <div class="bubble md"
             oncontextmenu={(e) => { msgSelectionClicks.mark(e, key); }}
             onauxclick={openPathRef}
             onclick={(e) => { if (openPathRef(e)) return; if (msgSelectionClicks.consume(key)) return; if (typeof getSelection === 'function' && !(getSelection()?.isCollapsed ?? true)) return; setMessageActions(msgOpen === key ? -1 : key); }}>
-            {#if m.from !== 'human'}
-              <!-- A status note keeps the ordinary bubble, but its header
-                   says what the words are ABOUT. The first cut was
-                   `name → state`, and the arrow read as an ADDRESSEE —
-                   "像是这个 Agent 给另外一个 working 的人发的" (owner,
-                   2026-08-20) — so the state is now a BADGE in the app's
-                   existing state-pill dialect (.pg-tag): a dot + the
-                   state word in its own status colour, which reads as
-                   "entered this state", not "sent to working". -->
-              <div class="m-head">{m.from}{#if note}<span class="m-note-state" style:color={noteStateColor(note.state)}><span class="mns-dot" aria-hidden="true"></span>{stateLabel(note.state)}</span>{/if}</div>
-            {/if}
             <div class="m-body" lang={hanLang(m.body ?? '')}>
               <!-- A reply's quote (board #290): the bubble's own markdown
                    blockquote, the sender and time over the quoted line. -->
@@ -756,7 +760,7 @@
                      markdown: arguments are data): the recipients in the
                      mention dialect, the name in the rendered inline-
                      code dialect, the arguments wrapping in full. -->
-                <p>{#each b.command.to as n, k (n)}<span class="m-to">@{n}</span>{k < b.command.to.length - 1 ? ' ' : ''}{/each}{b.command.to.length ? ' ' : ''}<code>{b.command.name}</code>{#if b.command.args}{' '}{folded ? cmdFold : b.command.args}{/if}</p>
+                <p>{#each b.command.to as n, k (n)}<span class="m-to" style:--who-ink={agentHue(n)}>@{n}</span>{k < b.command.to.length - 1 ? ' ' : ''}{/each}{b.command.to.length ? ' ' : ''}<code>{b.command.name}</code>{#if b.command.args}{' '}{folded ? cmdFold : b.command.args}{/if}</p>
               {:else if parts.text}
                 {#if rawOpen === key}
                   <pre class="raw">{m.body}</pre>
@@ -1033,7 +1037,7 @@
   .bubble {
     position: relative;
     background: var(--bubble-in); border: 1px solid var(--bubble-line);
-    border-radius: 18px 18px 18px 6px; padding: 8px 12px 9px;
+    border-radius: 6px 18px 18px 18px; padding: 8px 12px 9px;
     color: var(--text); font-size: var(--fs-body); line-height: 1.48;
     word-break: break-word; overflow-wrap: anywhere; cursor: text;
     box-shadow: 0 1px 2px rgba(0,0,0,0.10);
@@ -1051,11 +1055,25 @@
      accent bubble already says "yours"). A flex row so the status badge can
      sit at the bubble's TOP-RIGHT ("放到这个消息的右侧 往右上角放", owner
      2026-08-20) while the name keeps the left edge. */
+  /* Since board #292 it sits OUTSIDE the bubble, over its top-left corner,
+     inset by the bubble's own text padding so name and words share one left
+     edge. A name's ink is ONE variable, --who-ink, set per name by
+     `agentHue` (hub.ts) wherever a name shows — header, sysline who, the
+     @mention — and --accent where no name sets it (a board issue number). */
+  .feed { --who-ink: var(--accent); }
   .m-head {
-    display: flex; align-items: center; gap: 8px;
-    font-family: var(--font-display);
-    color: var(--accent); font-weight: 650; font-size: var(--fs-ui);
-    letter-spacing: 0.1px; line-height: 1.2; margin: 0 0 2px; user-select: none;
+    display: flex; align-items: baseline; gap: 8px; min-width: 0;
+    padding: 0 12px; margin: 0 0 4px; line-height: 1.2; user-select: none;
+  }
+  .m-head .m-who {
+    flex: none; font-family: var(--font-display);
+    color: var(--who-ink); font-weight: 650; font-size: var(--fs-ui); letter-spacing: 0.1px;
+  }
+  /* What it runs on: meta ink, mono (it is data), the line's one part that
+     gives way on a narrow phone. */
+  .m-head .m-runtime {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--text3);
   }
   /* The status-note header's state BADGE: the .pg-tag pill dialect (micro,
      uppercase, bordered) plus a leading dot, coloured by noteStateColor via
@@ -1092,7 +1110,7 @@
   .m-body > :global(p:nth-last-child(2)) { display: inline; }
   /* The leading @recipient — the address — reads apart from the words
      without shouting: weight and a quiet accent lean, no chip, no box. */
-  .m-body :global(.m-to) { font-weight: 600; color: color-mix(in srgb, var(--accent) 62%, var(--text)); }
+  .m-body :global(.m-to) { font-weight: 600; color: color-mix(in srgb, var(--who-ink) 62%, var(--text)); }
   .m-body :global(.katex-display) { overflow-x: auto; overflow-y: hidden; margin: 8px 0; padding: 2px 0; }
   .m-body :global(.katex) { font-size: 1.06em; }
   /* A real <button>: the accessible route to the copy/raw row (the bubble
@@ -1148,7 +1166,7 @@
      ACTION wears the status-note badge (.m-note-state — dot + word in a
      currentColor pill, coloured by the one progressive status language). A
      sent /command is not a capsule: it is the person's own bubble (#264). */
-  .sysline .sys-who { flex: none; font-weight: 650; color: var(--accent); letter-spacing: 0.1px; }
+  .sysline .sys-who { flex: none; font-weight: 650; color: var(--who-ink); letter-spacing: 0.1px; }
   .sysline .sys-verb {
     flex: none; display: inline-flex; align-items: center; gap: 4px;
     font-size: var(--fs-micro); font-weight: 650;

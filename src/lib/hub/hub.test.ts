@@ -2,7 +2,7 @@ import test from 'node:test';
 import { ALL_TARGET, teamTarget } from './hub-composer.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { wakeLine, localWhen, gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markMentions, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, HUMAN, parseQuote, quotePreview, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand, foldedCommandArgs, inputModeSwitch } from './hub.ts';
+import { wakeLine, localWhen, gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markMentions, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, HUMAN, parseQuote, quotePreview, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, runtimeLabel, agentHue, AGENT_HUES, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand, foldedCommandArgs, inputModeSwitch } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 import { mentionPalette, rosterGroups, rosterMarker, sortAgentsForRoster, stoppedGroups } from './hub.ts';
 
@@ -958,7 +958,7 @@ test('an unconfirmed delivery is visible even at the chat-only level', () => {
 
 test('markMentions marks every valid address, anywhere in the message (#273)', () => {
   const roster = ['architect', 'engineer', 'data', 'evaluator', 'reviewer', 'bob'];
-  const m = (n: string) => `<span class="m-to">@${n}</span>`;
+  const m = (n: string) => `<span class="m-to" style="--who-ink: ${agentHue(n)}">@${n}</span>`;
   // The owner's sample: five addresses in a row, all live agents.
   assert.equal(markMentions('<p>@architect @engineer @data @evaluator @reviewer 哈喽，lab 团队你们好。</p>', roster),
     `<p>${m('architect')} ${m('engineer')} ${m('data')} ${m('evaluator')} ${m('reviewer')} 哈喽，lab 团队你们好。</p>`);
@@ -981,7 +981,7 @@ test('markMentions leaves what names nobody plain (#273)', () => {
   same('<p><a href="https://x">@bob</a></p>', 'a link\'s text');
   same('<p>@ alone</p>', 'a bare @');
   assert.equal(markMentions('<p><code>@bob</code> then @bob</p>', roster),
-    '<p><code>@bob</code> then <span class="m-to">@bob</span></p>', 'after a code span the text is read again');
+    `<p><code>@bob</code> then <span class="m-to" style="--who-ink: ${agentHue('bob')}">@bob</span></p>`, 'after a code span the text is read again');
 });
 
 test('the spawn kick never appears in the transcript', () => {
@@ -1753,6 +1753,30 @@ test('perLine is MEASURED from the real line, never assumed (board #53 review)',
   // a sliver of a column still shows words, a wall of glass still folds.
   assert.equal(perLineOf(40, 9), 16, 'floor: never fewer than 16 units');
   assert.equal(perLineOf(9000, 3), 240, 'cap: never more than 240 units');
+});
+
+test('agentHue is a stable pick of the six agent inks; people keep the accent (board #292)', () => {
+  // Pinned values: a hash change would recolour every agent in every room.
+  assert.equal(agentHue('builder'), agentHue('builder'));
+  const seen = new Set(['orchestrator', 'builder', 'validator', 'reviewer', 'archivist', 'data', 'architect', 'engineer', 'lead', 'dev', 'kiro', 'claude', 'codex', 'evaluator']
+    .map((n) => agentHue(n)));
+  for (const v of seen) assert.match(v, /^var\(--agent-[1-6]\)$/u, v);
+  assert.ok(seen.size >= 5, `the names spread over the palette: ${[...seen]}`);
+  assert.equal(AGENT_HUES, 6);
+  // The dev-squad, as the owner sees it: four different inks.
+  assert.deepEqual(['orchestrator', 'builder', 'validator', 'reviewer'].map(agentHue),
+    ['var(--agent-2)', 'var(--agent-3)', 'var(--agent-4)', 'var(--agent-5)']);
+  assert.equal(agentHue('human'), 'var(--accent)');
+  assert.equal(agentHue('all'), 'var(--accent)');
+  assert.equal(agentHue(''), 'var(--accent)');
+  assert.equal(agentHue('数据'), agentHue('数据'), 'any script hashes');
+});
+
+test('runtimeLabel is the backend then the model, and nothing without a live row (board #292)', () => {
+  assert.equal(runtimeLabel({ agent: 'kiro', vitals: { model: 'global.anthropic.claude-opus-5-5' } }), 'kiro · claude-opus-5-5');
+  assert.equal(runtimeLabel({ agent: 'codex', vitals: null }), 'codex', 'a model the pane did not show is left out, not guessed');
+  assert.equal(runtimeLabel({ agent: null, vitals: { model: 'gpt-6.1-sol' } }), 'gpt-6.1-sol');
+  assert.equal(runtimeLabel(undefined), '', 'a stopped or removed agent has no row, so no label');
 });
 
 test('modelLabel drops vendor and region prefixes, keeps the model id', () => {

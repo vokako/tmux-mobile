@@ -152,7 +152,7 @@ test('native selection owns hover and context; stopped slots never select or res
   assert.match(off, /disabled=\{acting\}/u);
   assert.doesNotMatch(off, /selectTarget|interrupt\(|startAgent|a-start|aria-pressed/u);
   assert.doesNotMatch(source, /role="button"|onkeydown|position:\s*fixed/u);
-  for (const fact of ['modelLabel(a.vitals.model)', 'fmtElapsed(a.since, tick)', 'stateTone(a.state)', "t('hubHoverTarget')", "t('hubHoverPath')", "t('hubToDmLong')", "t('hubToAlsoHint')"]) {
+  for (const fact of ['runtimeLabel(a)', 'fmtElapsed(a.since, tick)', 'stateTone(a.state)', "t('hubHoverTarget')", "t('hubHoverPath')", "t('hubToDmLong')", "t('hubToAlsoHint')"]) {
     assert.ok(source.includes(fact), `retained hover fact: ${fact}`);
   }
 });
@@ -248,7 +248,7 @@ test('the stop is a quiet dense action and the dot sits clear of the name, on th
   // 46px card (card 111px wide), name→dot gap 1.3–2px, dot on the line-box centre.
   assert.match(source, /class="agent-stop compact-tools" class:pending use:overDot/u, 'the shared dense slot, not a private size');
   assert.doesNotMatch(source, /variant="warn"/u, 'the amber-mixed ink is gone with its variant');
-  assert.match(source, /<span class="a-name">\{a\.name\}<span class="ac-top"><span class="st"/u, 'the dot is in the name\'s line');
+  assert.match(source, /<span class="a-name" style:--who-ink=\{agentHue\(a\.name\)\}>\{a\.name\}<span class="ac-top"><span class="st"/u, 'the dot is in the name\'s line');
   assert.match(rule('.ac-top'), /vertical-align: middle; margin-inline-start: 5px;/u);
 });
 
@@ -421,4 +421,14 @@ test('a team with nobody running keeps its place: a name that opens the team men
   assert.match(off, /onclick=\{\(e\) => onteamcontext\(cardAnchor\(e\.currentTarget\), group\.team\)\}/u, 'its name opens the team menu');
   assert.doesNotMatch(off, /setRecipient|aria-pressed/u, 'not a destination: nobody is running to talk to');
   assert.equal(source.match(/\{@render offSelect\(name\)\}/gu)?.length, 2, 'one stopped-card body, for a loose identity and a team member');
+});
+
+test('the hover model line is runtimeLabel, the one the feed header reads (board #292)', () => {
+  assert.match(source, /const model = runtimeLabel\(a\);/u);
+});
+
+test('a live card name wears agentHue, dimmed toward --text2 when unlit (board #292)', () => {
+  assert.match(source, /<span class="a-name" style:--who-ink=\{agentHue\(a\.name\)\}>/u);
+  assert.match(source, /\.tabs:not\(\.all-lit\) \.acard:not\(\.sel\):not\(\.off\) \.a-name \{ color: color-mix\(in srgb, var\(--who-ink\) 55%, var\(--text2\)\); \}/u);
+  assert.doesNotMatch(source, /var\(--agent-\d\)/u);
 });

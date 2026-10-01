@@ -482,3 +482,28 @@ test('a reply quote renders as the bubble\u2019s own blockquote; Reply sits in t
   const acts = source.slice(source.indexOf('<div class="m-acts appear">'), source.indexOf('</div>', source.indexOf('<div class="m-acts appear">')));
   assert.match(acts, /\{#if onreply && m\.id\}\s*<CommandButton iconOnly icon="arc-left" label=\{t\('hubReply'\)\}/u, 'Reply beside Copy and Raw');
 });
+
+test('an agent bubble is headed from OUTSIDE by name + runtime, in one ink (board #292)', () => {
+  // Owner 2026-10-01: "Agent 的名字在气泡外边…名字后面有灰色的文字表示它是 runtime".
+  const head = source.indexOf('<div class="m-head"');
+  const bubble = source.indexOf('<div class="bubble md"');
+  assert.ok(head > 0 && head < bubble, 'the header is a sibling BEFORE the bubble');
+  assert.equal(source.indexOf('<div class="m-head"', bubble), -1, 'and the bubble no longer carries one');
+  assert.match(source, /\{@const runtime = runtimeLabel\(agents\.find\(\(a\) => a\.managed && a\.name === m\.from\)\)\}/u,
+    'the label is the roster hover line, from the live hub_agents row only');
+  assert.match(rule('.m-head .m-runtime'), /font-size: var\(--fs-micro\); color: var\(--text3\)/u, 'meta ink, the micro step');
+  // ONE ink for an agent name, wherever it shows in the feed: A (--accent)
+  // until the owner chooses per-agent colour, which then changes one line.
+  assert.match(source, /\.feed \{ --who-ink: var\(--accent\); \}/u);
+  assert.match(rule('.m-head .m-who'), /color: var\(--who-ink\)/u);
+  assert.match(rule('.sysline .sys-who'), /color: var\(--who-ink\)/u);
+  assert.equal((source.match(/--who-ink:/gu) ?? []).length, 1, 'defined once');
+  // Per-agent ink (owner yes, 14:36): agentHue sets --who-ink on every name.
+  assert.match(source, /<div class="m-head" style:--who-ink=\{agentHue\(m\.from\)\}>/u);
+  assert.match(source, /<span class="sys-who" style:--who-ink=\{agentHue\(p\.who\)\}>\{p\.who\}<\/span>/u);
+  assert.match(source, /<span class="m-to" style:--who-ink=\{agentHue\(n\)\}>@\{n\}<\/span>/u, 'a command\u2019s recipients too');
+  assert.match(source, /\.m-body :global\(\.m-to\) \{ font-weight: 600; color: color-mix\(in srgb, var\(--who-ink\) 62%, var\(--text\)\); \}/u);
+  assert.doesNotMatch(source, /var\(--agent-\d\)/u, 'no component names an agent ink by hand');
+  // The bubble hangs from its name: the tight corner is top-left now.
+  assert.match(source, /\n {2}\.bubble \{\n\s*position: relative;[^}]*border-radius: 6px 18px 18px 18px/u);
+});
