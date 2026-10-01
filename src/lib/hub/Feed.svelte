@@ -624,8 +624,14 @@
        bubble, folded by default because the answer is right below. -->
   {#snippet lane(b, attached)}
     {@const open = stepsOpen(b, attached)}
-      <div class="steps" class:open class:attached class:appear-rise={!attached && b.ts > openedAt}>
-        <button class="s-head" aria-expanded={open} onclick={(e) => { e.stopPropagation(); toggleSteps(b, !open); }}>
+      <!-- Inside a reply's bubble, NO click on the run reaches the bubble's
+           own click (which opens the message's action row): head, rows and
+           "show all" alike, the m-unfold rule, stopped once at the lane
+           (validator #295 P1). -->
+      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+      <div class="steps" class:open class:attached class:appear-rise={!attached && b.ts > openedAt}
+        onclick={(e) => { if (attached) e.stopPropagation(); }}>
+        <button class="s-head" aria-expanded={open} onclick={() => toggleSteps(b, !open)}>
           {#if !attached && isRunning(b)}
             <span class="s-live live-dot" aria-hidden="true"></span>
           {:else}

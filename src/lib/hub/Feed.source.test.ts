@@ -524,6 +524,8 @@ test('a tool run has ONE markup, worn standalone or inside its reply, folded the
   assert.match(source, /\{@render lane\(b, false\)\}/u, 'and as its own block');
   assert.match(source, /const stepsOpen = \(b, attached = false\) => stepsChoice\[b\.key\] \?\? !attached;/u,
     'a choice, keyed by the group, wins; otherwise attached = folded, standalone = open (unchanged)');
-  assert.match(source, /onclick=\{\(e\) => \{ e\.stopPropagation\(\); toggleSteps\(b, !open\); \}\}/u, 'unfolding is not a tap on the message');
+  // No click inside an attached run reaches the bubble (validator P1): the
+  // head, the rows and "show all" are all stopped once, at the lane.
+  assert.match(source, /<div class="steps" class:open class:attached class:appear-rise=\{!attached && b\.ts > openedAt\}\n\s*onclick=\{\(e\) => \{ if \(attached\) e\.stopPropagation\(\); \}\}>/u, 'unfolding or reading a run is not a tap on the message');
   assert.match(source, /class:appear-rise=\{!attached && b\.ts > openedAt\}/u, 'the merged card rises once, as its bubble');
 });
