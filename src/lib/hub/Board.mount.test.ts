@@ -197,3 +197,26 @@ test('Board copy failure is persistent and retryable without a false Copied stat
     assert.equal(app.document.querySelector('.m-acts button')?.getAttribute('aria-label'), 'Copied');
   } finally { await app.close(); }
 });
+
+test('a card lights its assignee only while that agent runs, and follows the poll (board #293)', async context => {
+  let state = 'working';
+  const assigned = { ...issue, assignee: 'builder' };
+  const app = await (await compiled).mount(context, {
+    props: { session: 'fixture', visible: true },
+    setup(window) { window.Element.prototype.getAnimations = () => []; },
+    modules: [rpc({
+      boardList: async () => ({ issues: [assigned] }),
+      hubAgents: async () => ({ agents: [{ window: 1, name: 'builder', command: 'kiro', agent: 'kiro', managed: true, state, detail: '', since: 0 }] }),
+    })],
+  });
+  try {
+    await flush(app);
+    const who = () => app.document.querySelector('.card .c-who');
+    assert.equal(who()?.querySelector('.c-assignee')?.textContent, 'builder');
+    assert.equal(who()?.querySelector('.c-tile')?.textContent?.trim(), 'B');
+    assert.ok(who()?.querySelector('.c-live.live-dot'), 'running: the dot is lit');
+    state = 'idle';
+    await app.advance(8000); await flush(app);
+    assert.equal(who()?.querySelector('.c-live'), null, 'idle after the next poll: no dot');
+  } finally { await app.close(); }
+});

@@ -15,7 +15,9 @@
   import Icon from './Icon.svelte';
   import { anchorOf, menuPlacement, popOrigin, viewBox, type AnchorRect } from './placement.ts';
 
-  interface Option { value: string; label?: string; hint?: string; icon?: string }
+  /** `ink`: an agent's name ink (board #293) — the option wears the app's
+   *  `.ava` tile in it, lettered with the label's first character. */
+  interface Option { value: string; label?: string; hint?: string; icon?: string; ink?: string }
 
   let {
     value = $bindable(''),
@@ -72,7 +74,7 @@
       return hit.length === 1 && hit[0]!.value === value ? norm : hit;
     })(),
   );
-  const hasIcons = $derived(shown.some((option) => !!option.icon));
+  const hasIcons = $derived(shown.some((option) => !!option.icon || !!option.ink));
 
   // EXACTLY as wide as the field: with the menu right-aligned to the trigger,
   // equal widths make both edges line up, which is what a field-shaped picker
@@ -186,6 +188,8 @@
   });
 </script>
 
+{#snippet tile(o: Option)}<span class="ava so-ava" style:background={o.ink}>{(o.label ?? o.value).slice(0, 1).toUpperCase()}</span>{/snippet}
+
 {#if editable}
   <!-- COMBOBOX: the native input keeps its hit box and editable field paint.
        The inert chevron still says "there is a list here". -->
@@ -217,7 +221,7 @@
     if (!imeKey(e) && !open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); show(); }
   }}
   onclick={() => (open ? hide() : show())}>
-  {#if current?.icon}<img class="so-ico" src={current.icon} alt="" />{/if}
+  {#if current?.icon}<img class="so-ico" src={current.icon} alt="" />{/if}{#if current?.ink}{@render tile(current)}{/if}
   <span class="sel-value">{label || placeholder}</span>
   <span class="flip" class:on={open}><Icon name="chevron-down" size={11} /></span>
 </button>
@@ -232,7 +236,7 @@
       <button class="sel-opt menu-item" class:sel={o.value === value} class:cur={i === cursor}
         role="option" aria-selected={o.value === value} type="button" tabindex="-1" id={`${listId}-${i}`}
         onclick={() => pick(o.value)} onpointerenter={() => (cursor = i)}>
-        {#if hasIcons}<span class="menu-icon" aria-hidden="true">{#if o.icon}<img class="so-ico" src={o.icon} alt="" />{/if}</span>{/if}
+        {#if hasIcons}<span class="menu-icon" aria-hidden="true">{#if o.icon}<img class="so-ico" src={o.icon} alt="" />{:else if o.ink}{@render tile(o)}{/if}</span>{/if}
         <span class="so-label menu-label" style:font-family={fontPreview && o.value ? `'${o.value.replace(/['"]/g, '')}'` : undefined}>{o.label ?? o.value}</span>
         {#if o.hint}<span class="so-hint menu-hint">{o.hint}</span>{/if}
         {#if o.value === value}<span class="menu-check" aria-hidden="true"><Icon name="check" size={12} /></span>{/if}
@@ -281,6 +285,8 @@
   .sel-opt.sel { color: var(--accent-ink); }
   /* An option's icon (a backend logo): sized to the text line, never stretched. */
   .so-ico { flex: none; width: 15px; height: 15px; border-radius: 3px; object-fit: contain; }
+  /* An agent option's tile is the app's .ava atom as it is (board #293). */
+  .so-ava { flex: none; }
 
   /* iOS (only) zooms a focused control below 16px. On Android this bump made
      a Select disagree with the fields beside it — and .dense (0,2,0) beat the

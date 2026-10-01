@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, ISSUE_REF_CHARS, assignNotes, chipCols } from './board.ts';
+import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, ISSUE_REF_CHARS, assignNotes, chipCols, assigneeView } from './board.ts';
+import { agentHue } from './hub.ts';
 
 // Since board #15 a draft carries all four editable fields; these helpers
 // build the full shape from the short form the assertions speak.
@@ -287,4 +288,19 @@ test('chipCols: one row when it fits, else 2×2, else one column — never three
     const c = chipCols(w, 50, 10);
     assert.ok(c === 1 || c === 2 || c === 4, `w=${w} gave ${c}`);
   }
+});
+
+test('assigneeView: an agent wears its ink, and is lit only while its row is running (board #293)', () => {
+  const agents = [
+    { name: 'builder', state: 'working', managed: true },
+    { name: 'validator', state: 'idle', managed: true },
+    { name: 'shell', state: 'working', managed: false },
+  ];
+  assert.equal(assigneeView('', agents), null, 'unassigned: nothing');
+  assert.deepEqual(assigneeView('builder', agents), { name: 'builder', ink: agentHue('builder'), live: true });
+  assert.deepEqual(assigneeView('validator', agents), { name: 'validator', ink: agentHue('validator'), live: false }, 'idle: no dot');
+  assert.deepEqual(assigneeView('reviewer', agents), { name: 'reviewer', ink: agentHue('reviewer'), live: false },
+    'stopped or removed: its identity stays, nothing is running');
+  assert.equal(assigneeView('shell', agents)?.live, false, 'a direct window is not a managed agent');
+  assert.deepEqual(assigneeView('human', agents), { name: 'human', ink: null, live: false }, 'the human is not an agent: no tile');
 });

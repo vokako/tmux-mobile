@@ -43,7 +43,8 @@ test('picker and tooltip share only frame paint, not menu layout or interaction 
 test('menu copy wraps and icon columns align without creating new renderers or selection semantics (#165)', () => {
   assert.match(css, /\.menu-label \{[^}]*overflow-wrap: anywhere/u);
   assert.match(context, /const hasIcons = \$derived\(items\.some\(\(item\) => !!item\.icon\)\)/u);
-  assert.match(select, /const hasIcons = \$derived\(shown\.some\(\(option\) => !!option\.icon\)\)/u);
+  // An agent option's .ava tile takes the same column (board #293).
+  assert.match(select, /const hasIcons = \$derived\(shown\.some\(\(option\) => !!option\.icon \|\| !!option\.ink\)\)/u);
   for (const source of [context, select]) {
     assert.match(source, /\{#if hasIcons\}<span class="menu-icon" aria-hidden="true">/u);
     assert.match(source, /class="[^"]*menu-check[^"]*"/u);

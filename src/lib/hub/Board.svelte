@@ -9,7 +9,7 @@
      terminal and Files. */
   import { boardList, boardGet, boardSave, boardNote, boardDelete, boardCounts, projectList, hubAgents, hubPost, hubRooms, type BoardIssue, type BoardCountRow, type HubAgent } from '../core/ws.ts';
   import { projectAgeLabel, sortRows } from '../projects/projects.ts';
-  import { boardStatusColor, localWhen } from './hub.ts';
+  import { boardStatusColor, localWhen, agentHue } from './hub.ts';
   import type { ProjectRow } from '../projects/projects.ts';
   import { t, hanLang } from '../core/i18n.svelte.ts';
   import { onDestroy, untrack } from 'svelte';
@@ -22,7 +22,7 @@
   import { feedbackPosition } from '../ui/feedback-position.ts';
   import { copyText } from '../core/clipboard.ts';
   import { scheduleCompletion } from '../ui/feedback-lifetime.ts';
-  import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, countsOf, applyCounts, visibleBoards, boardTitle, assignNotes, chipCols } from './board.ts';
+  import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, countsOf, applyCounts, visibleBoards, boardTitle, assignNotes, chipCols, assigneeView } from './board.ts';
   import { messageActsSet, messageActsCopyLanded, messageActsCopyFailed, messageActsExpired, MESSAGE_ACTS_IDLE, type MessageActsState } from './message-actions.ts';
   import { scrollFade } from '../core/scrollFade.ts';
   import { flip } from 'svelte/animate';
@@ -794,7 +794,7 @@
           {/each}
         </div>
         <Select value={draft.assignee} dense
-          options={[{ value: '', label: t('boardUnassigned') }, ...agents.map((a) => ({ value: a.name, label: `@${a.name}` }))]}
+          options={[{ value: '', label: t('boardUnassigned') }, ...agents.map((a) => ({ value: a.name, label: a.name, ink: agentHue(a.name) }))]}
           onchange={(v: string) => (draft.assignee = v)} />
         {#if sel.created_by}<span class="meta-bit">{t('boardOpenedBy')} <span class="m-name">{sel.created_by}</span></span>{/if}
       </div>
@@ -881,7 +881,7 @@
            is briefed the moment the issue exists (board #11). -->
       <div class="d-meta">
         <Select value={nAssignee} dense
-          options={[{ value: '', label: t('boardUnassigned') }, ...agents.map((a) => ({ value: a.name, label: `@${a.name}` }))]}
+          options={[{ value: '', label: t('boardUnassigned') }, ...agents.map((a) => ({ value: a.name, label: a.name, ink: agentHue(a.name) }))]}
           onchange={(v: string) => (nAssignee = v)} />
       </div>
       <!-- The body is MULTI-LINE, so Enter must stay a newline — the submit
@@ -916,7 +916,15 @@
               <span class="c-meta">
                 #{i.id}
                 {#if i.created_by}· {t('boardBy')} {i.created_by}{/if}
-                {#if i.assignee}· <span class="c-assignee">@{i.assignee}</span>{/if}
+                {#if i.assignee}
+                  {@const who = assigneeView(i.assignee, agents)}
+                  <!-- WHO is on it (board #293): the app's .ava tile in the
+                       agent's own ink + the name; a dot on the tile's corner
+                       while that agent is running (hub_agents, stateIsLive). -->
+                  {#if who?.ink}·
+                    <span class="c-who"><span class="ava c-tile" style:background={who.ink}>{who.name.slice(0, 1).toUpperCase()}{#if who.live}<span class="c-live live-dot" aria-hidden="true"></span>{/if}</span><span class="c-assignee">{who.name}</span></span>
+                  {:else}· <span class="c-assignee">@{i.assignee}</span>{/if}
+                {/if}
                 {#if noteCount(i)}· {noteCount(i)} <Icon name="chat" size={10} />{/if}
                 · {ago(i.updated_at)}
               </span>
@@ -1116,7 +1124,16 @@
     overflow: hidden;
   }
   .c-meta { font-size: var(--fs-micro); color: var(--text3); display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
-  .c-assignee { color: var(--accent); }
+  /* The assignee (board #293): the shared .ava tile filled with the agent's
+     ink, then its name in --text2. Its running dot sits on the tile's
+     top-right corner, the status language's own dot and live cue. */
+  .c-who { display: inline-flex; align-items: center; gap: 5px; }
+  .c-tile { position: relative; }
+  .c-live {
+    position: absolute; top: -2px; right: -2px; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent); box-sizing: content-box; border: 1px solid var(--bg2);
+  }
+  .c-assignee { color: var(--text2); }
 
 
   /* ── detail / new form ── */

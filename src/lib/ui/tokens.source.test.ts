@@ -82,6 +82,7 @@ const ROUND_ALLOWED: { file: string; match: string; why: string }[] = [
   { file: 'lib/hub/AgentsPage.svelte', match: 'object-fit: cover', why: 'an avatar' },
   { file: 'lib/hub/Roster.svelte', match: '.ava', why: 'an avatar' },
   { file: 'lib/hub/Roster.svelte', match: '.unread', why: 'a dot' },
+  { file: 'lib/hub/Board.svelte', match: '.c-live', why: 'the assignee\u2019s running dot (board #293)' },
   { file: 'lib/hub/Roster.svelte', match: '.ctx-ring', why: 'the context ring around an avatar' },
   { file: 'lib/hub/hub-atoms.css', match: '.st', why: 'the status dot' },
   { file: 'lib/sessions/Sessions.svelte', match: '.search-bar', why: 'an input capsule' },

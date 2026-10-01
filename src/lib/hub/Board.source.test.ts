@@ -883,3 +883,13 @@ test("the Board's sidebar follows the shell-wide collapse with the Hub's reveal 
   assert.match(style, /\.board-root\.side-collapsed:not\(:global\(\.moving\)\) > \.sidebar \{ visibility: hidden; \}/u);
   assert.match(style, /\.sidebar:global\(\.pin-end\) \{ justify-self: end; \}/u);
 });
+
+test('a card names its assignee with the .ava tile in agentHue ink and the one live dot (board #293)', () => {
+  assert.match(source, /\{@const who = assigneeView\(i\.assignee, agents\)\}/u, 'one pure helper decides');
+  assert.match(source, /<span class="ava c-tile" style:background=\{who\.ink\}>/u, 'the app-wide .ava atom, filled with the agent ink');
+  assert.match(source, /\{#if who\.live\}<span class="c-live live-dot" aria-hidden="true"><\/span>\{\/if\}/u, 'the status language\u2019s own live cue');
+  assert.match(source, /\.c-assignee \{ color: var\(--text2\); \}/u, 'the name in --text2, not accent');
+  // The agents are the poll Board already runs: no second hub_agents loop.
+  assert.equal((source.match(/hubAgents\(/gu) ?? []).length, 1);
+  assert.match(source, /agents\.map\(\(a\) => \(\{ value: a\.name, label: a\.name, ink: agentHue\(a\.name\) \}\)\)/u, 'the picker wears the same tile');
+});
