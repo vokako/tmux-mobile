@@ -28,17 +28,17 @@ See [Terminal Gestures Design Doc](terminal-gestures.md) for the full gesture pr
 - Complex custom code to maintain
 - Must pause/resume content updates around touch interactions
 - Platform-specific keyboard handling (browser vs Android WebView)
-- Double-tap is slightly less discoverable than single-tap (mitigated by keyboard toggle button)
+- Double-tap is slightly less discoverable than single-tap (until #296 a keyboard toggle button mitigated this; that slot is now Enter while the keyboard is down)
 
 ## Lessons Learned
 - xterm.js DA responses (`\x1b[?62;22c`) must be filtered before forwarding to tmux
-- **endTouchScroll must NOT manipulate kbLocked** — it's called via setTimeout (200-500ms delay) and can fire after a pointerdown/double-tap unlock, overriding the user's intent. Keyboard state is managed only by: double-tap, toggle button, blur timer, keyboard-shift event.
+- **endTouchScroll must NOT manipulate kbLocked** — it's called via setTimeout (200-500ms delay) and can fire after a pointerdown/double-tap unlock, overriding the user's intent. Keyboard state is managed only by: double-tap, the bar's close key, blur timer, keyboard-shift event.
 - **Android keyboard control** pins `inputmode="text"` and gates focus:
   1. `kbLocked` + the focus guard immediately blur a textarea focused while locked.
   2. `keyboard-shift kbHeight=0` locks only on the open-to-close edge after the unlock grace period.
-  - **Unlock flow**: double-tap or keyboard toggle → `unlockKeyboard()` (clears the blur timer, resumes live tail, unlocks, then blurs an already-focused textarea and focuses it).
-  - **Lock flow**: blur schedules a 150ms check (up to two re-focus attempts within the 1.5s unlock grace); the keyboard-height falling edge, pane switch and toggle close also use `lockKeyboard()`.
-  - **Documentation correction (#139, 2026-09-09)**: the retired none/text toggle could leave Android's first InputConnection believing the view did not want the IME (`a228b41c`). The toggle now reads real IME visibility via `keyboard-open`; it does not infer visibility from the lock flag. These are existing source contracts, not a new device-validation claim.
+  - **Unlock flow**: double-tap → `unlockKeyboard()` (clears the blur timer, resumes live tail, unlocks, then blurs an already-focused textarea and focuses it).
+  - **Lock flow**: blur schedules a 150ms check (up to two re-focus attempts within the 1.5s unlock grace); the keyboard-height falling edge, pane switch and the bar's close key also use `lockKeyboard()`.
+  - **Documentation correction (#139, 2026-09-09)**: the retired none/text toggle could leave Android's first InputConnection believing the view did not want the IME (`a228b41c`). The bar now reads real IME visibility via `keyboard-open`; it does not infer visibility from the lock flag. These are existing source contracts, not a new device-validation claim.
 - **Svelte 5 registers `touchstart`/`touchmove` as passive** — `e.preventDefault()` in `ontouchstart` is silently ignored. The `nonPassiveShortcuts` Svelte action registers non-passive handlers.
 - **Mobile auto-pair textarea accumulation** — Mobile keyboards auto-pair quotes/brackets. Fix: force-clear textarea after each `onData`, skip paste (detected via `paste` event flag, NOT `data.length`).
 - **Tab swipe vs child gestures** — App-level swipe suppressed when `e.defaultPrevented` or vertical movement > 10px.

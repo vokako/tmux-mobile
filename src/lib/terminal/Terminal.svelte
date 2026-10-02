@@ -170,11 +170,11 @@
 
   // The ONLY two writers of `kbLocked` (terminal-keyboard.md): unlockKeyboard()
   // opens, lockKeyboard() closes. Its four callers — pane switch, the blur
-  // timer, the keyboard-shift close transition, and the toggle's close half —
+  // timer, the keyboard-shift close transition, and the bar's close key —
   // are the sanctioned lock sites; `endTouchScroll` and every other timer path
   // must never lock, because a delayed timer racing a fresh unlock is how the
-  // keyboard used to vanish under the user's finger. unlockKeyboard() has two
-  // callers of its own — the toggle's open half and the double-tap — each
+  // keyboard used to vanish under the user's finger. unlockKeyboard() has ONE
+  // caller of its own — the double-tap (#296 retired the bar's open key) —
   // labelled at the call site.
   function lockKeyboard() {
     kbLocked = true;
@@ -184,7 +184,7 @@
     clearTimeout(kbBlurTimer);
     // Opening the keyboard means the user is about to type, so settle any
     // suppressed-rendering state instead of merely cancelling its timer.
-    // Cancelling was the old behaviour and it leaked: a tap on this button
+    // Cancelling was the old behaviour and it leaked: an unlock
     // within TOUCH_END_DELAY_MS of a scroll killed the only pending
     // endTouchScroll, leaving `touchScrolling` pinned forever — every later
     // frame was dropped and the characters the user then typed never appeared.
@@ -1251,8 +1251,8 @@
     };
     document.addEventListener('visibilitychange', onVisible);
 
-    // Mobile keyboard: opened only via the keyboard toggle button or a
-    // DOUBLE-tap on the terminal (onTouchEnd). A single tap does NOT open it —
+    // Mobile keyboard: opened only by a DOUBLE-tap on the terminal
+    // (onTouchEnd); the bar's slot is Enter while it is down (#296). A single tap does NOT open it —
     // users found stray taps while reading scrollback (or near the selection
     // handles) surprising.
     // Single layer: kbLocked flag, enforced by onTaFocus (it blurs whenever
@@ -1419,8 +1419,8 @@
       // then keyboard dismissed by Android back/system — textarea stays focused but keyboard
       // is gone. Without this, any subsequent touch (shortcut button) causes IME to re-show.
       // Guard: only trigger on the open→close transition. A bare kbH=0 event (e.g., Android
-      // pad where IME never actually rose) must NOT re-lock — that would kill the keyboard
-      // toggle the user just pressed.
+      // pad where IME never actually rose) must NOT re-lock — that would kill the
+      // double-tap the user just made.
       if (kbTa && kbH === 0 && lastKbHeight > 0 && Date.now() >= unlockUntil) {
         lockKeyboard(); // keyboard-shift: open → close transition
         if (document.activeElement === kbTa) kbTa.blur();
@@ -1635,11 +1635,15 @@
   let repeatTimer = null;
   let repeatInterval = null;
 
-  function startRepeat(key) {
+  // One press of a shortcut key. Enter stops here (#296); the repeatable
+  // keys go through startRepeat, which adds the long-press repeat.
+  function pressKey(key) {
     ctrlOneShot.disarm(); // a shortcut key is not "the next letter"
-    const ta = termEl?.querySelector('.xterm-helper-textarea');
     navigator.vibrate?.(8); // haptic tick on press; silent during repeat interval
     sendSpecial(key);
+  }
+  function startRepeat(key) {
+    pressKey(key);
     repeatTimer = setTimeout(() => {
       repeatInterval = setInterval(() => sendSpecial(key), 80);
     }, 400);
@@ -1656,7 +1660,7 @@
   function nonPassiveShortcuts(node) {
     let activeBtn = null;
     const onStart = (e) => {
-      // preventDefault on ALL buttons (including kb-toggle) to prevent synthetic
+      // preventDefault on ALL buttons (including the close key) to prevent synthetic
       // mousedown from stealing focus away from xterm's textarea after ta.focus().
       const btn = e.target.closest('button');
       if (btn && node.contains(btn)) {
@@ -1900,36 +1904,24 @@
             <button tabindex="-1" ontouchstart={() => startRepeat('Left')}><span><Icon name="arrow-left" size={13} /></span></button>
             <button tabindex="-1" ontouchstart={() => startRepeat('Down')}><span><Icon name="arrow-down" size={13} /></span></button>
             <button tabindex="-1" ontouchstart={() => startRepeat('Right')}><span><Icon name="arrow-right" size={13} /></span></button>
-            <button class="kb-toggle" tabindex="-1" onpointerdown={(e) => {
-              // Stop the touch from bubbling into terminal-touch handlers.
-              // Note: we deliberately do NOT call e.preventDefault() here.
-              // On Chrome Android, preventDefault on a pointerdown that
-              // ends up driving focus() can consume the user-activation
-              // token, leaving the IME refusing to honour showSoftInput.
-              // Focus stealing is already prevented by tabindex="-1".
+            <!-- One slot, two keys, switched by `html.keyboard-open` — the
+                 class App.svelte derives from the real IME height, so the key
+                 the finger lands on is the key on screen (#296). Keyboard
+                 down: Enter, sent once (double-tap is what opens the
+                 keyboard). Keyboard up: close it. -->
+            <button class="kb-enter" tabindex="-1" aria-label="Enter" ontouchstart={() => pressKey('Enter')}><span><Icon name="corner-down-left" size={13} /></span></button>
+            <button class="kb-close" tabindex="-1" aria-label="Close keyboard" onpointerdown={(e) => {
+              // Keep the touch out of the terminal-touch handlers.
               e.stopPropagation();
               e.stopImmediatePropagation();
               const ta = kbTa;
               if (!ta) return;
-              // Decide open/close from the REAL IME visibility, not from
-              // our internal kbLocked flag. Two states could disagree:
-              //   - User dismisses IME via the system keyboard's close
-              //     button → IME hidden, but the textarea remains focused
-              //     and our kbLocked stays false (no blur was issued).
-              //     Reading kbLocked here would route us through the
-              //     "close" branch, requiring a second tap to actually
-              //     re-open. visualViewport is the source of truth.
-              const kbOpen = document.documentElement.classList.contains('keyboard-open');
-              if (!kbOpen) {
-                unlockKeyboard(); // toggle: open half
-              } else {
-                // Cancel any pending unlock-grace retries so the blur
-                // timer doesn't bounce focus back. See 73957f5.
-                unlockUntil = 0;
-                unlockRetries = 0;
-                lockKeyboard(); // toggle: close half
-                ta.blur();
-              }
+              // Cancel any pending unlock-grace retries so the blur
+              // timer doesn't bounce focus back. See 73957f5.
+              unlockUntil = 0;
+              unlockRetries = 0;
+              lockKeyboard(); // close key
+              ta.blur();
             }}><span><Icon name="keyboard" size={13} /></span></button>
           </div>
         </div>
@@ -2275,7 +2267,10 @@
     border-color: var(--accent);
     box-shadow: none;
   }
-  :global(html.keyboard-open) .shortcuts .kb-toggle {
+  .shortcuts .kb-close { display: none; }
+  :global(html.keyboard-open) .shortcuts .kb-enter { display: none; }
+  :global(html.keyboard-open) .shortcuts .kb-close {
+    display: flex;
     background: var(--accent-bg);
     color: var(--accent);
     border-color: var(--accent);

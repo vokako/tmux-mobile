@@ -343,7 +343,7 @@
       androidNativeKb = true; // suppress visualViewport handler on Android
       const kbh = e.detail?.height || 0;
       if (kbh > 0 && !hasFocusedTextInput()) {
-        // The IME can become visible during the keyboard-toggle pointer event,
+        // The IME can become visible during the opening touch event,
         // one task before xterm's hidden textarea receives focus. Dropping this
         // one-shot native height leaves the terminal at full-screen size until
         // the user closes and reopens the keyboard. Keep the stale-event guard,

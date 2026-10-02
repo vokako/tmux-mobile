@@ -83,7 +83,7 @@ Two traps worth keeping written down:
 - **`unlockKeyboard()` used to `clearTimeout(endTouchScrollTimer)`.** That timer
   is the *only* pending reset of `touchScrolling` (armed for
   `TOUCH_END_DELAY_MS` = 500 ms after every scroll, longer with momentum).
-  Tapping the keyboard toggle inside that window therefore pinned the display
+  Opening the keyboard inside that window therefore pinned the display
   forever — the exact "I typed and the terminal froze" report. It now calls
   `resumeLiveTail()` instead of cancelling the reset.
 - **Momentum outlives the snap.** Setting `termAtBottom = true` and
@@ -250,13 +250,12 @@ These are off-device checks, not the owner Android pass pending on #148.
 ### Transitions
 | From | Event | To | Action |
 |------|-------|----|--------|
-| either | keyboard toggle, IME hidden | unlocked | focus textarea, 1.5s grace |
 | either | double-tap on terminal (two clean `down` taps ≤300ms, ≤40px apart, no selection) | unlocked | `unlockKeyboard()`; the second touchend is `preventDefault`ed so no synthetic dblclick reaches xterm |
 | locked | single tap on terminal | locked | no-op |
 | unlocked | single tap on terminal | unlocked | no-op |
 | unlocked | textarea blur (150ms timer) | locked (or retry focus if in grace) | grace → re-focus, at most twice; otherwise lock |
 | unlocked | keyboard-shift kbH=0 (was >0, post-grace) | locked | lock, blur |
-| either | keyboard toggle, IME visible | locked | end grace, lock, blur |
+| either | bar close key (shown only under `keyboard-open`) | locked | end grace, lock, blur |
 | unlocked | pane switch | locked | reset |
 
 **Documentation correction (#139, 2026-09-09):** `a228b41c` records why

@@ -281,14 +281,14 @@ test('kbLocked has exactly two writers: unlockKeyboard() and lockKeyboard()', ()
   // terminal-keyboard.md: `endTouchScroll` and other delayed timers must never
   // lock — a timer racing a fresh unlock is how the keyboard vanished under
   // the user's finger. Every lock site (pane switch, blur timer, keyboard-shift
-  // close transition, toggle close half) goes through the one function so the
+  // close transition, the bar's close key) goes through the one function so the
   // list of callers is greppable.
   const writes = [...source.matchAll(/^\s*kbLocked = (true|false);/gmu)].map(m => m[1]);
   assert.deepEqual(writes.sort(), ['false', 'true'], 'one lock write and one unlock write');
   assert.match(source, /function lockKeyboard\(\) \{\s*kbLocked = true;\s*\}/u);
   assert.match(/function unlockKeyboard\(\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '', /kbLocked = false;/u);
   // The known callers, each labelled at the call site.
-  for (const label of ['pane switch', 'blur timer', 'keyboard-shift', 'toggle: close half']) {
+  for (const label of ['pane switch', 'blur timer', 'keyboard-shift', 'close key']) {
     assert.match(source, new RegExp(`lockKeyboard\\(\\); // ${label}`, 'u'), `caller "${label}" labelled`);
   }
 });
@@ -299,13 +299,31 @@ test('double-tap is the ONE terminal-area gesture that opens the keyboard (revie
   assert.match(source, /openFromDoubleTap\(\) \{\s*unlockKeyboard\(\); \/\/ double-tap/u);
   assert.doesNotMatch(source, /createDoubleTapDetector|doubleTap\.tap/u);
   assert.match(source, /addEventListener\('touchend', onTouchEnd, \{ passive: false \}\)/u, 'preventDefault needs a non-passive touchend');
-  // unlockKeyboard() has exactly two callers, each labelled.
+  // unlockKeyboard() has exactly one caller, labelled (#296 removed the bar's open key).
   const calls = [...source.matchAll(/unlockKeyboard\(\);(?: \/\/ ([^\n]*))?/gu)].map(m => m[1] ?? '');
-  assert.deepEqual(calls.sort(), ['double-tap', 'toggle: open half']);
+  assert.deepEqual(calls, ['double-tap']);
   // endTouchScroll stays out of the keyboard entirely.
   const ets = /function endTouchScroll\(\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1] ?? '';
   assert.ok(ets, 'endTouchScroll must exist');
   assert.doesNotMatch(ets, /kbLocked|lockKeyboard|unlockKeyboard/u);
+});
+
+test('the bar\'s last slot is Enter while the keyboard is down and Close while it is up (#296)', () => {
+  // Owner 2026-10-02: double-tap already opens the keyboard, so the slot that
+  // used to open it sends Enter instead. Both keys are in the markup and
+  // `html.keyboard-open` — the class derived from the real IME height —
+  // shows exactly one, so the key under the finger is the key on screen and a
+  // tap while the IME is still up (even mid-close) can never send Enter.
+  const slot = /<div class="shortcuts">((?:(?!<div class="shortcuts">)[\s\S])*?)<\/div>\s*<\/div>\s*<\/div>\s*\{:else\}/u.exec(source)?.[1] ?? '';
+  assert.ok(slot, 'second shortcut row must exist');
+  assert.match(slot, /<button class="kb-enter" tabindex="-1" aria-label="Enter" ontouchstart=\{\(\) => pressKey\('Enter'\)\}><span><Icon name="corner-down-left"/u,
+    'Enter fires once through pressKey, not startRepeat');
+  assert.match(slot, /<button class="kb-close" tabindex="-1" aria-label="Close keyboard" onpointerdown=[\s\S]*?lockKeyboard\(\); \/\/ close key\s*ta\.blur\(\);[\s\S]*?<Icon name="keyboard"/u);
+  assert.doesNotMatch(source, /startRepeat\('Enter'\)|kb-toggle/u, 'no repeating Enter and no toggle left behind');
+  // One press path: startRepeat = pressKey + the long-press timers.
+  assert.match(source, /function pressKey\(key\) \{\s*ctrlOneShot\.disarm\(\);[^\n]*\n\s*navigator\.vibrate\?\.\(8\);[^\n]*\n\s*sendSpecial\(key\);\s*\}\s*function startRepeat\(key\) \{\s*pressKey\(key\);\s*repeatTimer = setTimeout/u);
+  // The class decides visibility; the close key keeps the accent it had.
+  assert.match(source, /\.shortcuts \.kb-close \{ display: none; \}\s*:global\(html\.keyboard-open\) \.shortcuts \.kb-enter \{ display: none; \}\s*:global\(html\.keyboard-open\) \.shortcuts \.kb-close \{\s*display: flex;\s*background: var\(--accent-bg\);/u);
 });
 
 test('the Ctrl one-shot lives in terminal-keyboard.ts; ctrlArmed is only its mirror (review 2026-09-03)', () => {
