@@ -14,6 +14,7 @@
   import { handlePathLinkClick } from '../core/path-links.ts';
   import { selectionClickGuard } from '../ui/native-context-menu.ts';
   import { boxFromOffsets } from '../ui/indicator.ts';
+  import { createDoubleTapDetector } from '../terminal/terminal-keyboard.ts';
   import { heldAnchor, readingDirection, refoldEligible, sameReadingSize } from './hub-reading.ts';
   import { FONT_CHANGE_EVENT } from '../app/fonts.svelte.ts';
   import { parseQuote, TAIL_GAP, bottomGap, tailAfterScroll, markMentions, mentionedAgents, splitImages, toolColor, pickAnchor, toolEventParts, elideTail, foldedCommandArgs, foldLines, statusNote, noteStateColor, runtimeLabel, agentHue, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, perLineOf, STEPS_ROWS, stateIsLive } from './hub.ts';
@@ -310,6 +311,17 @@
    * project changes — resetting it whenever the anchor moved would re-fold a
    * message the reader is still reading. */
   let expanded = $state({});
+  /** Double-tap on a HELD bubble jumps to it (board #304). Touch uses the
+   * terminal's one double-tap detector; a mouse has native dblclick. */
+  const heldDoubleTap = createDoubleTapDetector();
+  // The pair's second tap still produces a click; it must not reopen the
+  // action row the jump just closed.
+  let jumpClick = null;
+  function jumpHeld(key) {
+    getSelection?.()?.removeAllRanges();
+    setMessageActions(-1);
+    jumpToMsg(key);
+  }
   /** Expanding releases the pin (see `pinned` in the markup), so the bubble
    * returns to its natural flow position — often pages away from the viewport
    * that was showing its pinned copy, which read as the message VANISHING
@@ -319,15 +331,25 @@
   async function expandMsg(key) {
     expanded = { ...expanded, [key]: true };
     await settled();
+    jumpToMsg(key);
+  }
+  /** Bring a user message's NATURAL position into view — the one jump shared
+   * by expanding and by double-tapping a held bubble (board #304). A held
+   * bubble is sticky, and Chromium reports a sticky element's HELD offsetTop,
+   * so stickiness is neutralized for this synchronous read (as in syncAsk). */
+  function jumpToMsg(key) {
     if (!feedEl) return;
     const el = feedEl.querySelector(`[data-ask="${CSS.escape(key)}"]`);
     if (!(el instanceof HTMLElement)) return;
+    el.style.position = 'static';
+    const at = el.offsetTop;
+    el.style.removeProperty('position');
     const top = feedEl.scrollTop;
-    if (el.offsetTop >= top && el.offsetTop < top + feedEl.clientHeight - 60) {
+    if (at >= top && at < top + feedEl.clientHeight - 60) {
       syncAsk();
       return;
     }
-    feedEl.scrollTop = Math.max(0, el.offsetTop - 8);
+    feedEl.scrollTop = Math.max(0, at - 8);
     // Programmatic jump: seed the anchor path from the destination, the way
     // scrollToTail does — the scroll event this assignment fires then sees a
     // zero delta and invents no direction.
@@ -821,7 +843,10 @@
           <div class="bubble md"
             oncontextmenu={(e) => { msgSelectionClicks.mark(e, key); }}
             onauxclick={openPathRef}
-            onclick={(e) => { if (openPathRef(e)) return; if (msgSelectionClicks.consume(key)) return; if (typeof getSelection === 'function' && !(getSelection()?.isCollapsed ?? true)) return; setMessageActions(msgOpen === key ? -1 : key); }}>
+            ondblclick={() => { if (pinned && askHeld) jumpHeld(key); }}
+            onpointerup={(e) => { if (e.pointerType === 'mouse') return; if (heldDoubleTap.tap({ x: e.clientX, y: e.clientY, t: e.timeStamp }) && pinned && askHeld) { jumpClick = key; jumpHeld(key); } }}
+            onpointercancel={() => heldDoubleTap.reset()}
+            onclick={(e) => { if (jumpClick === key) { jumpClick = null; return; } if (openPathRef(e)) return; if (msgSelectionClicks.consume(key)) return; if (typeof getSelection === 'function' && !(getSelection()?.isCollapsed ?? true)) return; setMessageActions(msgOpen === key ? -1 : key); }}>
             {#if b.steps}{@render lane(b.steps, true)}{/if}
             <div class="m-body" lang={hanLang(m.body ?? '')}>
               <!-- A reply's quote (board #290): the bubble's own markdown

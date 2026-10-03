@@ -342,9 +342,10 @@ test('a tapped bubble reveals Copy/Raw under it — and still never an app conte
   // A plain tap toggles the row — after the path-reference route (board #99:
   // a tapped file link opens the preview, it must not ALSO flip the row), the
   // one-shot compatibility-click guard (a long-press's echo click) and the
-  // live-selection fallback.
+  // live-selection fallback. First of all, the echo click of a held bubble's
+  // double-tap pair (board #304) is consumed: the jump just closed the row.
   assert.match(bubble,
-    /onclick=\{\(e\) => \{ if \(openPathRef\(e\)\) return; if \(msgSelectionClicks\.consume\(key\)\) return; if \(typeof getSelection === 'function' && !\(getSelection\(\)\?\.isCollapsed \?\? true\)\) return; setMessageActions\(msgOpen === key \? -1 : key\); \}\}/u,
+    /onclick=\{\(e\) => \{ if \(jumpClick === key\) \{ jumpClick = null; return; \} if \(openPathRef\(e\)\) return; if \(msgSelectionClicks\.consume\(key\)\) return; if \(typeof getSelection === 'function' && !\(getSelection\(\)\?\.isCollapsed \?\? true\)\) return; setMessageActions\(msgOpen === key \? -1 : key\); \}\}/u,
     'the synthetic click is consumed before the selection fallback and the row toggle');
   // The contextmenu handler only MARKS a touch-owned hold: no preventDefault,
   // no menu — native selection proceeds on touch, and a mouse right-click is
@@ -528,4 +529,13 @@ test('a tool run has ONE markup, worn standalone or inside its reply, folded the
   // head, the rows and "show all" are all stopped once, at the lane.
   assert.match(source, /<div class="steps" class:open class:attached class:appear-rise=\{!attached && b\.ts > openedAt\}\n\s*onclick=\{\(e\) => \{ if \(attached\) e\.stopPropagation\(\); \}\}>/u, 'unfolding or reading a run is not a tap on the message');
   assert.match(source, /class:appear-rise=\{!attached && b\.ts > openedAt\}/u, 'the merged card rises once, as its bubble');
+});
+
+test('a held bubble\u2019s double-tap reuses the terminal detector and the expand jump (board #304)', () => {
+  assert.match(source, /import \{ createDoubleTapDetector \} from '\.\.\/terminal\/terminal-keyboard\.ts';/u);
+  assert.equal([...source.matchAll(/createDoubleTapDetector\(/g)].length, 1, 'one detector, no second double-tap implementation');
+  assert.match(source, /async function expandMsg\(key\) \{\s*expanded = \{ \.\.\.expanded, \[key\]: true \};\s*await settled\(\);\s*jumpToMsg\(key\);/u,
+    'expanding and the double-tap share ONE jump');
+  assert.match(source, /ondblclick=\{\(\) => \{ if \(pinned && askHeld\) jumpHeld\(key\); \}\}/u, 'only a HELD bubble jumps');
+  assert.doesNotMatch(source, /function jumpHeld[\s\S]{0,200}expanded = /u, 'the jump never expands');
 });
