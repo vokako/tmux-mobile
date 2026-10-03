@@ -186,7 +186,7 @@ test('Hub keeps Composer transport and capture listeners at the coordinator boun
   assert.match(source, /onsend=\{send\} onstage=\{stageFiles\} onremove=\{removeAttachment\}/u);
   assert.match(source, /onmodels=\{modelsList\} oninterrupt=\{interrupt\}/u);
   assert.match(source, /onheightchange=\{\(\) => \{ if \(following\) scrollFeed\(true\); \}\}/u);
-  assert.match(source, /onfocus=\{\(\) => \{ following = true; scrollFeed\(true\); setTimeout\(\(\) => scrollFeed\(true\), 300\); \}\}/u);
+  assert.doesNotMatch(source, /onfocus=/u, 'focusing the composer must not drag a reader to the tail (#303)');
   assert.match(source, /let at = composer\?\.caret\(\) \?\? composerText\.length;/u);
   assert.match(source, /composer\?\.focus\(\);/u);
   assert.doesNotMatch(source, /recipientChanged|closeRecipient/u);

@@ -2266,6 +2266,34 @@ test('a global font change re-takes the tail through the reading anchor; a histo
   } finally { await app.close(); }
 });
 
+test('focusing the composer is not navigation: a history reader keeps their place (board #303)', { timeout: 60000 }, async context => {
+  // Owner 2026-10-03: reading an earlier reply while typing the answer to it;
+  // the composer's focus used to force `following` and park the feed at the tail.
+  const { rpc } = roomFixture();
+  const messages = Array.from({ length: 24 }, (_, i) => ({ id: 'm' + i, seq: i + 1, ts: 100 + i, from: i % 2 ? 'alice' : 'human', body: 'line ' + i }));
+  const app = await compiledHub().then(f => f.mount(context, {
+    props: { visible: true, mobile: true },
+    setup(window) { window.Element.prototype.getAnimations = () => []; window.HTMLCanvasElement.prototype.getContext = () => null; },
+    modules: [{ ...rpc, hubLog: async () => ({ messages, has_more: false }) }],
+  }));
+  try {
+    for (let i = 0; i < 12 && app.document.querySelectorAll('.msg').length < 24; i++) await app.flush();
+    const feed = app.document.querySelector<HTMLElement>('.feed')!;
+    Object.defineProperty(feed, 'scrollHeight', { get: () => 2563, configurable: true });
+    Object.defineProperty(feed, 'clientHeight', { get: () => 724, configurable: true });
+    Object.defineProperty(feed, 'clientWidth', { get: () => 390, configurable: true });
+    feed.scrollTop = 330;
+    feed.dispatchEvent(new app.window.Event('scroll'));
+    for (let i = 0; i < 4; i++) await app.flush();
+    assert.ok(app.document.querySelector('.to-tail'), 'the reader is off the tail');
+    app.document.querySelector<HTMLTextAreaElement>('.c-input')!.focus();
+    await app.advance(400);
+    for (let i = 0; i < 4; i++) await app.flush();
+    assert.equal(feed.scrollTop, 330, 'focus leaves the reading position where it was');
+    assert.ok(app.document.querySelector('.to-tail'), 'and the feed still knows it is not following');
+  } finally { await app.close(); }
+});
+
 // ── Board #258: group verbs on All and on a team name ─────────────────────
 async function groupFixture(context: TestContext, extra: Record<string, (...args: any[]) => unknown>, openAgentConfig?: (name: string, kind?: string) => void) {
   const { rpc } = roomFixture();

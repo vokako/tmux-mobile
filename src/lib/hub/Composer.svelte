@@ -15,7 +15,7 @@
     onsend: send = () => {},
     onstage: stageFiles = async () => {}, onremove: removeAttachment = () => {},
     onmodels: modelsList = async () => ({ models: [] }), oninterrupt = async (_target) => {},
-    onpreview = () => {}, onfocus = () => {}, onheightchange = () => {},
+    onpreview = () => {}, onheightchange = () => {},
     registerBack = null, replyTo = null, onclearreply = () => {},
   } = $props();
 
@@ -319,7 +319,6 @@
     oninput={growComposer}
     onkeydown={onComposerKey}
     onpaste={onComposerPaste}
-    onfocus={onfocus}
   ></textarea>
   <!-- On the phone the two controls are a dense group (.compact-tools, the
        Files-head pitch): 32px each instead of 44, so the field keeps 24px more

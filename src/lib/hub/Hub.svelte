@@ -1992,7 +1992,6 @@
         onclearreply={() => { replyTo = null; composer?.focus(); }}
         onsend={send} onstage={stageFiles} onremove={removeAttachment}
         onmodels={modelsList} oninterrupt={interrupt} onpreview={(path) => { shotView = path; }}
-        onfocus={() => { following = true; scrollFeed(true); setTimeout(() => scrollFeed(true), 300); }}
         onheightchange={() => { if (following) scrollFeed(true); }}
         registerBack={onGoBack ? backLayers.register : null} />
       {#if commandFeedback && commandFeedbackAnchor}

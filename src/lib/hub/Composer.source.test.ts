@@ -67,7 +67,7 @@ test('Composer owns local UI state, while transport and capture ordering stay ou
   assert.match(source, /onmodels: modelsList/u, 'models use the explicit transport command');
   assert.match(source, /if \(shellH !== lastShellH\) \{\s*lastShellH = shellH;\s*onheightchange\(\);/u,
     'height intent fires only when the shell really changed');
-  assert.match(source, /onfocus=\{onfocus\}/u);
+  assert.doesNotMatch(source, /onfocus/u, 'focusing the composer is not navigation (#303)');
   assert.match(source, /export function caret\(\) \{ return composerEl\?\.selectionStart; \}/u);
   assert.match(source, /export function focus\(\) \{ composerEl\?\.focus\(\); \}/u);
   assert.match(source, /export function feedbackAnchor\(\) \{ return shellEl; \}/u);

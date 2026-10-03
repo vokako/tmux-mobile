@@ -5,6 +5,22 @@ per-agent interruption. The feed is `hub-feed.md`.
 
 ## Rules and their reasons
 
+### Focusing the composer is not navigation (board #303, 2026-10-03)
+
+Tapping or clicking the input leaves the feed where it is. The owner reads an
+earlier reply while typing the answer to it (2026-10-03: "要保持在我当时浏览的
+消息位置不变……需要一边看一边回复"), and the old `onfocus` set `following` and
+scrolled to the tail twice (immediately and after 300 ms), so the reader was
+pulled away exactly when they needed the message on screen. Composer therefore
+has no focus intent at all. The tail is still taken by the paths that mean it:
+sending forces `scrollFeed(true)`; a reader who is already `following` keeps the
+tail when the keyboard shrinks the viewport (Feed's `keyboard-shift` listener)
+or the input grows (`onheightchange`); a reader in history keeps their row
+through the ResizeObserver reading anchor. `Hub.source.test.ts` and
+`Composer.source.test.ts` pin the absence of the handler; `Hub.mount.test.ts`
+focuses the input at `scrollTop` 330 and asserts it stays there with `.to-tail`
+visible (fails on the old handler).
+
 ### Header path copy reports its actual result (#167 batch 2, 2026-09-12)
 
 The desktop path stays selectable prose; double-click still copies its full,
@@ -956,9 +972,8 @@ Hub transport/staging/reading functions are AST-identical to the #171 base.
 Chromium 152 checks desktop and 390px light/dark, explicit coarse media,
 long names, nested teams, menu/Stop reach, reload, reduced motion and a
 reduced-height multiline input. Settled history typing and peer Stop preserve
-the reference row within 1px. Tests wait for the existing 300ms focus-tail
-callback before beginning a history transaction; racing that separate callback
-is not evidence of a composer-growth defect. Synthetic touch and key checks
+the reference row within 1px. (Those tests waited for the 300ms focus-tail
+callback, which board #303 removed.) Synthetic touch and key checks
 do not replace native Android keyboard/IME acceptance.
 
 ### The room has a default recipient
@@ -1126,7 +1141,8 @@ Hub still owns the draft binding, recipient/preference writes, attachment
 generation/jobs/pending set, staging, `send()` and every RPC. Composer receives
 explicit state and commands, not a Hub store or feed/roster DOM references.
 The named `caret`/`focus` methods replace staging's two textarea accesses;
-height/focus intents retain the original parent tail behavior. Thumbnail
+the height intent retains the original parent tail behavior (the focus intent
+was removed by board #303). Thumbnail
 preview passes the original local object URL to Hub's existing Lightbox.
 
 Composer registers only recipient/palette/interrupt with the existing fixed
