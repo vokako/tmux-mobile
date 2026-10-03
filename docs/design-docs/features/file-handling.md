@@ -43,7 +43,8 @@ contexts cannot revive an old attempt. Progress, completion, expiry and
 Open callbacks may update only their current slot. The path passed at the
 download gesture and the output passed at the Open gesture remain fixed
 through awaits. A new feedback owner does NOT cancel any requested download:
-all byte transfer and save operations still finish independently.
+all byte transfer and save operations still finish independently. Since board #301 the outcome of such a download is not
+dropped either: see § A download that lost its slot still reports once.
 
 Numeric progress means actual received bytes divided by known total bytes.
 Unknown Content-Length and the write/picker phase are indeterminate, with
@@ -321,6 +322,22 @@ rule beside the keyboard one).
 Frontend `fsDownloadHttp` always uses the streaming HTTP path now (both `ws://` and `wss://`). The server peeks the first bytes of every accepted connection (plain TCP via `TcpStream::peek`; TLS via `BufStream::fill_buf` after the TLS handshake) and branches HTTP vs WebSocket-upgrade. This is what keeps a 56 MB .pptx download working over `wss://` — before, `wss://` fell back to the WS RPC path and tripped `MAX_READ_SIZE`.
 
 `fs_download` stays — it's still the right choice for inline preview (the browser wants the bytes as `data:` URL anyway, so the base64 it gets from the server is already the final shape).
+
+### Where a download lands, and what closing the preview does (board #301, 2026-10-03)
+
+Owner asked whether a second download breaks the first, whether closing the preview loses files, and why the spinner wobbled. Measured in the real app (Chromium 151, 390×844 dpr 3 and 1280×800) against a fake server whose `/dl` answers after a delay; the Android write path is read from code, not measured on a device.
+
+- **Landing place per platform.** Android: `save_to_downloads` writes `/storage/emulated/0/Download/TmuxMobile/<name>` (`lib.rs`), the public Download folder that the Downloads list (`list_downloads`) reads. macOS/desktop: the path the user picks in the save dialog (`tauriFs.writeFile`). Browser: the browser's own download manager (`<a download>` on a blob URL; revoking the URL 100 ms later does not touch the saved file).
+- **Closing the preview loses nothing.** A remote file's preview is read into memory (`fs_read` / `fs_download`) and never written to disk; a download is a separate write to the place above. Leaving the preview only ends the feedback slot's context.
+- **Android overwrites a same-name file** (`std::fs::write`). The save dialog and the browser rename instead.
+- **Downloads run in parallel.** Each `handleDownload` owns its chunks, byte count and fetch; nothing is queued or shared. Two overlapping downloads both save (measured: b.bin served at 3.3 s, a.bin at 5.5 s, two browser download events).
+- **Known limit: memory.** Every download is buffered whole in JS memory and then copied once into one `Uint8Array`, so the peak is about twice the file size per download, and concurrent large downloads add up. This matters most on Android. Streaming to disk is not built.
+
+### A download that lost its slot still reports once (board #301, 2026-10-03)
+
+The download slot belongs to its newest attempt (#167). Before #301, a download whose slot was taken by a newer download, or by leaving the preview, finished and saved silently, which read as "did it break?". Now every outcome of such an attempt (`Saved` / `Download requested` as an expiring success; a failure as a closable error) goes to ONE more `OperationFeedback` in the same stack (`earlierLifetime`), latest wins. It is a notice, not a download list, and it never writes into the live slot, so a newer download's progress is never replaced. It is deliberately exempt from the context-exit clear, because leaving the context is exactly the case it reports; it ends with Files (`alive`). The saved notice has no Open action: Open belongs to the live result. `Files.mount.test.ts` pins both outcomes (both fail without the change).
+
+**The spinner turns about its own centre.** `.feedback-icon` is `--control-icon-size` (17px on the phone) while `Icon` draws 16px, and the glyph sat in the box's top-left corner, so the arc's centre orbited the rotation origin by 0.5px (measured centre at 0/90/180/270°: (25,765.5)→(26,765.5)→(26,766.5)→(25,766.5) at 390; fixed (71,769) at 1280, where both are 16px). The glyph now fills its box (`.feedback-icon :global(svg) { width: 100%; height: 100% }`, the CommandButton rule), no new token. Pinned by `OperationFeedback.source.test.ts`.
 
 ### Resumable downloads (Range + retry)
 Public-internet paths (reverse proxy in front of the server) routinely kill long-lived large responses: proxy idle/total timeouts, connection resets, silent stalls. Three pieces make `/dl` survive that:

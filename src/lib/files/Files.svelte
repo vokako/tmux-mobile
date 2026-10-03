@@ -1142,6 +1142,11 @@
   let uploadFeedback = $state(null);
   let downloadOperation = $state.raw(null);
   let downloadOutput = $state(null);
+  // A download whose slot was taken (a newer download, or leaving the
+  // preview) still finishes; its outcome is told ONCE here (#301). One slot,
+  // latest wins: this is a notice, not a download list.
+  let earlierFeedback = $state(null);
+  const earlierLifetime = createFeedbackLifetime(value => { earlierFeedback = value; });
   const copyLifetime = createFeedbackLifetime(value => { copyFeedback = value; });
   const downloadLifetime = createFeedbackLifetime(value => { downloadFeedback = value; });
   const uploadLifetime = createFeedbackLifetime(value => { uploadFeedback = value; });
@@ -1157,7 +1162,7 @@
     session; root; cwd; view; currentFile?.path; navRequest; visible;
     return () => { copyLifetime.clear(); dismissDownload(); uploadLifetime.clear(); };
   });
-  $effect(() => () => { copyLifetime.dispose(); downloadLifetime.dispose(); uploadLifetime.dispose(); });
+  $effect(() => () => { copyLifetime.dispose(); downloadLifetime.dispose(); uploadLifetime.dispose(); earlierLifetime.dispose(); });
 
   async function openDownloaded(output) {
     if (!output || output !== downloadOutput || !output.operation.current() || output.opening) return;
@@ -1308,8 +1313,14 @@
         { kind: 'progress', message, detail: path,
           progress: fraction == null ? null : fraction * 100 });
     };
+    // Outcome of an attempt that lost its slot: an expiring success or a
+    // closable error in the earlier-download notice, never the live slot.
+    const earlier = (value) => {
+      if (!alive) return;
+      earlierLifetime.update(earlierLifetime.begin(), value);
+    };
     const completed = (savedPath) => {
-      if (!operation.current()) return;
+      if (!operation.current()) { earlier({ kind: 'success', message: t('saved'), detail: savedPath }); return; }
       downloadOutput = { path: savedPath, operation, opening: false };
       downloadLifetime.update(token, { kind: 'result', message: t('saved'), detail: savedPath });
     };
@@ -1372,11 +1383,11 @@
       document.body.appendChild(a);
       a.click();
       setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(blobUrl); }, 100);
-      if (operation.current()) downloadLifetime.update(token,
-        { kind: 'success', message: t('downloadRequested'), detail: name });
+      const requested = { kind: 'success', message: t('downloadRequested'), detail: name };
+      if (operation.current()) downloadLifetime.update(token, requested); else earlier(requested);
     } catch (e) {
-      if (operation.current()) downloadLifetime.update(token,
-        { kind: 'error', message: String(e.message || e), detail: path });
+      const failed = { kind: 'error', message: String(e.message || e), detail: path };
+      if (operation.current()) downloadLifetime.update(token, failed); else earlier(failed);
     }
   }
 
@@ -1989,7 +2000,7 @@
     {:else if view === 'git'}<GitPanel bind:this={gitPanelRef} {cwd} {fontSize} onOpenFile={(entry) => { fromGit = true; openEntry(entry); }} onClose={() => { view = 'list'; }} />
     {/if}
   {/if}
-  {#if copyFeedback || downloadFeedback || uploadFeedback}
+  {#if copyFeedback || downloadFeedback || uploadFeedback || earlierFeedback}
     {@const operation = downloadOperation}
     {@const output = downloadOutput}
     {#snippet downloadActions()}
@@ -2003,6 +2014,8 @@
       <OperationFeedback value={downloadFeedback} actions={output ? downloadActions : undefined}
         ondismiss={downloadFeedback?.kind === 'error' || downloadFeedback?.kind === 'result'
           ? () => dismissDownload(operation) : undefined} />
+      <OperationFeedback value={earlierFeedback}
+        ondismiss={earlierFeedback?.kind === 'error' ? earlierLifetime.clear : undefined} />
       <OperationFeedback value={uploadFeedback}
         ondismiss={uploadFeedback?.kind === 'error' ? uploadLifetime.clear : undefined} />
     </div>

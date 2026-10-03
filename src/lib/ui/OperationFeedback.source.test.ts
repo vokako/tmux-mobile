@@ -14,3 +14,10 @@ test('operation feedback is presentation over the shared chrome and control owne
     'intrinsic text width keeps a short notice and Close in one row in a shrink-to-fit popover');
   assert.doesNotMatch(source, /#[0-9a-fA-F]{3,8}\b|rgba?\(/u, 'shared tokens own the palette');
 });
+
+test('the progress glyph fills its box, so the spin is centred (board #301)', () => {
+  // Icon draws 16px; the phone's --control-icon-size is 17px. A corner-pinned
+  // glyph orbited the box centre by 0.5px (measured at 390, dpr 3).
+  assert.match(source, /\.feedback-icon \{ display: inline-flex; flex: none; width: var\(--control-icon-size\); height: var\(--control-icon-size\); \}/u);
+  assert.match(source, /\.feedback-icon :global\(svg\) \{ width: 100%; height: 100%; \}/u);
+});

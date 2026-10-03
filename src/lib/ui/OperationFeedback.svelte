@@ -51,6 +51,9 @@
     max-width: 100%; max-height: var(--feedback-max-height, none); overflow: auto;
   }
   .feedback-icon { display: inline-flex; flex: none; width: var(--control-icon-size); height: var(--control-icon-size); }
+  /* The glyph FILLS its box (board 301): Icon draws 16px, the phone's control icon
+     is 17px, and a 16px glyph in the box's corner spun 0.5px off its centre. */
+  .feedback-icon :global(svg) { width: 100%; height: 100%; }
   .feedback-body { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; }
   .feedback-message, .feedback-detail { overflow-wrap: anywhere; }
   .feedback-detail { color: var(--text2); font: var(--fs-sub)/1.5 var(--font-mono); }

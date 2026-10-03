@@ -9,7 +9,7 @@ test('copy and download feedback share the UI owner and never restore private to
   // OperationFeedback owns paint; Files only composes a single in-flow stack.
   assert.match(source, /import OperationFeedback from '\.\.\/ui\/OperationFeedback\.svelte'/u);
   assert.match(source, /import \{ createFeedbackLifetime \} from '\.\.\/ui\/feedback-lifetime\.ts'/u);
-  assert.equal(source.match(/<OperationFeedback /gu)?.length, 3, 'copy, download, upload — one owner');
+  assert.equal(source.match(/<OperationFeedback /gu)?.length, 4, 'copy, download, earlier download (#301), upload — one owner');
   assert.match(source, /\.files-feedback \{[^}]*flex-direction: column/u);
   assert.doesNotMatch(source, /copyToast|copyTimer|downloadToast|downloadedPath|dlProgress|displayedDlProgress|copy-toast|download-toast|dl-ring|toast-fade/u);
 });
@@ -19,7 +19,7 @@ test('upload feedback rides the same slot: one batch runner for both transports,
   // to be a silent listing refresh.
   assert.match(source, /import \{ uploadProgress, uploadSummary, uploadSizeError \} from '\.\/file-upload\.ts'/u);
   assert.match(source, /const uploadLifetime = createFeedbackLifetime\(value => \{ uploadFeedback = value; \}\);/u);
-  assert.match(source, /\{#if copyFeedback \|\| downloadFeedback \|\| uploadFeedback\}/u, 'the slot renders for an upload too');
+  assert.match(source, /\{#if copyFeedback \|\| downloadFeedback \|\| uploadFeedback \|\| earlierFeedback\}/u, 'the slot renders for an upload (and an earlier download, #301) too');
   assert.match(source, /<OperationFeedback value=\{uploadFeedback\}\s*ondismiss=\{uploadFeedback\?\.kind === 'error' \? uploadLifetime\.clear : undefined\} \/>/u,
     'errors are dismissable; progress has no cancel, success expires by itself');
   assert.equal(source.match(/await runUploadBatch\(/gu)?.length, 2, 'picker/drop Files and native paths share ONE runner');
@@ -302,4 +302,12 @@ test('reading mode: the header hides as a cut, the return floats above the safe 
   const reading = source.indexOf('if (reading) { reading = false; return true; }');
   const menu = source.indexOf('if (fileMenu) { closeFileMenu(); return true; }');
   assert.ok(back > 0 && back < reading && reading < menu, 'reading mode is the layer under the viewer');
+});
+
+test('a download that lost its slot reports once, outside the live slot (board #301)', () => {
+  assert.match(source, /const earlierLifetime = createFeedbackLifetime\(value => \{ earlierFeedback = value; \}\);/u);
+  assert.match(source, /if \(!operation\.current\(\)\) \{ earlier\(\{ kind: 'success', message: t\('saved'\), detail: savedPath \}\); return; \}/u);
+  assert.match(source, /if \(operation\.current\(\)\) downloadLifetime\.update\(token, failed\); else earlier\(failed\);/u);
+  assert.doesNotMatch(source.slice(source.indexOf('return () => { copyLifetime.clear();'), source.indexOf('return () => { copyLifetime.clear();') + 120), /earlierLifetime/u,
+    'leaving the context is the case it reports, so the context exit does not clear it');
 });

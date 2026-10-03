@@ -827,3 +827,53 @@ test('reading mode is not offered for an image (the Lightbox is its fullscreen) 
     assert.equal(desktop.document.querySelector('button[aria-label="Reading mode"]'), null, 'the desktop keeps its chrome');
   } finally { await desktop.close(); }
 });
+
+// Board #301: a second download takes the feedback slot; the first still
+// finishes, and its outcome must be told once instead of being dropped.
+test('a download that lost its slot still reports its outcome once (#301)', async context => {
+  const first = deferred<object>(), second = deferred<object>();
+  const calls: string[] = [];
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, session: 'fixture' },
+    setup(window) {
+      (window.URL as any).createObjectURL = () => 'blob:fixture';
+      (window.URL as any).revokeObjectURL = () => {};
+      window.HTMLAnchorElement.prototype.click = function () { calls.push((this as HTMLAnchorElement).download); };
+    },
+    modules: [rpc({ fsDownloadHttp: (path: string) => (path.endsWith('AGENTS.md') ? first.promise : second.promise) })],
+  });
+  const notices = () => [...app.document.querySelectorAll('.operation-feedback')].map((e) => e.textContent?.replace(/\s+/gu, ' ').trim());
+  try {
+    await settle(app);
+    button(app, 'Download: AGENTS.md').click(); await settle(app);
+    button(app, 'Download: next.md').click(); await settle(app);
+    assert.equal(notices().length, 1, 'the slot belongs to the newest download');
+    assert.match(notices()[0] ?? '', /next\.md/u);
+    second.resolve({ base64: 'eA==' }); await settle(app);
+    assert.match(notices().join(' | '), /next\.md/u);
+    first.resolve({ base64: 'eA==' }); await settle(app);
+    assert.deepEqual(calls, ['next.md', 'AGENTS.md'], 'both files were handed to the browser');
+    assert.ok(notices().some((n) => /AGENTS\.md/u.test(n ?? '')), `the earlier download is reported: ${notices().join(' | ')}`);
+  } finally { first.reject(Error('fixture closed')); second.reject(Error('fixture closed')); await app.close(); }
+});
+
+test('an earlier download\u2019s failure is reported, closable, without touching the live slot (#301)', async context => {
+  const first = deferred<object>(), second = deferred<object>();
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, session: 'fixture' },
+    modules: [rpc({ fsDownloadHttp: (path: string) => (path.endsWith('AGENTS.md') ? first.promise : second.promise) })],
+  });
+  try {
+    await settle(app);
+    button(app, 'Download: AGENTS.md').click(); await settle(app);
+    button(app, 'Download: next.md').click(); await settle(app);
+    first.reject(Error('first failed')); await settle(app);
+    const all = [...app.document.querySelectorAll('.operation-feedback')];
+    assert.equal(all.length, 2, 'the live progress stays, the earlier failure joins it');
+    const failed = all.find((e) => /first failed/u.test(e.textContent ?? ''))!;
+    assert.ok(failed, 'the earlier failure is shown');
+    assert.ok(all.some((e) => /next\.md/u.test(e.textContent ?? '') && !/first failed/u.test(e.textContent ?? '')), 'next.md is still downloading');
+    failed.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click(); await settle(app);
+    assert.equal(app.document.querySelectorAll('.operation-feedback').length, 1);
+  } finally { first.reject(Error('fixture closed')); second.reject(Error('fixture closed')); await app.close(); }
+});
