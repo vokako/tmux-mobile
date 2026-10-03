@@ -489,7 +489,10 @@ test('an agent bubble is headed from OUTSIDE by name + runtime, in one ink (boar
   const head = source.indexOf('<div class="m-head"');
   const bubble = source.indexOf('<div class="bubble md"');
   assert.ok(head > 0 && head < bubble, 'the header is a sibling BEFORE the bubble');
-  assert.equal(source.indexOf('<div class="m-head"', bubble), -1, 'and the bubble no longer carries one');
+  const own = source.indexOf('<!-- A run its reply has not');
+  const later = source.indexOf('<div class="m-head"', bubble);
+  assert.ok(own > bubble && later > own && source.indexOf('<div class="bubble">', later) > later,
+    'and the bubble no longer carries one (the only later head is #298\u2019s, again BEFORE its bubble)');
   assert.match(source, /\{@const runtime = runtimeLabel\(agents\.find\(\(a\) => a\.managed && a\.name === m\.from\)\)\}/u,
     'the label is the roster hover line, from the live hub_agents row only');
   assert.match(rule('.m-head .m-runtime'), /font-size: var\(--fs-micro\); color: var\(--text3\)/u, 'meta ink, the micro step');
@@ -522,13 +525,22 @@ test('a tool run has ONE markup, worn standalone or inside its reply, folded the
   assert.equal((source.match(/<div class="steps"/gu) ?? []).length, 1, 'one list species');
   assert.match(source, /\{#snippet lane\(b, attached\)\}/u);
   assert.match(source, /\{#if b\.steps\}\{@render lane\(b\.steps, true\)\}\{\/if\}\n\s*<div class="m-body"/u, 'inside the bubble, above the words');
-  assert.match(source, /\{@render lane\(b, false\)\}/u, 'and as its own block');
-  assert.match(source, /const stepsOpen = \(b, attached = false\) => stepsChoice\[b\.key\] \?\? !attached;/u,
-    'a choice, keyed by the group, wins; otherwise attached = folded, standalone = open (unchanged)');
+  assert.match(source, /<div class="bubble">\{@render lane\(b, false\)\}<\/div>/u, 'and as its own block, in an agent bubble of its own (#298)');
+  assert.match(source, /const stepsOpen = \(b, attached = false\) => stepsChoice\[b\.key\] \?\? \(!attached && isRunning\(b\)\);/u,
+    'a choice, keyed by the group, wins; otherwise only a RUNNING run of its own is open (#298)');
   // No click inside an attached run reaches the bubble (validator P1): the
   // head, the rows and "show all" are all stopped once, at the lane.
-  assert.match(source, /<div class="steps" class:open class:attached class:appear-rise=\{!attached && b\.ts > openedAt\}\n\s*onclick=\{\(e\) => \{ if \(attached\) e\.stopPropagation\(\); \}\}>/u, 'unfolding or reading a run is not a tap on the message');
-  assert.match(source, /class:appear-rise=\{!attached && b\.ts > openedAt\}/u, 'the merged card rises once, as its bubble');
+  assert.match(source, /<div class="steps" class:open\n\s*onclick=\{\(e\) => \{ if \(attached\) e\.stopPropagation\(\); \}\}>/u, 'unfolding or reading a run is not a tap on the message');
+});
+
+test('a run of its own wears its reply\u2019s shape, only without words (board #298)', () => {
+  const own = source.slice(source.indexOf('{:else}\n      <!-- A run its reply has not'), source.indexOf('{#if !blocks.length && roomReady}'));
+  assert.match(own, /<div class="msg" class:appear-rise=\{b\.ts > openedAt\}>/u, 'the same .msg column, rising like any bubble');
+  assert.match(own, /<div class="m-head" style:--who-ink=\{agentHue\(b\.window\)\}><span class="m-who">\{windowName\(b\.window\)\}<\/span>\{#if runtime\}<span class="m-runtime">\{runtime\}<\/span>\{\/if\}<\/div>/u,
+    'the same name + runtime head outside the bubble');
+  assert.doesNotMatch(source, /class="s-who"|\.s-who/u, 'the lane carries no name of its own any more');
+  assert.doesNotMatch(source, /\.steps\.attached|class:attached/u, 'one lane CSS, no attached variant');
+  assert.match(source, /\.msg:has\(\.steps\.open\) \{ width: var\(--msg-max\); \}/u, 'an open run takes the message cap in both places');
 });
 
 test('a held bubble\u2019s double-tap reuses the terminal detector and the expand jump (board #304)', () => {

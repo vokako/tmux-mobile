@@ -546,7 +546,9 @@
     stateIsLive(agents.find((a) => a.name === b.window)?.state ?? '');
   // A run its reply carries is folded until someone opens it (#295): the
   // answer is the thing to read, the steps are how it got there.
-  const stepsOpen = (b, attached = false) => stepsChoice[b.key] ?? !attached;
+  // A run of its own (#298) is open only while it RUNS — the capped tail is
+  // the live view — and folds like a carried run once it stopped.
+  const stepsOpen = (b, attached = false) => stepsChoice[b.key] ?? (!attached && isRunning(b));
   const toggleSteps = (b, open) => { stepsChoice[b.key] = open; };
 
   /** Keep a capped step list showing its NEWEST row, the way a log tail does —
@@ -651,7 +653,7 @@
            "show all" alike, the m-unfold rule, stopped once at the lane
            (validator #295 P1). -->
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-      <div class="steps" class:open class:attached class:appear-rise={!attached && b.ts > openedAt}
+      <div class="steps" class:open
         onclick={(e) => { if (attached) e.stopPropagation(); }}>
         <button class="s-head" aria-expanded={open} onclick={() => toggleSteps(b, !open)}>
           {#if !attached && isRunning(b)}
@@ -659,7 +661,6 @@
           {:else}
             <span class="chev" class:open><Icon name="chevron-right" size={12} /></span>
           {/if}
-          {#if !attached}<span class="s-who">{windowName(b.window)}</span>{/if}
           <span class="s-count">{t('hubStepsN').replace('{n}', String(b.events.length))}</span>
           {#if !open}
             {@const last = b.events[b.events.length - 1]}
@@ -975,7 +976,15 @@
         <span class="n-ts">{fmtTime(b.ts)}</span>
       </div>
     {:else}
-      {@render lane(b, false)}
+      <!-- A run its reply has not (yet) ended wears the reply's own shape
+           (board #298, owner 2026-10-03: "合并之前的渲染也应该是相类似的结构
+           ……不要有差别"): the name + runtime head outside, the agent bubble,
+           the same lane inside it — only the words are missing. -->
+      {@const runtime = runtimeLabel(agents.find((a) => a.managed && a.name === b.window))}
+      <div class="msg" class:appear-rise={b.ts > openedAt}>
+        <div class="m-head" style:--who-ink={agentHue(b.window)}><span class="m-who">{windowName(b.window)}</span>{#if runtime}<span class="m-runtime">{runtime}</span>{/if}</div>
+        <div class="bubble">{@render lane(b, false)}</div>
+      </div>
     {/if}
   {/each}
   {#if !blocks.length && roomReady}
@@ -1302,14 +1311,12 @@
   .prog.blocked .pg-text { color: var(--text); }
 
   /* Collapsible run of tool calls between two replies. */
-  /* Telemetry, not a bubble: the group spans the feed's full width so paths
-     stop being truncated at 76% (owner: "整个宽度非常窄"), and it is ONE card —
-     the head owns no border of its own, the body is separated by a line rather
-     than indented with a margin+border guide. That guide is what made the left
-     edge jog when the group opened: the body box started at 11px while the
-     head's text started at 30px. */
+  /* One card inside an agent bubble, wherever the run lives (#295 inside its
+     reply, #298 on its own): the head owns no border of its own, the body is
+     separated by a line rather than indented with a margin+border guide (that
+     guide made the left edge jog when the group opened). */
   .steps {
-    display: flex; flex-direction: column; width: 100%;
+    display: flex; flex-direction: column; margin: 2px 0 6px; cursor: default;
     /* The lane's painted colour as one value: the feed canvas underneath, the
        same 3% wash on top. Nothing needs to COVER anything since the middle cell
        became the only scroller, but the token stays — it is the lane's colour,
@@ -1323,12 +1330,11 @@
     background: var(--lane-bg); border: 1px solid var(--border2); border-radius: var(--ui-radius-panel);
     overflow: hidden;
   }
-  /* Inside its reply's bubble (#295): the same lane, a step in from the
-     bubble's own surface, above the words. */
-  .steps.attached { width: auto; margin: 2px 0 6px; cursor: default; overflow: hidden; }
+  /* With no words under it (#298) the lane is the bubble's whole content. */
+  .steps:last-child { margin-bottom: 2px; }
   /* An OPEN run needs the lane's width, not the reply's: the bubble grows to
      the message cap while it is open, and the rows pan inside it as usual. */
-  .msg:has(.steps.attached.open) { width: var(--msg-max); }
+  .msg:has(.steps.open) { width: var(--msg-max); }
   .s-head {
     display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
     background: none; border: none; border-radius: 0;
@@ -1345,7 +1351,6 @@
      (halo + breathe, never an opacity fade — that fade is what made a running
      dot read dimmer than a resting one), worn alongside this class. */
   .s-live { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
-  .s-who { flex: none; font-weight: 600; color: var(--text2); }
   .s-count { flex: none; }
   .s-peek { min-width: 0; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-body {

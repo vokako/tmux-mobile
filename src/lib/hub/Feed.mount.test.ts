@@ -89,3 +89,32 @@ test('double-click / double-tap on the held user bubble jumps to its natural pos
     assert.equal(app.document.querySelectorAll('.m-acts').length, 0, 'the pair\u2019s second click does not reopen the row');
   } finally { await app.close(); }
 });
+
+// Board #298: a run its reply has not ended is the reply's shape without
+// words — head outside, bubble, the same lane — open only while it runs.
+test('a standalone run is an agent bubble holding the lane; it is open while running, folded once stopped (#298)', async (context) => {
+  const tool = (ts: number, text: string) => ({ id: ts, ts, window: 'dev', kind: 'tool' as const, tool: 'Read', text });
+  const blocks = feedBlocks([], [tool(10, 'a.rs'), tool(11, 'b.rs')], 'tools', (n) => n);
+  const mount = async (state: string) => (await compiled).mount(context, {
+    props: { selected: 'fixture', roomReady: true, visible: true, blocks, managedNames: ['dev'], stepsRows: 3,
+      agents: [{ name: 'dev', window: 0, managed: true, agent: 'codex', state, model: 'gpt-6' }] },
+    setup(window) { window.Element.prototype.getAnimations = () => []; window.HTMLCanvasElement.prototype.getContext = () => null; },
+    modules: [],
+  });
+  const running = await mount('running');
+  try {
+    for (let i = 0; i < 4; i++) await running.flush();
+    const q = (s: string) => running.document.querySelector<HTMLElement>(s);
+    assert.equal(q('.msg > .m-head .m-who')?.textContent, 'dev', 'the name heads it from outside, as on a reply');
+    assert.ok(q('.msg > .bubble > .steps.open .s-live'), 'inside an agent bubble, open, pulsing while it runs');
+    assert.ok(!q('.m-body'), 'and no words');
+  } finally { await running.close(); }
+  const idle = await mount('idle');
+  try {
+    for (let i = 0; i < 4; i++) await idle.flush();
+    const q = (s: string) => idle.document.querySelector<HTMLElement>(s);
+    assert.ok(q('.msg > .bubble > .steps:not(.open) .chev'), 'a stopped run folds like a carried one');
+    q('.steps .s-head')!.click(); await idle.flush();
+    assert.ok(q('.steps.open'), 'and opens on its head');
+  } finally { await idle.close(); }
+});

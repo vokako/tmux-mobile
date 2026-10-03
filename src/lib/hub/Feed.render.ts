@@ -44,7 +44,8 @@ test('Feed renders direct rows, safe rich content, complete capped tools and the
   assert.equal(tree.children.length, 1);
   assert.ok(tree.firstElementChild?.classList.contains('feed-wrap'));
   const feed = tree.querySelector('.feed')!;
-  for (const row of tree.querySelectorAll('.msg,.steps,.sysline,.day-sep')) assert.equal(row.parentElement, feed);
+  for (const row of tree.querySelectorAll('.msg,.sysline,.day-sep')) assert.equal(row.parentElement, feed);
+  for (const lane of tree.querySelectorAll('.steps')) assert.ok(lane.parentElement?.matches('.msg > .bubble'), 'every run sits in an agent bubble (#298)');
   assert.equal(tree.querySelectorAll('[data-ask]').length, 2);
   assert.equal(tree.querySelectorAll('.m-unfold').length, 2, 'the long ask and the long prompt fold; nothing else does');
   // A prompt row folds its TEXT through elideTail — a visible `……` and the
@@ -73,8 +74,10 @@ test('Feed renders direct rows, safe rich content, complete capped tools and the
   assert.equal(tree.querySelector('a[href^="javascript:"]'), null);
   assert.equal(tree.querySelector('.ci-ref')?.textContent, '/chart.png', 'client image loading retains the exact reference');
   assert.ok(tree.querySelector('.sys-jump'));
-  assert.equal(tree.querySelectorAll('.s-body.capped').length, 2);
-  assert.equal(tree.querySelectorAll('.step').length, 26, 'the cap is a viewport, not data loss');
+  // alice is working: her run is open and capped; bob's stopped run is folded (#298).
+  assert.equal(tree.querySelectorAll('.s-body.capped').length, 1);
+  assert.equal(tree.querySelectorAll('.step').length, 13, 'the cap is a viewport, not data loss: all 13 of alice\u2019s calls');
+  assert.equal(tree.querySelectorAll('.steps:not(.open)').length, 1, 'the idle lane folds');
   assert.equal(tree.querySelectorAll('.s-live.live-dot').length, 1);
   assert.ok(tree.querySelector('.to-tail.news'));
   const empty = view({ blocks: [] }).querySelector('.empty')!;
@@ -211,17 +214,17 @@ test('a run its reply ended rides in that reply, folded; a run still going stand
     stepsRows: 5, following: false, newBelow: false,
     emptyFeed: createRawSnippet(() => ({ render: () => '<div></div>' })),
   } }).body as string);
-  const reply = tree.querySelector('.msg:not(.me)')!;
-  const carried = reply.querySelector('.bubble > .steps.attached')!;
+  const reply = tree.querySelector('.msg:has(.m-body)')!;
+  const carried = reply.querySelector('.bubble > .steps')!;
   assert.ok(carried, 'the run is inside the reply\u2019s bubble, one card');
-  assert.ok(reply.querySelector('.bubble > .steps.attached + .m-body'), 'between the header and the words');
+  assert.ok(reply.querySelector('.bubble > .steps + .m-body'), 'between the header and the words');
   assert.equal(carried.classList.contains('open'), false, 'folded by default: the answer is there');
   assert.equal(carried.querySelector('.s-head')?.getAttribute('aria-expanded'), 'false');
   assert.equal(carried.querySelector('.s-who'), null, 'the bubble already names who');
   assert.equal(carried.querySelector('.s-live'), null, 'a finished run never pulses');
   assert.match(carried.querySelector('.s-count')?.textContent ?? '', /2/u);
-  // ops is still working and has no reply: its own block, open, live.
-  const lanes = [...tree.querySelectorAll('.feed > .steps')];
+  // ops is still working and has no reply: its own bubble (#298), open, live.
+  const lanes = [...tree.querySelectorAll('.feed > .msg:not(:has(.m-body)) > .bubble > .steps')];
   assert.equal(lanes.length, 1);
   assert.ok(lanes[0]!.classList.contains('open'));
   assert.ok(lanes[0]!.querySelector('.s-live.live-dot'));

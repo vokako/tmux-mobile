@@ -1849,11 +1849,11 @@ test('Feed keeps native selection, Copy/Raw dismissal, path intents and room-loc
     const head = app.document.querySelector<HTMLElement>('.s-head')!;
     head.click();
     await app.flush();
-    assert.equal(head.getAttribute('aria-expanded'), 'false');
+    assert.equal(head.getAttribute('aria-expanded'), 'true', 'a stopped run starts folded (#298); the head opens it');
     app.document.querySelector<HTMLElement>('[aria-label="other"] .proj-pick')!.click();
     for (let i = 0; i < 12 && app.document.querySelector('.h1-text')?.textContent !== 'other'; i++) await app.flush();
     assert.equal(reply().querySelector('.raw'), null, 'room reset clears raw without remounting the whole Feed');
-    assert.equal(app.document.querySelector('.s-head')?.getAttribute('aria-expanded'), 'false',
+    assert.equal(app.document.querySelector('.s-head')?.getAttribute('aria-expanded'), 'true',
       'the same tool group retains its explicit disclosure choice across rooms');
     const link = reply().querySelector<HTMLAnchorElement>('a')!;
     for (const [type, options] of [
