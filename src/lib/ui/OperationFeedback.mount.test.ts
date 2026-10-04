@@ -50,3 +50,22 @@ test('actionable results stay present and dismiss through caller intent only (#1
     assert.ok(app.document.querySelector('[role=status]'), 'the caller owns clearing the result');
   } finally { await app.close(); }
 });
+
+test('a download keeps its ring turning with a known percent; other progress keeps refresh (board #307)', async context => {
+  for (const [glyph, progress] of [['download', 40], ['download', null], [undefined, 40]] as const) {
+    const app = await (await compiled).mount(context, {
+      props: { value: { kind: 'progress', message: 'Downloading', progress, ...(glyph ? { glyph } : {}) } }, modules: [],
+    });
+    try {
+      const icon = app.document.querySelector('.feedback-icon')!;
+      if (glyph) {
+        assert.ok(icon.classList.contains('downloading'), `the ring turns at ${progress}`);
+        assert.ok(!icon.classList.contains('spinning'), 'the whole glyph does not');
+        assert.ok(icon.querySelector('circle.dl-ring'));
+      } else {
+        assert.ok(!icon.classList.contains('downloading') && !icon.querySelector('.dl-ring'), 'others keep refresh');
+        assert.ok(!icon.classList.contains('spinning'), 'which still stops at a known percent');
+      }
+    } finally { await app.close(); }
+  }
+});

@@ -1235,7 +1235,7 @@
     downloadOutput = null;
     let shown = null;   // this attempt's latest progress, to show again on adopt
     const progress = (fraction = null, message = t('downloading')) => {
-      shown = { kind: 'progress', message, detail: path,
+      shown = { kind: 'progress', glyph: 'download', message, detail: path,
         progress: fraction == null ? null : fraction * 100 };
       if (operation.current()) downloadLifetime.update(token, shown);
     };

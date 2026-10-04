@@ -10,6 +10,10 @@
     ondismiss?: () => void;
     actions?: Snippet;
   } = $props();
+  // The download glyph's ring turns for the WHOLE progress phase: with real
+  // byte progress (board 305) the percent is known from the first piece, and
+  // a ring that stopped there read as stalled (owner, 2026-10-04: "圆圈都不动了").
+  const downloadGlyph = $derived(value?.kind === 'progress' && value.glyph === 'download');
   const percent = $derived(typeof value?.progress === 'number' && Number.isFinite(value.progress)
     ? Math.max(0, Math.min(100, Math.round(value.progress))) : null);
 </script>
@@ -17,8 +21,9 @@
 {#if value}
   <div class="operation-feedback menu-surface" class:error={value.kind === 'error'}
     role={value.kind === 'error' ? 'alert' : 'status'}>
-    <span class="feedback-icon" class:spinning={value.kind === 'progress' && percent === null} aria-hidden="true">
-      <Icon name={value.kind === 'error' ? 'info' : value.kind === 'progress' ? 'refresh' : 'check'} />
+    <span class="feedback-icon" class:spinning={value.kind === 'progress' && percent === null && !downloadGlyph}
+      class:downloading={downloadGlyph} aria-hidden="true">
+      <Icon name={value.kind === 'error' ? 'info' : downloadGlyph ? 'downloading' : value.kind === 'progress' ? 'refresh' : 'check'} />
     </span>
     <div class="feedback-body">
       <span class="feedback-message" class:config-error={value.kind === 'error'}>{value.message}</span>
@@ -68,6 +73,9 @@
   progress::-webkit-progress-value { background: var(--accent); }
   progress::-moz-progress-bar { background: var(--accent); }
   .feedback-percent { flex: none; width: 4ch; text-align: end; font: var(--fs-sub)/1.5 var(--font-mono); }
-  .spinning { animation: spin 0.6s linear infinite; }
-  @media (prefers-reduced-motion: reduce) { .spinning { animation: none; } }
+  /* One turn rule: the refresh glyph turns whole; the download glyph turns
+     only its ring, about the ring's own centre (the arrow holds still). */
+  .spinning, .downloading :global(.dl-ring) { animation: spin 0.6s linear infinite; }
+  .downloading :global(.dl-ring) { transform-box: fill-box; transform-origin: center; }
+  @media (prefers-reduced-motion: reduce) { .spinning, .downloading :global(.dl-ring) { animation: none; } }
 </style>

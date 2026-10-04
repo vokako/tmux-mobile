@@ -520,6 +520,7 @@ approved on 2026-09-12 at 18:08; shortening the old download result to 1.5 secon
 would hide an action before it could be used. Unrelated jobs have separate local
 slots, so copying cannot erase a download prompt or a connection error.
 Plain success/progress does not gain a redundant Close button.
+The progress glyph is `refresh`, turning only while the percent is unknown; a value with `glyph: 'download'` (Files' download path, board #307) wears `downloading` instead: a dashed ring that turns for the whole progress phase, known percent or not, around a still arrow into a tray (only `.dl-ring` animates, about its own centre; reduced motion holds it still).
 
 A percentage reports measured transfer bytes only. Unknown Content-Length and
 the write phase are indeterminate, not a synthetic ramp. A browser download

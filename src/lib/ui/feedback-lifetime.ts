@@ -5,6 +5,9 @@ export interface FeedbackValue {
   message: string;
   detail?: string;
   progress?: number | null;
+  /** The progress glyph. Default 'refresh' (spins only while indeterminate);
+   * 'download' is the Files download glyph (board #307). */
+  glyph?: 'download';
 }
 
 interface FeedbackClock {

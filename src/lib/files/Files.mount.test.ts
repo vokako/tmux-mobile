@@ -966,6 +966,11 @@ test('a second Download of a file in flight starts no second writer (#305)', asy
     for (let i = 0; i < 20 && !feed; i++) await settle(app);
     feed.enqueue(new Uint8Array(size / 2));
     await settle(app);
+    // Board #307: the download path asks for the download glyph, whose ring
+    // keeps turning while the percent is known.
+    const icon = app.document.querySelector('.operation-feedback .feedback-icon');
+    assert.ok(icon?.classList.contains('downloading') && icon.querySelector('.dl-ring'), 'Files passes glyph: download');
+    assert.match(app.document.querySelector('.operation-feedback')?.textContent ?? '', /50%/u, 'at a known percent');
     button(app, 'Download: AGENTS.md').click();      // the second click, mid-transfer
     await settle(app);
     assert.match(app.document.querySelector('.operation-feedback')?.textContent ?? '', /Downloading/u,

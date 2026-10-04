@@ -94,6 +94,11 @@
     <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>
   {:else if name === 'upload'}
     <polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+  {:else if name === 'downloading'}
+    <!-- A download in progress (board #307): a dashed ring around an arrow
+         into a tray. Only the ring turns (.dl-ring, OperationFeedback); the
+         arrow and tray hold still. -->
+    <circle class="dl-ring" cx="12" cy="12" r="10" stroke-dasharray="3.2 2.8"/><polyline points="8.5 10.5 12 14 15.5 10.5"/><line x1="12" y1="6.5" x2="12" y2="14"/><line x1="7.5" y1="17.5" x2="16.5" y2="17.5"/>
   {:else if name === 'download'}
     <polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/>
   {:else if name === 'plus'}
