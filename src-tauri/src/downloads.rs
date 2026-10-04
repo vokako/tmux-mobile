@@ -64,9 +64,34 @@ pub struct PartInfo {
     pub etag: Option<String>,
 }
 
+/// What a part is OF, so the Downloads view can list it and resume it
+/// (board #308): the file name, its path on the server, and the server's
+/// machine id (a part resumes only against the server that sent it). This
+/// stays in the app's own part folder; `list_downloads` never returns it.
+#[derive(serde::Serialize, serde::Deserialize, Default, Clone, Debug, PartialEq)]
+pub struct About {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub server: String,
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Sidecar {
     etag: Option<String>,
+    #[serde(default, flatten)]
+    about: About,
+}
+
+/// One unfinished download on disk, for the Downloads view.
+#[derive(serde::Serialize, Debug, PartialEq)]
+pub struct PartListing {
+    pub id: String,
+    pub received: u64,
+    #[serde(flatten)]
+    pub about: About,
 }
 
 /// Parts that have a writer in this process (validator #305). The webview
@@ -116,12 +141,34 @@ pub fn open_part(dir: &Path, id: &str) -> Result<PartInfo, String> {
 }
 
 /// Start over for the version `etag` names: empty part, new sidecar.
-pub fn reset_part(dir: &Path, id: &str, etag: Option<&str>) -> Result<(), String> {
+pub fn reset_part(dir: &Path, id: &str, etag: Option<&str>, about: Option<&About>) -> Result<(), String> {
     check_id(id)?;
     std::fs::create_dir_all(dir).map_err(|e| format!("mkdir: {e}"))?;
     std::fs::File::create(part(dir, id)).map_err(|e| format!("create: {e}"))?;
-    let meta = serde_json::to_vec(&Sidecar { etag: etag.map(str::to_string) }).map_err(|e| e.to_string())?;
+    let sidecar_value = Sidecar { etag: etag.map(str::to_string), about: about.cloned().unwrap_or_default() };
+    let meta = serde_json::to_vec(&sidecar_value).map_err(|e| e.to_string())?;
     std::fs::write(sidecar(dir, id), meta).map_err(|e| format!("sidecar: {e}"))
+}
+
+/// Every unfinished download in `dir` that has a sidecar, newest first. A
+/// part without one is not resumable and not listed (open_part's rule).
+pub fn list_parts(dir: &Path) -> Vec<PartListing> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut out: Vec<(std::time::SystemTime, PartListing)> = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(id) = name.to_str()
+            .and_then(|n| n.strip_prefix(PART_PREFIX))
+            .and_then(|n| n.strip_suffix(".json")) else { continue };
+        if check_id(id).is_err() { continue; }
+        let Some(meta) = std::fs::read(entry.path()).ok()
+            .and_then(|raw| serde_json::from_slice::<Sidecar>(&raw).ok()) else { continue };
+        let Ok(stat) = std::fs::metadata(part(dir, id)) else { continue };
+        out.push((stat.modified().unwrap_or(std::time::UNIX_EPOCH),
+            PartListing { id: id.to_string(), received: stat.len(), about: meta.about }));
+    }
+    out.sort_by(|a, b| b.0.cmp(&a.0));
+    out.into_iter().map(|(_, p)| p).collect()
 }
 
 /// Append one base64 piece. The part must have been opened by `reset_part`
@@ -197,7 +244,7 @@ mod tests {
         assert_eq!(open_part(&dir, ID).unwrap_err(), "this file is already downloading", "one writer per part");
         assert!(open_part(&tmp("fresh-other"), ID).is_ok(), "the same id in another folder is another part");
         release_part(&tmp("fresh-other"), ID).unwrap();
-        reset_part(&dir, ID, Some("\"a-1\"")).unwrap();
+        reset_part(&dir, ID, Some("\"a-1\""), None).unwrap();
         append_part(&dir, ID, &b64(b"hello ")).unwrap();
         append_part(&dir, ID, &b64(b"world")).unwrap();
         let out = finish_part(&dir, ID, &dir.join("greeting.txt")).unwrap();
@@ -209,7 +256,7 @@ mod tests {
     #[test]
     fn a_later_session_finds_the_part_and_its_etag() {
         let dir = tmp("resume");
-        reset_part(&dir, ID, Some("\"a-1\"")).unwrap();
+        reset_part(&dir, ID, Some("\"a-1\""), None).unwrap();
         append_part(&dir, ID, &b64(b"12345")).unwrap();
         // A later session: nothing holds the id any more.
         assert_eq!(open_part(&dir, ID).unwrap(), PartInfo { received: 5, etag: Some("\"a-1\"".into()) });
@@ -218,7 +265,7 @@ mod tests {
         assert_eq!(open_part(&dir, ID).unwrap().received, 8);
         release_part(&dir, ID).unwrap();
         // The file changed: start over for the new version.
-        reset_part(&dir, ID, Some("\"b-2\"")).unwrap();
+        reset_part(&dir, ID, Some("\"b-2\""), None).unwrap();
         assert_eq!(open_part(&dir, ID).unwrap(), PartInfo { received: 0, etag: Some("\"b-2\"".into()) });
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -236,11 +283,11 @@ mod tests {
     fn finish_replaces_a_same_name_file_and_abort_is_idempotent() {
         let dir = tmp("finish");
         std::fs::write(dir.join("v.mp4"), b"old").unwrap();
-        reset_part(&dir, ID, None).unwrap();
+        reset_part(&dir, ID, None, None).unwrap();
         append_part(&dir, ID, &b64(b"new")).unwrap();
         finish_part(&dir, ID, &dir.join("v.mp4")).unwrap();
         assert_eq!(std::fs::read(dir.join("v.mp4")).unwrap(), b"new");
-        reset_part(&dir, ID, None).unwrap();
+        reset_part(&dir, ID, None, None).unwrap();
         abort_part(&dir, ID).unwrap();
         abort_part(&dir, ID).unwrap();
         assert!(!part(&dir, ID).exists() && !sidecar(&dir, ID).exists());
@@ -252,7 +299,7 @@ mod tests {
     fn a_refused_claim_leaves_the_first_writer_alone_and_a_new_page_frees_all() {
         let dir = tmp("claim");
         open_part(&dir, ID).unwrap();
-        reset_part(&dir, ID, None).unwrap();
+        reset_part(&dir, ID, None, None).unwrap();
         append_part(&dir, ID, &b64(b"first")).unwrap();
         assert!(open_part(&dir, ID).is_err(), "the second writer is refused");
         append_part(&dir, ID, &b64(b" writer")).unwrap();
@@ -264,14 +311,36 @@ mod tests {
     }
 
     #[test]
+    fn the_view_lists_parts_with_what_they_are_of() {
+        let dir = tmp("list");
+        let about = About { name: "v.mp4".into(), path: "/home/u/v.mp4".into(), server: "m1".into() };
+        open_part(&dir, ID).unwrap();
+        reset_part(&dir, ID, Some("\"a-1\""), Some(&about)).unwrap();
+        append_part(&dir, ID, &b64(b"12345")).unwrap();
+        release_part(&dir, ID).unwrap();
+        std::fs::write(part(&dir, "fedcba9876543210"), b"orphan").unwrap();   // no sidecar: not listed
+        std::fs::write(dir.join("v.mp4"), b"a finished file").unwrap();       // not a part
+        assert_eq!(list_parts(&dir), vec![PartListing { id: ID.into(), received: 5, about: about.clone() }]);
+        // The etag still resumes: the sidecar gained fields, it did not lose one.
+        assert_eq!(open_part(&dir, ID).unwrap(), PartInfo { received: 5, etag: Some("\"a-1\"".into()) });
+        release_part(&dir, ID).unwrap();
+        // A sidecar from before #308 (etag only) is still read.
+        std::fs::write(sidecar(&dir, ID), br#"{"etag":"\"a-1\""}"#).unwrap();
+        assert_eq!(list_parts(&dir)[0].about, About::default());
+        abort_part(&dir, ID).unwrap();
+        assert!(list_parts(&dir).is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn ids_names_and_destinations_cannot_escape() {
         let dir = tmp("escape");
         for bad in ["../../etc/passw", "0123456789ABCDEF", "0123456789abcde", "0123456789abcdefa", ""] {
-            assert!(reset_part(&dir, bad, None).is_err(), "{bad:?}");
+            assert!(reset_part(&dir, bad, None, None).is_err(), "{bad:?}");
             assert!(open_part(&dir, bad).is_err(), "{bad:?}");
             assert!(abort_part(&dir, bad).is_err(), "{bad:?}");
         }
-        reset_part(&dir, ID, None).unwrap();
+        reset_part(&dir, ID, None, None).unwrap();
         assert!(append_part(&dir, ID, "not base64!").is_err());
         assert_eq!(sanitize_filename("../../etc/passwd").unwrap(), "passwd");
         assert!(sanitize_filename("..").is_err());

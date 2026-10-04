@@ -191,3 +191,22 @@ test('a refused part claim is marked busy, so the caller leaves the other writer
   assert.equal(e?.partBusy, true);
   assert.equal(s.seen.length, 0, 'nothing is fetched');
 });
+
+test('cancel stops at once, is not retried, and says the part should go (#308)', async () => {
+  const ctl = new AbortController();
+  let feedRef!: ReadableStreamDefaultController<Uint8Array>;
+  const fetch = (async (_u: string, init: RequestInit) => {
+    const body = new ReadableStream<Uint8Array>({ start(c) { feedRef = c; init.signal!.addEventListener('abort', () => c.error(init.signal!.reason)); } });
+    return new Response(body, { status: 200, headers: { etag: '"v1"', 'content-length': '1000' } });
+  }) as unknown as typeof globalThis.fetch;
+  let calls = 0;
+  const counting = (async (u: string, i: RequestInit) => { calls++; return fetch(u, i); }) as unknown as typeof globalThis.fetch;
+  const run = download({ ...fast, fetch: counting, sink: memorySink(), signal: ctl.signal });
+  await new Promise((ok) => setTimeout(ok, 10));
+  feedRef.enqueue(new Uint8Array(100));
+  ctl.abort();
+  const e = await run.then(() => null, (err) => err);
+  assert.equal(e?.cancelled, true);
+  assert.equal(e?.keepPart, false);
+  assert.equal(calls, 1, 'no retry after a cancel');
+});

@@ -38,13 +38,16 @@ export interface DownloadOptions {
   /** A fresh signed URL: the plain /dl signature lives 60 s. */
   freshUrl: () => Promise<string>;
   sink: DownloadSink;
-  /** fraction 0–1, or null while the total is unknown. */
-  onProgress?: (fraction: number | null) => void;
+  /** fraction 0–1 (null while the total is unknown), and the bytes. */
+  onProgress?: (fraction: number | null, received: number, total: number) => void;
   /** A part was found but its file changed on the server; told once. */
   onRestart?: () => void;
   fetch?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
   stallMs?: number;
+  /** Cancel (the Downloads view, board #308): stops at once, never retried,
+   * and the error carries `cancelled` so the caller drops the part. */
+  signal?: AbortSignal;
   retryDelayMs?: number;
   maxRetries?: number;
 }
@@ -55,6 +58,12 @@ export const DL_RETRY_DELAY_MS = 1500;
 /** Zero bytes after this many attempts: plain HTTP to the host is blocked
  * (typical: a reverse proxy that forwards WebSocket upgrades only). */
 export const DL_UNREACHABLE_ATTEMPTS = 2;
+
+export class DownloadCancelled extends Error {
+  cancelled = true;
+  keepPart = false;
+  constructor() { super('cancelled'); }
+}
 
 export class DownloadUnreachable extends Error {
   code = 'DL_HTTP_UNREACHABLE';
@@ -96,7 +105,7 @@ export async function download(o: DownloadOptions): Promise<{ etag: string | nul
   let retriesLeft = maxRetries;
   let attempts = 0;
   let url = o.url;
-  const report = () => o.onProgress?.(total ? received / total : null);
+  const report = () => o.onProgress?.(total ? received / total : null, received, total);
 
   while (true) {
     const before = received;
@@ -106,6 +115,7 @@ export async function download(o: DownloadOptions): Promise<{ etag: string | nul
       await o.sink.flush();
       return { etag, total };
     } catch (e) {
+      if (o.signal?.aborted) throw new DownloadCancelled();
       if (e instanceof SinkError) throw keep(e.cause, false);
       // Some proxies cut the connection instead of ending it cleanly.
       if (total && received >= total) { await o.sink.flush(); return { etag, total }; }
@@ -131,6 +141,9 @@ export async function download(o: DownloadOptions): Promise<{ etag: string | nul
     const ctrl = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const arm = () => { clearTimeout(timer); timer = setTimeout(() => ctrl.abort(new Error('download stalled')), stallMs); };
+    const cancel = () => ctrl.abort(new DownloadCancelled());
+    if (o.signal?.aborted) throw new DownloadCancelled();
+    o.signal?.addEventListener('abort', cancel);
     arm();
     try {
       const headers: Record<string, string> = {};
@@ -185,6 +198,7 @@ export async function download(o: DownloadOptions): Promise<{ etag: string | nul
       if (total && received < total) throw new Error('connection closed early');
     } finally {
       clearTimeout(timer);
+      o.signal?.removeEventListener('abort', cancel);
     }
   }
 }
@@ -238,7 +252,10 @@ export function memorySink() {
 export type NativeInvoke = (cmd: string, args: Record<string, unknown>) => Promise<unknown>;
 
 /** Android / macOS: one buffered piece at most, each sent as base64. */
-export function nativeSink(invoke: NativeInvoke, id: string, piece = PIECE_BYTES) {
+/** What a part is of, kept beside it for the Downloads view (board #308). */
+export interface PartAbout { name: string; path: string; server: string }
+
+export function nativeSink(invoke: NativeInvoke, id: string, piece = PIECE_BYTES, about: PartAbout | null = null) {
   let pending: Uint8Array[] = [];
   let held = 0;
   async function send(all: boolean) {
@@ -259,7 +276,7 @@ export function nativeSink(invoke: NativeInvoke, id: string, piece = PIECE_BYTES
   }
   return {
     async open() { return await invoke('download_open', { id }) as PartState; },
-    async reset(etag: string | null) { pending = []; held = 0; await invoke('download_reset', { id, etag }); },
+    async reset(etag: string | null) { pending = []; held = 0; await invoke('download_reset', { id, etag, about }); },
     async write(bytes: Uint8Array) {
       if (!bytes.length) return;
       pending.push(bytes); held += bytes.length;

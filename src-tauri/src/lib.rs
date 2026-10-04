@@ -69,8 +69,15 @@ fn download_open(app: tauri::AppHandle, id: String) -> Result<downloads::PartInf
 
 #[cfg(feature = "gui")]
 #[tauri::command]
-fn download_reset(app: tauri::AppHandle, id: String, etag: Option<String>) -> Result<(), String> {
-    downloads::reset_part(&part_dir(&app)?, &id, etag.as_deref())
+fn download_reset(app: tauri::AppHandle, id: String, etag: Option<String>, about: Option<downloads::About>) -> Result<(), String> {
+    downloads::reset_part(&part_dir(&app)?, &id, etag.as_deref(), about.as_ref())
+}
+
+/// Unfinished downloads for the Downloads view (board #308).
+#[cfg(feature = "gui")]
+#[tauri::command]
+fn download_list_parts(app: tauri::AppHandle) -> Result<Vec<downloads::PartListing>, String> {
+    Ok(downloads::list_parts(&part_dir(&app)?))
 }
 
 #[cfg(feature = "gui")]
@@ -196,7 +203,7 @@ pub fn run() {
         // this plugin. The JS side (`hub/notifications.ts`) picks it when it
         // runs inside Tauri and keeps the browser path otherwise.
         .plugin(tauri_plugin_notification::init())
-        .invoke_handler(tauri::generate_handler![get_local_config, download_open, download_reset, download_chunk, download_finish, download_abort, download_release, download_release_all, list_downloads, delete_download, get_download_path])
+        .invoke_handler(tauri::generate_handler![get_local_config, download_open, download_reset, download_chunk, download_finish, download_abort, download_release, download_release_all, download_list_parts, list_downloads, delete_download, get_download_path])
         .setup(|app| {
             // Desktop: build a custom menu WITHOUT the default View → Zoom
             // items.

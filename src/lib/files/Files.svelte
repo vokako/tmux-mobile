@@ -8,6 +8,9 @@
   // (board #305): the page and the drawer write the same part folder, so the
   // one-writer rule must hold across them, not only inside one.
   const inFlight = new Map(); // part id → { owner, adopt() }
+  // How to stop each running attempt (the Downloads view's Cancel), by row id.
+  const cancels = new Map(); // row id → AbortController
+  let webSeq = 0;             // browser rows: no part, a session id
   // A fresh page has no writer yet: drop claims a previous page (a webview
   // reload in a live process) left in Rust, or its parts could never be
   // resumed. Once per realm, before any download can start.
@@ -19,7 +22,8 @@
   import { createPreviewRenderers, defaultWrapForMime, highlightCode, isPreviewable, mimeCategory, streamsInline } from './file-preview.ts';
   import { isAndroid, isTauri, tauriReady } from '../core/platform.ts';
   import { invokeNative } from '../core/native.ts';
-  import { download, bytesToB64, memorySink, nativeSink, partId } from './download.ts';
+  import { download, bytesToB64, memorySink, nativeSink, partId, PIECE_BYTES } from './download.ts';
+  import * as store from './downloads.svelte.ts';
   import Icon from '../ui/Icon.svelte';
   import CommandButton from '../ui/CommandButton.svelte';
   import Segmented from '../ui/Segmented.svelte';
@@ -1219,7 +1223,8 @@
     // Without a machine id (should not happen after auth) the id must not be
     // shared across servers: a one-off id downloads correctly, it just cannot
     // resume in a later session.
-    const id = isTauri ? partId(getMachineId() || `once-${Date.now()}-${Math.random()}`, path) : null;
+    const server = isTauri ? getMachineId() || `once-${Date.now()}-${Math.random()}` : '';
+    const id = isTauri ? partId(server, path) : null;
     const running = id ? inFlight.get(id) : null;
     if (running?.owner === instance) { running.adopt(); return; }
     if (running) {
@@ -1233,18 +1238,21 @@
     const operation = { get token() { return token; }, current: () => downloadLifetime.current(token) && contextCurrent() };
     downloadOperation = operation;
     downloadOutput = null;
-    let shown = null;   // this attempt's latest progress, to show again on adopt
-    const progress = (fraction = null, message = t('downloading')) => {
-      shown = { kind: 'progress', glyph: 'download', message, detail: path,
-        progress: fraction == null ? null : fraction * 100 };
-      if (operation.current()) downloadLifetime.update(token, shown);
-    };
+    // The store's row is this attempt's ONE record (board #308): progress
+    // writes it, and the feedback slot shows what it says.
+    const rowId = id ?? `web-${++webSeq}`;
+    const row = store.begin(rowId, name, path);
+    const control = new AbortController();
+    cancels.set(rowId, control);
+    const strings = () => ({ downloading: t('downloading'), changed: t('downloadFileChanged'), saving: t('saving') });
+    const show = () => { if (operation.current()) downloadLifetime.update(token, store.feedbackOf(row, strings())); };
+    const progress = (fraction, received = 0, total = 0) => { store.progress(rowId, received, total); show(); };
     if (id) inFlight.set(id, { owner: instance, adopt() {
       token = downloadLifetime.begin();
       contextCurrent = feedbackContext();
       downloadOperation = operation;
       downloadOutput = null;
-      if (shown) downloadLifetime.update(token, shown);
+      show();
     } });
     // Outcome of an attempt that lost its slot: an expiring success or a
     // closable error in the earlier-download notice, never the live slot.
@@ -1253,6 +1261,7 @@
       earlierLifetime.update(earlierLifetime.begin(), value);
     };
     const completed = (savedPath) => {
+      store.done(rowId, savedPath);
       if (!operation.current()) { earlier({ kind: 'success', message: t('saved'), detail: savedPath }); return; }
       downloadOutput = { path: savedPath, operation, opening: false };
       downloadLifetime.update(token, { kind: 'result', message: t('saved'), detail: savedPath });
@@ -1262,12 +1271,9 @@
     // ONE download core (board #305, download.ts); only the sink differs.
     // A Tauri shell writes a resumable part on disk, the browser holds the
     // file in memory for <a download>.
-    const native = id ? nativeSink(invokeNative, id) : null;
+    const native = id ? nativeSink(invokeNative, id, PIECE_BYTES, { name, path, server }) : null;
     const memory = native ? null : memorySink();
     const sink = native ?? memory;
-    // After a restart the progress line says why it began again (told once:
-    // it is this attempt's line, not a second notice).
-    let downloadingLabel = t('downloading');
     try {
       const dlInfo = await fsDownloadHttp(path);
       if (dlInfo.url) {
@@ -1275,10 +1281,11 @@
         // so resuming a long transfer needs a new URL, not the original.
         const freshUrl = () => fsDownloadHttp(path).then(info => info.url);
         try {
-          await download({ url: dlInfo.url, freshUrl, sink,
-            onProgress: (fraction) => progress(fraction, downloadingLabel),
-            // The part on disk is of an older version of the file.
-            onRestart: () => { downloadingLabel = t('downloadFileChanged'); progress(null, downloadingLabel); } });
+          await download({ url: dlInfo.url, freshUrl, sink, signal: control.signal,
+            onProgress: progress,
+            // The part on disk is of an older version of the file: the row
+            // says so for the rest of the attempt (told once).
+            onRestart: () => { store.restarted(rowId); show(); } });
         } catch (e) {
           if (e.code !== 'DL_HTTP_UNREACHABLE') throw e;
           // The WS connection demonstrably works (we just got the signed
@@ -1294,7 +1301,8 @@
       }
 
       // There is no measured write fraction. Only transfer bytes report a percentage.
-      progress(null, t('saving'));
+      store.saving(rowId);
+      show();
       if (native) {
         let dest = null;
         if (!isAndroid) {
@@ -1305,6 +1313,7 @@
             // Cancelled: the finished part stays in the app cache, so the
             // next Download of this file asks again without refetching.
             await native.release();
+            store.paused(rowId, null);
             const kept = { kind: 'success', message: t('downloadPartKept'), detail: name };
             if (operation.current()) downloadLifetime.update(token, kept); else earlier(kept);
             return;
@@ -1322,6 +1331,7 @@
       document.body.appendChild(a);
       a.click();
       setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(blobUrl); }, 100);
+      store.done(rowId, null, Date.now(), true);
       const requested = { kind: 'success', message: t('downloadRequested'), detail: name };
       if (operation.current()) downloadLifetime.update(token, requested); else earlier(requested);
     } catch (e) {
@@ -1332,16 +1342,25 @@
       // to finish, so neither abort nor release it, and say so as the JS
       // guard does.
       if (e?.partBusy) {
+        store.forget(rowId);
         const busy = { kind: 'success', message: t('downloadInProgress'), detail: path };
         if (operation.current()) downloadLifetime.update(token, busy); else earlier(busy);
         return;
       }
-      if (e?.keepPart) await native?.release();
-      else await native?.abort();
+      // Cancelled from the Downloads view: the part goes, the row goes, and
+      // the slot says nothing more.
+      if (e?.cancelled) {
+        await native?.abort();
+        store.forget(rowId);
+        dismissDownload(operation);
+        return;
+      }
+      if (e?.keepPart) { await native?.release(); store.paused(rowId, String(e.message || e)); }
+      else { await native?.abort(); store.failed(rowId, String(e.message || e)); }
       const failed = { kind: 'error', message: String(e.message || e), detail: path };
       if (operation.current()) downloadLifetime.update(token, failed); else earlier(failed);
     }
-    } finally { if (id) inFlight.delete(id); }
+    } finally { if (id) inFlight.delete(id); cancels.delete(rowId); }
   }
 
   // ONE destination rule and ONE byte→b64 encoder for every upload entry point

@@ -311,3 +311,11 @@ test('a download that lost its slot reports once, outside the live slot (board #
   assert.doesNotMatch(source.slice(source.indexOf('return () => { copyLifetime.clear();'), source.indexOf('return () => { copyLifetime.clear();') + 120), /earlierLifetime/u,
     'leaving the context is the case it reports, so the context exit does not clear it');
 });
+
+test('the download feedback slot shows the store row; it keeps no copy of its own (board #308)', () => {
+  assert.match(source, /import \* as store from '\.\/downloads\.svelte\.ts';/u);
+  assert.match(source, /const show = \(\) => \{ if \(operation\.current\(\)\) downloadLifetime\.update\(token, store\.feedbackOf\(row, strings\(\)\)\); \};/u);
+  assert.match(source, /const progress = \(fraction, received = 0, total = 0\) => \{ store\.progress\(rowId, received, total\); show\(\); \};/u);
+  assert.doesNotMatch(source, /shown = \{ kind: 'progress'/u, 'the old private progress copy is gone');
+  assert.match(source, /store\.done\(rowId, savedPath\);/u);
+});
