@@ -127,15 +127,15 @@ html {
 @media (any-pointer: coarse) {
   :root { --menu-row-height: 44px; --menu-font-size: var(--fs-body); }
   :root { --files-row-height: 44px; }
-  /* A dense tool group on the phone keeps the 28 px paint and 17 px icon but
-     sits on a 32 px pitch, not 44 (owner, 2026-09-13: "手机上的按钮可以紧凑一些，
-     现在按钮太大了…空间利用不够", then "最上边一行能显示全，不要...折叠了";
-     boards #192, #193). Measured: the APK's ten Files tools (Git, Downloads)
-     need 390 px at 36 and still folded into More on a 360–384 px phone; at
-     32 they take 338 px and fit at 360 (348 available). The deliberate
-     exception to the 44 px icon hit box: only inside .compact-tools, only on
-     touch. */
-  .compact-tools { --control-height: 32px; --control-paint-inset: 2px; }
+  /* A dense tool group on the phone keeps the 17 px icon but sits on a 30 px
+     pitch, not 44 (owner, 2026-09-13: "手机上的按钮可以紧凑一些，现在按钮太大了…
+     空间利用不够", then "最上边一行能显示全，不要...折叠了"; boards #192, #193,
+     #309). Measured: the APK's ten Files tools (Git, Downloads) need 390 px at
+     36; at 32 they took 338 px, which fit at 360 but not on the owner's 347 px
+     viewport (335 available, 3 px short, 2026-10-04); at 30 they take 318 px
+     and fit from a 330 px viewport. The deliberate exception to the 44 px icon
+     hit box: only inside .compact-tools, only on touch. */
+  .compact-tools { --control-height: 30px; --control-paint-inset: 2px; }
 }
 
 @media (any-pointer: coarse) {

@@ -179,12 +179,13 @@ test('a dense tool group on the phone keeps its paint but sits on a 32px pitch (
   // Owner 2026-09-13: "手机上的按钮可以紧凑一些，现在按钮太大了…空间利用不够", then
   // "最上边一行能显示全，不要...折叠了". Measured coarse: nine Files tools 412 px
   // at 44 (More needed at 390); the APK's TEN (Git, Downloads) 390 px at 36 —
-  // still 8 + More on a 360–384 phone; 338 px at 32, all ten fit at 360.
-  // The paint (28 px) and the icon (17 px) are unchanged — only the pitch.
+  // still 8 + More on a 360–384 phone; 338 px at 32, all ten fit at 360 but
+  // not on the owner's 347 px viewport (#309: 3 px short); 318 px at 30, all
+  // ten fit from 330. The icon (17 px) is unchanged; the paint is 26 inside 30.
   assert.match(css, /\.compact-tools \{ --control-paint-inset: 4px; --control-paint-radius: 5px; \}/u,
     'pointer: 20 px paint inside 28, with the corner scaled to that paint (#219: 7px on 20px read as a circle)');
-  assert.match(css, /@media \(any-pointer: coarse\)[\s\S]*?\.compact-tools \{ --control-height: 32px; --control-paint-inset: 2px; \}/u,
-    'touch: 28 px paint inside 32 — the one deliberate exception to the 44 px icon hit box');
+  assert.match(css, /@media \(any-pointer: coarse\)[\s\S]*?\.compact-tools \{ --control-height: 30px; --control-paint-inset: 2px; \}/u,
+    'touch: 26 px paint inside 30 — the one deliberate exception to the 44 px icon hit box');
   const files = await readFile(new URL('../files/Files.svelte', import.meta.url), 'utf8');
   for (const group of ['toolbar', 'bc-path-row', 'file-actions', 'preview-header']) {
     assert.match(files, new RegExp(`class="${group} compact-tools"`, 'u'), `${group} is a dense tool group`);
