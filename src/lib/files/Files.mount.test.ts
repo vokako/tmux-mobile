@@ -147,9 +147,9 @@ test('every Files toolbar action has a localized accessible name (#157)', async 
   try {
     await settle(app);
     const buttons = [...app.document.querySelectorAll<HTMLButtonElement>('.toolbar button')];
-    assert.equal(buttons.length, 9);
+    assert.equal(buttons.length, 10, 'Downloads is a tool in the browser too (#308)');
     assert.ok(buttons.every(b => !!b.getAttribute('aria-label')), 'no unnamed tool');
-    for (const label of ['Session directory', 'Refresh', 'New item', 'Upload files', 'Show hidden files', 'Bookmark directory', 'Bookmarks', 'Recent files', 'Git']) {
+    for (const label of ['Session directory', 'Refresh', 'New item', 'Upload files', 'Show hidden files', 'Bookmark directory', 'Bookmarks', 'Recent files', 'Git', 'Downloads']) {
       button(app, label);
     }
   } finally { await app.close(); }
@@ -607,7 +607,7 @@ test('Back/Forward: the browser pair heads the path row, disabled at the ends (b
     await settle(app);
     const back = () => button(app, 'Back'), fwd = () => button(app, 'Forward');
     assert.ok(back().closest('.bc-path-row') && fwd().closest('.bc-path-row'), 'the pair lives at the head of the path row, not in the tools bar (#164 overflow)');
-    assert.equal(app.document.querySelectorAll('.toolbar button').length, 9, 'the tools bar is untouched');
+    assert.equal(app.document.querySelectorAll('.toolbar button').length, 10, 'the tools bar is untouched (Downloads joined it in #308)');
     assert.equal(back().disabled, true, 'nothing behind at the entry point');
     assert.equal(fwd().disabled, true, 'nothing ahead');
     app.document.querySelector<HTMLButtonElement>('.file-row .file-main')!.click();
@@ -1023,4 +1023,61 @@ test('a claim Rust refuses leaves the other writer\u2019s part alone and says it
     assert.match(notice, /Already downloading/u, 'the localized notice, not the Rust text');
     assert.doesNotMatch(notice, /this file is already downloading/u);
   } finally { await app.close(); }
+});
+
+// Board #308: the Downloads view reads the one store plus the shell's disk.
+test('the Downloads view: two running rows, Cancel aborts its part, a part on disk is resumable (#308)', async context => {
+  const feeds = new Map<string, ReadableStreamDefaultController<Uint8Array>>();
+  const calls: { cmd: string; args: Record<string, unknown> }[] = [];
+  const app = await (await shell).mount(context, {
+    props: { visible: true, session: 'fixture' },
+    pendingImports: ['@tauri-apps/'],
+    setup(window) {
+      Object.assign(window, { __TAURI_INTERNALS__: {} });
+      Object.defineProperty(window.navigator, 'userAgent', { value: 'Mozilla/5.0 (Linux; Android 15) fixture' });
+      (window as any).fetch = async (url: string, init: RequestInit) => {
+        const body = new ReadableStream<Uint8Array>({ start(c) {
+          feeds.set(url, c);
+          init.signal?.addEventListener('abort', () => c.error(init.signal!.reason));
+        } });
+        return new Response(body, { status: 200, headers: { etag: '"v1"', 'content-length': '1000' } });
+      };
+    },
+    modules: [
+      rpc({ getMachineId: () => 'machine-1', fsDownloadHttp: async (path: string) => ({ url: `http://h/dl?p=${path}`, name: path.split('/').pop() }) }),
+      { invokeNative: async (cmd: string, args: Record<string, unknown> = {}) => {
+        calls.push({ cmd, args });
+        if (cmd === 'download_open') return { received: 0, etag: null };
+        if (cmd === 'list_downloads') return [{ name: 'old.mp4', modified: 1 }];
+        if (cmd === 'download_list_parts') return [{ id: '0123456789abcdef', received: 2048, name: 'half.bin', path: '/fixture/half.bin', server: 'machine-1' }];
+        return null;
+      } },
+    ],
+  });
+  const q = (s: string) => app.document.querySelector<HTMLElement>(s);
+  const rows = (s: string) => [...app.document.querySelectorAll<HTMLElement>(s)].map((e) => e.textContent?.replace(/\s+/gu, ' ').trim());
+  try {
+    await settle(app);
+    button(app, 'Download: AGENTS.md').click();
+    button(app, 'Download: next.md').click();
+    for (let i = 0; i < 20 && feeds.size < 2; i++) await settle(app);
+    for (const f of feeds.values()) f.enqueue(new Uint8Array(250));
+    await settle(app);
+    button(app, 'Downloads').click();
+    for (let i = 0; i < 20 && !q('.downloads-list .dl-active'); i++) await settle(app);
+    const active = rows('.downloads-list .dl-active');
+    assert.equal(active.length, 2, 'two downloads, two rows');
+    assert.ok(active.some((t) => /next\.md.*25%/u.test(t ?? '')) && active.some((t) => /AGENTS\.md.*25%/u.test(t ?? '')), active.join(' | '));
+    assert.ok(rows('.downloads-list .file-row').some((t) => /half\.bin.*2\.0 KB/u.test(t ?? '')), 'the part on disk is resumable');
+    assert.ok(rows('.downloads-list .file-row').some((t) => /old\.mp4/u.test(t ?? '')), 'and Android lists what it saved');
+    const nextId = calls.find((c) => c.cmd === 'download_open' && calls.some((d) => d.cmd === 'download_reset' && d.args.id === c.args.id && (d.args.about as any)?.name === 'next.md'))!.args.id;
+    button(app, 'Cancel: next.md').click();
+    for (let i = 0; i < 20 && !calls.some((c) => c.cmd === 'download_abort'); i++) await settle(app);
+    assert.deepEqual(calls.filter((c) => c.cmd === 'download_abort').map((c) => c.args.id), [nextId], 'Cancel aborts that part only');
+    await settle(app);
+    assert.equal(rows('.downloads-list .dl-active').length, 1, 'and its row goes');
+    button(app, 'Download again: half.bin').click();
+    for (let i = 0; i < 20 && feeds.size < 3; i++) await settle(app);
+    assert.ok([...feeds.keys()].some((u) => u.endsWith('/fixture/half.bin')), 'resume starts from the part\u2019s server path');
+  } finally { for (const f of feeds.values()) { try { f.close(); } catch {} } await app.close(); }
 });

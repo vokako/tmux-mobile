@@ -198,15 +198,71 @@
     return '/storage/emulated/0/Download/TmuxMobile/';
   }
 
+  // The Downloads view (board #308): this session's rows come from the
+  // store; what outlives the app (resumable parts everywhere, finished files
+  // on Android) is read from the shell. The browser has only the store.
+  let diskParts = $state([]);
+  async function readDownloads() {
+    if (!isTauri) return;
+    const [files, parts] = await Promise.all([
+      isAndroid ? invokeNative('list_downloads') : Promise.resolve([]),
+      invokeNative('download_list_parts'),
+    ]);
+    localFiles = files.map(file => typeof file === 'string' ? { name: file, modified: 0 } : file);
+    diskParts = parts;
+    localDir = '/storage/emulated/0/Download/TmuxMobile/';
+  }
   async function openLocalFiles() {
     try {
-      const files = await invokeNative('list_downloads');
-      localFiles = files.map(file => typeof file === 'string' ? { name: file, modified: 0 } : file);
-      localDir = '/storage/emulated/0/Download/TmuxMobile/';
+      await readDownloads();
       view = 'local';
       navPush();
     } catch (e) { error = e.message; }
   }
+  const sessionRows = $derived(store.downloads.rows);
+  const activeRows = $derived(sessionRows.filter((r) => r.state === 'downloading' || r.state === 'saving'));
+  const failedRows = $derived(sessionRows.filter((r) => r.state === 'failed'));
+  // Resumable: a part on disk with no attempt. The store knows this
+  // session's paused rows; the disk knows every part. One row per id.
+  const resumableRows = $derived.by(() => {
+    const busy = new Set(activeRows.map((r) => r.id));
+    const out = new Map();
+    for (const p of diskParts) if (!busy.has(p.id)) out.set(p.id, { id: p.id, name: p.name || p.id, path: p.path, server: p.server, received: p.received });
+    for (const r of sessionRows) if (r.state === 'paused' && !busy.has(r.id)) out.set(r.id, { ...out.get(r.id), id: r.id, name: r.name, path: r.path, server: out.get(r.id)?.server ?? getMachineId(), received: out.get(r.id)?.received ?? r.received });
+    return [...out.values()];
+  });
+  // Finished: on Android the folder itself (it outlives the app), on the
+  // desktop and in the browser what this session saved.
+  const finishedRows = $derived(isAndroid
+    ? localFiles.map((f) => ({ key: `f:${f.name}`, name: f.name, local: f.name }))
+    : sessionRows.filter((r) => r.state === 'done').map((r) => ({ key: r.id, name: r.name, savedPath: r.savedPath, requested: r.requested })));
+  // A download changes what is on disk: refresh the lists when one ends.
+  let lastActive = 0;
+  $effect(() => {
+    const n = store.downloads.active;
+    if (n < lastActive && view === 'local') readDownloads().catch(() => {});
+    lastActive = n;
+  });
+  function cancelDownload(id) { cancels.get(id)?.abort(); }
+  async function deletePart(id) {
+    try { await invokeNative('download_abort', { id }); store.forget(id); await readDownloads(); }
+    catch (e) { error = e.message; }
+  }
+  async function openSaved(row) {
+    try {
+      if (row.local) await openFileNative(localDir + row.local);
+      else if (row.savedPath && isTauri) { await tauriPlugins; await tauriOpener.openPath(row.savedPath); }
+    } catch (e) { error = t('openFailed') + (e.message || e); }
+  }
+  const rowSpeed = (row) => {
+    const bps = store.speed(row);
+    return bps ? `${formatSize(Math.round(bps))}/s` : '';
+  };
+  const rowFeedback = (row) => {
+    const value = store.feedbackOf(row, { downloading: t('downloading'), changed: t('downloadFileChanged'), saving: t('saving') });
+    const speedText = rowSpeed(row);
+    return { ...value, detail: speedText ? `${row.name} · ${speedText}` : row.name };
+  };
 
   function getFileOpener() {
     try {
@@ -390,7 +446,7 @@
     { key: 'recent', label: t('filesRecent'), icon: 'clock', expanded: showRecent,
       controls: showRecent ? `${panelId}-recent` : undefined, run: () => { showRecent = !showRecent; showBookmarks = false; } },
     ...(hasGit ? [{ key: 'git', label: 'Git', icon: 'git-branch', run: openGitView }] : []),
-    ...(isTauri ? [{ key: 'downloads', label: t('downloads'), icon: 'download', run: openLocalFiles }] : []),
+    { key: 'downloads', label: t('downloads'), icon: 'download', run: openLocalFiles },
   ]);
   const toolCount = $derived(visibleToolCount(toolbarActions.length, toolbarBox.width, toolbarBox.target, toolbarBox.gap));
   const closeFileMenu = () => { fileMenu = null; };
@@ -1869,28 +1925,73 @@
 {/snippet}
 
 {#snippet localPanel()}
-    <!-- Local downloaded files -->
+    <!-- Downloads (board #308): four groups from ONE store plus what the
+         shell keeps on disk. Same list atoms as the file list; a running
+         download is the same OperationFeedback the slot shows. -->
     <div class="preview-header">
       <CommandButton variant="icon" icon="arrow-left" label={t('back')} onclick={() => { navAnim('back'); view = 'list'; }} />
       <span class="preview-name">{t('downloads')}</span>
       <div class="preview-actions">
-        <CommandButton variant="icon" icon="refresh" label={t('filesRefresh')} onclick={openLocalFiles} />
+        {#if isTauri}<CommandButton variant="icon" icon="refresh" label={t('filesRefresh')} onclick={() => readDownloads().catch((e) => { error = e.message; })} />{/if}
       </div>
     </div>
-    <div class="file-list">
-      {#each localFiles as f}
-        <div class="file-row">
-          <button class="file-main" onclick={() => openLocalFile(f.name)}>
-            <Icon name="file" size={16} />
-            <span class="file-name">{f.name}</span>
-          </button>
-          <CommandButton variant="danger" iconOnly icon="trash" label={`${t('delete')}: ${f.name}`}
-            onclick={() => requestAct({ kind: 'local', name: f.name })} />
-        </div>
-      {/each}
-      {#if !localFiles.length}
+    <div class="file-list downloads-list">
+      {#if activeRows.length}
+        <div class="side-h">{t('downloadsActive')}</div>
+        {#each activeRows as row (row.id)}
+          {#snippet cancelAction()}
+            <CommandButton variant="icon" icon="x" label={`${t('cancel')}: ${row.name}`} onclick={() => cancelDownload(row.id)} />
+          {/snippet}
+          <div class="dl-active"><OperationFeedback value={rowFeedback(row)} actions={cancelAction} /></div>
+        {/each}
+      {/if}
+      {#if resumableRows.length}
+        <div class="side-h">{t('downloadsResumable')}</div>
+        {#each resumableRows as part (part.id)}
+          {@const here = !!part.path && part.server === getMachineId()}
+          <div class="file-row">
+            <button class="file-main" disabled={!here} onclick={() => handleDownload(part.path)}>
+              <Icon name="download" size={16} />
+              <span class="file-name">{part.name}</span>
+              <span class="file-size">{here ? formatSize(part.received) : t('downloadsOtherServer')}</span>
+            </button>
+            {#if here}<CommandButton variant="icon" icon="download" label={`${t('downloadsResume')}: ${part.name}`} onclick={() => handleDownload(part.path)} />{/if}
+            <CommandButton variant="danger" iconOnly icon="trash" label={`${t('delete')}: ${part.name}`} onclick={() => deletePart(part.id)} />
+          </div>
+        {/each}
+      {/if}
+      {#if failedRows.length}
+        <div class="side-h">{t('downloadsFailed')}</div>
+        {#each failedRows as row (row.id)}
+          <div class="file-row">
+            <div class="file-main">
+              <Icon name="info" size={16} />
+              <span class="file-name">{row.name}</span>
+              <span class="file-size config-error">{row.error}</span>
+            </div>
+            <CommandButton variant="icon" icon="refresh" label={`${t('downloadsRetry')}: ${row.name}`} onclick={() => handleDownload(row.path)} />
+          </div>
+        {/each}
+      {/if}
+      {#if finishedRows.length}
+        <div class="side-h">{t('downloadsFinished')}</div>
+        {#each finishedRows as f (f.key)}
+          <div class="file-row">
+            <button class="file-main" disabled={!f.local && !f.savedPath} onclick={() => openSaved(f)}>
+              <Icon name="file" size={16} />
+              <span class="file-name">{f.name}</span>
+            </button>
+            {#if f.local}
+              <CommandButton variant="danger" iconOnly icon="trash" label={`${t('delete')}: ${f.name}`}
+                onclick={() => requestAct({ kind: 'local', name: f.local })} />
+            {/if}
+          </div>
+        {/each}
+      {/if}
+      {#if !activeRows.length && !resumableRows.length && !failedRows.length && !finishedRows.length}
         <div class="empty">{t('noDownloads')}</div>
       {/if}
+      {#if !isTauri}<p class="panel-empty">{t('downloadsBrowserNote')}</p>{/if}
     </div>
 {/snippet}
 
@@ -2141,6 +2242,10 @@
   .file-row {
     display: flex; align-items: center; border-bottom: 1px solid var(--border2);
   }
+  /* A running download in the Downloads view is the slot's own card, inset
+     like the list's rows. */
+  .dl-active { padding: 4px 8px; }
+  .file-main:disabled { cursor: default; }
   .file-main {
     flex: 1; display: flex; align-items: center; gap: 8px; padding: 4px 8px;
     border: none; background: none; color: var(--text); cursor: pointer; text-align: left;

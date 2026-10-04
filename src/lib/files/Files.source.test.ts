@@ -9,7 +9,7 @@ test('copy and download feedback share the UI owner and never restore private to
   // OperationFeedback owns paint; Files only composes a single in-flow stack.
   assert.match(source, /import OperationFeedback from '\.\.\/ui\/OperationFeedback\.svelte'/u);
   assert.match(source, /import \{ createFeedbackLifetime \} from '\.\.\/ui\/feedback-lifetime\.ts'/u);
-  assert.equal(source.match(/<OperationFeedback /gu)?.length, 4, 'copy, download, earlier download (#301), upload — one owner');
+  assert.equal(source.match(/<OperationFeedback /gu)?.length, 5, 'copy, download, earlier download (#301), upload, and a running row in the Downloads view (#308) — one owner');
   assert.match(source, /\.files-feedback \{[^}]*flex-direction: column/u);
   assert.doesNotMatch(source, /copyToast|copyTimer|downloadToast|downloadedPath|dlProgress|displayedDlProgress|copy-toast|download-toast|dl-ring|toast-fade/u);
 });
