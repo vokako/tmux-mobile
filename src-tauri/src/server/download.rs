@@ -91,6 +91,68 @@ fn find_header_end(buf: &[u8]) -> Option<usize> {
 /// element sends (board #182): WebKit probes with `bytes=0-1` and refuses to
 /// play unless the answer is a 206 of exactly two bytes; Chromium seeks with
 /// bounded ranges too. Suffix (`-N`) and multi-range forms stay unsupported.
+/// A strong validator for one version of a file (board #305): its size and
+/// modification time, both in hex. Derived from metadata, never from the
+/// content: hashing an 89 MB file to answer one header is not worth it, and a
+/// rewrite that keeps both size and mtime to the nanosecond is not a case a
+/// download needs to catch. Strong (no `W/`) because If-Range compares
+/// strongly (RFC 7233 §3.2).
+fn etag_for(size: u64, mtime_ns: u128) -> String {
+    format!("\"{size:x}-{mtime_ns:x}\"")
+}
+
+/// `Last-Modified` in IMF-fixdate, the only date form a client may echo back.
+/// By hand: this module is compiled into the Android shell too, where
+/// `chrono` is not a dependency (Cargo.toml gates it to the desktop).
+/// Days → civil date is Howard Hinnant's `civil_from_days`.
+fn http_date(secs: i64) -> String {
+    const DAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{}, {:02} {} {} {:02}:{:02}:{:02} GMT",
+        DAYS[days.rem_euclid(7) as usize], day, MONTHS[(month - 1) as usize], year,
+        rem / 3600, rem % 3600 / 60, rem % 60)
+}
+
+fn header_value<'a>(req: &'a str, name: &str) -> Option<&'a str> {
+    req.lines().skip(1).find_map(|line| {
+        let (k, v) = line.split_once(':')?;
+        k.trim().eq_ignore_ascii_case(name).then(|| v.trim())
+    })
+}
+
+/// Whether a Range may be honoured: always without `If-Range`; with it, only
+/// when it names THIS version (the exact ETag or the exact Last-Modified).
+/// Otherwise the file changed since the client's partial copy, and the answer
+/// is the whole new file as a 200 (RFC 7233 §3.2), which is how a resuming
+/// client learns to restart.
+fn if_range_allows(req: &str, etag: &str, last_modified: &str) -> bool {
+    match header_value(req, "if-range") {
+        None => true,
+        Some(v) => v == etag || v == last_modified,
+    }
+}
+
+/// The CORS preflight for /dl. A Tauri page (tauri://localhost,
+/// http://tauri.localhost) is cross-origin to /dl, and `If-Range` is not a
+/// safelisted request header, so the webview asks first. The answer grants
+/// GET with exactly the two headers a resume sends; it checks no signature
+/// and touches no file, so it reveals nothing. A Chromium webview that applies
+/// Private Network Access (a page reaching a LAN/Tailscale address) adds
+/// `Access-Control-Request-Private-Network` to this same preflight and needs
+/// the matching allow line; it grants nothing beyond the signed GET.
+const DL_PREFLIGHT: &str = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET\r\nAccess-Control-Allow-Headers: Range, If-Range\r\nAccess-Control-Allow-Private-Network: true\r\nAccess-Control-Max-Age: 600\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+
 fn parse_range(req: &str, size: u64) -> Result<Option<(u64, u64)>, ()> {
     for line in req.lines() {
         let Some((k, v)) = line.split_once(':') else { continue };
@@ -118,7 +180,7 @@ fn parse_range(req: &str, size: u64) -> Result<Option<(u64, u64)>, ()> {
 /// path prefix (e.g. "GET /tmux/dl?path=..." when the proxy doesn't strip
 /// its location prefix).
 pub(super) fn looks_like_dl_request(prelude: &[u8]) -> bool {
-    if !prelude.starts_with(b"GET ") {
+    if !prelude.starts_with(b"GET ") && !prelude.starts_with(b"OPTIONS ") {
         return false;
     }
     let line_end = prelude
@@ -157,6 +219,11 @@ where
     };
     let req = String::from_utf8_lossy(&buf[..header_end]).to_string();
     let first_line = req.lines().next().unwrap_or("");
+    if first_line.starts_with("OPTIONS ") {
+        let _ = stream.write_all(DL_PREFLIGHT.as_bytes()).await;
+        let _ = stream.flush().await;
+        return;
+    }
 
     // Parse "GET <path>/dl?path=...&ts=...&sig=... HTTP/1.1". Locate the
     // "/dl?" segment instead of assuming it starts the path, so a proxy
@@ -197,6 +264,12 @@ where
     };
     let name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
     let size = metadata.len();
+    let modified = metadata.modified().ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .unwrap_or_default();
+    let etag = etag_for(size, modified.as_nanos());
+    let last_modified = http_date(modified.as_secs() as i64);
+    let validators = format!("ETag: {etag}\r\nLast-Modified: {last_modified}\r\n");
 
     // Range support: lets the client RESUME an interrupted transfer instead
     // of restarting from byte 0. Critical through reverse proxies on the
@@ -208,10 +281,12 @@ where
     // HTTP/1.1 defaults to keep-alive and the proxy may pool the (already
     // closed) backend connection, surfacing as intermittent 502s on the
     // next download.
-    let range = match parse_range(&req, size) {
+    // If-Range names an older version: ignore Range, send the new file.
+    let range = if !if_range_allows(&req, &etag, &last_modified) { Ok(None) } else { parse_range(&req, size) };
+    let range = match range {
         Ok(r) => r,
         Err(()) => {
-            let _ = stream.write_all(format!("HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */{}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", size).as_bytes()).await;
+            let _ = stream.write_all(format!("HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */{}\r\nContent-Length: 0\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Expose-Headers: Content-Range\r\nConnection: close\r\n\r\n", size).as_bytes()).await;
             let _ = stream.flush().await;
             return;
         }
@@ -227,12 +302,12 @@ where
     let ctype = media_content_type(&name);
     let header = match range {
         Some((start, end)) => format!(
-            "HTTP/1.1 206 Partial Content\r\nContent-Type: {}\r\nContent-Disposition: attachment; filename=\"{}\"\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\nAccept-Ranges: bytes\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges\r\nConnection: close\r\n\r\n",
-            ctype, name, end - start + 1, start, end, size
+            "HTTP/1.1 206 Partial Content\r\nContent-Type: {}\r\nContent-Disposition: attachment; filename=\"{}\"\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\nAccept-Ranges: bytes\r\n{}Access-Control-Allow-Origin: *\r\nAccess-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges, ETag, Last-Modified\r\nConnection: close\r\n\r\n",
+            ctype, name, end - start + 1, start, end, size, validators
         ),
         None => format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Disposition: attachment; filename=\"{}\"\r\nContent-Length: {}\r\nAccept-Ranges: bytes\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges\r\nConnection: close\r\n\r\n",
-            ctype, name, size
+            "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Disposition: attachment; filename=\"{}\"\r\nContent-Length: {}\r\nAccept-Ranges: bytes\r\n{}Access-Control-Allow-Origin: *\r\nAccess-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges, ETag, Last-Modified\r\nConnection: close\r\n\r\n",
+            ctype, name, size, validators
         ),
     };
     if stream.write_all(header.as_bytes()).await.is_err() { return; }
@@ -312,6 +387,44 @@ mod tests {
         assert_eq!(media_content_type("report.pdf"), "application/octet-stream");
         assert_eq!(media_content_type("player.js"), "application/octet-stream");
         assert_eq!(media_content_type("noext"), "application/octet-stream");
+    }
+
+    #[test]
+    fn etag_is_strong_and_follows_size_and_mtime() {
+        assert_eq!(etag_for(255, 4096), "\"ff-1000\"");
+        assert_ne!(etag_for(255, 4096), etag_for(255, 4097), "a touch is a new version");
+        assert_ne!(etag_for(255, 4096), etag_for(256, 4096));
+        assert!(!etag_for(1, 1).starts_with("W/"), "If-Range needs a strong validator");
+        assert_eq!(http_date(0), "Thu, 01 Jan 1970 00:00:00 GMT");
+        assert_eq!(http_date(784_111_777), "Sun, 06 Nov 1994 08:49:37 GMT", "RFC 9110's own example");
+        assert_eq!(http_date(951_782_400), "Tue, 29 Feb 2000 00:00:00 GMT", "a leap day in a century leap year");
+        assert_eq!(http_date(1_790_502_579), "Sun, 27 Sep 2026 09:49:39 GMT");
+    }
+
+    #[test]
+    fn if_range_honours_range_only_for_the_same_version() {
+        let tag = "\"ff-1000\"";
+        let date = "Thu, 01 Jan 1970 00:00:00 GMT";
+        let req = |extra: &str| format!("GET /dl?path=x HTTP/1.1\r\nHost: h\r\nRange: bytes=10-\r\n{extra}");
+        assert!(if_range_allows(&req(""), tag, date), "no If-Range: plain Range as before");
+        assert!(if_range_allows(&req("If-Range: \"ff-1000\"\r\n"), tag, date));
+        assert!(if_range_allows(&req("if-range: Thu, 01 Jan 1970 00:00:00 GMT\r\n"), tag, date), "header name is case-insensitive; the date form works");
+        assert!(!if_range_allows(&req("If-Range: \"ff-0fff\"\r\n"), tag, date), "another version: whole file, 200");
+        assert!(!if_range_allows(&req("If-Range: W/\"ff-1000\"\r\n"), tag, date), "a weak tag never matches (strong comparison)");
+        assert!(!if_range_allows(&req("If-Range: Fri, 02 Jan 1970 00:00:00 GMT\r\n"), tag, date));
+    }
+
+    #[test]
+    fn preflight_is_recognised_and_grants_only_the_resume_headers() {
+        assert!(looks_like_dl_request(b"OPTIONS /dl?path=%2Fx HTTP/1.1\r\n"));
+        assert!(!looks_like_dl_request(b"OPTIONS /ws HTTP/1.1\r\n"), "only /dl, never the WS path");
+        assert!(DL_PREFLIGHT.starts_with("HTTP/1.1 204 "));
+        assert!(DL_PREFLIGHT.contains("Access-Control-Allow-Headers: Range, If-Range\r\n"));
+        assert!(DL_PREFLIGHT.contains("Access-Control-Allow-Methods: GET\r\n"));
+        assert!(DL_PREFLIGHT.contains("Access-Control-Allow-Private-Network: true\r\n"));
+        // A resume whose part is already complete gets 416; a cross-origin
+        // page can only read its Content-Range if CORS covers it.
+        assert!(include_str!("download.rs").contains("416 Range Not Satisfiable\\r\\nContent-Range: bytes */{}\\r\\nContent-Length: 0\\r\\nAccess-Control-Allow-Origin: *\\r\\nAccess-Control-Expose-Headers: Content-Range"));
     }
 
     #[test]
