@@ -983,3 +983,39 @@ test('a second Download of a file in flight starts no second writer (#305)', asy
     assert.equal(fetches, 2, 'a finished download releases its id');
   } finally { try { feed.close(); } catch {} await app.close(); }
 });
+
+// Validator #306 P1: Files must not abort (or release) a part whose claim
+// Rust refused; the other writer owns it. The notice is the JS guard's.
+test('a claim Rust refuses leaves the other writer\u2019s part alone and says it is downloading (#306)', async context => {
+  const calls: string[] = [];
+  let fetched = 0;
+  const app = await (await shell).mount(context, {
+    props: { visible: true, session: 'fixture' },
+    pendingImports: ['@tauri-apps/'],
+    setup(window) {
+      Object.assign(window, { __TAURI_INTERNALS__: {} });
+      Object.defineProperty(window.navigator, 'userAgent', { value: 'Mozilla/5.0 (Linux; Android 15) fixture' });
+      (window as any).fetch = async () => { fetched++; return new Response(new Uint8Array(1), { status: 200 }); };
+    },
+    modules: [
+      rpc({ getMachineId: () => 'machine-1', fsDownloadHttp: async () => ({ url: 'http://h/dl?path=x', name: 'AGENTS.md' }) }),
+      { invokeNative: async (cmd: string) => {
+        calls.push(cmd);
+        if (cmd === 'download_open') throw new Error('this file is already downloading');
+        return null;
+      } },
+    ],
+  });
+  try {
+    await settle(app);
+    button(app, 'Download: AGENTS.md').click();
+    for (let i = 0; i < 20 && !calls.includes('download_open'); i++) await settle(app);
+    await settle(app);
+    assert.ok(!calls.includes('download_abort'), 'the other writer\u2019s part is not deleted');
+    assert.ok(!calls.includes('download_release'), 'nor its claim released');
+    assert.equal(fetched, 0);
+    const notice = app.document.querySelector('.operation-feedback')?.textContent ?? '';
+    assert.match(notice, /Already downloading/u, 'the localized notice, not the Rust text');
+    assert.doesNotMatch(notice, /this file is already downloading/u);
+  } finally { await app.close(); }
+});

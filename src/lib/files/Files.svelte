@@ -1328,9 +1328,15 @@
       // A NETWORK failure keeps the part for a later resume (download.ts
       // flushed what arrived); anything else (a write or save failure, a
       // missing file) leaves no half-file behind.
-      // Another writer holds the part: it is theirs to finish.
-      if (e?.partBusy) {}
-      else if (e?.keepPart) await native?.release();
+      // Another writer holds the part (Rust refused the claim): it is theirs
+      // to finish, so neither abort nor release it, and say so as the JS
+      // guard does.
+      if (e?.partBusy) {
+        const busy = { kind: 'success', message: t('downloadInProgress'), detail: path };
+        if (operation.current()) downloadLifetime.update(token, busy); else earlier(busy);
+        return;
+      }
+      if (e?.keepPart) await native?.release();
       else await native?.abort();
       const failed = { kind: 'error', message: String(e.message || e), detail: path };
       if (operation.current()) downloadLifetime.update(token, failed); else earlier(failed);
