@@ -877,3 +877,50 @@ test('an earlier download\u2019s failure is reported, closable, without touching
     assert.equal(app.document.querySelectorAll('.operation-feedback').length, 1);
   } finally { first.reject(Error('fixture closed')); second.reject(Error('fixture closed')); await app.close(); }
 });
+
+// Board #305: on Android the bytes leave in ≤4 MiB base64 pieces through the
+// download_* commands while they arrive. The whole buffer never crosses the
+// bridge (the JSON-per-byte encoding behind the owner's "invalid array length").
+const shell = compileMount(new URL('./Files.test.svelte', import.meta.url),
+  [new URL('../core/ws.ts', import.meta.url), new URL('../core/native.ts', import.meta.url)]);
+test('Android saves a download through download_chunk pieces, never one buffer (#305)', async context => {
+  const size = 7 * 1024 * 1024 + 123;           // three pieces: 3 MiB, 3 MiB, the rest
+  const file = new Uint8Array(size).map((_, i) => i & 0xff);
+  const calls: { cmd: string; args: Record<string, unknown> }[] = [];
+  const app = await (await shell).mount(context, {
+    props: { visible: true, session: 'fixture' },
+    pendingImports: ['@tauri-apps/'],
+    setup(window) {
+      Object.assign(window, { __TAURI_INTERNALS__: {} });
+      Object.defineProperty(window.navigator, 'userAgent', { value: 'Mozilla/5.0 (Linux; Android 15) fixture' });
+      (window as any).fetch = async (_url: string, init: RequestInit) => {
+        assert.equal(JSON.stringify(init.headers), '{}', 'nothing on disk: a fresh request');
+        return new Response(file, { status: 200, headers: { etag: '"v1"', 'content-length': String(size) } });
+      };
+    },
+    modules: [
+      rpc({ getMachineId: () => 'machine-1', fsDownloadHttp: async () => ({ url: 'http://h/dl?path=x', name: 'AGENTS.md' }) }),
+      { invokeNative: async (cmd: string, args: Record<string, unknown> = {}) => {
+        calls.push({ cmd, args });
+        if (cmd === 'download_open') return { received: 0, etag: null };
+        if (cmd === 'download_finish') return '/storage/emulated/0/Download/TmuxMobile/AGENTS.md';
+        return null;
+      } },
+    ],
+  });
+  try {
+    await settle(app);
+    button(app, 'Download: AGENTS.md').click();
+    for (let i = 0; i < 40 && !calls.some((c) => c.cmd === 'download_finish'); i++) await settle(app);
+    const id = calls[0]!.args.id as string;
+    assert.match(id, /^[0-9a-f]{16}$/u);
+    assert.deepEqual(calls.map((c) => c.cmd), ['download_open', 'download_reset', 'download_chunk', 'download_chunk', 'download_chunk', 'download_finish']);
+    assert.ok(calls.every((c) => c.args.id === id), 'one part for the whole download');
+    assert.equal(calls[1]!.args.etag, '"v1"', 'the part is tagged with the version it holds');
+    const pieces = calls.filter((c) => c.cmd === 'download_chunk').map((c) => atob(c.args.data as string).length);
+    assert.deepEqual(pieces, [3 * 1024 * 1024, 3 * 1024 * 1024, 1024 * 1024 + 123]);
+    assert.ok(calls.every((c) => !('bytes' in c.args) && !(c.args.data instanceof Uint8Array)), 'no raw buffer crosses');
+    assert.equal(JSON.stringify(calls.at(-1)!.args), JSON.stringify({ id, name: 'AGENTS.md', dest: null }), 'Android needs no destination');
+    assert.match(app.document.querySelector('.operation-feedback')?.textContent ?? '', /TmuxMobile\/AGENTS\.md/u);
+  } finally { await app.close(); }
+});

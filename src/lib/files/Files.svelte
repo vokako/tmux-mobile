@@ -10,6 +10,8 @@
   import FilePreview from './FilePreview.svelte';
   import { createPreviewRenderers, defaultWrapForMime, highlightCode, isPreviewable, mimeCategory, streamsInline } from './file-preview.ts';
   import { isAndroid, isTauri, tauriReady } from '../core/platform.ts';
+  import { invokeNative } from '../core/native.ts';
+  import { download, bytesToB64, memorySink, nativeSink, partId } from './download.ts';
   import Icon from '../ui/Icon.svelte';
   import CommandButton from '../ui/CommandButton.svelte';
   import Segmented from '../ui/Segmented.svelte';
@@ -34,7 +36,7 @@
   import { directoryLoadState, leaveDecision, cwdFollowStep } from './file-view-state.ts';
   import { createFileNavigation, directoryBackFloor } from './file-nav.ts';
   import { handlePathLinkClick, resolvePathRef } from '../core/path-links.ts';
-  import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadHttp, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from '../core/ws.ts';
+  import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadHttp, getMachineId, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from '../core/ws.ts';
   import { uploadProgress, uploadSummary, uploadSizeError } from './file-upload.ts';
 
   // Tauri plugin imports (tree-shaken in browser builds). The platform flags
@@ -186,8 +188,7 @@
 
   async function openLocalFiles() {
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      const files = await invoke('list_downloads');
+      const files = await invokeNative('list_downloads');
       localFiles = files.map(file => typeof file === 'string' ? { name: file, modified: 0 } : file);
       localDir = '/storage/emulated/0/Download/TmuxMobile/';
       view = 'local';
@@ -230,8 +231,7 @@
   }
 
   async function deleteLocalFile(name) {
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('delete_download', { name });
+    await invokeNative('delete_download', { name });
   }
   let currentFile = $state(null); // { path, name, stat, content }
   let editContent = $state('');
@@ -1189,117 +1189,17 @@
     downloadOperation = null;
   }
 
-  // Stream one HTTP response body into `chunks`, counting bytes. A stall
-  // watchdog aborts the fetch if no bytes arrive for STALL_TIMEOUT_MS —
-  // reverse proxies on the public internet love to silently kill long
-  // responses, and without the watchdog reader.read() hangs forever.
-  const DL_STALL_TIMEOUT_MS = 20000;
-  async function fetchRangeInto(url, startByte, chunks, onBytes) {
-    const ctrl = new AbortController();
-    let stallTimer = null;
-    const armStall = () => {
-      clearTimeout(stallTimer);
-      stallTimer = setTimeout(() => ctrl.abort(new Error('download stalled')), DL_STALL_TIMEOUT_MS);
-    };
-    armStall();
-    try {
-      const headers = startByte > 0 ? { Range: `bytes=${startByte}-` } : {};
-      const resp = await fetch(url, { headers, signal: ctrl.signal });
-      if (!resp.ok && resp.status !== 206) throw new Error(`HTTP ${resp.status}`);
-      // Asked to resume but got a full 200 (server/proxy ignored Range):
-      // the bytes we already have would be duplicated. Restart cleanly.
-      if (startByte > 0 && resp.status !== 206) {
-        chunks.length = 0;
-        onBytes?.(-startByte, 0);
-        startByte = 0;
-      }
-      // total size of the WHOLE file (for progress), regardless of range
-      let total = 0;
-      const cr = resp.headers.get('content-range'); // "bytes N-M/SIZE"
-      if (cr) total = Number(cr.split('/')[1]) || 0;
-      else total = Number(resp.headers.get('content-length')) || 0;
-      if (!resp.body || !resp.body.getReader) {
-        const buf = await resp.arrayBuffer();
-        clearTimeout(stallTimer);
-        chunks.push(new Uint8Array(buf));
-        onBytes?.(buf.byteLength, total);
-        return;
-      }
-      const reader = resp.body.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        armStall();
-        chunks.push(value);
-        onBytes?.(value.length, total);
-      }
-    } finally {
-      clearTimeout(stallTimer);
-    }
+  /** An RPC fallback arrives whole as base64 (≤50 MB server cap). */
+  async function writeWhole(sink, b64) {
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    await sink.reset(null);
+    await sink.write(bytes);
+    await sink.flush();
   }
-
-  // Fetch a download into a Uint8Array with REAL progress + automatic
-  // resume. On a mid-transfer failure (proxy idle timeout, network blip,
-  // stall) we retry with `Range: bytes=<received>-` so completed bytes are
-  // never re-downloaded. Each retry calls `freshUrl()` because the signed
-  // /dl URL expires after 60 s — a retry minutes into a big transfer would
-  // otherwise 403. The retry budget refills whenever a retry makes real
-  // progress, so a flaky-but-moving link can take many small hits without
-  // dying; only consecutive no-progress failures give up.
-  const DL_MAX_RETRIES = 4;
-  const DL_RETRY_DELAY_MS = 1500;
-  // Zero bytes after this many attempts ⇒ the HTTP path is unreachable
-  // (typical: a reverse proxy that forwards WebSocket upgrades but not
-  // plain GETs — WS works fine, every fetch dies instantly). Retrying is
-  // pointless; fail fast with a marker so the caller can fall back to the
-  // WS RPC download path.
-  const DL_UNREACHABLE_ATTEMPTS = 2;
-  async function fetchWithResume(url, freshUrl, onProgress) {
-    const chunks = [];
-    let received = 0;
-    let totalSize = 0;
-    let retriesLeft = DL_MAX_RETRIES;
-    let attempts = 0;
-    const onBytes = (n, total) => {
-      received += n;
-      if (total) totalSize = total;
-      if (totalSize) onProgress?.(received / totalSize);
-      else onProgress?.(null); // size unknown → indeterminate
-    };
-    let curUrl = url;
-    while (true) {
-      const receivedBefore = received;
-      try {
-        attempts++;
-        await fetchRangeInto(curUrl, received, chunks, onBytes);
-        break; // complete
-      } catch (e) {
-        // If the whole-file size is known and we already have every byte,
-        // treat the error as EOF noise (some proxies cut the connection
-        // instead of finishing cleanly).
-        if (totalSize && received >= totalSize) break;
-        // Never received a single byte across multiple attempts: the HTTP
-        // endpoint is unreachable, not flaky. Surface a typed error so the
-        // caller can switch transports instead of burning the full retry
-        // budget on a path that will never work.
-        if (received === 0 && attempts >= DL_UNREACHABLE_ATTEMPTS) {
-          const err = new Error(`HTTP download unreachable: ${e.message}`);
-          err.code = 'DL_HTTP_UNREACHABLE';
-          throw err;
-        }
-        if (received > receivedBefore) retriesLeft = DL_MAX_RETRIES; // made progress
-        if (retriesLeft <= 0) throw e;
-        retriesLeft--;
-        await new Promise(r => setTimeout(r, DL_RETRY_DELAY_MS));
-        // Signed URL may have expired (60 s TTL) — get a fresh one.
-        try { curUrl = await freshUrl(); } catch { /* keep old URL */ }
-      }
-    }
-    const out = new Uint8Array(received);
-    let off = 0;
-    for (const c of chunks) { out.set(c, off); off += c.length; }
-    return out;
-  }
+  /** fetch rejects with a TypeError when the network fails; a stall is our
+   * own abort, and an ended-early body is our own error. */
+  const isNetworkFailure = (e) => e instanceof TypeError
+    || /download stalled|connection closed early|network/iu.test(String(e?.message ?? ''));
 
   async function handleDownload(path) {
     const name = path.split('/').pop();
@@ -1325,56 +1225,60 @@
       downloadLifetime.update(token, { kind: 'result', message: t('saved'), detail: savedPath });
     };
     progress();
+    // ONE download core (board #305, download.ts); only the sink differs.
+    // A Tauri shell writes a resumable part on disk, the browser holds the
+    // file in memory for <a download>.
+    const native = isTauri ? nativeSink(invokeNative, partId(getMachineId() || 'server', path)) : null;
+    const memory = native ? null : memorySink();
+    const sink = native ?? memory;
+    // After a restart the progress line says why it began again (told once:
+    // it is this attempt's line, not a second notice).
+    let downloadingLabel = t('downloading');
     try {
-      const t0 = Date.now();
       const dlInfo = await fsDownloadHttp(path);
-
-      // Pull the bytes. Same shape regardless of platform; downstream code
-      // either writes via Tauri fs/invoke or triggers a browser download.
-      let bytes;
       if (dlInfo.url) {
         // freshUrl re-signs on each retry: the /dl signature has a 60 s TTL,
         // so resuming a long transfer needs a new URL, not the original.
         const freshUrl = () => fsDownloadHttp(path).then(info => info.url);
         try {
-          bytes = await fetchWithResume(dlInfo.url, freshUrl, progress);
+          await download({ url: dlInfo.url, freshUrl, sink,
+            onProgress: (fraction) => progress(fraction, downloadingLabel),
+            // The part on disk is of an older version of the file.
+            onRestart: () => { downloadingLabel = t('downloadFileChanged'); progress(null, downloadingLabel); } });
         } catch (e) {
           if (e.code !== 'DL_HTTP_UNREACHABLE') throw e;
           // The WS connection demonstrably works (we just got the signed
           // URL over it) but plain HTTP to the same host doesn't — typical
           // when a reverse proxy only forwards WebSocket upgrades. Fall
           // back to the WS RPC download (base64, 50 MB server-side cap).
-          const r = await fsDownload(path);
-          bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
+          await writeWhole(sink, (await fsDownload(path)).data);
         }
       } else {
         // wss:// fallback path: we got base64 over WS RPC. No progress to
         // report mid-decode.
-        bytes = Uint8Array.from(atob(dlInfo.base64), c => c.charCodeAt(0));
+        await writeWhole(sink, dlInfo.base64);
       }
 
       // There is no measured write fraction. Only transfer bytes report a percentage.
       progress(null, t('saving'));
-      if (isTauri && tauriFs) {
-        await tauriPlugins;
-        if (isAndroid) {
-          // Tauri 2's invoke supports Vec<u8> natively over its binary IPC
-          // channel. Earlier we transcoded bytes → base64 → JSON IPC →
-          // Rust base64-decode, which dominated download time on Android
-          // (FileReader.readAsDataURL is a main-thread allocation of 4n/3
-          // bytes in addition to the n raw bytes the response already used).
-          const { invoke } = await import('@tauri-apps/api/core');
-          const filePath = await invoke('save_to_downloads', { name, data: bytes });
-          completed(filePath);
-          return;
+      if (native) {
+        let dest = null;
+        if (!isAndroid) {
+          await tauriPlugins;
+          // macOS / desktop: the dialog comes after the bytes, as before.
+          dest = await tauriDialog.save({ defaultPath: name });
+          if (!dest) {
+            // Cancelled: the finished part stays in the app cache, so the
+            // next Download of this file asks again without refetching.
+            const kept = { kind: 'success', message: t('downloadPartKept'), detail: name };
+            if (operation.current()) downloadLifetime.update(token, kept); else earlier(kept);
+            return;
+          }
         }
-        // macOS / desktop: prompt for save location.
-        const savePath = await tauriDialog.save({ defaultPath: name });
-        if (!savePath) { dismissDownload(operation); return; }
-        await tauriFs.writeFile(savePath, bytes);
-        completed(String(savePath));
+        completed(await native.finish(name, dest ? String(dest) : null));
         return;
       }
+      const bytes = memory.bytes();
       // Plain browser: trigger a tag-based download.
       const blob = new Blob([bytes]);
       const blobUrl = URL.createObjectURL(blob);
@@ -1386,6 +1290,10 @@
       const requested = { kind: 'success', message: t('downloadRequested'), detail: name };
       if (operation.current()) downloadLifetime.update(token, requested); else earlier(requested);
     } catch (e) {
+      // A NETWORK failure keeps the part for a later resume (download.ts
+      // flushed what arrived); anything else (a write or save failure, a
+      // missing file) leaves no half-file behind.
+      if (!isNetworkFailure(e)) await native?.abort();
       const failed = { kind: 'error', message: String(e.message || e), detail: path };
       if (operation.current()) downloadLifetime.update(token, failed); else earlier(failed);
     }
@@ -1403,14 +1311,6 @@
   // view back; refreshing their NEW dir would announce files that landed
   // elsewhere. Still there → show the arrivals; moved on → touch nothing.
   const refreshAfterBatch = (dir) => { if (cwd === dir) loadDir(dir); };
-
-  function bytesToB64(bytes) {
-    let binary = '';
-    for (let i = 0; i < bytes.length; i += 8192) {
-      binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-    }
-    return btoa(binary);
-  }
 
   // ONE batch runner for both transports (board #214: "文件上传要有个进度或者提示，
   // 让我知道传上去了没有"). Per file: refuse over the server's message cap up

@@ -45,6 +45,7 @@ download gesture and the output passed at the Open gesture remain fixed
 through awaits. A new feedback owner does NOT cancel any requested download:
 all byte transfer and save operations still finish independently. Since board #301 the outcome of such a download is not
 dropped either: see § A download that lost its slot still reports once.
+How the bytes travel and resume: § One download core (board #305).
 
 Numeric progress means actual received bytes divided by known total bytes.
 Unknown Content-Length and the write/picker phase are indeterminate, with
@@ -323,15 +324,28 @@ Frontend `fsDownloadHttp` always uses the streaming HTTP path now (both `ws://` 
 
 `fs_download` stays — it's still the right choice for inline preview (the browser wants the bytes as `data:` URL anyway, so the base64 it gets from the server is already the final shape).
 
-### Where a download lands, and what closing the preview does (board #301, 2026-10-03)
+### One download core, resumable across sessions (board #305, 2026-10-04)
 
-Owner asked whether a second download breaks the first, whether closing the preview loses files, and why the spinner wobbled. Measured in the real app (Chromium 151, 390×844 dpr 3 and 1280×800) against a fake server whose `/dl` answers after a delay; the Android write path is read from code, not measured on a device.
+Owner, 2026-10-04: an 89 MB mp4 failed on the phone with "invalid array length"; then: "应该所有的下载都走一样的逻辑，并且支持下载断点续传之类的，如果服务端的文件没有更新，可以续传，如果更新了就重新下载".
 
-- **Landing place per platform.** Android: `save_to_downloads` writes `/storage/emulated/0/Download/TmuxMobile/<name>` (`lib.rs`), the public Download folder that the Downloads list (`list_downloads`) reads. macOS/desktop: the path the user picks in the save dialog (`tauriFs.writeFile`). Browser: the browser's own download manager (`<a download>` on a blob URL; revoking the URL 100 ms later does not touch the saved file).
-- **Closing the preview loses nothing.** A remote file's preview is read into memory (`fs_read` / `fs_download`) and never written to disk; a download is a separate write to the place above. Leaving the preview only ends the feedback slot's context.
-- **Android overwrites a same-name file** (`std::fs::write`). The save dialog and the browser rename instead.
-- **Downloads run in parallel.** Each `handleDownload` owns its chunks, byte count and fetch; nothing is queued or shared. Two overlapping downloads both save (measured: b.bin served at 3.3 s, a.bin at 5.5 s, two browser download events).
-- **Known limit: memory.** Every download is buffered whole in JS memory and then copied once into one `Uint8Array`, so the peak is about twice the file size per download, and concurrent large downloads add up. This matters most on Android. Streaming to disk is not built.
+Root cause of the error: Tauri 2 on Android never uses its binary IPC (`ipc-protocol.js`: `canUseCustomProtocol = osName !== 'android'`). The old `invoke('save_to_downloads', { data: bytes })` was JSON-encoded with one number per byte (`Array.from` in `process-ipc-message-fn.js`): 89 million array elements and about 318 million JSON characters through the Java bridge. A comment in Files.svelte claimed the binary channel; it was wrong on Android and is gone with the command.
+
+Every download now runs through `src/lib/files/download.ts`. The bytes stream from the signed `/dl` URL into a sink as they arrive; the shells differ only in the sink:
+
+| Shell | Sink | Unfinished part | Saved to | Resume | Peak memory |
+|---|---|---|---|---|---|
+| Android | `nativeSink`: ≤4 MiB base64 pieces to `download_chunk` | `Download/TmuxMobile/.tmm-<id>.part` + `.tmm-<id>.json` (ETag) | `Download/TmuxMobile/<name>` (a same-name file is replaced) | across sessions | one piece (3 MiB raw) |
+| macOS / desktop | the same `nativeSink` | `<app cache>/downloads/.tmm-<id>.part` + `.json` | the path the save dialog returns after the bytes arrive | across sessions; a cancelled dialog keeps the part and says so | one piece |
+| Browser | `memorySink`: chunks in memory, one Blob for `<a download>` | none | the browser's download manager | only within one attempt (network retries) | about the file size |
+
+- **Resume rule.** `sink.open()` reports what an earlier attempt left. The request carries `Range: bytes=<received>-` and `If-Range: <etag>`. A 206 continues the part. A 200 means the file changed (or a proxy dropped Range): the part is reset for the new ETag and the download starts at byte 0. When that throws away a part from an EARLIER attempt, the progress line reads "File changed on the server, downloading again" for the rest of the attempt (told once, no second notice). A 416 for a part that already holds every byte (the save dialog was cancelled) completes without refetching. The server side is in websocket-rpc.md § `fs_download_url`.
+- **Part id** = fnv1a64(server machine id + "\n" + remote path), 16 hex digits. The machine id rather than the URL, so the same server reached over LAN or Tailscale finds the same part. The remote path is never written to disk, and `list_downloads` hides `.tmm-` files, so the Downloads list never shows it. Rust accepts only `[0-9a-f]{16}` ids, so an id cannot name a path outside the part folder.
+- **What a failure leaves.** A network failure (fetch TypeError, stall, connection closed early) flushes what arrived and KEEPS the part for the next download of that file. Any other failure (a write, a save, a missing file) calls `download_abort`, so no half-file is left. Parts that nobody downloads again stay until removed by hand; there is no expiry in this version.
+- **Within one attempt** the earlier rules hold: up to 4 retries that refill on progress, 1.5 s apart, a fresh 60 s signature each time, a 20 s stall watchdog, and the WS `fs_download` fallback when plain HTTP is unreachable (`DownloadUnreachable`).
+- **Closing the preview loses nothing.** A remote file's preview is read into memory (`fs_read` / `fs_download`) and never written to disk; a download is a separate write to the place above.
+- **Downloads run in parallel**, each with its own sink; the slot rule below decides which one the feedback shows.
+
+Tests: `download.test.ts` (fresh, resume across sessions with Range + If-Range, a changed file restarts and is told once, a 200 inside one attempt overwrites, a complete part finishes from 416, a sink failure is not retried, the unreachable marker, piece sizes, the id); `downloads.rs` (open/reset/append/finish/abort on a real temp dir, a part without its sidecar is not resumed, id/name/destination escapes); `download.rs` (ETag, If-Range, OPTIONS); `Files.mount.test.ts` (Android: open, reset, three pieces, finish; no buffer crosses; fails if the old whole-buffer call returns). There is no device here: the APK is built, and the owner's smoke test (a file over 80 MB, the network cut midway, then Download again) is the device acceptance.
 
 ### A download that lost its slot still reports once (board #301, 2026-10-03)
 
@@ -344,7 +358,7 @@ Public-internet paths (reverse proxy in front of the server) routinely kill long
 
 - **Server: `Range` support.** `/dl` answers `206 Partial Content` + `Content-Range` for the single-range forms `bytes=N-` (what our resume client sends) and `bytes=N-M` (what a media element sends — board #182: WebKit probes with `bytes=0-1` and refuses to play unless the answer is a 206 of exactly two bytes; seeks are bounded windows), clamps `M` to the last byte, answers `416` + `Content-Range: bytes */size` when the start is past the end, and advertises `Accept-Ranges: bytes`. Suffix (`-N`) and multi-range forms fall back to a full 200, which is legal per RFC 7233. Measured live 2026-09-12 against the debug server with curl: 200 / 206 (2 bytes, 1000 bytes, exact slice equality) / 416 / 403.
 - **Server: robust request parsing.** The request is read until `\r\n\r\n` (a proxy may split the request line across TCP segments — a single `read()` used to truncate the query mid-signature and 403 valid requests). `/dl?` is located anywhere in the request line so an unstripped proxy path prefix (`GET /tmux/dl?...`) still routes. Same prefix tolerance in the HTTP-vs-WS dispatch (`looks_like_dl_request`, request line only — header echoes don't match).
-- **Client: `fetchWithResume` (Files.svelte).** Streams the body with a 20 s stall watchdog (AbortController); on any mid-transfer failure it retries with `Range: bytes=<received>-`, so finished bytes are never re-fetched. Each retry re-signs the URL via `fs_download_url` (a download signature expires after 60 s — a retry minutes into a transfer would otherwise 403). The retry budget (4) refills whenever an attempt makes progress, so a flaky-but-moving link survives many small interruptions; only consecutive zero-progress failures abort. If a resume gets 200 instead of 206 (proxy stripped the Range), the client restarts from byte 0 rather than corrupting the buffer.
+- **Client: `download()` in `download.ts` (was `fetchWithResume` in Files.svelte until board #305).** Streams the body with a 20 s stall watchdog (AbortController); on any mid-transfer failure it retries with `Range: bytes=<received>-`, so finished bytes are never re-fetched. Each retry re-signs the URL via `fs_download_url` (a download signature expires after 60 s — a retry minutes into a transfer would otherwise 403). The retry budget (4) refills whenever an attempt makes progress, so a flaky-but-moving link survives many small interruptions; only consecutive zero-progress failures abort. If a resume gets 200 instead of 206 (proxy stripped the Range, or since #305 the file changed), the client resets its sink and restarts from byte 0 rather than corrupting the file.
 
 ### Video previews stream through `/dl` (board #182, 2026-09-12)
 

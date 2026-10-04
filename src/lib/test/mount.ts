@@ -16,6 +16,10 @@ interface MountOptions {
   props?: Record<string, unknown>;
   modules: Record<string, MockExport>[];
   setup?: (window: DOMWindow) => void;
+  /** Lazy package imports that may stay PENDING instead of failing the mount,
+   * by specifier prefix (board #305: a Tauri-shell fixture loads its plugin
+   * modules at init). Every other lazy import still fails. */
+  pendingImports?: string[];
 }
 interface ClientApi {
   start(props: Record<string, unknown>): void;
@@ -153,7 +157,9 @@ export async function compileMount(component: URL, mockedModules: readonly URL[]
         event.preventDefault();
       });
       Object.assign(win, {
-        __mountUnexpectedImport: (id: string) => fail(`Unexpected lazy import in a mounted fixture: ${id}`),
+        __mountUnexpectedImport: (id: string) => options.pendingImports?.some((prefix) => id.startsWith(prefix))
+          ? new win.Promise(() => {})
+          : fail(`Unexpected lazy import in a mounted fixture: ${id}`),
         fetch: () => fail('Unexpected fetch in a mounted fixture'),
         WebSocket: class { constructor() { fail('Unexpected WebSocket in a mounted fixture'); } },
         XMLHttpRequest: class { constructor() { fail('Unexpected XMLHttpRequest in a mounted fixture'); } },

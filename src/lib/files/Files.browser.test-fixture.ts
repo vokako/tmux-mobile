@@ -56,7 +56,11 @@ Object.assign(window, { filesFixture: {
   invoke(name: string, args?: { name: string }) {
     if (name === 'list_downloads') return Promise.resolve([{ name: 'copy.md', modified: 0 }]);
     if (name === 'delete_download') { deletes.push(args!.name); return pending; }
-    if (feedback && name === 'save_to_downloads') return gate('android-save', [args]);
+    // Board #305: every native download is written in pieces; the gate
+    // stands at the step that saves it.
+    if (feedback && name === 'download_open') return Promise.resolve({ received: 0, etag: null });
+    if (feedback && ['download_reset', 'download_chunk', 'download_abort'].includes(name)) return Promise.resolve(null);
+    if (feedback && name === 'download_finish') return gate(scenario === 'feedback-android' ? 'android-save' : 'desktop-finish', [args]);
     return fail(`Unexpected IPC: ${name}`);
   },
   native(name: string, args: unknown[]) {

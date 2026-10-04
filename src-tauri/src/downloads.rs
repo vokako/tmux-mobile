@@ -1,0 +1,226 @@
+//! A download being written to disk, resumable across sessions (board #305).
+//!
+//! Why pieces: Tauri 2 on Android never uses its binary IPC channel
+//! (`ipc-protocol.js`: `canUseCustomProtocol = osName !== 'android'`), so a
+//! `Uint8Array` argument is JSON-encoded as one number per byte. An 89 MB file
+//! became an 89-million-element JS array and ~318 million JSON characters
+//! crossing the Java bridge, and the phone failed with "Invalid array length"
+//! (owner, 2026-10-04). The webview therefore hands every download over as
+//! base64 pieces of at most 4 MiB while the bytes arrive; peak memory is one
+//! piece. The desktop shell uses the same commands, so all native downloads
+//! share one write path and one resume rule.
+//!
+//! Layout in `dir`: `.tmm-<id>.part` holds the bytes so far, `.tmm-<id>.json`
+//! the server's ETag for them. `id` is the webview's fnv1a64 of server +
+//! remote path (16 hex digits), so the same file from the same server finds
+//! its part again after a restart; the remote path itself is never stored.
+//! The helpers take `dir` as an argument so the tests run on a temp dir with
+//! the real filesystem; they are not gated on `gui`, so `test:rust` runs them.
+
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+use base64::Engine;
+
+/// Where the Android shell keeps downloads: the public Download folder, so a
+/// file outlives the app and the system file manager sees it.
+pub const ANDROID_DIR: &str = "/storage/emulated/0/Download/TmuxMobile";
+
+/// The prefix of every unfinished-download file; `list_downloads` hides it.
+pub const PART_PREFIX: &str = ".tmm-";
+
+/// Just the final path component, never `.`/`..`/empty: a name from the
+/// remote server must not choose a directory.
+pub fn sanitize_filename(name: &str) -> Result<String, String> {
+    let fname = Path::new(name)
+        .file_name()
+        .and_then(|f| f.to_str())
+        .ok_or_else(|| "invalid filename".to_string())?;
+    if fname.is_empty() || fname == "." || fname == ".." {
+        return Err("invalid filename".to_string());
+    }
+    Ok(fname.to_string())
+}
+
+/// Exactly 16 lowercase hex digits, so an id can only ever name a file
+/// inside `dir`.
+fn check_id(id: &str) -> Result<(), String> {
+    if id.len() == 16 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        Ok(())
+    } else {
+        Err("invalid download id".to_string())
+    }
+}
+fn part(dir: &Path, id: &str) -> PathBuf { dir.join(format!("{PART_PREFIX}{id}.part")) }
+fn sidecar(dir: &Path, id: &str) -> PathBuf { dir.join(format!("{PART_PREFIX}{id}.json")) }
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+pub struct PartInfo {
+    /// Bytes already on disk.
+    pub received: u64,
+    /// The server's ETag for those bytes, if it sent one.
+    pub etag: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Sidecar {
+    etag: Option<String>,
+}
+
+/// What a previous session left: the part's size and its ETag. No part, or a
+/// part without a readable sidecar, counts as nothing to resume.
+pub fn open_part(dir: &Path, id: &str) -> Result<PartInfo, String> {
+    check_id(id)?;
+    let size = std::fs::metadata(part(dir, id)).map(|m| m.len()).ok();
+    let meta: Option<Sidecar> = std::fs::read(sidecar(dir, id)).ok()
+        .and_then(|raw| serde_json::from_slice(&raw).ok());
+    Ok(match (size, meta) {
+        (Some(received), Some(meta)) => PartInfo { received, etag: meta.etag },
+        _ => PartInfo { received: 0, etag: None },
+    })
+}
+
+/// Start over for the version `etag` names: empty part, new sidecar.
+pub fn reset_part(dir: &Path, id: &str, etag: Option<&str>) -> Result<(), String> {
+    check_id(id)?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("mkdir: {e}"))?;
+    std::fs::File::create(part(dir, id)).map_err(|e| format!("create: {e}"))?;
+    let meta = serde_json::to_vec(&Sidecar { etag: etag.map(str::to_string) }).map_err(|e| e.to_string())?;
+    std::fs::write(sidecar(dir, id), meta).map_err(|e| format!("sidecar: {e}"))
+}
+
+/// Append one base64 piece. The part must have been opened by `reset_part`
+/// (a fresh download) or found by `open_part` (a resume).
+pub fn append_part(dir: &Path, id: &str, data_b64: &str) -> Result<(), String> {
+    check_id(id)?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data_b64)
+        .map_err(|e| format!("decode: {e}"))?;
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(part(dir, id))
+        .map_err(|e| format!("open part: {e}"))?;
+    file.write_all(&bytes).map_err(|e| format!("write: {e}"))
+}
+
+/// Move the finished part to `dest`, replacing a file of that name (Android
+/// has always overwritten a same-name download). A rename across volumes
+/// (app cache → a folder on another disk) falls back to copy + remove.
+pub fn finish_part(dir: &Path, id: &str, dest: &Path) -> Result<PathBuf, String> {
+    check_id(id)?;
+    let from = part(dir, id);
+    if std::fs::rename(&from, dest).is_err() {
+        std::fs::copy(&from, dest).map_err(|e| format!("save: {e}"))?;
+        std::fs::remove_file(&from).map_err(|e| format!("remove part: {e}"))?;
+    }
+    let _ = std::fs::remove_file(sidecar(dir, id));
+    Ok(dest.to_path_buf())
+}
+
+/// Drop an unfinished download. Absent is fine.
+pub fn abort_part(dir: &Path, id: &str) -> Result<(), String> {
+    check_id(id)?;
+    for path in [part(dir, id), sidecar(dir, id)] {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("remove: {e}")),
+        }
+    }
+    Ok(())
+}
+
+/// The desktop destination comes from the save dialog: it must be an absolute
+/// file path in an existing folder.
+pub fn checked_dest(dest: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(dest);
+    let ok = path.is_absolute()
+        && path.file_name().is_some()
+        && !path.is_dir()
+        && path.parent().is_some_and(|p| p.is_dir());
+    if ok { Ok(path) } else { Err("invalid save location".to_string()) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ID: &str = "0123456789abcdef";
+    fn b64(bytes: &[u8]) -> String { base64::engine::general_purpose::STANDARD.encode(bytes) }
+    fn tmp(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("tmm-dl-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_fresh_download_appends_in_order_and_finish_moves_it() {
+        let dir = tmp("fresh");
+        assert_eq!(open_part(&dir, ID).unwrap(), PartInfo { received: 0, etag: None });
+        reset_part(&dir, ID, Some("\"a-1\"")).unwrap();
+        append_part(&dir, ID, &b64(b"hello ")).unwrap();
+        append_part(&dir, ID, &b64(b"world")).unwrap();
+        let out = finish_part(&dir, ID, &dir.join("greeting.txt")).unwrap();
+        assert_eq!(std::fs::read(&out).unwrap(), b"hello world");
+        assert!(!part(&dir, ID).exists() && !sidecar(&dir, ID).exists(), "nothing unfinished is left");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_later_session_finds_the_part_and_its_etag() {
+        let dir = tmp("resume");
+        reset_part(&dir, ID, Some("\"a-1\"")).unwrap();
+        append_part(&dir, ID, &b64(b"12345")).unwrap();
+        assert_eq!(open_part(&dir, ID).unwrap(), PartInfo { received: 5, etag: Some("\"a-1\"".into()) });
+        append_part(&dir, ID, &b64(b"678")).unwrap();
+        assert_eq!(open_part(&dir, ID).unwrap().received, 8);
+        // The file changed: start over for the new version.
+        reset_part(&dir, ID, Some("\"b-2\"")).unwrap();
+        assert_eq!(open_part(&dir, ID).unwrap(), PartInfo { received: 0, etag: Some("\"b-2\"".into()) });
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_part_without_its_sidecar_is_not_resumed() {
+        let dir = tmp("orphan");
+        std::fs::write(part(&dir, ID), b"stale").unwrap();
+        assert_eq!(open_part(&dir, ID).unwrap(), PartInfo { received: 0, etag: None });
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn finish_replaces_a_same_name_file_and_abort_is_idempotent() {
+        let dir = tmp("finish");
+        std::fs::write(dir.join("v.mp4"), b"old").unwrap();
+        reset_part(&dir, ID, None).unwrap();
+        append_part(&dir, ID, &b64(b"new")).unwrap();
+        finish_part(&dir, ID, &dir.join("v.mp4")).unwrap();
+        assert_eq!(std::fs::read(dir.join("v.mp4")).unwrap(), b"new");
+        reset_part(&dir, ID, None).unwrap();
+        abort_part(&dir, ID).unwrap();
+        abort_part(&dir, ID).unwrap();
+        assert!(!part(&dir, ID).exists() && !sidecar(&dir, ID).exists());
+        assert!(append_part(&dir, ID, &b64(b"x")).is_err(), "no append without a reset or a found part");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn ids_names_and_destinations_cannot_escape() {
+        let dir = tmp("escape");
+        for bad in ["../../etc/passw", "0123456789ABCDEF", "0123456789abcde", "0123456789abcdefa", ""] {
+            assert!(reset_part(&dir, bad, None).is_err(), "{bad:?}");
+            assert!(open_part(&dir, bad).is_err(), "{bad:?}");
+            assert!(abort_part(&dir, bad).is_err(), "{bad:?}");
+        }
+        reset_part(&dir, ID, None).unwrap();
+        assert!(append_part(&dir, ID, "not base64!").is_err());
+        assert_eq!(sanitize_filename("../../etc/passwd").unwrap(), "passwd");
+        assert!(sanitize_filename("..").is_err());
+        assert!(checked_dest("relative/file.bin").is_err());
+        assert!(checked_dest("/no/such/folder/file.bin").is_err());
+        assert!(checked_dest(dir.to_str().unwrap()).is_err(), "a folder is not a file to save to");
+        assert!(checked_dest(dir.join("out.bin").to_str().unwrap()).is_ok());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

@@ -1,5 +1,6 @@
 pub mod agent_notifications;
 pub mod config;
+pub mod downloads;
 pub mod fs;
 pub mod pptx;
 pub mod server;
@@ -43,44 +44,73 @@ fn get_local_config() -> serde_json::Value {
 }
 
 #[cfg(feature = "gui")]
-fn sanitize_filename(name: &str) -> Result<String, String> {
-    // Extract just the filename, stripping any directory components
-    let fname = std::path::Path::new(name)
-        .file_name()
-        .and_then(|f| f.to_str())
-        .ok_or_else(|| "invalid filename".to_string())?;
-    if fname.is_empty() || fname == "." || fname == ".." {
-        return Err("invalid filename".to_string());
+use downloads::sanitize_filename;
+
+// Native downloads are written in pieces and resume across sessions
+// (board #305, downloads.rs). The part files live in the Android Downloads
+// folder (hidden by their prefix) or, on the desktop, in the app cache until
+// the save dialog names a destination.
+#[cfg(feature = "gui")]
+fn part_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    #[cfg(target_os = "android")]
+    { let _ = app; Ok(std::path::PathBuf::from(downloads::ANDROID_DIR)) }
+    #[cfg(not(target_os = "android"))]
+    {
+        use tauri::Manager;
+        app.path().app_cache_dir().map(|d| d.join("downloads")).map_err(|e| e.to_string())
     }
-    Ok(fname.to_string())
 }
 
 #[cfg(feature = "gui")]
 #[tauri::command]
-fn save_to_downloads(name: String, data: Vec<u8>) -> Result<String, String> {
-    // Used to take base64 String — the round trip
-    //   Rust raw → JS base64 → JSON IPC → Rust base64-decode → write
-    // dominated download time on Android for any non-trivial file.
-    // Now Tauri's IPC carries Vec<u8> directly via its binary channel,
-    // so the bytes pass through without a single copy or transcode.
-    let safe_name = sanitize_filename(&name)?;
-    let dir = std::path::PathBuf::from("/storage/emulated/0/Download/TmuxMobile");
-    std::fs::create_dir_all(&dir).ok();
-    let path = dir.join(&safe_name);
-    std::fs::write(&path, &data).map_err(|e| format!("write: {}", e))?;
-    Ok(path.to_string_lossy().to_string())
+fn download_open(app: tauri::AppHandle, id: String) -> Result<downloads::PartInfo, String> {
+    downloads::open_part(&part_dir(&app)?, &id)
+}
+
+#[cfg(feature = "gui")]
+#[tauri::command]
+fn download_reset(app: tauri::AppHandle, id: String, etag: Option<String>) -> Result<(), String> {
+    downloads::reset_part(&part_dir(&app)?, &id, etag.as_deref())
+}
+
+#[cfg(feature = "gui")]
+#[tauri::command]
+fn download_chunk(app: tauri::AppHandle, id: String, data: String) -> Result<(), String> {
+    downloads::append_part(&part_dir(&app)?, &id, &data)
+}
+
+/// Android saves as `<Downloads>/TmuxMobile/<name>`; the desktop passes the
+/// path its save dialog returned.
+#[cfg(feature = "gui")]
+#[tauri::command]
+fn download_finish(app: tauri::AppHandle, id: String, name: String, dest: Option<String>) -> Result<String, String> {
+    let dir = part_dir(&app)?;
+    let target = if cfg!(target_os = "android") {
+        dir.join(sanitize_filename(&name)?)
+    } else {
+        downloads::checked_dest(dest.as_deref().ok_or("no save location")?)?
+    };
+    downloads::finish_part(&dir, &id, &target).map(|p| p.to_string_lossy().to_string())
+}
+
+#[cfg(feature = "gui")]
+#[tauri::command]
+fn download_abort(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    downloads::abort_part(&part_dir(&app)?, &id)
 }
 
 #[cfg(feature = "gui")]
 #[tauri::command]
 fn list_downloads() -> Result<Vec<DownloadEntry>, String> {
-    let dir = std::path::PathBuf::from("/storage/emulated/0/Download/TmuxMobile");
+    let dir = std::path::PathBuf::from(downloads::ANDROID_DIR);
     std::fs::create_dir_all(&dir).ok();
     let mut files = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
             if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 if let Some(name) = entry.file_name().to_str() {
+                    // An unfinished download is not a file yet (#305).
+                    if name.starts_with(downloads::PART_PREFIX) { continue; }
                     let modified = entry
                         .metadata()
                         .ok()
@@ -108,7 +138,7 @@ fn list_downloads() -> Result<Vec<DownloadEntry>, String> {
 #[tauri::command]
 fn delete_download(name: String) -> Result<(), String> {
     let safe_name = sanitize_filename(&name)?;
-    let path = std::path::PathBuf::from("/storage/emulated/0/Download/TmuxMobile").join(&safe_name);
+    let path = std::path::PathBuf::from(downloads::ANDROID_DIR).join(&safe_name);
     std::fs::remove_file(&path).map_err(|e| format!("delete: {}", e))
 }
 
@@ -116,7 +146,7 @@ fn delete_download(name: String) -> Result<(), String> {
 #[tauri::command]
 fn get_download_path(name: String) -> Result<String, String> {
     let safe_name = sanitize_filename(&name)?;
-    Ok(format!("/storage/emulated/0/Download/TmuxMobile/{}", safe_name))
+    Ok(format!("{}/{}", downloads::ANDROID_DIR, safe_name))
 }
 
 #[cfg(feature = "gui")]
@@ -146,7 +176,7 @@ pub fn run() {
         // this plugin. The JS side (`hub/notifications.ts`) picks it when it
         // runs inside Tauri and keeps the browser path otherwise.
         .plugin(tauri_plugin_notification::init())
-        .invoke_handler(tauri::generate_handler![get_local_config, save_to_downloads, list_downloads, delete_download, get_download_path])
+        .invoke_handler(tauri::generate_handler![get_local_config, download_open, download_reset, download_chunk, download_finish, download_abort, list_downloads, delete_download, get_download_path])
         .setup(|app| {
             // Desktop: build a custom menu WITHOUT the default View → Zoom
             // items.
