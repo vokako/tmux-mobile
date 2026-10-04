@@ -887,6 +887,7 @@ test('Android saves a download through download_chunk pieces, never one buffer (
   const size = 7 * 1024 * 1024 + 123;           // three pieces: 3 MiB, 3 MiB, the rest
   const file = new Uint8Array(size).map((_, i) => i & 0xff);
   const calls: { cmd: string; args: Record<string, unknown> }[] = [];
+  let releasedAll = 0;
   const app = await (await shell).mount(context, {
     props: { visible: true, session: 'fixture' },
     pendingImports: ['@tauri-apps/'],
@@ -901,6 +902,7 @@ test('Android saves a download through download_chunk pieces, never one buffer (
     modules: [
       rpc({ getMachineId: () => 'machine-1', fsDownloadHttp: async () => ({ url: 'http://h/dl?path=x', name: 'AGENTS.md' }) }),
       { invokeNative: async (cmd: string, args: Record<string, unknown> = {}) => {
+        if (cmd === 'download_release_all') { releasedAll++; return null; }   // the page start
         calls.push({ cmd, args });
         if (cmd === 'download_open') return { received: 0, etag: null };
         if (cmd === 'download_finish') return '/storage/emulated/0/Download/TmuxMobile/AGENTS.md';
@@ -912,6 +914,7 @@ test('Android saves a download through download_chunk pieces, never one buffer (
     await settle(app);
     button(app, 'Download: AGENTS.md').click();
     for (let i = 0; i < 40 && !calls.some((c) => c.cmd === 'download_finish'); i++) await settle(app);
+    assert.equal(releasedAll, 1, 'a new page drops stale Rust claims once');
     const id = calls[0]!.args.id as string;
     assert.match(id, /^[0-9a-f]{16}$/u);
     assert.deepEqual(calls.map((c) => c.cmd), ['download_open', 'download_reset', 'download_chunk', 'download_chunk', 'download_chunk', 'download_finish']);

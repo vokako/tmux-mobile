@@ -84,7 +84,10 @@ export async function download(o: DownloadOptions): Promise<{ etag: string | nul
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
   const stallMs = o.stallMs ?? DL_STALL_TIMEOUT_MS;
   const maxRetries = o.maxRetries ?? DL_MAX_RETRIES;
-  const part = await o.sink.open();
+  // A refused claim (another writer holds this part) must not be handled as
+  // this attempt's failure: the caller neither aborts nor releases it.
+  let part: PartState;
+  try { part = await o.sink.open(); } catch (e) { throw busy(e); }
   let received = part.received;
   let etag = part.etag;
   // Only a part from an earlier attempt can be outdated; tell the user once.
@@ -184,6 +187,12 @@ export async function download(o: DownloadOptions): Promise<{ etag: string | nul
       clearTimeout(timer);
     }
   }
+}
+
+/** The part has another writer: leave it, and its claim, alone. */
+function busy(e: unknown) {
+  if (e && typeof e === 'object') (e as { partBusy?: boolean }).partBusy = true;
+  return e;
 }
 
 /** Mark whether the part on disk is worth keeping for a later resume. */

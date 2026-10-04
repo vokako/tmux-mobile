@@ -8,6 +8,10 @@
   // (board #305): the page and the drawer write the same part folder, so the
   // one-writer rule must hold across them, not only inside one.
   const inFlight = new Map(); // part id → { owner, adopt() }
+  // A fresh page has no writer yet: drop claims a previous page (a webview
+  // reload in a live process) left in Rust, or its parts could never be
+  // resumed. Once per realm, before any download can start.
+  if (isTauri) invokeNative('download_release_all').catch(() => {});
 </script>
 
 <script>
@@ -1324,7 +1328,10 @@
       // A NETWORK failure keeps the part for a later resume (download.ts
       // flushed what arrived); anything else (a write or save failure, a
       // missing file) leaves no half-file behind.
-      if (e?.keepPart) await native?.release(); else await native?.abort();
+      // Another writer holds the part: it is theirs to finish.
+      if (e?.partBusy) {}
+      else if (e?.keepPart) await native?.release();
+      else await native?.abort();
       const failed = { kind: 'error', message: String(e.message || e), detail: path };
       if (operation.current()) downloadLifetime.update(token, failed); else earlier(failed);
     }

@@ -85,6 +85,13 @@ fn claim(dir: &Path, id: &str) -> Result<(), String> {
     }
 }
 
+/// A new webview (first load or a reload, while the process lives on) has no
+/// writer of its own yet: claims left by the previous page are dead
+/// (validator #305 P2). The shell calls this once when the page starts.
+pub fn release_all() {
+    if let Ok(mut held) = WRITERS.lock() { *held = None; }
+}
+
 /// Let go of an id without touching its files.
 pub fn release_part(dir: &Path, id: &str) -> Result<(), String> {
     check_id(id)?;
@@ -238,6 +245,21 @@ mod tests {
         abort_part(&dir, ID).unwrap();
         assert!(!part(&dir, ID).exists() && !sidecar(&dir, ID).exists());
         assert!(append_part(&dir, ID, &b64(b"x")).is_err(), "no append without a reset or a found part");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_refused_claim_leaves_the_first_writer_alone_and_a_new_page_frees_all() {
+        let dir = tmp("claim");
+        open_part(&dir, ID).unwrap();
+        reset_part(&dir, ID, None).unwrap();
+        append_part(&dir, ID, &b64(b"first")).unwrap();
+        assert!(open_part(&dir, ID).is_err(), "the second writer is refused");
+        append_part(&dir, ID, &b64(b" writer")).unwrap();
+        assert_eq!(std::fs::read(part(&dir, ID)).unwrap(), b"first writer", "and the first keeps writing");
+        release_all();
+        assert!(open_part(&dir, ID).is_ok(), "a reloaded page may resume the part");
+        release_part(&dir, ID).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

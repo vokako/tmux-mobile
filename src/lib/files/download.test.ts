@@ -183,3 +183,11 @@ test('the native sink releases its writer claim when it keeps a part (#305)', as
   await sink.release();
   assert.deepEqual(calls, ['download_release'], 'and a failing release does not throw');
 });
+
+test('a refused part claim is marked busy, so the caller leaves the other writer alone (validator #305 P2)', async () => {
+  const s = server(bytes(100), '"v1"');
+  const sink = { open: async () => { throw new Error('this file is already downloading'); }, reset: async () => {}, write: async () => {}, flush: async () => {} };
+  const e = await download({ ...fast, fetch: s.fetch, sink }).then(() => null, (err) => err);
+  assert.equal(e?.partBusy, true);
+  assert.equal(s.seen.length, 0, 'nothing is fetched');
+});
