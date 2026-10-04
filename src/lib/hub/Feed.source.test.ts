@@ -551,3 +551,10 @@ test('a held bubble\u2019s double-tap reuses the terminal detector and the expan
   assert.match(source, /ondblclick=\{\(\) => \{ if \(pinned && askHeld\) jumpHeld\(key\); \}\}/u, 'only a HELD bubble jumps');
   assert.doesNotMatch(source, /function jumpHeld[\s\S]{0,200}expanded = /u, 'the jump never expands');
 });
+
+test('a held bubble lifts by shadow only: no backdrop blur behind its rounded corners (board #302)', () => {
+  // Owner 2026-10-04 (phone screenshot): "圆角后边的阴影有问题". The blur sat on
+  // the square .msg box; the opaque bubble showed it only outside its corners.
+  assert.doesNotMatch(source, /\.msg\.held \{[^}]*backdrop-filter/u);
+  assert.match(source, /\.msg\.held \.bubble \{ box-shadow: 0 6px 20px rgba\(0, 0, 0, 0\.28\); \}/u);
+});

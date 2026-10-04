@@ -1065,16 +1065,17 @@
      — a deliberately long question held at an edge covers more of the feed, and
      that is the trade the owner asked for.
 
-     Depth is the only thing `.held` adds: the backdrop blur plus a lifted
-     shadow, both paint-only, so a bubble overlapping the scrolling content
-     below it reads as floating rather than as a rendering glitch. */
+     Depth is the only thing `.held` adds: a lifted shadow, paint-only, so a
+     bubble overlapping the scrolling content below it reads as floating rather
+     than as a rendering glitch. No backdrop blur (board #302): it sat on the
+     SQUARE .msg box while the opaque bubble is rounded, so it was visible only
+     in the corners outside the bubble's curve, as a grey smear behind them. */
   /* NOTHING is clipped or capped here. The bubble keeps its whole box — border,
      radius, padding, meta trailer — and stays as tall as the text it is showing;
      what shrinks is the TEXT, folded by elideTail before it is rendered (owner,
      2026-08-19: "我希望是消息内容自己内部折叠 不是框截断 … 气泡什么的都要完整的不要
      任何裁切"). A cap or a clip would cut the bubble itself, which is exactly the
      thing that read as broken in the two earlier attempts. */
-  .msg.held { -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
   .msg.held .bubble { box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28); }
   /* Back to the tail: the LOOK is the shared .to-tail in app.css (board #49
      unified it with the Terminal's) — only the feed placement lives here. */
