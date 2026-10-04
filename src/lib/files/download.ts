@@ -303,7 +303,9 @@ export function nativeSink(invoke: NativeInvoke, id: string, piece = PIECE_BYTES
 
 /** The part file's id: fnv1a64(server + "\n" + remote path), 16 hex digits.
  * The same file from the same server finds its part again after a restart;
- * the path itself never reaches the disk. */
+ * the id carries no path. The path is stored, in the part's sidecar (board
+ * #308, so the Downloads view can resume it): on Android that is the public
+ * Download/TmuxMobile folder, hidden only by its dot prefix. */
 export function partId(server: string, path: string): string {
   let h = 0xcbf29ce484222325n;
   for (const b of new TextEncoder().encode(`${server}\n${path}`)) {

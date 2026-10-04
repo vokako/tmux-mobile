@@ -13,7 +13,10 @@
 //! Layout in `dir`: `.tmm-<id>.part` holds the bytes so far, `.tmm-<id>.json`
 //! the server's ETag for them. `id` is the webview's fnv1a64 of server +
 //! remote path (16 hex digits), so the same file from the same server finds
-//! its part again after a restart; the remote path itself is never stored.
+//! its part again after a restart. The sidecar records the file name, server
+//! path and machine id (board #308, for the Downloads view). On Android the
+//! part folder is the public Download/TmuxMobile, hidden only by the dot
+//! prefix; on the desktop it is the app cache.
 //! The helpers take `dir` as an argument so the tests run on a temp dir with
 //! the real filesystem; they are not gated on `gui`, so `test:rust` runs them.
 
