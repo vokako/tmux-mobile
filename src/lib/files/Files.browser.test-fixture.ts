@@ -59,7 +59,7 @@ Object.assign(window, { filesFixture: {
     // Board #305: every native download is written in pieces; the gate
     // stands at the step that saves it.
     if (feedback && name === 'download_open') return Promise.resolve({ received: 0, etag: null });
-    if (feedback && ['download_reset', 'download_chunk', 'download_abort'].includes(name)) return Promise.resolve(null);
+    if (feedback && ['download_reset', 'download_chunk', 'download_abort', 'download_release'].includes(name)) return Promise.resolve(null);
     if (feedback && name === 'download_finish') return gate(scenario === 'feedback-android' ? 'android-save' : 'desktop-finish', [args]);
     return fail(`Unexpected IPC: ${name}`);
   },

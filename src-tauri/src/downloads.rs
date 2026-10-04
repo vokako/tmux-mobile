@@ -17,8 +17,10 @@
 //! The helpers take `dir` as an argument so the tests run on a temp dir with
 //! the real filesystem; they are not gated on `gui`, so `test:rust` runs them.
 
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use base64::Engine;
 
@@ -67,10 +69,36 @@ struct Sidecar {
     etag: Option<String>,
 }
 
+/// Parts that have a writer in this process (validator #305). The webview
+/// keeps one attempt per id (Files' module table); this is the second line:
+/// `open_part` claims the id and refuses a second claim until `finish_part`
+/// or `abort_part` releases it, or the writer gives up (`release_part`, a
+/// network failure that keeps the part for a later resume).
+static WRITERS: Mutex<Option<HashSet<(PathBuf, String)>>> = Mutex::new(None);
+
+fn claim(dir: &Path, id: &str) -> Result<(), String> {
+    let mut held = WRITERS.lock().map_err(|_| "download lock poisoned".to_string())?;
+    if held.get_or_insert_with(HashSet::new).insert((dir.to_path_buf(), id.to_string())) {
+        Ok(())
+    } else {
+        Err("this file is already downloading".to_string())
+    }
+}
+
+/// Let go of an id without touching its files.
+pub fn release_part(dir: &Path, id: &str) -> Result<(), String> {
+    check_id(id)?;
+    if let Ok(mut held) = WRITERS.lock() {
+        if let Some(set) = held.as_mut() { set.remove(&(dir.to_path_buf(), id.to_string())); }
+    }
+    Ok(())
+}
+
 /// What a previous session left: the part's size and its ETag. No part, or a
 /// part without a readable sidecar, counts as nothing to resume.
 pub fn open_part(dir: &Path, id: &str) -> Result<PartInfo, String> {
     check_id(id)?;
+    claim(dir, id)?;
     let size = std::fs::metadata(part(dir, id)).map(|m| m.len()).ok();
     let meta: Option<Sidecar> = std::fs::read(sidecar(dir, id)).ok()
         .and_then(|raw| serde_json::from_slice(&raw).ok());
@@ -114,6 +142,7 @@ pub fn finish_part(dir: &Path, id: &str, dest: &Path) -> Result<PathBuf, String>
         std::fs::remove_file(&from).map_err(|e| format!("remove part: {e}"))?;
     }
     let _ = std::fs::remove_file(sidecar(dir, id));
+    release_part(dir, id)?;
     Ok(dest.to_path_buf())
 }
 
@@ -127,7 +156,7 @@ pub fn abort_part(dir: &Path, id: &str) -> Result<(), String> {
             Err(e) => return Err(format!("remove: {e}")),
         }
     }
-    Ok(())
+    release_part(dir, id)
 }
 
 /// The desktop destination comes from the save dialog: it must be an absolute
@@ -158,6 +187,9 @@ mod tests {
     fn a_fresh_download_appends_in_order_and_finish_moves_it() {
         let dir = tmp("fresh");
         assert_eq!(open_part(&dir, ID).unwrap(), PartInfo { received: 0, etag: None });
+        assert_eq!(open_part(&dir, ID).unwrap_err(), "this file is already downloading", "one writer per part");
+        assert!(open_part(&tmp("fresh-other"), ID).is_ok(), "the same id in another folder is another part");
+        release_part(&tmp("fresh-other"), ID).unwrap();
         reset_part(&dir, ID, Some("\"a-1\"")).unwrap();
         append_part(&dir, ID, &b64(b"hello ")).unwrap();
         append_part(&dir, ID, &b64(b"world")).unwrap();
@@ -172,9 +204,12 @@ mod tests {
         let dir = tmp("resume");
         reset_part(&dir, ID, Some("\"a-1\"")).unwrap();
         append_part(&dir, ID, &b64(b"12345")).unwrap();
+        // A later session: nothing holds the id any more.
         assert_eq!(open_part(&dir, ID).unwrap(), PartInfo { received: 5, etag: Some("\"a-1\"".into()) });
         append_part(&dir, ID, &b64(b"678")).unwrap();
+        release_part(&dir, ID).unwrap();
         assert_eq!(open_part(&dir, ID).unwrap().received, 8);
+        release_part(&dir, ID).unwrap();
         // The file changed: start over for the new version.
         reset_part(&dir, ID, Some("\"b-2\"")).unwrap();
         assert_eq!(open_part(&dir, ID).unwrap(), PartInfo { received: 0, etag: Some("\"b-2\"".into()) });
@@ -186,6 +221,7 @@ mod tests {
         let dir = tmp("orphan");
         std::fs::write(part(&dir, ID), b"stale").unwrap();
         assert_eq!(open_part(&dir, ID).unwrap(), PartInfo { received: 0, etag: None });
+        release_part(&dir, ID).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

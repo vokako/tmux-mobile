@@ -105,6 +105,13 @@ fn download_abort(app: tauri::AppHandle, id: String) -> Result<(), String> {
     downloads::abort_part(&part_dir(&app)?, &id)
 }
 
+/// The writer gave up on the network and keeps its part for a later resume.
+#[cfg(feature = "gui")]
+#[tauri::command]
+fn download_release(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    downloads::release_part(&part_dir(&app)?, &id)
+}
+
 #[cfg(feature = "gui")]
 #[tauri::command]
 fn list_downloads() -> Result<Vec<DownloadEntry>, String> {
@@ -182,7 +189,7 @@ pub fn run() {
         // this plugin. The JS side (`hub/notifications.ts`) picks it when it
         // runs inside Tauri and keeps the browser path otherwise.
         .plugin(tauri_plugin_notification::init())
-        .invoke_handler(tauri::generate_handler![get_local_config, download_open, download_reset, download_chunk, download_finish, download_abort, list_downloads, delete_download, get_download_path])
+        .invoke_handler(tauri::generate_handler![get_local_config, download_open, download_reset, download_chunk, download_finish, download_abort, download_release, list_downloads, delete_download, get_download_path])
         .setup(|app| {
             // Desktop: build a custom menu WITHOUT the default View → Zoom
             // items.

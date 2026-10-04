@@ -176,3 +176,10 @@ test('what a failure leaves: the link keeps the part, the file or the sink drops
   assert.equal(e.message, 'disk full');
   assert.equal(e.keepPart, false, 'a write failure leaves no half-file');
 });
+
+test('the native sink releases its writer claim when it keeps a part (#305)', async () => {
+  const calls: string[] = [];
+  const sink = nativeSink(async (cmd) => { calls.push(cmd); if (cmd === 'download_release') throw new Error('gone'); return null; }, 'abcdefabcdefabcd');
+  await sink.release();
+  assert.deepEqual(calls, ['download_release'], 'and a failing release does not throw');
+});

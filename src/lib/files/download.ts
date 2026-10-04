@@ -261,6 +261,12 @@ export function nativeSink(invoke: NativeInvoke, id: string, piece = PIECE_BYTES
     async finish(name: string, dest: string | null = null) {
       return await invoke('download_finish', { id, name, dest }) as string;
     },
+    /** Keep the part for a later resume and let go of the writer claim
+     * (downloads.rs). Never throws. */
+    async release() {
+      pending = []; held = 0;
+      try { await invoke('download_release', { id }); } catch { /* the claim ends with the app */ }
+    },
     /** Drop the part. Never throws: the error that led here wins. */
     async abort() {
       pending = []; held = 0;

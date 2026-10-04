@@ -4,6 +4,10 @@
   // any one instance. In-memory on purpose — a temporary reading position,
   // not a preference; the follow-the-real-cwd rule still outranks it.
   const browsed = new Map(); // session → { cwd, sourceDir }
+  // Native downloads in flight by part id, shared by every Files instance
+  // (board #305): the page and the drawer write the same part folder, so the
+  // one-writer rule must hold across them, not only inside one.
+  const inFlight = new Map(); // part id → { owner, adopt() }
 </script>
 
 <script>
@@ -1197,12 +1201,14 @@
     await sink.flush();
   }
 
-  /** Native downloads in flight, by part id (board #305). The id is stable
-   * per server + file so a later session can resume; two concurrent
-   * attempts on one id would append to the same part and corrupt it, so a
-   * second Download of a file already downloading takes that attempt back
-   * into the slot instead of starting another. */
-  const inFlight = new Map();
+  /** One writer per part id (board #305). The id is stable per server +
+   * file so a later session can resume; two concurrent attempts on one id
+   * would append to the same part and corrupt it. A second Download of a
+   * file already downloading starts nothing: in THIS Files it takes that
+   * attempt back into the slot; in the other Files (page vs drawer) it says
+   * the file is already downloading, because the progress lives where the
+   * download was started. `inFlight` is the module-level table. */
+  const instance = {};
 
   async function handleDownload(path) {
     const name = path.split('/').pop();
@@ -1210,7 +1216,14 @@
     // shared across servers: a one-off id downloads correctly, it just cannot
     // resume in a later session.
     const id = isTauri ? partId(getMachineId() || `once-${Date.now()}-${Math.random()}`, path) : null;
-    if (id && inFlight.has(id)) { inFlight.get(id).adopt(); return; }
+    const running = id ? inFlight.get(id) : null;
+    if (running?.owner === instance) { running.adopt(); return; }
+    if (running) {
+      const notice = downloadLifetime.begin();
+      downloadOperation = null; downloadOutput = null;
+      downloadLifetime.update(notice, { kind: 'success', message: t('downloadInProgress'), detail: path });
+      return;
+    }
     let token = downloadLifetime.begin();
     let contextCurrent = feedbackContext();
     const operation = { get token() { return token; }, current: () => downloadLifetime.current(token) && contextCurrent() };
@@ -1222,7 +1235,7 @@
         progress: fraction == null ? null : fraction * 100 };
       if (operation.current()) downloadLifetime.update(token, shown);
     };
-    if (id) inFlight.set(id, { adopt() {
+    if (id) inFlight.set(id, { owner: instance, adopt() {
       token = downloadLifetime.begin();
       contextCurrent = feedbackContext();
       downloadOperation = operation;
@@ -1287,6 +1300,7 @@
           if (!dest) {
             // Cancelled: the finished part stays in the app cache, so the
             // next Download of this file asks again without refetching.
+            await native.release();
             const kept = { kind: 'success', message: t('downloadPartKept'), detail: name };
             if (operation.current()) downloadLifetime.update(token, kept); else earlier(kept);
             return;
@@ -1310,7 +1324,7 @@
       // A NETWORK failure keeps the part for a later resume (download.ts
       // flushed what arrived); anything else (a write or save failure, a
       // missing file) leaves no half-file behind.
-      if (!e?.keepPart) await native?.abort();
+      if (e?.keepPart) await native?.release(); else await native?.abort();
       const failed = { kind: 'error', message: String(e.message || e), detail: path };
       if (operation.current()) downloadLifetime.update(token, failed); else earlier(failed);
     }
