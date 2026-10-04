@@ -60,6 +60,15 @@ export class DownloadUnreachable extends Error {
   code = 'DL_HTTP_UNREACHABLE';
 }
 
+/** A /dl answer that is not 200/206. 5xx, 408 and 429 are the link (a
+ * public proxy cutting a long transfer answers 502/504), so the part is kept
+ * for a later resume; any other status (403, 404) is about the file. */
+export class DownloadStatus extends Error {
+  status: number;
+  constructor(status: number) { super(`HTTP ${status}`); this.status = status; }
+  get transient() { return this.status >= 500 || this.status === 408 || this.status === 429; }
+}
+
 /** Raw bytes per native IPC call: 3 MiB, i.e. exactly 4 MiB of base64. */
 export const PIECE_BYTES = 3 * 1024 * 1024;
 
@@ -94,7 +103,7 @@ export async function download(o: DownloadOptions): Promise<{ etag: string | nul
       await o.sink.flush();
       return { etag, total };
     } catch (e) {
-      if (e instanceof SinkError) throw e.cause;
+      if (e instanceof SinkError) throw keep(e.cause, false);
       // Some proxies cut the connection instead of ending it cleanly.
       if (total && received >= total) { await o.sink.flush(); return { etag, total }; }
       if (received === 0 && attempts >= DL_UNREACHABLE_ATTEMPTS) {
@@ -105,7 +114,9 @@ export async function download(o: DownloadOptions): Promise<{ etag: string | nul
         // Giving up on the NETWORK: put what arrived on disk, so a later
         // download of this file resumes from all of it.
         try { await o.sink.flush(); } catch { /* the network error wins */ }
-        throw e;
+        // The caller keeps the part (no abort) when the link failed; a
+        // status about the file itself is not worth resuming.
+        throw keep(e, !(e instanceof DownloadStatus) || e.transient);
       }
       retriesLeft--;
       await sleep(o.retryDelayMs ?? DL_RETRY_DELAY_MS);
@@ -135,7 +146,7 @@ export async function download(o: DownloadOptions): Promise<{ etag: string | nul
         await sink(() => o.sink.reset(null));
         return await fetchFrom();
       }
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw new DownloadStatus(resp.status);
       const tag = resp.headers.get('etag');
       if (resp.status !== 206) {
         // The whole file: a fresh download, or a version the part is not of.
@@ -173,6 +184,12 @@ export async function download(o: DownloadOptions): Promise<{ etag: string | nul
       clearTimeout(timer);
     }
   }
+}
+
+/** Mark whether the part on disk is worth keeping for a later resume. */
+function keep(e: unknown, value: boolean) {
+  if (e && typeof e === 'object') (e as { keepPart?: boolean }).keepPart = value;
+  return e;
 }
 
 /** A sink failure is not a network blip: never retried. */

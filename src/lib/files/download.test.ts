@@ -157,3 +157,22 @@ test('the part id is 16 hex digits, stable for server + path, different otherwis
   assert.notEqual(a, partId('wss://studio:8443/ws', '/home/u/w.mp4'));
   assert.equal(partId('', ''), 'af63c74c8601c8dd', 'fnv1a64 of "\\n" (offset basis cbf29ce484222325, prime 100000001b3)');
 });
+
+test('what a failure leaves: the link keeps the part, the file or the sink drops it (validator #305 P2)', async () => {
+  const status = (code: number) => (async () => new Response(null, { status: code })) as unknown as typeof globalThis.fetch;
+  const failWith = async (fetch: typeof globalThis.fetch, sink: any = memorySink()) => {
+    try { await download({ ...fast, maxRetries: 0, fetch, sink }); } catch (e) { return e as { keepPart?: boolean; message: string }; }
+    throw new Error('expected a failure');
+  };
+  // A part exists, so the zero-byte unreachable rule does not apply.
+  const resumable = () => ({ open: async () => ({ received: 10, etag: '"v1"' }), reset: async () => {}, write: async () => {}, flush: async () => {} });
+  for (const code of [502, 503, 504, 408, 429]) assert.equal((await failWith(status(code), resumable())).keepPart, true, `HTTP ${code} is the link`);
+  for (const code of [403, 404]) assert.equal((await failWith(status(code), resumable())).keepPart, false, `HTTP ${code} is about the file`);
+  const cut = server(bytes(5000), '"v1"', { cutAt: [3000] });
+  assert.equal((await failWith(cut.fetch)).keepPart, true, 'a dropped connection keeps the part');
+  const s = server(bytes(5000), '"v1"');
+  const broken = { open: async () => ({ received: 0, etag: null }), reset: async () => {}, flush: async () => {}, write: async () => { throw new Error('disk full'); } };
+  const e = await failWith(s.fetch, broken);
+  assert.equal(e.message, 'disk full');
+  assert.equal(e.keepPart, false, 'a write failure leaves no half-file');
+});

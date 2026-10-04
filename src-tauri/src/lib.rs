@@ -80,7 +80,10 @@ fn download_chunk(app: tauri::AppHandle, id: String, data: String) -> Result<(),
 }
 
 /// Android saves as `<Downloads>/TmuxMobile/<name>`; the desktop passes the
-/// path its save dialog returned.
+/// path its save dialog returned. The dialog plugin grants exactly that file
+/// to the fs scope, so a path the user did not pick is refused: the webview
+/// talks to a possibly remote server and must not choose a local file to
+/// overwrite (validator #305 P2).
 #[cfg(feature = "gui")]
 #[tauri::command]
 fn download_finish(app: tauri::AppHandle, id: String, name: String, dest: Option<String>) -> Result<String, String> {
@@ -88,7 +91,10 @@ fn download_finish(app: tauri::AppHandle, id: String, name: String, dest: Option
     let target = if cfg!(target_os = "android") {
         dir.join(sanitize_filename(&name)?)
     } else {
-        downloads::checked_dest(dest.as_deref().ok_or("no save location")?)?
+        use tauri_plugin_fs::FsExt;
+        let dest = downloads::checked_dest(dest.as_deref().ok_or("no save location")?)?;
+        if !app.fs_scope().is_allowed(&dest) { return Err("save location was not chosen in the dialog".into()); }
+        dest
     };
     downloads::finish_part(&dir, &id, &target).map(|p| p.to_string_lossy().to_string())
 }

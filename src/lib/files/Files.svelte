@@ -1196,23 +1196,39 @@
     await sink.write(bytes);
     await sink.flush();
   }
-  /** fetch rejects with a TypeError when the network fails; a stall is our
-   * own abort, and an ended-early body is our own error. */
-  const isNetworkFailure = (e) => e instanceof TypeError
-    || /download stalled|connection closed early|network/iu.test(String(e?.message ?? ''));
+
+  /** Native downloads in flight, by part id (board #305). The id is stable
+   * per server + file so a later session can resume; two concurrent
+   * attempts on one id would append to the same part and corrupt it, so a
+   * second Download of a file already downloading takes that attempt back
+   * into the slot instead of starting another. */
+  const inFlight = new Map();
 
   async function handleDownload(path) {
     const name = path.split('/').pop();
-    const token = downloadLifetime.begin();
-    const contextCurrent = feedbackContext();
-    const operation = { token, current: () => downloadLifetime.current(token) && contextCurrent() };
+    // Without a machine id (should not happen after auth) the id must not be
+    // shared across servers: a one-off id downloads correctly, it just cannot
+    // resume in a later session.
+    const id = isTauri ? partId(getMachineId() || `once-${Date.now()}-${Math.random()}`, path) : null;
+    if (id && inFlight.has(id)) { inFlight.get(id).adopt(); return; }
+    let token = downloadLifetime.begin();
+    let contextCurrent = feedbackContext();
+    const operation = { get token() { return token; }, current: () => downloadLifetime.current(token) && contextCurrent() };
     downloadOperation = operation;
     downloadOutput = null;
+    let shown = null;   // this attempt's latest progress, to show again on adopt
     const progress = (fraction = null, message = t('downloading')) => {
-      if (operation.current()) downloadLifetime.update(token,
-        { kind: 'progress', message, detail: path,
-          progress: fraction == null ? null : fraction * 100 });
+      shown = { kind: 'progress', message, detail: path,
+        progress: fraction == null ? null : fraction * 100 };
+      if (operation.current()) downloadLifetime.update(token, shown);
     };
+    if (id) inFlight.set(id, { adopt() {
+      token = downloadLifetime.begin();
+      contextCurrent = feedbackContext();
+      downloadOperation = operation;
+      downloadOutput = null;
+      if (shown) downloadLifetime.update(token, shown);
+    } });
     // Outcome of an attempt that lost its slot: an expiring success or a
     // closable error in the earlier-download notice, never the live slot.
     const earlier = (value) => {
@@ -1224,11 +1240,12 @@
       downloadOutput = { path: savedPath, operation, opening: false };
       downloadLifetime.update(token, { kind: 'result', message: t('saved'), detail: savedPath });
     };
+    try {
     progress();
     // ONE download core (board #305, download.ts); only the sink differs.
     // A Tauri shell writes a resumable part on disk, the browser holds the
     // file in memory for <a download>.
-    const native = isTauri ? nativeSink(invokeNative, partId(getMachineId() || 'server', path)) : null;
+    const native = id ? nativeSink(invokeNative, id) : null;
     const memory = native ? null : memorySink();
     const sink = native ?? memory;
     // After a restart the progress line says why it began again (told once:
@@ -1293,10 +1310,11 @@
       // A NETWORK failure keeps the part for a later resume (download.ts
       // flushed what arrived); anything else (a write or save failure, a
       // missing file) leaves no half-file behind.
-      if (!isNetworkFailure(e)) await native?.abort();
+      if (!e?.keepPart) await native?.abort();
       const failed = { kind: 'error', message: String(e.message || e), detail: path };
       if (operation.current()) downloadLifetime.update(token, failed); else earlier(failed);
     }
+    } finally { if (id) inFlight.delete(id); }
   }
 
   // ONE destination rule and ONE byte→b64 encoder for every upload entry point

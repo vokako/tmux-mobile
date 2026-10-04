@@ -924,3 +924,59 @@ test('Android saves a download through download_chunk pieces, never one buffer (
     assert.match(app.document.querySelector('.operation-feedback')?.textContent ?? '', /TmuxMobile\/AGENTS\.md/u);
   } finally { await app.close(); }
 });
+
+// Validator #305 P1: a second Download of a file still downloading reused its
+// part id and appended to the same .part (7340032 bytes for a 4 MiB file,
+// reported "Saved"). It now takes the running attempt back into the slot.
+test('a second Download of a file in flight starts no second writer (#305)', async context => {
+  const size = 4 * 1024 * 1024;
+  let feed!: ReadableStreamDefaultController<Uint8Array>;
+  let fetches = 0;
+  const written: number[] = [];
+  const calls: string[] = [];
+  const app = await (await shell).mount(context, {
+    props: { visible: true, session: 'fixture' },
+    pendingImports: ['@tauri-apps/'],
+    setup(window) {
+      Object.assign(window, { __TAURI_INTERNALS__: {} });
+      Object.defineProperty(window.navigator, 'userAgent', { value: 'Mozilla/5.0 (Linux; Android 15) fixture' });
+      (window as any).fetch = async () => {
+        fetches++;
+        const body = new ReadableStream<Uint8Array>({ start(c) { feed = c; } });
+        return new Response(body, { status: 200, headers: { etag: '"v1"', 'content-length': String(size) } });
+      };
+    },
+    modules: [
+      rpc({ getMachineId: () => 'machine-1', fsDownloadHttp: async () => ({ url: 'http://h/dl?path=x', name: 'AGENTS.md' }) }),
+      { invokeNative: async (cmd: string, args: Record<string, unknown> = {}) => {
+        calls.push(cmd);
+        if (cmd === 'download_open') return { received: 0, etag: null };
+        if (cmd === 'download_chunk') written.push(atob(args.data as string).length);
+        if (cmd === 'download_finish') return '/storage/emulated/0/Download/TmuxMobile/AGENTS.md';
+        return null;
+      } },
+    ],
+  });
+  try {
+    await settle(app);
+    button(app, 'Download: AGENTS.md').click();
+    for (let i = 0; i < 20 && !feed; i++) await settle(app);
+    feed.enqueue(new Uint8Array(size / 2));
+    await settle(app);
+    button(app, 'Download: AGENTS.md').click();      // the second click, mid-transfer
+    await settle(app);
+    assert.match(app.document.querySelector('.operation-feedback')?.textContent ?? '', /Downloading/u,
+      'the slot shows the running attempt again');
+    feed.enqueue(new Uint8Array(size / 2)); feed.close();
+    for (let i = 0; i < 40 && !calls.includes('download_finish'); i++) await settle(app);
+    assert.equal(calls.filter((c) => c === 'download_open').length, 1, 'one attempt opened the part');
+    assert.equal(fetches, 1, 'one transfer');
+    assert.equal(written.reduce((a, b) => a + b, 0), size, 'the part holds the file exactly once');
+    assert.equal(calls.filter((c) => c === 'download_finish').length, 1);
+    assert.match(app.document.querySelector('.operation-feedback')?.textContent ?? '', /Saved/u);
+    // Done: the same file may be downloaded again.
+    button(app, 'Download: AGENTS.md').click();
+    for (let i = 0; i < 20 && fetches < 2; i++) await settle(app);
+    assert.equal(fetches, 2, 'a finished download releases its id');
+  } finally { try { feed.close(); } catch {} await app.close(); }
+});
