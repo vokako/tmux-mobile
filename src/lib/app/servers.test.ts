@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CURRENT_KEY, MACHINE_PREFIX, MAX_SERVERS, SERVERS_KEY, STATE_PREFIX,
-  activateConnected, applySwitch, currentServerId, hostLabel, loadServers,
+  activateConnected, adoptHostname, applySwitch, currentServerId, hostLabel, loadServers,
   migrateServers, recordServer, removeServer, renameServer, saveMachineAddresses,
 } from './servers.ts';
 
@@ -360,4 +360,37 @@ test('saveMachineAddresses refuses a missing machine id and an unreadable map', 
   const written = saveMachineAddresses(s, 'm-a', ['ws://a:1']);
   assert.deepEqual(written, ['ws://a:1'], 'an unreadable map is replaced, not crashed on');
   assert.deepEqual(JSON.parse(s.getItem('tmux_machines')!), { 'm-a': ['ws://a:1'] });
+});
+
+// Board #310 (owner 2026-10-05: "显示的名称应该默认是主机的名称，不是连接的url").
+test('adoptHostname: a default name becomes the hostname the server reports; a typed name never does', () => {
+  const base = { id: 'a', address: 'wss://d1x.cloudfront.net/tmuxmobile-x/ws', token: 't', machineId: 'm' };
+  const fresh = [{ ...base, name: 'd1x.cloudfront.net' }];
+  const adopted = adoptHostname(fresh, 'a', 'macmini');
+  assert.equal(adopted[0]!.name, 'macmini', 'the URL host was only a placeholder');
+  assert.equal(adopted[0]!.hostname, 'macmini');
+  assert.notEqual(adopted, fresh, 'a new array when something changed');
+  assert.equal(adoptHostname(adopted, 'a', 'macmini'), adopted, 'the same hostname twice changes nothing');
+  // The address changes (failover to the LAN address): the adopted name stays.
+  const moved = [{ ...adopted[0]!, address: 'ws://192.168.11.221:9899' }];
+  assert.equal(adoptHostname(moved, 'a', 'macmini'), moved);
+  // The host is renamed on the server: an adopted name follows it.
+  assert.equal(adoptHostname(moved, 'a', 'studio')[0]!.name, 'studio');
+  // A name the user typed is never overwritten, flagged or (pre-#310) not.
+  const typed = [{ ...base, name: 'My Mac', named: true as const }];
+  assert.equal(adoptHostname(typed, 'a', 'macmini'), typed);
+  const legacy = [{ ...base, name: 'My Mac' }];
+  assert.equal(adoptHostname(legacy, 'a', 'macmini'), legacy, 'an old hand rename has no flag but is not the default');
+  // Nothing to adopt.
+  assert.equal(adoptHostname(fresh, 'a', ''), fresh);
+  assert.equal(adoptHostname(fresh, 'a', '   '), fresh);
+  assert.equal(adoptHostname(fresh, 'nope', 'macmini'), fresh);
+});
+
+test('renameServer marks the name as typed, and the flag survives a reload (#310)', () => {
+  const s = mem({ [SERVERS_KEY]: JSON.stringify([{ id: 'a', name: 'ws-host', address: 'ws://ws-host:9899', token: '' }]) });
+  renameServer(s, 'a', 'Desk');
+  const [entry] = loadServers(s);
+  assert.equal(entry!.named, true);
+  assert.equal(adoptHostname([entry!], 'a', 'macmini')[0]!.name, 'Desk');
 });

@@ -39,6 +39,13 @@ export interface ServerEntry {
    *  answers on — address is how you REACH a server, machineId is WHICH
    *  server it is (lead review, board #55). Absent until first connect. */
   machineId?: string;
+  /** The user typed this name (renameServer). Without it the name is the
+   *  DEFAULT: the server's own hostname once an auth has reported it, and
+   *  hostLabel(address) only as the pre-auth placeholder (board #310). */
+  named?: true;
+  /** The hostname this entry last adopted as its name, so a later auth can
+   *  tell an adopted name (follow the server) from an old hand rename. */
+  hostname?: string;
 }
 
 export const SERVERS_KEY = 'tmux_servers';
@@ -70,7 +77,7 @@ function sanitize(raw: unknown): ServerEntry[] {
   const out: ServerEntry[] = [];
   for (const e of raw) {
     if (!e || typeof e !== 'object') continue;
-    const { id, name, address, token, socket, machineId } = e as Record<string, unknown>;
+    const { id, name, address, token, socket, machineId, named, hostname } = e as Record<string, unknown>;
     if (typeof id !== 'string' || !id || seen.has(id)) continue;
     if (typeof address !== 'string' || !address) continue;
     seen.add(id);
@@ -81,9 +88,34 @@ function sanitize(raw: unknown): ServerEntry[] {
       token: typeof token === 'string' ? token : '',
       ...(typeof socket === 'string' && socket ? { socket } : {}),
       ...(typeof machineId === 'string' && machineId ? { machineId } : {}),
+      ...(named === true ? { named: true as const } : {}),
+      ...(typeof hostname === 'string' && hostname ? { hostname } : {}),
     });
   }
   return out.slice(0, MAX_SERVERS);
+}
+
+/**
+ * The name a server reports for itself replaces a DEFAULT name (board #310,
+ * owner 2026-10-05: "显示的名称应该默认是主机的名称，不是连接的url"). A name
+ * the user typed (`named`) is never touched. Entries from before #310 carry
+ * no flag, so their name counts as default only while it still equals the
+ * URL host it was derived from; a hand-renamed entry keeps its name. Once
+ * adopted the hostname follows the server (a renamed host is renamed here)
+ * and survives an address change. Pure; returns the same array when nothing
+ * changed, so the caller can skip the write.
+ */
+export function adoptHostname(servers: ServerEntry[], id: string, hostname: string): ServerEntry[] {
+  const host = hostname.trim();
+  const at = servers.findIndex((s) => s.id === id);
+  if (!host || at < 0) return servers;
+  const entry = servers[at]!;
+  if (entry.named || (entry.name === host && entry.hostname === host)) return servers;
+  const isDefault = entry.name === hostLabel(entry.address) || entry.name === entry.hostname;
+  if (!isDefault) return servers;
+  const next = servers.slice();
+  next[at] = { ...entry, name: host, hostname: host };
+  return next;
 }
 
 export function loadServers(storage: Store): ServerEntry[] {
@@ -311,7 +343,7 @@ export function renameServer(storage: Store, id: string, name: string): ServerEn
   const servers = loadServers(storage);
   const entry = servers.find((s) => s.id === id);
   const trimmed = name.trim();
-  if (entry && trimmed) { entry.name = trimmed; saveServers(storage, servers); }
+  if (entry && trimmed) { entry.name = trimmed; entry.named = true; saveServers(storage, servers); }
   return servers;
 }
 

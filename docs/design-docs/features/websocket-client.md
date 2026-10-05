@@ -153,6 +153,20 @@ doc already describes. Design decisions, in the order they bit:
   The timer, delayed-click functions and double-click handler are removed
   whole. No alternate switch path, storage format or reconnect behavior is
   introduced.
+- **A row's name defaults to the hostname the server reports** (board #310,
+  owner 2026-10-05: "显示的名称应该默认是主机的名称，不是连接的url"). Every auth
+  answers `{authenticated, machine_id, hostname}`, and one App effect hands that
+  hostname to `servers.ts adoptHostname` for this machine's entry. A URL host
+  (`hostLabel(address)`, e.g. `d1x.cloudfront.net` or `192.168.11.221`) is only
+  the pre-auth placeholder. A name the user typed is never overwritten:
+  `renameServer` sets `named`. The adopted value is kept as `hostname` on the
+  entry, so it survives an address change (failover to the LAN address) and
+  follows a renamed host, while an entry renamed by hand before #310 (no flag,
+  a name that is neither its URL host nor an adopted hostname) keeps its name.
+  No one-time migration: an old entry whose name is still its URL host adopts
+  the hostname at its next connect. The address stays on the row's second line
+  (`.sm-addr`), so two machines named alike remain distinguishable. Pinned by
+  `servers.test.ts`.
 - **The server chooser is a non-modal picker dialog** (2026-09-12, #165).
   It contains selection, rename and removal controls, so it follows the
   PanePicker family and native Tab order, not action-menu arrow navigation.

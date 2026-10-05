@@ -29,7 +29,7 @@
   import { agentsLivesInSettings, defaultPage, restoreNav, retarget } from './lib/app/nav-state.ts';
   import { RAIL_DRAG_THRESHOLD, RAIL_GAP, RAIL_ORDER_KEY, parseRailOrder, railDropAt, railDropIndex, railDropOffset, railOrderToStore, visibleRailSlots } from './lib/app/nav-order.ts';
   import { createReconnectMachine } from './lib/app/reconnect.ts';
-  import { activateConnected, applySwitch, currentServerId, hostLabel, loadServers, migrateServers, recordServer, removeServer, renameServer, saveMachineAddresses } from './lib/app/servers.ts';
+  import { activateConnected, adoptHostname, applySwitch, currentServerId, hostLabel, loadServers, migrateServers, recordServer, removeServer, renameServer, saveMachineAddresses, saveServers } from './lib/app/servers.ts';
   import { anchorOf, menuPlacement, popOrigin, viewBox } from './lib/ui/placement.ts';
   import HoverCard from './lib/ui/HoverCard.svelte';
   import ContextMenu from './lib/ui/ContextMenu.svelte';
@@ -717,6 +717,23 @@
     serverList = loadServers(localStorage);
     serverCurId = currentServerId(localStorage);
   }
+  // Every successful auth reports the server's hostname (serverInfo, set on
+  // each connect path). The ONE place the registry learns it (board #310):
+  // the entry for this machine (or the current one, before it has a machine
+  // id) adopts it as its name unless the user named it. Runs after the
+  // connect paths' recordServer, so a fresh entry is already there.
+  $effect(() => {
+    const { hostname, machineId } = serverInfo;
+    if (!hostname) return;
+    const servers = loadServers(localStorage);
+    const entry = (machineId && servers.find((s) => s.machineId === machineId))
+      || servers.find((s) => s.id === currentServerId(localStorage));
+    if (!entry) return;
+    const next = adoptHostname(servers, entry.id, hostname);
+    if (next === servers) return;
+    saveServers(localStorage, next);
+    serverList = next;
+  });
 
   function toggleServerMenu(e) {
     if (serverMenuOpen) { closeServerPicker(); return; }
