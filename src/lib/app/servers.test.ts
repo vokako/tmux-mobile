@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CURRENT_KEY, MACHINE_PREFIX, MAX_SERVERS, SERVERS_KEY, STATE_PREFIX,
-  activateConnected, adoptHostname, applySwitch, currentServerId, hostLabel, loadServers,
+  activateConnected, activateSwitched, adoptHostname, currentServerId, parkFrom, pointTo, PARKED_KEYS, hostLabel, loadServers,
   migrateServers, recordServer, removeServer, renameServer, saveMachineAddresses,
 } from './servers.ts';
 
@@ -211,7 +211,8 @@ test('activateConnected: a DIFFERENT server parks the old live state and demands
   assert.equal(currentServerId(s), bEntry.id, 'B is current');
   assert.equal(s.getItem('tmux_disconnected'), null, 'connecting IS the intent');
   // And a later switch back restores A intact.
-  assert.equal(applySwitch(s, aId), true);
+  parkFrom(s, currentServerId(s));
+  pointTo(s, loadServers(s).find((x) => x.id === aId)!);
   assert.equal(s.getItem('tmux_state'), '{"page":"board"}');
   assert.equal(s.getItem('tmux_machine_id'), 'm-a');
 });
@@ -230,57 +231,101 @@ test('removeServer refuses the current entry and clears parked state for others'
   assert.equal(s.getItem(MACHINE_PREFIX + b.id), null);
 });
 
-test('applySwitch parks the leaving server’s state and restores the target’s', () => {
+// --- The in-place switch's storage half (board 315) -------------------------
+
+const HUB = (project: string, draft: string) => ({
+  tmux_hub_project: project,
+  tmux_hub_drafts: JSON.stringify({ [project]: draft }),
+  tmux_hub_seen: JSON.stringify({ [project]: 1 }),
+  tmux_hub_lead: JSON.stringify({ [project]: 'lead' }),
+});
+
+test('parkFrom files every per-server key under the source id; pointTo surfaces the target’s', () => {
   const s = mem({
-    tmux_address: 'ws://a:1', tmux_token: 'ta', tmux_socket: '/sa',
-    tmux_state: '{"page":"terminal","terminalTarget":"projA:1.1"}',
-    tmux_machine_id: 'mid-a',
-    tmux_disconnected: '1',
+    tmux_address: 'ws://a:1', tmux_token: 'ta',
+    tmux_state: '{"page":"terminal","terminalTarget":"app:1.1"}', tmux_machine_id: 'mid-a',
+    ...HUB('app', 'half-typed on A'),
   });
-  migrateServers(s);                                     // a = current
+  migrateServers(s);
   const a = loadServers(s)[0]!;
   const { entry: b } = recordServer(s, { address: 'ws://b:2', token: 'tb' });
   s.setItem(STATE_PREFIX + b.id, '{"page":"board"}');
   s.setItem(MACHINE_PREFIX + b.id, 'mid-b');
+  s.setItem(`tmux_hub_drafts::${b.id}`, JSON.stringify({ app: 'B draft' }));
 
-  assert.equal(applySwitch(s, 'nope'), false, 'unknown target is refused');
-  assert.equal(applySwitch(s, a.id), false, 'already current is refused');
-  assert.equal(applySwitch(s, b.id), true);
-
-  assert.equal(s.getItem(STATE_PREFIX + a.id), '{"page":"terminal","terminalTarget":"projA:1.1"}');
+  parkFrom(s, a.id);
+  assert.equal(s.getItem(STATE_PREFIX + a.id), '{"page":"terminal","terminalTarget":"app:1.1"}');
   assert.equal(s.getItem(MACHINE_PREFIX + a.id), 'mid-a');
+  assert.equal(s.getItem(`tmux_hub_drafts::${a.id}`), JSON.stringify({ app: 'half-typed on A' }));
+  assert.equal(s.getItem(`tmux_hub_project::${a.id}`), 'app');
+  assert.equal(s.getItem('tmux_address'), 'ws://a:1', 'parking never touches the mirror');
+  assert.equal(currentServerId(s), a.id, 'nor CURRENT');
+
+  pointTo(s, b);
   assert.equal(s.getItem('tmux_state'), '{"page":"board"}');
   assert.equal(s.getItem('tmux_machine_id'), 'mid-b');
-  assert.equal(s.getItem('tmux_address'), 'ws://b:2');
-  assert.equal(s.getItem('tmux_token'), 'tb');
-  assert.equal(s.getItem('tmux_socket'), null, 'no socket on b — the key is cleared, not inherited');
+  assert.equal(s.getItem('tmux_hub_drafts'), JSON.stringify({ app: 'B draft' }), 'same project name, B’s own draft');
+  assert.equal(s.getItem('tmux_hub_project'), null, 'nothing parked for B: cleared, never A’s');
+  assert.equal(s.getItem('tmux_hub_seen'), null);
   assert.equal(currentServerId(s), b.id);
-  assert.equal(s.getItem('tmux_disconnected'), null, 'switching is the intent to connect');
-});
 
-test('applySwitch to a first-visit target clears the live pair instead of inheriting', () => {
-  const s = mem({ tmux_address: 'ws://a:1', tmux_token: 'ta', tmux_state: '{"page":"hub"}', tmux_machine_id: 'mid-a' });
-  migrateServers(s);
-  const a = loadServers(s)[0]!;
-  const { entry: b } = recordServer(s, { address: 'ws://b:2', token: 'tb' });
-  assert.equal(applySwitch(s, b.id), true);
-  assert.equal(s.getItem('tmux_state'), null, 'no parked state — B starts fresh, never on A’s targets');
-  assert.equal(s.getItem('tmux_machine_id'), null, 'B’s machine id arrives on connect, never A’s');
-  assert.equal(applySwitch(s, a.id), true);
-  assert.equal(s.getItem('tmux_state'), '{"page":"hub"}');
+  // And back: A exactly as it was.
+  parkFrom(s, b.id);
+  pointTo(s, a);
+  assert.equal(s.getItem('tmux_state'), '{"page":"terminal","terminalTarget":"app:1.1"}');
+  assert.equal(s.getItem('tmux_hub_drafts'), JSON.stringify({ app: 'half-typed on A' }));
+  assert.equal(s.getItem('tmux_hub_project'), 'app');
   assert.equal(s.getItem('tmux_machine_id'), 'mid-a');
-  assert.equal(s.getItem('tmux_address'), 'ws://a:1');
 });
 
-test('applySwitch prefers the entry’s own machineId for the failover set', () => {
+test('pointTo prefers the entry’s own machineId for the failover set', () => {
   const s = mem({ tmux_address: 'ws://a:1', tmux_token: 'ta', tmux_machine_id: 'm-a' });
   migrateServers(s);
   const a = loadServers(s)[0]!;
   const { entry: b } = recordServer(s, { address: 'ws://b:2', token: 'tb', machineId: 'm-b' });
-  assert.equal(applySwitch(s, b.id), true);
+  parkFrom(s, a.id);
+  pointTo(s, b);
   assert.equal(s.getItem('tmux_machine_id'), 'm-b', 'B’s identity, even with no parked key');
-  assert.equal(applySwitch(s, a.id), true);
+  parkFrom(s, b.id);
+  pointTo(s, loadServers(s).find((x) => x.id === a.id)!);
   assert.equal(s.getItem('tmux_machine_id'), 'm-a', 'and back — never crossed');
+});
+
+test('activateSwitched: a candidate becomes current only by the identity it reported', () => {
+  const s = mem({
+    tmux_address: 'ws://a:1', tmux_token: 'ta', tmux_machine_id: 'm-a', tmux_state: '{"page":"hub"}',
+    tmux_machines: JSON.stringify({ 'm-a': ['ws://a:1'] }), tmux_disconnected: '1',
+  });
+  migrateServers(s);
+  const aId = currentServerId(s);
+  parkFrom(s, aId);
+  // A NEW address that turns out to be machine A (its Tailscale name): it
+  // folds into A's entry and restores A's parked state, never a second server.
+  const same = activateSwitched(s, { address: 'ws://a-ts:9', token: 'ta', machineId: 'm-a' });
+  assert.equal(same.id, aId);
+  assert.equal(loadServers(s).length, 1);
+  assert.equal(s.getItem('tmux_state'), '{"page":"hub"}');
+  assert.deepEqual(JSON.parse(s.getItem('tmux_machines')!)['m-a'], ['ws://a:1', 'ws://a-ts:9'], 'the address joins the failover set');
+  assert.equal(s.getItem('tmux_address'), 'ws://a-ts:9', 'the mirror follows only after auth');
+  assert.equal(s.getItem('tmux_disconnected'), null);
+  // A genuinely new machine gets its own entry and starts fresh.
+  parkFrom(s, aId);
+  const b = activateSwitched(s, { address: 'ws://b:2', token: 'tb', socket: '/sb', machineId: 'm-b' });
+  assert.notEqual(b.id, aId);
+  assert.equal(currentServerId(s), b.id);
+  assert.equal(s.getItem('tmux_state'), null);
+  assert.equal(s.getItem('tmux_machine_id'), 'm-b');
+  assert.equal(s.getItem('tmux_socket'), '/sb');
+  assert.equal(s.getItem(STATE_PREFIX + aId), '{"page":"hub"}', 'A’s park untouched by B’s activation');
+});
+
+test('PARKED_KEYS names exactly the Hub prefs that are per project (per server)', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('../hub/hub-prefs.svelte.ts', import.meta.url), 'utf8');
+  const keyOf = (name: string) => new RegExp(`const ${name} = '([^']+)'`, 'u').exec(src)?.[1];
+  const list = /HUB_SERVER_KEYS = \[([^\]]+)\]/u.exec(src)?.[1]?.split(',').map((x) => keyOf(x.trim())) ?? [];
+  assert.ok(list.length >= 4, 'hub-prefs names its per-server keys');
+  for (const key of list) assert.ok((PARKED_KEYS as readonly string[]).includes(key!), `${key} is parked per server`);
 });
 
 test('activateConnected owns the live machine id — same machine refreshes it (lead blocker #2)', () => {

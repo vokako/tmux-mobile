@@ -124,4 +124,7 @@ export function feedbackOf(row: DownloadRow, s: FeedbackStrings): FeedbackValue 
 }
 
 /** Test seam: the store is module state. */
-export function resetForTests() { rows.splice(0, rows.length); }
+/** A server switch (board 315): this session's rows name paths on the
+ * leaving server. Parts on disk carry their server and stay listed. */
+export function forgetAll() { rows.splice(0, rows.length); }
+export function resetForTests() { forgetAll(); }

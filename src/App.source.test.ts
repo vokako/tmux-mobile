@@ -380,18 +380,49 @@ test('the rail server switcher sits above the configure group and only places (b
   assert.doesNotMatch(gapBranch, /class="flip"/u, '180° leaves swap-h looking unchanged');
 });
 
-test('a server switch fully drops the old socket, applies the plan, and reboots (board #55)', () => {
-  // Order is the contract: cancel any reconnect loop (it re-reads
-  // tmux_address and would race the storage writes), close the socket, THEN
-  // applySwitch (park/restore per-server state) and reload — the boot path
-  // is the one way up against a server, so nothing in-memory can leak across.
-  const fn = source.match(/function doServerSwitch\(id\) \{[\s\S]*?\n  \}/u)?.[0] ?? '';
-  const iCancel = fn.indexOf('reconnectMachine.cancel()');
-  const iDisc = fn.indexOf('disconnect()');
-  const iApply = fn.indexOf('applySwitch(localStorage, id)');
-  const iReload = fn.indexOf('location.reload()');
-  assert.ok(iCancel >= 0 && iCancel < iDisc && iDisc < iApply && iApply < iReload,
-    'cancel → disconnect → applySwitch → reload');
+test('the in-place server switch keeps its order (board 315, replaces the #55 reload)', async () => {
+  // websocket-client.md §#55: guards → one intent (reconnect stopped, tree
+  // unmounted) → downloads suspended + unmount persistence → park the source
+  // (only a connected one) → socket closed → memory reset → connect WITHOUT
+  // touching the mirror → only after auth activate + come up.
+  const mod = await readFile(new URL('./lib/app/server-switch.ts', import.meta.url), 'utf8');
+  const fn = mod.match(/async function switchTo\(target: SwitchTarget\): Promise<void> \{[\s\S]*?\n  \}/u)?.[0] ?? '';
+  const at = (needle: string) => { const i = fn.indexOf(needle); assert.ok(i >= 0, `switchTo has ${needle}`); return i; };
+  const order = [
+    'await d.confirmLeave()',
+    'const intent = ++seq',
+    'd.stopReconnect()',
+    "set({ intent, from, target, phase: 'connecting'",
+    'await d.suspendDownloads()',
+    'await d.afterUnmount()',
+    'parkFrom(d.storage, from.id)',
+    'd.disconnect()',
+    'd.resetMemory()',
+    'await d.connect(target.address, target.token)',
+    'activateSwitched(d.storage',
+    'd.comeUp(target, entry)',
+  ].map(at);
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'the switch steps run in the documented order');
+  assert.match(fn, /if \(fromConnected && from\) \{\s*await d\.suspendDownloads\(\);\s*await d\.afterUnmount\(\);\s*parkFrom\(d\.storage, from\.id\);/u,
+    'only a switch that LEFT a connected server parks — retry/back never re-park');
+  assert.ok((fn.match(/intent !== seq/gu) ?? []).length >= 3, 'every await re-checks that this intent still owns the switch');
+  // App wires the effects into that one module and calls nothing else.
+  assert.match(source, /const serverSwitch = createServerSwitch\(\{/u);
+  assert.match(source, /onstate: \(st\) => \{\s*switching = st;/u);
+  assert.match(source, /comeUp: \(target\) => \{[\s\S]*?serverEpoch\+\+;[\s\S]*?bringUp\(target\.address, target\.token\);/u);
+  assert.doesNotMatch(source, /location\.reload\(/u, 'no reload remains on any switch or connect path');
+  assert.doesNotMatch(source, /applySwitch/u, 'the reload-era plan is gone');
+});
+
+test('the shell stays through a switch; only the server-bound content tree goes (board 315)', () => {
+  assert.match(source, /const shell = \$derived\(connected \|\| !!switching\);/u);
+  assert.match(source, /\{#if switching\}[\s\S]*?class="switch-panel[\s\S]*?\{:else\}[\s\S]*?\{#key serverEpoch\}/u,
+    'the panel replaces the content tree; a different server remounts it');
+  assert.match(source, /inert=\{switching\?\.phase === 'connecting'\}/u, 'SWITCHING: the rail takes no input');
+  assert.match(source, /disabled=\{!!switching\}\s*onpointerdown=\{\(e\) => railPointerDown/u,
+    'FAILED: page buttons stay disabled, only the server control works');
+  assert.match(source, /<nav class="tabbar" inert=\{!!switching\}>/u);
+  assert.match(source, /let sysMounted = \$derived\(connected\);/u, 'the old server’s readings unmount with the connection');
 });
 
 test('failover success RECORDS by machine identity — and never moves CURRENT (board #55)', () => {
@@ -407,21 +438,24 @@ test('failover success RECORDS by machine identity — and never moves CURRENT (
     'failover records; it never activates');
 });
 
-test('a Settings connect to a DIFFERENT server reboots before onConnected (board #55)', async () => {
-  // The lead blocker: connect() swaps the socket but Hub room caches,
-  // mounted terminals and Files cwds are old-server memory, and the old
-  // tmux_state was never parked. The form therefore asks activateConnected
-  // AFTER auth and BEFORE onConnected: same server → proceed in place,
-  // different server → location.reload() through the one boot path (the
-  // reload return also skips onConnected — no flash of the old world).
+test('a Settings connect to a DIFFERENT server comes up in place before onConnected (board #55 → 315)', async () => {
+  // connect() swaps the socket but every server-bound memory is the old
+  // server's, and the old tmux_state was never parked. The form asks
+  // activateConnected AFTER auth and BEFORE onConnected: same server →
+  // proceed in place, different server → onConnected(true), which resets the
+  // per-server memory and remounts the tree (board 315; was location.reload()).
   const settings = await readFile(new URL('./lib/app/Settings.svelte', import.meta.url), 'utf8');
   const fn = settings.match(/async function doConnect\(\) \{[\s\S]*?\n  \}/u)?.[0] ?? '';
   const iAct = fn.indexOf('activateConnected(localStorage');
-  const iReload = fn.indexOf('if (act.reload) { location.reload(); return; }');
-  const iDone = fn.indexOf('onConnected()');
-  assert.ok(iAct >= 0 && iReload > iAct && iDone > iReload,
-    'activate → maybe-reload-and-return → only then onConnected');
+  const iSwitched = fn.indexOf('if (act.reload) { onConnected(true); return; }');
+  const iDone = fn.indexOf('onConnected(false)');
+  assert.ok(iAct >= 0 && iSwitched > iAct && iDone > iSwitched,
+    'activate → a different server comes up as a switch → only then the same-server path');
   assert.match(fn, /machineId: mid/u, 'the learned machine identity rides the activation');
+  assert.doesNotMatch(settings, /location\.reload/u);
+  const on = source.match(/function onConnected\(switched = false\) \{[\s\S]*?\n  \}/u)?.[0] ?? '';
+  assert.match(on, /if \(switched\) \{[\s\S]*?resetServerMemory\(\);[\s\S]*?hubPrefs\.reloadServerState\(\);[\s\S]*?serverEpoch\+\+;[\s\S]*?bringUp\(/u,
+    'the same reset + remount + bring-up as an in-place switch');
 });
 
 test('the boot auto-connect RECORDS the machine identity, never activates (board #55)', () => {
@@ -464,7 +498,7 @@ test('removing a saved server goes through the shared ConfirmDialog (board #55)'
   assert.match(fn, /onremove\(v\.id\)/u, 'and removes by that id alone');
   assert.match(list, /<ConfirmDialog open=\{!!victim\}[\s\S]*?onconfirm=\{confirmRemove\} oncancel=\{\(\) => \(victim = null\)\}/u,
     'the shared dialog, cancel drops the capture');
-  assert.match(source, /onremove=\{\(id\) => \{ serverList = removeServer\(localStorage, id\)/u, 'App removes by the id it is handed');
+  assert.match(source, /function serverRemove\(id\) \{ serverList = removeServer\(localStorage, id\);/u, 'App removes by the id it is handed');
 });
 
 test('one system-vitals strip serves desktop sidebar and an open phone drawer (board #85)', () => {
@@ -478,7 +512,7 @@ test('one system-vitals strip serves desktop sidebar and an open phone drawer (b
   assert.match(source, /load=\{systemStatus\}/u, 'load is INJECTED — the component never imports ws');
   assert.match(source, /sysMounted = \$derived\(connected\)/u,
     'connected clients share one sampler; layout only decides visibility');
-  assert.match(source, /<main[^>]*class:touch-layout=\{connected && layout\.isTouchDevice\}/u,
+  assert.match(source, /<main[^>]*class:touch-layout=\{shell && layout\.isTouchDevice\}/u,
     'touch mode is explicit on the shell');
   assert.match(source, /\{#if sysMounted\}[\s\S]{0,500}<aside class="sys-sidebar"[\s\S]{0,100}<SystemStatus/u,
     'mount gate wraps the sidebar strip');
@@ -584,7 +618,7 @@ test('the rail keeps the ONE travelling highlight; the tab bar is foreground-onl
   // from the post-tap state). Selection on the tab bar is the ink cross-fade
   // alone: grey at rest, accent when chosen, no background. The desktop rail
   // keeps the travelling wash (board #86).
-  assert.match(tabbar, /^<nav class="tabbar">/u, 'no slideIndicator on the tab bar');
+  assert.match(tabbar, /^<nav class="tabbar" inert=\{!!switching\}>/u, 'no slideIndicator on the tab bar');
   assert.ok(!tabbar.includes('slide-pill'), 'no pill inside the tab bar');
   assert.ok(!source.includes('slide-ind'), 'no bar indicator anywhere in the shell');
   assert.match(rail, /use:slideIndicator=\{\{ key: page, active: '\.rail-btn\.active', hidden: !!railDrag \}\}/u,
@@ -611,7 +645,7 @@ test('a second click on the active rail tab hands the page a reselect — the Hu
 test('one shell-wide sidebar state: the Terminal page and the system status follow the Hub\'s collapse; reselect opens it on every page (board #200)', async () => {
   // Owner 2026-09-14: "左侧边栏收起的时候，底下的系统状态显示也要收起，而且这个折叠收起在不同的
   // 页面是同步的，不然我点击chat terminal board，展开状态不一致".
-  assert.match(source, /const shellSideCollapsed = \$derived\(connected && !layout\.isTouchDevice && hubPrefs\.sidebarCollapsed\);/u);
+  assert.match(source, /const shellSideCollapsed = \$derived\(shell && !layout\.isTouchDevice && hubPrefs\.sidebarCollapsed\);/u);
   assert.match(source, /<main class:with-rail=\{[^}]+\} class:touch-layout=\{[^}]+\} class:side-collapsed=\{shellSideCollapsed\} class:side-page=\{pageHasSidebar\}/u);
   assert.match(source, /pageReselect\.terminal = pageReselect\.board = \(\) => hubPrefs\.setSidebarCollapsed\(!hubPrefs\.sidebarCollapsed\);/u, '#199 on every page, a toggle since #201');
   assert.match(source, /<Board session=\{filesSession\} visible=\{page === 'board'\} sideCollapsed=\{shellSideCollapsed\}/u);
@@ -641,7 +675,7 @@ test('THE sidebar toggle is one fixed shell node at the content area\'s top-left
   const rail = source.match(/<nav\s+class="rail"[\s\S]*?<\/nav>/u)?.[0] ?? '';
   assert.doesNotMatch(rail, /CommandButton|panel-left|rail-head/u, 'the rail is brand + tabs again; no toggle, no head group, no rule');
   assert.match(source, /<img class="rail-brand"[^>]*\/>\s*\n\s*\{#each railSlots as slot \(slot\)\}/u, 'the brand is followed by the tabs');
-  assert.match(source, /<\/nav>\s*\n(?:\s*<!--[\s\S]*?-->\s*\n)?\s*\{#if pageHasSidebar\}\s*<div class="shell-side-toggle">\s*<CommandButton variant="secondary" iconOnly icon="panel-left" expanded=\{!hubPrefs\.sidebarCollapsed\} inside\s+label=\{hubPrefs\.sidebarCollapsed \? t\('hubSidebarExpand'\) : t\('hubSidebarCollapse'\)\}\s+onclick=\{toggleShellSidebar\} \/>\s*<\/div>\s*\{\/if\}\s*\{\/if\}/u,
+  assert.match(source, /<\/nav>\s*\n(?:\s*<!--[\s\S]*?-->\s*\n)?\s*\{#if pageHasSidebar && !switching\}\s*<div class="shell-side-toggle">\s*<CommandButton variant="secondary" iconOnly icon="panel-left" expanded=\{!hubPrefs\.sidebarCollapsed\} inside\s+label=\{hubPrefs\.sidebarCollapsed \? t\('hubSidebarExpand'\) : t\('hubSidebarCollapse'\)\}\s+onclick=\{toggleShellSidebar\} \/>\s*<\/div>\s*\{\/if\}\s*\{\/if\}/u,
     'rendered once, beside the rail, under the desktop-connected guard AND only on a page that has the sidebar (#219); a quiet surface so it reads over a terminal');
   // #219 (owner: "files页面里，多显示了折叠左侧边栏的按钮，还有设置这些页面也都没兼容好"):
   // Files, Settings and Agents have no primary sidebar — no toggle, no head room.

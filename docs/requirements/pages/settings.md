@@ -18,7 +18,7 @@ where Agents is a page of its own, reads as one plain list):
 - **Chat** — how much of the conversation the feed shows: chat detail and tool rows (moved out of Appearance 2026-09-25: they set what is said, not how it looks)
 - **Notifications** — message notifications On/Off, the level (Finished / Replies / Everything) and a test row (its own category, owner 2026-09-02)
 - **Shortcuts** — configurable desktop navigation and Terminal window bindings (desktop only)
-- **Connection** — current server/addresses, optimize/share/disconnect (the global debug switch and its floating log panel were retired 2026-09-26)
+- **Connection** — every saved server (switch/rename/remove/add), then the current server's addresses, optimize/share/disconnect (the global debug switch and its floating log panel were retired 2026-09-26)
 
 **Agent** (phone only, where Agents is not a page of its own)
 - **Agents / Teams / Skills / MCP servers** — four second-level pages, each the real AgentsPage narrowed to one section (owner, 2026-09-02)
@@ -35,10 +35,15 @@ where Agents is a page of its own, reads as one plain list):
   the Settings category list (swap icon + authenticated hostname, falling back
   to the host portion of the address before auth) opens the same switcher —
   current entry marked, click switches
-  (full socket teardown + reload through the one boot path, per-server
-  `tmux_state`/`tmux_machine_id` parked and restored so restore targets never
-  cross servers), double-click renames, non-current rows removable, `+` row
-  opens this page as the add flow. Migration from the single-server keys is
+  IN PLACE (board 315: no reload; the shell stays, a panel names the target
+  while connecting, a failure offers Retry, Back, Edit and the switcher;
+  per-server nav state and the Hub's per-project prefs are parked and
+  restored so nothing crosses servers; unsaved edits ask first), a pencil
+  renames, non-current rows removable, `+` row opens the Add server dialog
+  (cancel changes nothing; connect is the same switch). Settings ›
+  Connection lists every saved server with the same component and actions
+  (the current one marked, its address list below it). Migration from the
+  single-server keys is
   one-time, idempotent, and never loses the current user.
 - Server info: hostname, machine ID, address; the address list marks the
   current address and shows a connecting cue on a tapped address until the

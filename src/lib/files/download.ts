@@ -61,9 +61,14 @@ export const DL_UNREACHABLE_ATTEMPTS = 2;
 
 export class DownloadCancelled extends Error {
   cancelled = true;
-  keepPart = false;
-  constructor() { super('cancelled'); }
+  keepPart: boolean;
+  constructor(keepPart = false) { super('cancelled'); this.keepPart = keepPart; }
 }
+
+/** The abort reason of a SUSPEND (board 315, a server switch): the attempt
+ * stops like a cancel, but its part is kept for a resume. */
+export const SUSPEND = Object.freeze({ suspend: true });
+const cancelledBy = (signal: AbortSignal | undefined) => new DownloadCancelled(signal?.reason === SUSPEND);
 
 export class DownloadUnreachable extends Error {
   code = 'DL_HTTP_UNREACHABLE';
@@ -115,7 +120,7 @@ export async function download(o: DownloadOptions): Promise<{ etag: string | nul
       await o.sink.flush();
       return { etag, total };
     } catch (e) {
-      if (o.signal?.aborted) throw new DownloadCancelled();
+      if (o.signal?.aborted) throw cancelledBy(o.signal);
       if (e instanceof SinkError) throw keep(e.cause, false);
       // Some proxies cut the connection instead of ending it cleanly.
       if (total && received >= total) { await o.sink.flush(); return { etag, total }; }
@@ -133,6 +138,9 @@ export async function download(o: DownloadOptions): Promise<{ etag: string | nul
       }
       retriesLeft--;
       await sleep(o.retryDelayMs ?? DL_RETRY_DELAY_MS);
+      // Stopped while waiting: no re-sign may go out after an abort (a
+      // suspended attempt's next URL would be asked of the NEXT server).
+      if (o.signal?.aborted) throw cancelledBy(o.signal);
       try { url = await o.freshUrl(); } catch { /* keep the old URL */ }
     }
   }
@@ -142,7 +150,7 @@ export async function download(o: DownloadOptions): Promise<{ etag: string | nul
     let timer: ReturnType<typeof setTimeout> | undefined;
     const arm = () => { clearTimeout(timer); timer = setTimeout(() => ctrl.abort(new Error('download stalled')), stallMs); };
     const cancel = () => ctrl.abort(new DownloadCancelled());
-    if (o.signal?.aborted) throw new DownloadCancelled();
+    if (o.signal?.aborted) throw cancelledBy(o.signal);
     o.signal?.addEventListener('abort', cancel);
     arm();
     try {

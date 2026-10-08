@@ -15,6 +15,23 @@
   // reload in a live process) left in Rust, or its parts could never be
   // resumed. Once per realm, before any download can start.
   if (isTauri) invokeNative('download_release_all').catch(() => {});
+  // Each running attempt's settle, by row id (board 315): a server switch
+  // waits for them before the socket goes to another server.
+  const settles = new Map(); // row id → Promise<void>
+
+  /** A server switch (board 315) stops every running download and KEEPS its
+   * part: the bytes are the leaving server's file, and they resume when the
+   * user is back on it (Cancel in the Downloads view deletes the part; a
+   * switch does not). Resolves once every attempt has settled, so no retry,
+   * re-sign or fallback of the old server's chain can go out later. */
+  export async function suspendDownloads() {
+    const running = [...settles.values()];
+    for (const control of cancels.values()) control.abort(SUSPEND);
+    await Promise.allSettled(running);
+  }
+  /** Per-server memory a switch drops: browse positions are keyed by session
+   * NAME, and `app` on one server is not `app` on another. */
+  export function resetFilesMemory() { browsed.clear(); }
 </script>
 
 <script>
@@ -22,7 +39,7 @@
   import { createPreviewRenderers, defaultWrapForMime, highlightCode, isPreviewable, mimeCategory, streamsInline } from './file-preview.ts';
   import { isAndroid, isTauri, tauriReady } from '../core/platform.ts';
   import { invokeNative } from '../core/native.ts';
-  import { download, bytesToB64, memorySink, nativeSink, partId, PIECE_BYTES } from './download.ts';
+  import { download, bytesToB64, memorySink, nativeSink, partId, PIECE_BYTES, SUSPEND } from './download.ts';
   import * as store from './downloads.svelte.ts';
   import Icon from '../ui/Icon.svelte';
   import CommandButton from '../ui/CommandButton.svelte';
@@ -44,7 +61,8 @@
   import { t } from '../core/i18n.svelte.ts';
   import { layout } from '../app/layout.svelte.ts';
   import { copyText } from '../core/clipboard.ts';
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
+  import { registerLeaveGuard } from '../app/leave-guards.ts';
   import { directoryLoadState, leaveDecision, cwdFollowStep } from './file-view-state.ts';
   import { createFileNavigation, directoryBackFloor } from './file-nav.ts';
   import { handlePathLinkClick, resolvePathRef } from '../core/path-links.ts';
@@ -89,7 +107,7 @@
   // agent in a worktree). Empty = no declaration (a direct/adopted session):
   // follow the pane cwd, the pre-#181 rule. The Session-directory tool
   // (goSessionDir) keeps offering the pane cwd explicitly either way.
-  let { session = '', root = '', onGoBack = null, onimmersive = null, visible = false, fontSize = 14, singlePane = false, navRequest = null, jumped = false, currentDir = $bindable('') } = $props();
+  let { session = '', root = '', guardPage = '', onGoBack = null, onimmersive = null, visible = false, fontSize = 14, singlePane = false, navRequest = null, jumped = false, currentDir = $bindable('') } = $props();
   const panelId = $props.id();
   const LIST_WIDTH = { min: 320, max: 520, default: 400 };
   $effect(() => {
@@ -350,14 +368,29 @@
   }
   function cancelPendingAct() {
     if (!pendingAct) return false;
-    if (!pendingAct.busy) pendingAct = null;
+    if (!pendingAct.busy) { pendingAct.cancel?.(); pendingAct = null; }
     return true;
   }
   $effect(() => {
     // loadSeq is deliberately plain; loading observes a new directory request.
     void loading;
-    if (pendingAct && !actCurrent(pendingAct)) pendingAct = null;
+    if (pendingAct && !actCurrent(pendingAct)) { pendingAct.cancel?.(); pendingAct = null; }
   });
+  // A server switch destroys this instance (board 315): it asks through the
+  // editor's own discard dialog first, after any delete in flight finished.
+  $effect(() => registerLeaveGuard({
+    page: guardPage,
+    dirty: () => untrack(() => !!pendingAct?.busy || leaveDecision({ view, edited: isEdited }) !== 'go'),
+    ask: async () => {
+      while (untrack(() => pendingAct?.busy)) await new Promise((r) => setTimeout(r, 50));
+      if (untrack(() => leaveDecision({ view, edited: isEdited })) === 'go') return true;
+      await tick(); // the revealed layer is visible before the dialog asks
+      return new Promise((resolve) => {
+        requestAct({ kind: 'leave', run: () => resolve(true), cancel: () => resolve(false) });
+        if (!untrack(() => pendingAct?.kind === 'leave')) resolve(false);
+      });
+    },
+  }));
   /** EVERY way out of the editor goes through here — the back button/gesture,
    *  a session switch, the cwd follow, the drawer's "look here". No edits:
    *  `run` moves now. Unsaved edits: `run` waits behind the discard dialog and
@@ -1300,6 +1333,8 @@
     const row = store.begin(rowId, name, path);
     const control = new AbortController();
     cancels.set(rowId, control);
+    let settle;
+    settles.set(rowId, new Promise((resolve) => { settle = resolve; }));
     const strings = () => ({ downloading: t('downloading'), changed: t('downloadFileChanged'), saving: t('saving') });
     const show = () => { if (operation.current()) downloadLifetime.update(token, store.feedbackOf(row, strings())); };
     const progress = (fraction, received = 0, total = 0) => { store.progress(rowId, received, total); show(); };
@@ -1403,6 +1438,13 @@
         if (operation.current()) downloadLifetime.update(token, busy); else earlier(busy);
         return;
       }
+      // Suspended by a server switch (board 315): the part stays for a
+      // resume on this server; the row goes with the rest of its memory.
+      if (e?.cancelled && e.keepPart) {
+        await native?.release();
+        store.forget(rowId);
+        return;
+      }
       // Cancelled from the Downloads view: the part goes, the row goes, and
       // the slot says nothing more.
       if (e?.cancelled) {
@@ -1416,7 +1458,7 @@
       const failed = { kind: 'error', message: String(e.message || e), detail: path };
       if (operation.current()) downloadLifetime.update(token, failed); else earlier(failed);
     }
-    } finally { if (id) inFlight.delete(id); cancels.delete(rowId); }
+    } finally { if (id) inFlight.delete(id); cancels.delete(rowId); settles.delete(rowId); settle(); }
   }
 
   // ONE destination rule and ONE byte→b64 encoder for every upload entry point

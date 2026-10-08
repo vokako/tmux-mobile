@@ -11,7 +11,7 @@
 
   type HistoryEntry = { address: string; token: string };
 
-  let { onConnected }: { onConnected: () => void } = $props();
+  let { onConnected }: { onConnected: (switched: boolean) => void } = $props();
 
   let address = $state(localStorage.getItem('tmux_address') || defaultConnectionAddress(location, import.meta.env.DEV));
   let token = $state(localStorage.getItem('tmux_token') || '');
@@ -96,19 +96,18 @@
         // by machine identity and then asks whether this was a different
         // server. Same machine (a LAN/Tailscale alternate) — nothing to
         // activate, the socket swap was the whole event. A DIFFERENT server —
-        // the old one's live state is parked under its id and the app must
-        // REBOOT through the boot path: Hub room caches, mounted terminals
-        // and Files cwds are old-server memory that no in-place connect can
-        // reset (lead blocker). The mirror keys already point here — this
-        // form wrote them before dialing.
+        // the old one's live state is parked under its id and App brings the
+        // app up on this one with the content tree remounted and every
+        // per-server memory reset (board 315, no reload). The mirror keys
+        // already point here — this form wrote them before dialing.
         const act = activateConnected(localStorage, {
           address: url, token,
           ...(socket.trim() ? { socket: socket.trim() } : {}),
           ...(mid ? { machineId: mid } : {}),
         });
-        if (act.reload) { location.reload(); return; }
+        if (act.reload) { onConnected(true); return; }
       } catch {}
-      onConnected();
+      onConnected(false);
     } catch (e) {
       if (!cancelled) error = (e as Error).message;
     } finally {

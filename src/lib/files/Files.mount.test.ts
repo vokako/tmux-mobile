@@ -1081,3 +1081,34 @@ test('the Downloads view: two running rows, Cancel aborts its part, a part on di
     assert.ok([...feeds.keys()].some((u) => u.endsWith('/fixture/half.bin')), 'resume starts from the part\u2019s server path');
   } finally { for (const f of feeds.values()) { try { f.close(); } catch {} } await app.close(); }
 });
+
+const guarded = compileMount(new URL('./Files.guard.test.svelte', import.meta.url), [new URL('../core/ws.ts', import.meta.url)]);
+
+test('a server switch asks an unsaved editor through its own discard dialog (board 315)', async context => {
+  let api!: { confirmLeave: () => Promise<boolean> };
+  const app = await (await guarded).mount(context, {
+    props: { visible: true, session: 'fixture', guardPage: 'files', expose: (a: typeof api) => { api = a; } },
+    modules: [rpc()],
+    pendingImports: ['highlight.js/'], // the editor's highlighter loads lazily; this tier cannot paint it
+  });
+  try {
+    await settle(app);
+    // Clean list: nothing to ask, the switch may go.
+    assert.equal(await api.confirmLeave(), true);
+    app.document.querySelector<HTMLButtonElement>('.file-main')!.click(); await settle(app);
+    button(app, 'Edit').click(); await settle(app);
+    const area = app.document.querySelector<HTMLTextAreaElement>('.editor-layer textarea')!;
+    area.value = '# Rules\n\nchanged'; area.dispatchEvent(new app.window.Event('input', { bubbles: true })); await settle(app);
+    // Dirty: the discard dialog asks; Cancel keeps the switch from happening.
+    let answer = api.confirmLeave(); await settle(app);
+    const dialog = app.document.querySelector('[role=alertdialog]');
+    assert.ok(dialog, 'the editor’s own discard confirmation');
+    button(app, 'Keep editing').click(); await settle(app);
+    assert.equal(await answer, false);
+    assert.equal(area.isConnected && area.value, '# Rules\n\nchanged', 'the text is still there');
+    // Discard: the switch may go.
+    answer = api.confirmLeave(); await settle(app);
+    button(app, 'Discard').click(); await settle(app);
+    assert.equal(await answer, true);
+  } finally { await app.close(); }
+});

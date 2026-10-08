@@ -5,7 +5,7 @@
   import Sessions from './lib/sessions/Sessions.svelte';
   import Terminal from './lib/terminal/Terminal.svelte';
   import SplitView from './lib/sessions/SplitView.svelte';
-  import Files from './lib/files/Files.svelte';
+  import Files, { resetFilesMemory, suspendDownloads } from './lib/files/Files.svelte';
   import Hub from './lib/hub/Hub.svelte';
   import AgentsPage from './lib/hub/AgentsPage.svelte';
   import Board from './lib/hub/Board.svelte';
@@ -18,9 +18,10 @@
   import { hubRooms, systemStatus } from './lib/core/ws.ts';
   import SystemStatus from './lib/system/SystemStatus.svelte';
   import ServerList from './lib/app/ServerList.svelte';
+  import AddServerDialog from './lib/app/AddServerDialog.svelte';
   import { hubPrefs } from './lib/hub/hub-prefs.svelte.ts';
   import { moveTrack, pinTrack } from './lib/hub/reveal.ts';
-  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable, listPanes, listSessions, backendsList } from './lib/core/ws.ts';
+  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable, listPanes, listSessions, backendsList, setSocket } from './lib/core/ws.ts';
   import { setServedBackends } from './lib/core/agents.ts';
   import { t } from './lib/core/i18n.svelte.ts';
   import { layout } from './lib/app/layout.svelte.ts';
@@ -29,7 +30,11 @@
   import { agentsLivesInSettings, defaultPage, restoreNav, retarget } from './lib/app/nav-state.ts';
   import { RAIL_DRAG_THRESHOLD, RAIL_GAP, RAIL_ORDER_KEY, parseRailOrder, railDropAt, railDropIndex, railDropOffset, railOrderToStore, visibleRailSlots } from './lib/app/nav-order.ts';
   import { createReconnectMachine } from './lib/app/reconnect.ts';
-  import { activateConnected, adoptHostname, applySwitch, currentServerId, hostLabel, loadServers, migrateServers, recordServer, removeServer, renameServer, saveMachineAddresses, saveServers } from './lib/app/servers.ts';
+  import { activateConnected, adoptHostname, currentServerId, hostLabel, loadServers, migrateServers, recordServer, removeServer, renameServer, saveMachineAddresses, saveServers } from './lib/app/servers.ts';
+  import { confirmLeave } from './lib/app/leave-guards.ts';
+  import { createServerSwitch } from './lib/app/server-switch.ts';
+  import { forgetAll as forgetDownloadRows } from './lib/files/downloads.svelte.ts';
+  import { hoverCard } from './lib/ui/hover.svelte.ts';
   import { anchorOf, menuPlacement, popOrigin, viewBox } from './lib/ui/placement.ts';
   import HoverCard from './lib/ui/HoverCard.svelte';
   import ContextMenu from './lib/ui/ContextMenu.svelte';
@@ -60,6 +65,16 @@
   $effect(() => installNativeContextMenuGuard(window));
   $effect(() => installPathLinkNet(window));
   let connected = $state(false);
+  // An in-place server switch in progress (board 315): { intent, from, target,
+  // phase: 'connecting' | 'failed', error }. While set, the SHELL stays drawn
+  // (rail / tab bar, inert) and the content area shows the switch panel; the
+  // server-bound content tree is not mounted. `connected` is false then —
+  // honestly, the socket is down.
+  let switching = $state(null);
+  // Bumped whenever the app comes up against a DIFFERENT server; keys the
+  // content tree so it remounts (board 315).
+  let serverEpoch = $state(0);
+  const shell = $derived(connected || !!switching);
   let terminalTarget = $state('');
   let terminalSession = $state('');
   // Files follows the session the user touched LAST — opening a terminal pane
@@ -154,8 +169,8 @@
   // rail on connected desktop, nothing on connected mobile.
   $effect(() => {
     const root = document.documentElement.style;
-    root.setProperty('--shell-top', connected ? '0px' : '49px');
-    root.setProperty('--shell-left', connected && !layout.isTouchDevice ? '46px' : '0px');
+    root.setProperty('--shell-top', shell ? '0px' : '49px');
+    root.setProperty('--shell-left', shell && !layout.isTouchDevice ? '46px' : '0px');
   });
   // The Hub needs only the server-side bus (hub_* degrades method-not-found
   // without it, same probe). Its LAYOUT adapts: three columns on
@@ -568,6 +583,7 @@
   });
 
   setOnDisconnect(() => {
+    if (switching) return; // the switch owns the socket now
     // Keep connected=true during reconnect to avoid UI flicker
     reconnectMachine.start();
   });
@@ -595,6 +611,7 @@
         ...(mid ? { machineId: mid } : {}),
       });
     } catch {}
+    loadServerRegistry(); // the entry's active address moved
     resubscribeAll();
     serverReady();
     // Tell Terminal to reset stale resize state + re-fit against the new server.
@@ -620,7 +637,25 @@
     loadBackends();
   }
 
-  function onConnected() {
+  /** The disconnected connect page reached a server. `switched`: it is a
+   * DIFFERENT server than the current entry (activateConnected parked the
+   * old one and pointed the live keys here), so the app comes up on it the
+   * way an in-place switch does — memory reset, tree remounted, the
+   * target's parked state restored — instead of reloading (board 315). */
+  function onConnected(switched = false) {
+    if (switched) {
+      reconnectMachine.cancel();
+      serverSwitch.supersede();
+      resetServerMemory();
+      hubPrefs.reloadServerState();
+      serverEpoch++;
+      localStorage.removeItem('tmux_disconnected');
+      activeAddress = localStorage.getItem('tmux_address') || '';
+      loadServerRegistry();
+      bringUp(activeAddress, localStorage.getItem('tmux_token') || '');
+      resubscribeAll();
+      return;
+    }
     reconnectMachine.cancel();
     connected = true;
     serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
@@ -689,9 +724,7 @@
   // The registry lives in servers.ts (named entries mirroring the active
   // tmux_address/token keys); this is only the rail entry: a popover listing
   // the entries, the current one marked, a click switching. The switch itself
-  // is applySwitch (park/restore per-server state) + a full reload — the boot
-  // path is the ONE way up against a server, so nothing in-memory can leak
-  // across (Hub room cache, mounted terminals, Files parked cwds).
+  // is switchTo below — in place, no reload (board 315).
   let serverMenuOpen = $state(false);
   const serverPickerId = $props.id();
   let serverMenuEl = $state(null);
@@ -802,24 +835,96 @@
     };
   });
 
-  /** Switch: fully drop the old socket FIRST (cancel any reconnect loop so it
-   *  cannot race the storage writes with the old address), apply the storage
-   *  plan, reload. `tmux_disconnected` is cleared by the plan, so the boot
-   *  auto-connect brings the app up against the target. */
+  function serverRename(id, name) { serverList = renameServer(localStorage, id, name); }
+  function serverRemove(id) { serverList = removeServer(localStorage, id); serverCurId = currentServerId(localStorage); }
+  /** A row of the server list was picked. */
   function doServerSwitch(id) {
-    if (id === serverCurId) return; // already connected: no reconnect
-    reconnectMachine.cancel();
-    disconnect();
-    if (applySwitch(localStorage, id)) location.reload();
-    else serverMenuOpen = false; // stale row (entry vanished) — just close
+    const target = loadServers(localStorage).find((s) => s.id === id);
+    if (!target) { loadServerRegistry(); return; } // stale row (entry vanished)
+    void switchTo(target);
   }
+
+  /** Bring a hidden guarded page into view so its own dialog asks there. */
+  async function revealPage(next) {
+    if (page !== next) { page = next; await tick(); }
+  }
+
+  /** Everything in memory that belongs to the server being left (board 315),
+   * reset AFTER the content tree is gone and the socket closed. The rest of
+   * the per-server state is in storage, parked by parkFrom; components and
+   * their ws.ts listeners/subscriptions went with the unmount. A source test
+   * pins this list against the module-level stores. */
+  function resetServerMemory() {
+    resetFilesMemory();                 // browse positions keyed by session name
+    forgetDownloadRows();               // this session's rows; parts on disk carry their server
+    setServedBackends(null);            // the backend list is the server's answer
+    hoverCard.hide();                   // a card may describe the old server's row
+    hubState = { available: false, probed: false };
+    serverInfo = { hostname: '', machineId: '' };
+    pendingAddress = '';
+    // App navigation that names things on the old server; bringUp restores
+    // the target's own from its parked tmux_state.
+    terminalTarget = ''; terminalSession = '';
+    splitCells = []; splitLayout = 1; activeCellId = null;
+    filesSession = ''; filesNavReq = null; boardIssueReq = null; agentsEditReq = null;
+    jumpedFrom = null; sessListOpen = false;
+  }
+
+  // THE server switch (board 315): every entry — the switcher popover,
+  // Settings › Connection, Add server, the panel's Retry and Back — goes
+  // through server-switch.ts, which owns the order and the source/candidate
+  // split. App supplies the effects: the content tree unmounts while
+  // `switching` is set and remounts (keyed by serverEpoch) in comeUp.
+  const serverSwitch = createServerSwitch({
+    storage: localStorage,
+    connected: () => connected,
+    currentId: () => serverCurId,
+    currentName: () => serverName,
+    confirmLeave: () => confirmLeave(revealPage),
+    stopReconnect: () => reconnectMachine.cancel(),
+    onstate: (st) => {
+      switching = st;
+      if (st) { serverMenuOpen = false; connected = false; }
+    },
+    suspendDownloads,
+    afterUnmount: () => tick(),
+    disconnect,
+    resetMemory: resetServerMemory,
+    connect: (address, token) => connect(address, token),
+    setSocket,
+    machineId: () => getMachineId() || '',
+    comeUp: (target) => {
+      hubPrefs.reloadServerState();
+      serverEpoch++;
+      activeAddress = target.address;
+      loadServerRegistry();
+      addrSetVersion++;
+      bringUp(target.address, target.token);
+      resubscribeAll();
+    },
+  });
+  const switchTo = (target) => serverSwitch.switchTo(target);
+  function switchRetry() { void serverSwitch.retry(); }
+  function switchBack() { void serverSwitch.back(loadServers(localStorage)); }
+
   /** The `+` row: the Settings connect form IS the add flow (it upserts by
    *  address on success), so the row only takes you there. No disconnect —
    *  the current server stays live until the new one authenticates. */
-  function serverAddRow() {
+  /** The `+` row and the failed panel's Edit: the connect fields in a
+   * dialog inside the shell (board 315). Open/cancel write nothing; submit is
+   * the one switch path. */
+  let addServer = $state(null); // { initial } | null
+  function openAddServer(initial = null) {
     serverMenuOpen = false;
-    pageBeforePrefs = page;
-    page = 'settings';
+    addServer = { initial: initial ? { address: initial.address, token: initial.token, socket: initial.socket } : null };
+  }
+  function serverAddRow() { openAddServer(); }
+  function submitAddServer(c) {
+    addServer = null;
+    const known = loadServers(localStorage).find((s) => s.address === c.address);
+    // A known address is that entry (same token/socket edits apply); a new
+    // one is a CANDIDATE with no id until the server says which machine it is.
+    void switchTo(known ? { ...known, token: c.token, socket: c.socket } : { id: '', name: hostLabel(c.address), ...c });
   }
 
   // --- Optimal address selection ---
@@ -848,8 +953,11 @@
     const candidates = addrs.filter(a => classifyAddress(a) < curClass);
     if (candidates.length === 0) { lastProbeTime = Date.now(); return; }
     optimizing = true;
+    const intent = serverSwitch.intent;
     try {
       const best = await findBestAddress(candidates);
+      // A server switch began while probing: this server is not current now.
+      if (!serverSwitch.owns(intent)) return;
       if (!best || best === current) return;
       // Only switch if the new address is higher priority (lower class number)
       if (classifyAddress(best) >= curClass) return;
@@ -863,7 +971,7 @@
       window.dispatchEvent(new Event('ws-reconnected'));
     } catch {
       // Switch failed — trigger normal reconnect which will try all addresses
-      reconnectMachine.start();
+      if (serverSwitch.owns(intent)) reconnectMachine.start();
     } finally {
       optimizing = false;
       lastProbeTime = Date.now();
@@ -990,8 +1098,10 @@
       // Restoring it anyway lands the user on a pane that cannot be captured,
       // so check first and come back to the tab without a target instead.
       if (s.terminalTarget && s.terminalSession) {
+        const intent = serverSwitch.intent;
         listSessions()
           .then((sessions) => {
+            if (!serverSwitch.owns(intent)) return; // a switch began: not this server's tree
             // list_sessions answers with a bare array (list_sessions_with_panes
             // is the one that wraps).
             if (!(sessions ?? []).some((x) => x.name === s.terminalSession)) {
@@ -1030,7 +1140,7 @@
   // Detect app resume (Android background → foreground) + periodic optimize
   $effect(() => {
     const handler = () => {
-      if (document.visibilityState !== 'visible') return;
+      if (document.visibilityState !== 'visible' || switching) return;
       if (!isConnected() && !reconnectMachine.isActive()) {
         reconnectMachine.start();
       } else if (isConnected()) {
@@ -1045,7 +1155,7 @@
     document.addEventListener('visibilitychange', handler);
     // Periodic check while connected
     const interval = setInterval(() => {
-      if (isConnected() && Date.now() - lastProbeTime > OPTIMIZE_INTERVAL_MS) {
+      if (!switching && isConnected() && Date.now() - lastProbeTime > OPTIMIZE_INTERVAL_MS) {
         optimizeConnection();
       }
     }, OPTIMIZE_INTERVAL_MS);
@@ -1053,7 +1163,7 @@
   });
 
   $effect(() => {
-    if (autoConnectAttempted || connected) return;
+    if (autoConnectAttempted || connected || switching) return;
     const addr = localStorage.getItem('tmux_address');
     const token = localStorage.getItem('tmux_token');
     if (!addr || !token) return;
@@ -1205,6 +1315,20 @@
     return { title: t(RAIL_ITEMS[slot].label), note: key ? shortcutLabel(key) : undefined };
   }
   function serverCardInfo() {
+    // Mid-switch the card describes the TARGET being reached (board 315): the
+    // server we left is not connected any more, and saying so is the truth.
+    if (switching) {
+      const target = switching.target;
+      return {
+        title: target.name || hostLabel(target.address),
+        lines: [
+          { label: t('address'), value: target.address },
+          switching.phase === 'connecting'
+            ? { label: t('status'), value: t('connecting'), tone: 'warn' }
+            : { label: t('status'), value: switching.error, tone: 'danger' },
+        ],
+      };
+    }
     return {
       title: serverName,
       lines: [
@@ -1295,7 +1419,7 @@
   // 不一致"): the Hub's toggle writes hubPrefs.sidebarCollapsed; the Terminal
   // page's and the Board's sidebars and the system-status bar follow it, and a
   // rail reselect on any of the three pages opens it again (#199).
-  const shellSideCollapsed = $derived(connected && !layout.isTouchDevice && hubPrefs.sidebarCollapsed);
+  const shellSideCollapsed = $derived(shell && !layout.isTouchDevice && hubPrefs.sidebarCollapsed);
   // Only three pages HAVE the primary sidebar; the toggle and the page-head
   // room it takes exist there alone (board #219, owner 2026-09-20: "files页面里，
   // 多显示了折叠左侧边栏的按钮，还有设置这些页面也都没兼容好"). The collapsed state
@@ -1465,7 +1589,7 @@
   });
 </script>
 
-<main class:with-rail={connected && !layout.isTouchDevice} class:touch-layout={connected && layout.isTouchDevice} class:side-collapsed={shellSideCollapsed} class:side-page={pageHasSidebar} class:immersive={filesImmersive && page === 'files'}>
+<main class:with-rail={shell && !layout.isTouchDevice} class:touch-layout={shell && layout.isTouchDevice} class:side-collapsed={shellSideCollapsed} class:side-page={pageHasSidebar} class:immersive={filesImmersive && page === 'files'}>
   <!-- Shell chrome. Every nav item is in the Tab order (no tabindex="-1" —
        review, 2026-09-03: the whole nav was unreachable by keyboard) and wears
        the global button:focus-visible ring; the current page is aria-current.
@@ -1475,7 +1599,7 @@
        · connected mobile   → a bottom TAB BAR in thumb reach, hidden while the
          keyboard is up (html.keyboard-open) so immersive typing costs nothing
        · disconnected       → the top brand bar with the gear (both platforms) -->
-  {#if !connected}
+  {#if !shell}
     <nav class="topbar">
       <div class="brand">
         <img class="logo" src={iconSrc} alt="" width="24" height="24" />
@@ -1494,6 +1618,7 @@
          drag across it is an ordinary drop instead of a silent refusal. -->
     <nav
       class="rail"
+      inert={switching?.phase === 'connecting'}
       class:reordering={!!railDrag}
       onpointermove={railPointerMove}
       onpointerup={railPointerUp}
@@ -1548,6 +1673,7 @@
             aria-label={t(RAIL_ITEMS[slot].label)}
             use:hoverInfo={() => railInfo(slot)}
             aria-current={page === slot ? 'page' : undefined}
+            disabled={!!switching}
             onpointerdown={(e) => railPointerDown(e, slot)}
             onclick={() => railActivate(slot)}
           ><span class="tab-glyph" class:on={page === slot}><Icon name={RAIL_ITEMS[slot].icon} size={17} /></span></button>
@@ -1573,7 +1699,7 @@
          reselect delegate (#199/#201): the Hub keeps its reading anchor,
          Terminal/Board their reveal effects (#200). The heads make room for
          it through `.side-toggle-row` / `.page-head` (app.css). -->
-    {#if pageHasSidebar}
+    {#if pageHasSidebar && !switching}
       <div class="shell-side-toggle">
         <CommandButton variant="secondary" iconOnly icon="panel-left" expanded={!hubPrefs.sidebarCollapsed} inside
           label={hubPrefs.sidebarCollapsed ? t('hubSidebarExpand') : t('hubSidebarCollapse')}
@@ -1602,10 +1728,20 @@
       <div class="menu-heading">{t('serversTitle')}</div>
       <ServerList bind:this={serverListEl} servers={serverList} currentId={serverCurId} container={serverMenuEl}
         onpick={(id) => { serverMenuOpen = false; doServerSwitch(id); }}
-        onrename={(id, name) => { serverList = renameServer(localStorage, id, name); }}
-        onremove={(id) => { serverList = removeServer(localStorage, id); serverCurId = currentServerId(localStorage); }}
+        onrename={serverRename} onremove={serverRemove}
         onadd={serverAddRow} onclose={() => (serverMenuOpen = false)} />
     </div>
+  {/if}
+
+  {#snippet savedServers()}
+    <!-- Settings › Connection: the same ServerList as the popover (board 315). -->
+    <ServerList variant="page" servers={serverList} currentId={serverCurId}
+      onpick={doServerSwitch} onrename={serverRename} onremove={serverRemove} onadd={serverAddRow} />
+  {/snippet}
+
+  {#if addServer}
+    <AddServerDialog initial={addServer.initial} compact={narrowVp}
+      onsubmit={submitAddServer} oncancel={() => (addServer = null)} />
   {/if}
 
   {#if reconnecting && page !== 'settings'}
@@ -1617,6 +1753,35 @@
   {/if}
 
   <div class="page {slideAnim}" class:page-terminal={page === 'terminal'}>
+    {#if switching}
+      <!-- The switch panel (board 315): in the content area, inside the kept
+           shell. Connecting names the target with the running cue; a failure
+           says what happened and offers the three ways on — never the
+           connect page, never a blank screen. -->
+      <div class="switch-panel appear" role="status" aria-live="polite">
+        {#if switching.phase === 'connecting'}
+          <span class="reconnect-spinner" aria-hidden="true"></span>
+          <strong class="switch-name">{t('serverSwitching').replace('{name}', switching.target.name || hostLabel(switching.target.address))}</strong>
+          <span class="switch-addr">{switching.target.address}</span>
+        {:else}
+          <Icon name="info" size={22} />
+          <strong class="switch-name">{t('serverSwitchFailed').replace('{name}', switching.target.name || hostLabel(switching.target.address))}</strong>
+          <span class="switch-addr">{switching.target.address}</span>
+          <p class="config-error" role="alert">{switching.error}</p>
+          <div class="switch-actions">
+            <CommandButton label={t('configRetry')} icon="refresh" variant="primary" onclick={switchRetry} />
+            {#if switching.from}<CommandButton label={t('serverSwitchBack').replace('{name}', switching.from.name)} icon="arrow-left" onclick={switchBack} />{/if}
+            <CommandButton label={t('serverSwitchEdit')} icon="edit" onclick={() => openAddServer(switching.target)} />
+            <CommandButton label={t('serverSwitchOther')} icon="swap-h" expanded={serverMenuOpen}
+              onclick={(e) => toggleServerMenu(e)} />
+          </div>
+        {/if}
+      </div>
+    {:else}
+    <!-- Keyed by the server (board 315): a different server remounts every
+         server-bound component from scratch — no component state, listener or
+         subscription of the old server survives into the new tree. -->
+    {#key serverEpoch}
     {#if page === 'settings'}
       <Settings {onConnected} />
     {/if}
@@ -1636,12 +1801,13 @@
          chain. -->
     {#if hubEligible && !agentsLivesInSettings(layout.isTouchDevice)}
       <div class="page-layer" class:hidden={page !== 'agents'}>
-        <AgentsPage visible={page === 'agents'} onGoBack={(fn) => agentsGoBack = fn} editRequest={agentsEditReq} />
+        <AgentsPage visible={page === 'agents'} guardPage="agents" onGoBack={(fn) => agentsGoBack = fn} editRequest={agentsEditReq} />
       </div>
     {/if}
     {#if page === 'prefs'}
     <div class="page-layer">
     <Preferences {connected} {theme} {fontSize} {serverInfo} {activeAddress} {pendingAddress} addresses={prefAddresses}
+      {savedServers}
       {serverName} onServers={connected && layout.isTouchDevice ? toggleServerMenu : null} serversOpen={serverMenuOpen} serversControls={serverPickerId}
       {optimizing} {linkCopied}
       onClose={togglePrefs}
@@ -1679,7 +1845,7 @@
     </div>
     {/if}
     <div class="page-layer" class:hidden={page !== 'files'}>
-      <Files session={filesSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} onimmersive={(on) => filesImmersive = on} navRequest={filesNavReq} jumped={!!jumpedFrom} />
+      <Files session={filesSession} guardPage="files" visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} onimmersive={(on) => filesImmersive = on} navRequest={filesNavReq} jumped={!!jumpedFrom} />
     </div>
     <div class="page-layer" class:hidden={page !== 'board'}>
       {#if hubEligible}
@@ -1750,12 +1916,14 @@
       {/if}
       </div>
     </div>
+    {/key}
+    {/if}
   </div>
 
   <InstallPrompt />
   <HoverCard />
-  {#if connected && layout.isTouchDevice}
-    <nav class="tabbar">
+  {#if shell && layout.isTouchDevice}
+    <nav class="tabbar" inert={!!switching}>
       <!-- Foreground-only selection (owner, 2026-09-05: "保持没有背景色，只有
            前景色的一个高亮样式…没有选中灰色 选中后前景有颜色" — the WeChat/
            Alipay dialect): the 2026-09-04 travelling wash is retired here —
@@ -2128,6 +2296,18 @@
     gap: 9px; color: var(--text3); font-size: var(--fs-body);
   }
   .terminal-empty :global(svg) { opacity: 0.65; }
+  /* The in-place switch panel (board 315): the terminal-empty dialect, in
+     the content area of the kept shell. */
+  .switch-panel {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 9px; padding: 24px 16px; text-align: center; color: var(--text3); font-size: var(--fs-body);
+  }
+  .switch-panel :global(svg) { opacity: 0.65; }
+  .switch-name { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+  .switch-addr { font-family: var(--font-mono); font-size: var(--fs-meta); color: var(--text2); overflow-wrap: anywhere; }
+  .switch-panel .config-error { margin: 0; max-width: 420px; }
+  .switch-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 6px; }
 
   /* Split-layout control: a single floating icon in the terminal's top-right
      corner (no full-width toolbar row). Opens the shared ContextMenu with

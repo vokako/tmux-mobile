@@ -106,7 +106,7 @@
     <!-- Per-project cwd is Files' own parked-position map (module-scoped,
          keyed by session), so each project wakes up where you left it. -->
     <div class="files-body appear">
-      <Files session={selected} root={projectPath} visible={visible} {fontSize} singlePane jumped onGoBack={onfilesback} navRequest={drawerFilesReq} bind:currentDir={drawerFilesDir} />
+      <Files session={selected} root={projectPath} guardPage="hub" visible={visible} {fontSize} singlePane jumped onGoBack={onfilesback} navRequest={drawerFilesReq} bind:currentDir={drawerFilesDir} />
     </div>
   {/if}
   {#if drawerView === 'board'}

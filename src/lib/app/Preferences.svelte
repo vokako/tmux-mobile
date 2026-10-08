@@ -56,6 +56,7 @@
     onServers = null,
     serversOpen = false,
     serversControls = undefined,
+    savedServers = null,
   }: {
     connected?: boolean;
     theme?: string;
@@ -106,6 +107,9 @@
      *  would leave the icon looking unchanged. */
     serversOpen?: boolean;
     serversControls?: string;
+    /** Every saved server (board 315): App's ONE ServerList, rendered here in
+     *  page layout — same rows and actions as the switcher popover. */
+    savedServers?: import('svelte').Snippet | null;
   } = $props();
 
   const TAB_KEY = 'tmux_settings_tab';
@@ -590,6 +594,7 @@
           visible={AGENT_TABS.includes(tab)}
           editRequest={tab === (acceptedAgentRequest?.kind === 'team' ? 'teams' : 'agents') ? acceptedAgentRequest : null}
           onGuardExit={registerAgentsGuard}
+          guardPage="prefs"
           onGoBack={(fn: () => boolean) => agentsBack = fn}
           onDrilled={(d: boolean) => agentsDrilled = d}
         />
@@ -764,6 +769,12 @@
         </div>
       {:else}
         <div class="config-section">
+          {#if savedServers}
+            <div class="saved-servers" role="group" aria-label={t('serversSaved')}>
+              <strong class="config-field-label">{t('serversSaved')}</strong>
+              {@render savedServers()}
+            </div>
+          {/if}
           {#if connected}
             <div class="connection-title">
               <div><strong class="config-field-label">{serverInfo.hostname || 'unknown'}</strong><small class="config-note connection-id">{serverInfo.machineId?.slice(0, 8) || '—'}</small></div>
@@ -869,6 +880,9 @@
   .server-row :global(svg) { flex: none; color: var(--text3); }
   .server-row .r-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .r-label { flex: 1; min-width: 0; }
+  /* The saved servers sit ABOVE the current machine's address list: two
+     layers — which server, then how to reach it (board 315). */
+  .saved-servers { display: flex; flex-direction: column; gap: 6px; padding-bottom: 12px; border-bottom: 1px solid var(--border2); }
   .pref-shell { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .back { display: none; }
   .preferences.stacked { grid-template-columns: minmax(0, 1fr); }

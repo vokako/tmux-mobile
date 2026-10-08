@@ -134,15 +134,26 @@ doc already describes. Design decisions, in the order they bit:
   Migration attributes history addresses through the same map: the current
   machine's alternates never re-materialize as entries, an unseen machine
   yields one entry, unattributed addresses dedupe by address.
-- **Switching is storage writes + reload** (`applySwitch`): park the leaving
-  server's `tmux_state`/`tmux_machine_id` under `tmux_state::<id>` /
-  `tmux_machine_id::<id>`, restore the target's pair (or clear — a first
-  visit must not inherit A's terminal targets), point the mirror keys, clear
-  `tmux_disconnected`, reload. The boot path is the ONE way up against a
-  server, so the Hub room cache, mounted terminals, Files parked cwds and
-  Team state reset by construction instead of by per-component sweeps. The
-  caller cancels the reconnect machine and closes the socket FIRST — a live
-  retry loop re-reads `tmux_address` and would race the writes.
+- **Switching is in place, no reload** (board 315, owner 2026-10-08: "切换的过程要丝滑一些，不要整个画面又像到登录页面重新登录加载一样"). It was storage writes + `location.reload()` until then, which flashed the disconnected top bar and the connect card. `lib/app/server-switch.ts` is THE switch; every entry (rail/phone switcher, Settings › Connection, Add server, the failed panel's Retry/Back) calls `switchTo`. The shell (rail, tab bar) stays drawn; the server-bound content tree is not mounted while `switching` is set and is remounted under `{#key serverEpoch}` on arrival. The ORDER is the contract, each step finished before the next:
+  1. **Leave guards** (`lib/app/leave-guards.ts`): every instance that will be destroyed registers its OWN guard (the Files page, the Hub drawer's Files, AgentsPage on the rail or inside Settings). A dirty one is revealed on its page and asks in its own dialog; a save/delete in flight finishes first. Any "stay" and nothing happened.
+  2. **One intent**: the reconnect machine stops, `switching` unmounts the tree (so no keystroke, send or save reaches it), and every App async begun earlier (boot restore's `listSessions`, `optimizeConnection`) checks `serverSwitch.owns(intent)` before writing.
+  3. **Downloads suspended**: every running attempt aborts with `SUSPEND` and is awaited, so no retry, re-sign or WS fallback of the old server's chain can go out on the next connection (`download.ts` re-checks the signal after its retry sleep, before `freshUrl`). Its part is KEPT (see file-handling.md). Then `tick()` lets the unmounted tree's persistence run (the composer's last keystroke) — under the old server.
+  4. **Park the source, once**: `parkFrom` files every key in `PARKED_KEYS` under the leaving id. Only a switch that began CONNECTED parks; Retry and Back reuse the frozen `from` and never park again, so a half-switched world can never overwrite the source's slot.
+  5. Socket closed (`disconnect()` rejects every pending RPC), `resetServerMemory()`.
+  6. **Connect without touching the mirror or CURRENT**: a reload mid-switch boots the server you left.
+  7. **Only after auth**, `activateSwitched`: record by the machine id the server REPORTED (a new address of a known machine folds into its entry, a new machine gets a new one; an address never guesses a machine), add the address to that machine's failover set, `pointTo` the canonical entry, write the mirror. Then `comeUp`: `hubPrefs.reloadServerState()`, `serverEpoch++`, `bringUp` (the boot path's own half after connect).
+
+  A failure keeps the panel (Retry · Back to the source · Edit · the server switcher); in FAILED only the server control and the panel work, the page buttons stay disabled. A second address of the SAME machine is not a switch: failover keeps its path and nothing resets. The disconnected connect page reaching a different server comes up the same way (`onConnected(true)`).
+
+  | state | where it lives | on a switch |
+  |---|---|---|
+  | theme, fonts, zoom, locale, layout, shortcuts, rail order, widths, notifications, `tmux_servers`, `tmux_machines` (keyed by machine id) | localStorage | global, untouched |
+  | `tmux_state` (tab, terminal target, split), `tmux_machine_id`, `tmux_hub_project` / `_drafts` / `_seen` / `_lead` / `_drawer` / `_roster_expanded` (per-project maps keyed by tmux session NAME: `app` on A is not `app` on B) | localStorage, `PARKED_KEYS` | parked as `<key>::<id>`, the target's surfaced |
+  | every mounted component, its ws.ts listeners and subscriptions | memory | unmounted with the tree |
+  | Files' parked cwds (`browsed`), download rows, served backends, the hover card, App's hub probe / serverInfo / terminal and Files targets | module/App memory | `resetServerMemory()` |
+  | download parts on disk | the shell | kept; `partId` hashes the machine id, Resumable lists only this server's |
+
+  Proof: `server-switch.test.ts` runs the real switch, storage half, leave guards and `download()` against two fake machines (A→B→A with a same-named project; B fails twice → Back to A with every parked key unchanged; A's delayed read after B is up; a suspended download re-signs nothing; a dirty-guard cancel; a second address of A; a superseded intent), each with a negative control. `server-memory.source.test.ts` keeps the `resetServerMemory` list honest against every module-level store under `src/lib`; it is maintenance, not the proof.
 - **Single click switches; a pencil renames** (2026-09-12, #165, lead decision
   01:32). The old 260ms click hold guessed whether another click would arrive
   and delayed the requested switch, repeating the roster defect retired in
@@ -329,7 +340,7 @@ not claimed as a full-App or native-clipboard test.
 
 ### Servers are a named registry; the machine is the identity
 
-(board #55): `src/lib/app/servers.ts` keeps `tmux_servers` (+`tmux_server_current`) while the old `tmux_address`/`tmux_token`/`tmux_socket` stay the ACTIVE MIRROR every existing reader keeps reading. One machine = one entry however many LAN/Tailscale/WAN addresses it answers on — `recordServer` merges by `machineId` (learned at connect) without moving CURRENT, migration attributes `tmux_address_history` through `tmux_machines`, and the same-machine failover semantics are untouched. A different-machine successful connect goes through `activateConnected`: park the old live state/machine id before surfacing the target and reload; a same-machine alternate records in place. Switching (`applySwitch` + reload) parks/restores per-server `tmux_state`/`tmux_machine_id` under `::<id>` keys so restore targets never cross servers, and reuses the boot path so no in-memory cache (Hub rooms, terminals, Files cwds) can leak across; the caller cancels the reconnect machine and drops the socket first. The desktop rail's switcher rides the RAIL_GAP branch above the configure group — a control (no drag slot), popover in the one menu recipe; the Settings form is the add flow and activates only after authentication. Forgetting a non-current server captures its row identity and asks through the shared `ConfirmDialog` before removing config + parked state.
+(board #55): `src/lib/app/servers.ts` keeps `tmux_servers` (+`tmux_server_current`) while the old `tmux_address`/`tmux_token`/`tmux_socket` stay the ACTIVE MIRROR every existing reader keeps reading. One machine = one entry however many LAN/Tailscale/WAN addresses it answers on — `recordServer` merges by `machineId` (learned at connect) without moving CURRENT, migration attributes `tmux_address_history` through `tmux_machines`, and the same-machine failover semantics are untouched. A different-machine successful connect goes through `activateConnected` (or, for the in-place switch, `activateSwitched` after auth — board 315): park the old live state before surfacing the target; a same-machine alternate records in place. Switching is in place since board 315 (`server-switch.ts`, the order and the state-ownership table are in the Multi-Server section above): the per-server keys (`PARKED_KEYS`) park/restore under `::<id>` so restore targets and Hub drafts never cross servers, the content tree remounts and `resetServerMemory` clears the module caches, so nothing in memory leaks across. The desktop rail's switcher rides the RAIL_GAP branch above the configure group — a control (no drag slot), popover in the one menu recipe; Add server is a dialog over the connected shell (cancel changes nothing) and activates only after authentication. Forgetting a non-current server captures its row identity and asks through the shared `ConfirmDialog` before removing config + parked state.
 
 ### The failover set's order is the priority, edited through one writer
 

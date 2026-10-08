@@ -15,6 +15,6 @@ test('server switching is immediate and rename has its own sibling command (#165
   assert.match(list, /<CommandButton variant="icon" icon="edit"/u);
   assert.match(list, /disabled=\{renaming === s\.id\} onclick=\{\(e: MouseEvent\) => \{ e\.stopPropagation\(\); start\(s, e\.currentTarget as HTMLElement\); \}\}/u,
     'the pencil captures its own row, cannot restart an in-progress edit, and never bubbles into a switch');
-  assert.match(source, /reconnectMachine\.cancel\(\);\s*disconnect\(\);\s*if \(applySwitch\(localStorage, id\)\) location\.reload\(\);/u,
-    'switch transport and storage ordering remains unchanged');
+  assert.match(source, /function doServerSwitch\(id\) \{[\s\S]*?void switchTo\(target\);/u,
+    'a picked row goes through the one switch path');
 });

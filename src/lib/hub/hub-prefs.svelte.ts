@@ -71,7 +71,22 @@ const state = $state({
   stepsRows: clampStepsRows(localStorage.getItem(STEPS_ROWS_KEY) ?? STEPS_ROWS),
 });
 
+/** The per-PROJECT keys, i.e. per server (board 315): servers.ts parks them
+ * under the leaving server's id on a switch. A test pins the two lists. */
+export const HUB_SERVER_KEYS = [PROJECT_KEY, DRAFT_KEY, SEEN_KEY, LEAD_KEY, DRAWER_KEY, ROSTER_EXPANDED_KEY];
+
 export const hubPrefs = {
+  /** Re-read the per-server state after a switch pointed the live keys at
+   * another server (servers.ts pointTo). The Hub is not mounted then, so no
+   * component holds the old values. */
+  reloadServerState() {
+    state.leads = readMap<string>(LEAD_KEY);
+    state.seen = readMap<number>(SEEN_KEY);
+    state.project = localStorage.getItem(PROJECT_KEY) ?? '';
+    state.drafts = readMap<string>(DRAFT_KEY);
+    state.drawers = readMap<string>(DRAWER_KEY);
+    state.rosterExpanded = readMap<boolean>(ROSTER_EXPANDED_KEY);
+  },
   get feedLevel() { return state.feedLevel; },
   setFeedLevel(v: FeedLevel) {
     state.feedLevel = v;
