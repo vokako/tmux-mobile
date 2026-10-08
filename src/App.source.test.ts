@@ -414,6 +414,32 @@ test('the in-place server switch keeps its order (board 315, replaces the #55 re
   assert.doesNotMatch(source, /applySwitch/u, 'the reload-era plan is gone');
 });
 
+test('every App socket owner goes through the switch module and loses ownership on a switch (board 315 review P1)', () => {
+  // The address rows and the optimizer move the socket within one server;
+  // they share the switch's intent, so a stale attempt never restarts the
+  // reconnect loop over a newer server's socket.
+  const onAddress = source.match(/onAddress=\{\(address\) => \{[\s\S]*?\n      \}\}/u)?.[0] ?? '';
+  assert.match(onAddress, /serverSwitch\.connectAddress\(address,/u);
+  assert.doesNotMatch(onAddress, /reconnectMachine\.start|\bconnect\(/u, 'no direct connect or reconnect start');
+  const opt = source.match(/async function optimizeConnection\(\) \{[\s\S]*?\n  \}/u)?.[0] ?? '';
+  assert.match(opt, /await serverSwitch\.connectAddress\(best,/u);
+  assert.doesNotMatch(opt, /reconnectMachine\.start|await connect\(/u);
+  // Server answers land only for the server that was asked.
+  assert.match(source, /async function probeHub\(\) \{\s*const intent = serverSwitch\.intent;[\s\S]*?if \(!serverSwitch\.owns\(intent\)\) return;/u);
+  assert.match(source, /function loadBackends\(\) \{\s*const intent = serverSwitch\.intent;[\s\S]*?serverSwitch\.owns\(intent\)/u);
+  // The only remaining direct starts are the reconnect machine's own owners.
+  const starts = [...source.matchAll(/reconnectMachine\.start\(\)/gu)].length;
+  assert.equal(starts, 3, 'setOnDisconnect, the visibility resume and startReconnect — each guarded by the switch state');
+});
+
+test('the leave walk holds Settings mounted while guards are asked (board 315 review P1)', () => {
+  assert.match(source, /\{#if page === 'prefs' \|\| holdPages\}\s*<div class="page-layer" class:hidden=\{page !== 'prefs'\}>/u,
+    'revealing another page never unmounts an Agents editor that has not answered (LeaveHost.test.svelte mirrors this)');
+  assert.match(source, /confirmLeave: \(\) => confirmLeave\(\{ current: page, reveal: revealPage, hold: \(on\) => \{ holdPages = on; \} \}\),/u);
+  // Both server lists read one connection-state input.
+  assert.equal([...source.matchAll(/<ServerList [^>]*link=\{serverLink\}/gu)].length, 2);
+});
+
 test('the shell stays through a switch; only the server-bound content tree goes (board 315)', () => {
   assert.match(source, /const shell = \$derived\(connected \|\| !!switching\);/u);
   assert.match(source, /\{#if switching\}[\s\S]*?class="switch-panel[\s\S]*?\{:else\}[\s\S]*?\{#key serverEpoch\}/u,
@@ -536,12 +562,13 @@ test('one system-vitals strip serves desktop sidebar and an open phone drawer (b
   assert.ok(!/sys-footer/u.test(source), 'the retired full-width footer cannot regrow');
 });
 
-test('a typed address ends the running reconnect loop before it connects (review 2026-09-03)', () => {
+test('a typed address ends the running reconnect loop before it connects (review 2026-09-03)', async () => {
   // onAddress is a NEW intent. Without cancel() first, the machine's next
   // attempt raced this socket; ws.ts superseded the loser, whose 'connection
   // timeout' then marked a reachable address unreachable for two minutes.
-  assert.match(source,
-    /onAddress=\{\(address\) => \{[\s\S]{0,400}?reconnectMachine\.cancel\(\);\s*disconnect\(\);\s*connect\(address/u,
+  // Since board 315 the order lives in server-switch.ts connectAddress.
+  const mod = await readFile(new URL('./lib/app/server-switch.ts', import.meta.url), 'utf8');
+  assert.match(mod, /async function connectAddress\(address: string, token: string\)[\s\S]*?const intent = \+\+seq;\s*d\.stopReconnect\(\);\s*d\.disconnect\(\);\s*try \{\s*await d\.connect\(address, token\);/u,
     'cancel → disconnect → connect, in that order');
 });
 

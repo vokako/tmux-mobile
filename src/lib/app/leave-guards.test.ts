@@ -1,26 +1,41 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clearLeaveGuardsForTests, confirmLeave, registerLeaveGuard } from './leave-guards.ts';
+import { clearLeaveGuardsForTests, confirmLeave, registerLeaveGuard, type LeaveWalk } from './leave-guards.ts';
 
 test.beforeEach(() => clearLeaveGuardsForTests());
 
-test('only dirty guards ask, each on its own page, one at a time (board 315)', async () => {
+function walk(current: string, seen: string[]): LeaveWalk {
+  return {
+    current,
+    reveal: async (page) => { seen.push(`show ${page}`); },
+    hold: (on) => { seen.push(on ? 'hold' : 'release'); },
+  };
+}
+
+test('the current page asks first; others are revealed, held, and the user ends where they started (board 315)', async () => {
   const seen: string[] = [];
-  registerLeaveGuard({ page: 'files', dirty: () => false, ask: async () => { seen.push('files?'); return true; } });
-  registerLeaveGuard({ page: 'hub', dirty: () => true, ask: async () => { seen.push('hub?'); return true; } });
+  registerLeaveGuard({ page: 'files', dirty: () => true, ask: async () => { seen.push('files?'); return true; } });
+  registerLeaveGuard({ page: 'hub', dirty: () => false, ask: async () => { seen.push('hub?'); return true; } });
   registerLeaveGuard({ page: 'prefs', dirty: () => true, ask: async () => { seen.push('prefs?'); return true; } });
-  const ok = await confirmLeave(async (page) => { seen.push(`show ${page}`); });
-  assert.equal(ok, true);
-  assert.deepEqual(seen, ['show hub', 'hub?', 'show prefs', 'prefs?'], 'revealed before asking; clean guards are not asked');
+  assert.equal(await confirmLeave(walk('prefs', seen)), true);
+  assert.deepEqual(seen, ['hold', 'prefs?', 'show files', 'files?', 'show prefs', 'release'],
+    'the current page answers before any navigation; the held pages are released last');
 });
 
-test('a "stay" stops the walk; an unregistered guard is skipped', async () => {
+test('a "stay" stops the walk and still returns to the start; a guard that left on its own is skipped', async () => {
   const seen: string[] = [];
   let offLater = () => {};
   registerLeaveGuard({ page: '', dirty: () => true, ask: async () => { seen.push('first'); offLater(); return true; } });
   offLater = registerLeaveGuard({ page: '', dirty: () => true, ask: async () => { seen.push('gone'); return true; } });
-  registerLeaveGuard({ page: '', dirty: () => true, ask: async () => { seen.push('third'); return false; } });
+  registerLeaveGuard({ page: 'files', dirty: () => true, ask: async () => { seen.push('third'); return false; } });
   registerLeaveGuard({ page: '', dirty: () => true, ask: async () => { seen.push('never'); return true; } });
-  assert.equal(await confirmLeave(async () => {}), false);
-  assert.deepEqual(seen, ['first', 'third'], 'the unmounted one is skipped, nothing after a stay is asked');
+  assert.equal(await confirmLeave(walk('hub', seen)), false);
+  assert.deepEqual(seen, ['hold', 'first', 'show files', 'third', 'show hub', 'release']);
+});
+
+test('nothing dirty: no hold, no navigation', async () => {
+  const seen: string[] = [];
+  registerLeaveGuard({ page: 'files', dirty: () => false, ask: async () => true });
+  assert.equal(await confirmLeave(walk('hub', seen)), true);
+  assert.deepEqual(seen, []);
 });

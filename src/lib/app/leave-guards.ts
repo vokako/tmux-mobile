@@ -8,9 +8,15 @@
 // flow: the question is the component's own, in its own dialog.
 //
 // A guard on a page the user is not looking at is asked on THAT page: the
-// switch reveals it first (`reveal(page)`), so the dialog is seen next to
-// what it would discard, and a cancel leaves the user looking at it.
-//
+// switch reveals it first, so the dialog is seen next to what it would
+// discard. Revealing must not destroy anything that has not answered yet
+// (board 315 review P1): the host HOLDS every conditionally mounted page
+// (Settings, which carries an Agents editor) for the whole walk, guards on
+// the current page are asked before any navigation, and when the walk ends —
+// either way — the user is put back on the page they started from. A cancel
+// therefore loses nothing anywhere; a guard that disappears mid-walk did so
+// on its own, never because the walk navigated it away.
+
 // Framework-free and module-level: the instances live in different subtrees
 // (the Files page, the Hub drawer's Files, the Agents page on the rail or
 // inside Settings), and threading a callback through each host would be
@@ -34,16 +40,32 @@ export function registerLeaveGuard(guard: LeaveGuard): () => void {
   return () => { guards.delete(guard); };
 }
 
-/** Ask every dirty guard in turn, one dialog at a time. A guard that left
- * (its component unmounted) while an earlier one was asking is skipped. */
-export async function confirmLeave(reveal: (page: string) => Promise<void>): Promise<boolean> {
-  for (const guard of [...guards]) {
-    if (!guards.has(guard) || !guard.dirty()) continue;
-    if (guard.page) await reveal(guard.page);
-    if (!guards.has(guard)) continue;
-    if (!(await guard.ask())) return false;
+export interface LeaveWalk {
+  /** The page the user is on: its guards ask first, without navigating. */
+  current: string;
+  /** Show a page so its guard's dialog is visible. */
+  reveal(page: string): Promise<void>;
+  /** Keep (true) / release (false) every conditionally mounted page. */
+  hold(on: boolean): void;
+}
+
+/** Ask every dirty guard in turn, one dialog at a time. Resolves true to
+ * leave, false to stay; either way the user ends on `current`. */
+export async function confirmLeave(walk: LeaveWalk): Promise<boolean> {
+  const order = [...guards].sort((a, b) => Number(b.page === walk.current) - Number(a.page === walk.current));
+  if (!order.some((g) => g.dirty())) return true;
+  walk.hold(true);
+  try {
+    for (const guard of order) {
+      if (!guards.has(guard) || !guard.dirty()) continue;
+      if (guard.page && guard.page !== walk.current) await walk.reveal(guard.page);
+      if (!(await guard.ask())) return false;
+    }
+    return true;
+  } finally {
+    await walk.reveal(walk.current);
+    walk.hold(false);
   }
-  return true;
 }
 
 /** Test seam: the registry is module state. */

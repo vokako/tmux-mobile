@@ -4,7 +4,7 @@
   import Files from './Files.svelte';
   import { confirmLeave } from '../app/leave-guards.ts';
   let { expose = () => {}, ...initial } = $props();
-  $effect(() => expose({ confirmLeave: () => confirmLeave(async () => {}) }));
+  $effect(() => expose({ confirmLeave: () => confirmLeave({ current: 'files', reveal: async () => {}, hold: () => {} }) }));
 </script>
 
 <Files {...initial} />

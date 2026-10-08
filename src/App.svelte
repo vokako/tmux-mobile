@@ -93,8 +93,14 @@
   let hubState = $state({ available: false, probed: false });
   let hubAvailable = $derived(hubState.available);
   async function probeHub() {
-    try { await hubRooms(); hubState.available = true; hubState.probed = true; }
+    const intent = serverSwitch.intent;
+    try {
+      await hubRooms();
+      if (!serverSwitch.owns(intent)) return; // asked of a server we have left
+      hubState.available = true; hubState.probed = true;
+    }
     catch (e) {
+      if (!serverSwitch.owns(intent)) return;
       // Only a definitive server answer (method-not-found: no hub) may flip
       // the flag off. Transient failures (RPC timeout, reconnect blip) keep
       // the current value — flipping to false unmounts the always-mounted Hub
@@ -622,9 +628,10 @@
   // an older server without the method, or a timeout, leaves the client on
   // its frozen fallback list rather than on an empty one.
   function loadBackends() {
+    const intent = serverSwitch.intent;
     backendsList()
-      .then((r) => setServedBackends(r?.backends ?? null))
-      .catch(() => setServedBackends(null));
+      .then((r) => { if (serverSwitch.owns(intent)) setServedBackends(r?.backends ?? null); })
+      .catch(() => { if (serverSwitch.owns(intent)) setServedBackends(null); });
   }
 
   /** What EVERY connect path asks a server it has just reached: does it host
@@ -844,6 +851,14 @@
     void switchTo(target);
   }
 
+  // While the leave guards are asked, Settings stays mounted even when another
+  // page is revealed: its Agents editor may not have answered yet (board 315).
+  let holdPages = $state(false);
+  /** What both server lists show about the connection (ServerList `link`). */
+  const serverLink = $derived({
+    connected: connected && !reconnecting,
+    target: switching ? { id: switching.target.id, failed: switching.phase === 'failed' } : null,
+  });
   /** Bring a hidden guarded page into view so its own dialog asks there. */
   async function revealPage(next) {
     if (page !== next) { page = next; await tick(); }
@@ -880,8 +895,14 @@
     connected: () => connected,
     currentId: () => serverCurId,
     currentName: () => serverName,
-    confirmLeave: () => confirmLeave(revealPage),
+    confirmLeave: () => confirmLeave({ current: page, reveal: revealPage, hold: (on) => { holdPages = on; } }),
     stopReconnect: () => reconnectMachine.cancel(),
+    startReconnect: () => reconnectMachine.start(),
+    addressUp: () => {
+      serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
+      resubscribeAll();
+      window.dispatchEvent(new Event('ws-reconnected'));
+    },
     onstate: (st) => {
       switching = st;
       if (st) { serverMenuOpen = false; connected = false; }
@@ -963,15 +984,11 @@
       if (classifyAddress(best) >= curClass) return;
       localStorage.setItem('tmux_address', best);
       activeAddress = best;
-      disconnect();
-      const token = localStorage.getItem('tmux_token') || '';
-      await connect(best, token);
-      serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
-      resubscribeAll();
-      window.dispatchEvent(new Event('ws-reconnected'));
+      // A failure restarts the reconnect loop (all addresses) — only while
+      // this attempt still owns the socket (connectAddress).
+      await serverSwitch.connectAddress(best, localStorage.getItem('tmux_token') || '');
     } catch {
-      // Switch failed — trigger normal reconnect which will try all addresses
-      if (serverSwitch.owns(intent)) reconnectMachine.start();
+      // the probe itself threw: nothing was dialed, nothing to recover
     } finally {
       optimizing = false;
       lastProbeTime = Date.now();
@@ -1726,7 +1743,7 @@
       style:--pop-origin={serverMenuAnchor ? popOrigin(serverMenuAnchor, serverMenuPos) : undefined}
       bind:this={serverMenuEl} bind:offsetWidth={serverMenuW} bind:offsetHeight={serverMenuH}>
       <div class="menu-heading">{t('serversTitle')}</div>
-      <ServerList bind:this={serverListEl} servers={serverList} currentId={serverCurId} container={serverMenuEl}
+      <ServerList bind:this={serverListEl} servers={serverList} currentId={serverCurId} link={serverLink} container={serverMenuEl}
         onpick={(id) => { serverMenuOpen = false; doServerSwitch(id); }}
         onrename={serverRename} onremove={serverRemove}
         onadd={serverAddRow} onclose={() => (serverMenuOpen = false)} />
@@ -1735,7 +1752,7 @@
 
   {#snippet savedServers()}
     <!-- Settings › Connection: the same ServerList as the popover (board 315). -->
-    <ServerList variant="page" servers={serverList} currentId={serverCurId}
+    <ServerList variant="page" servers={serverList} currentId={serverCurId} link={serverLink}
       onpick={doServerSwitch} onrename={serverRename} onremove={serverRemove} onadd={serverAddRow} />
   {/snippet}
 
@@ -1804,8 +1821,8 @@
         <AgentsPage visible={page === 'agents'} guardPage="agents" onGoBack={(fn) => agentsGoBack = fn} editRequest={agentsEditReq} />
       </div>
     {/if}
-    {#if page === 'prefs'}
-    <div class="page-layer">
+    {#if page === 'prefs' || holdPages}
+    <div class="page-layer" class:hidden={page !== 'prefs'}>
     <Preferences {connected} {theme} {fontSize} {serverInfo} {activeAddress} {pendingAddress} addresses={prefAddresses}
       {savedServers}
       {serverName} onServers={connected && layout.isTouchDevice ? toggleServerMenu : null} serversOpen={serverMenuOpen} serversControls={serverPickerId}
@@ -1828,12 +1845,10 @@
         // A typed address is a NEW intent: end any running reconnect loop
         // before the direct connect, or its next attempt races this socket
         // and the loser's timeout marks a reachable address unreachable.
-        reconnectMachine.cancel();
-        disconnect();
-        connect(address, localStorage.getItem('tmux_token') || '').then(() => {
-          serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
-          resubscribeAll();
-        }).catch(() => { reconnectMachine.start(); })
+        // The switch module owns the socket (board 315): a server switch that
+        // starts meanwhile makes this attempt stale, and a stale one neither
+        // publishes nor restarts the reconnect loop.
+        void serverSwitch.connectAddress(address, localStorage.getItem('tmux_token') || '')
           .finally(() => { if (pendingAddress === address) pendingAddress = ''; });
       }}
       onDisconnect={() => { page = 'settings'; doDisconnect(); }}

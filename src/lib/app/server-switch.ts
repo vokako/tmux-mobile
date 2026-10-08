@@ -47,6 +47,8 @@ export interface SwitchDeps {
   /** Ask every leave guard; false = stay. */
   confirmLeave(): Promise<boolean>;
   stopReconnect(): void;
+  /** Start the reconnect loop for the CURRENT server (it reads the mirror). */
+  startReconnect(): void;
   /** The switch state changed: non-null = the content tree must be unmounted. */
   onstate(state: SwitchState | null): void;
   suspendDownloads(): Promise<void>;
@@ -59,6 +61,8 @@ export interface SwitchDeps {
   machineId(): string;
   /** Authenticated and activated: remount and bring the app up. */
   comeUp(target: SwitchTarget, entry: ServerEntry): void;
+  /** Another address of the CURRENT server answered (connectAddress). */
+  addressUp(address: string): void;
 }
 
 export function createServerSwitch(d: SwitchDeps) {
@@ -109,8 +113,35 @@ export function createServerSwitch(d: SwitchDeps) {
     }
   }
 
+  /**
+   * Move the CURRENT server's socket to another of its addresses (the
+   * Connection page's address rows, the periodic optimizer). The same machine,
+   * so nothing parks or resets; but it is a socket owner like a switch, so it
+   * takes its own intent (board 315 review P1): a switch that starts while
+   * this one dials makes it stale, and a stale attempt neither publishes its
+   * result nor restarts the reconnect loop — that loop reads the mirror and
+   * would dial the server the user just left, over the new server's socket.
+   * Resolves true when the address answered and is now the connection.
+   */
+  async function connectAddress(address: string, token: string): Promise<boolean> {
+    if (state || guarding) return false;
+    const intent = ++seq;
+    d.stopReconnect();
+    d.disconnect();
+    try {
+      await d.connect(address, token);
+      if (intent !== seq || state) return false;
+      d.addressUp(address);
+      return true;
+    } catch {
+      if (intent === seq && !state) d.startReconnect();
+      return false;
+    }
+  }
+
   return {
     switchTo,
+    connectAddress,
     get state() { return state; },
     /** The current intent: an async begun under it compares on resolve. */
     get intent() { return seq; },

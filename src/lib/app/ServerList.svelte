@@ -14,11 +14,16 @@
   import { activeModal } from '../ui/modal.ts';
   import { t } from '../core/i18n.svelte.ts';
   import type { ServerEntry } from './servers.ts';
+  import { stateDotColor } from '../hub/hub.ts';
 
   interface Props {
     servers: ServerEntry[];
     /** The CONFIRMED current server (authenticated). Only it wears aria-current. */
     currentId: string;
+    /** Connection state, one input for both hosts (board 315): `connected`
+     * says whether the current entry's socket is up; `target` is a switch in
+     * progress (pending) or failed. aria-current never stands in for it. */
+    link?: { connected: boolean; target?: { id: string; failed: boolean } | null };
     /** 'menu' inside the switcher popover; 'page' inside Settings › Connection. */
     variant?: 'menu' | 'page';
     onpick: (id: string) => void;
@@ -31,9 +36,22 @@
     container?: HTMLElement | null;
   }
   let {
-    servers, currentId, variant = 'menu',
+    servers, currentId, link = { connected: true }, variant = 'menu',
     onpick, onrename, onremove, onadd, onclose = () => {}, container = null,
   }: Props = $props();
+
+  /** The one status-dot language (stateDotColor / .live-dot): the server
+   * being reached breathes, a failed one is danger, the connected current is
+   * accent, everything else rests achromatic. */
+  type Dot = 'live' | 'pending' | 'failed' | 'rest';
+  function dotOf(id: string): Dot {
+    if (link.target?.id === id) return link.target.failed ? 'failed' : 'pending';
+    if (id === currentId && link.connected && !link.target) return 'live';
+    return 'rest';
+  }
+  const DOT_COLOR: Record<Dot, string> = {
+    live: 'var(--accent)', pending: stateDotColor('running'), failed: stateDotColor('failed'), rest: stateDotColor('idle'),
+  };
 
   let renaming = $state('');   // entry id whose name is an input
   let draft = $state('');
@@ -157,8 +175,12 @@
           onblur={commit} />
       {:else}
         <button class="sm-pick menu-item" type="button" title={s.address} aria-current={cur ? 'true' : undefined}
+          aria-busy={dotOf(s.id) === 'pending' ? 'true' : undefined}
           onclick={() => onpick(s.id)}>
-          <span class="sm-name">{s.name}</span>
+          <span class="sm-line">
+            <span class="sm-dot" class:live-dot={dotOf(s.id) === 'pending'} style:background={DOT_COLOR[dotOf(s.id)]} aria-hidden="true"></span>
+            <span class="sm-name">{s.name}</span>
+          </span>
           <span class="sm-addr">{s.address}</span>
         </button>
       {/if}
@@ -196,7 +218,10 @@
   .sm-pick {
     flex: 1; min-width: 0; flex-direction: column; align-items: flex-start; gap: 0;
   }
-  .sm-name { font-weight: 500; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sm-line { display: flex; align-items: center; gap: var(--menu-gap); min-width: 0; max-width: 100%; }
+  /* The address list's dot (Preferences .addr-dot): one size for one cue. */
+  .sm-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; transition: background var(--t-fast); }
+  .sm-name { font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sm-addr { font-family: var(--font-mono); font-size: var(--fs-meta); line-height: var(--control-line-height); color: var(--text2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sm-row.cur .sm-name { color: var(--accent-ink); }
   .sm-check { color: var(--accent-ink); display: grid; place-items: center; width: var(--control-height); flex: none; }

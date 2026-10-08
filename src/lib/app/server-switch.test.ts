@@ -86,13 +86,17 @@ function app(storage = mem({
   const states: (SwitchState | null)[] = [];
   const unmountWrites: (() => void)[] = [];
   const resets: string[] = [];
+  const reconnects: string[] = [];
+  const published: string[] = [];
   const sw = createServerSwitch({
     storage,
     connected: () => connected,
     currentId: () => currentServerId(storage),
     currentName: () => loadServers(storage).find((s) => s.id === currentServerId(storage))?.name ?? '',
-    confirmLeave: () => confirmLeave(async () => {}),
-    stopReconnect: () => {},
+    confirmLeave: () => confirmLeave({ current: 'hub', reveal: async () => {}, hold: () => {} }),
+    stopReconnect: () => { reconnects.push('stop'); },
+    startReconnect: () => { reconnects.push(`start ${storage.getItem('tmux_address')}`); },
+    addressUp: (addr) => { published.push(addr); },
     onstate: (st) => { states.push(st); if (st) { connected = false; mounted = false; } },
     suspendDownloads: async () => { for (const s of suspenders) await s(); },
     afterUnmount: async () => { for (const f of unmountWrites.splice(0)) f(); },
@@ -104,7 +108,7 @@ function app(storage = mem({
     comeUp: () => { connected = true; mounted = true; },
   });
   const suspenders: (() => Promise<void>)[] = [];
-  return { storage, w, a, b, sw, states, unmountWrites, resets, suspenders,
+  return { storage, w, a, b, sw, states, unmountWrites, resets, suspenders, reconnects, published,
     get connected() { return connected; }, get mounted() { return mounted; } };
 }
 
@@ -237,4 +241,37 @@ test('a superseded switch (A→B→C style) drops the older intent’s completio
   releaseB();
   await first;
   assert.notEqual(currentServerId(t.storage), t.b.id, 'B’s late success did not activate');
+});
+
+test('an address connect of A still dialing when a switch to B starts neither reconnects A nor touches B (review P1)', async () => {
+  const t = app();
+  // The Connection page taps A's Tailscale address; it is still dialing.
+  let releaseA!: () => void;
+  const gate = new Promise<void>((r) => { releaseA = r; });
+  const real = t.w.connect.bind(t.w);
+  (t.w as { connect: (a: string) => Promise<void> }).connect = async (addr: string) => {
+    if (addr === 'ws://a-ts:9') { await gate; throw new Error('disconnected'); }
+    return real(addr);
+  };
+  const tap = t.sw.connectAddress('ws://a-ts:9', 'ta');
+  await new Promise((r) => setTimeout(r, 0));
+  // Meanwhile the user picks B.
+  await t.sw.switchTo(t.b);
+  assert.equal(t.w.at, 'ws://b:2');
+  releaseA(); // A's attempt now rejects, as the switch's disconnect made it
+  assert.equal(await tap, false);
+  assert.deepEqual(t.reconnects.filter((r) => r.startsWith('start')), [], 'no reconnect loop started for anyone');
+  assert.deepEqual(t.published, [], 'A’s attempt published nothing');
+  assert.equal(t.w.at, 'ws://b:2', 'B’s socket untouched');
+  assert.equal(currentServerId(t.storage), t.b.id);
+  assert.equal(t.storage.getItem('tmux_address'), 'ws://b:2');
+});
+
+test('an address connect that fails on its own (no switch) still hands over to the reconnect loop', async () => {
+  const t = app();
+  t.w.fail('ws://a:1', 1);
+  assert.equal(await t.sw.connectAddress('ws://a:1', 'ta'), false);
+  assert.deepEqual(t.reconnects.filter((r) => r.startsWith('start')), ['start ws://a:1']);
+  assert.equal(await t.sw.connectAddress('ws://a:1', 'ta'), true);
+  assert.deepEqual(t.published, ['ws://a:1']);
 });
