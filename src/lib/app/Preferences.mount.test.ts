@@ -212,9 +212,10 @@ test('font suggestions are filtered to families the device actually has (#233)',
       const input = app.document.querySelector<HTMLInputElement>('.sel-combo input')!;
       input.click();
       const options = [...app.document.querySelectorAll('.sel-opt')].map(el => el.textContent?.trim());
+      // The bundled faces lead, unprobed (board 312); then the pool as probed.
       // 'LXGW WenKai GB' also matches the probe regex — pool order survives.
-      return options.length === 3
-        && options[0] === 'Inter' && options[1] === 'LXGW WenKai' && options[2] === 'LXGW WenKai GB';
+      return JSON.stringify(options) === JSON.stringify(
+        ['Inter Variable', 'Space Grotesk Variable', 'Inter', 'LXGW WenKai', 'LXGW WenKai GB']);
     });
   } finally { await app.close(); }
 });
@@ -248,9 +249,53 @@ test('font validation locks its row and restores the confirmed family on failure
     input.dispatchEvent(new app.window.Event('input', { bubbles: true }));
     input.dispatchEvent(new app.window.FocusEvent('blur'));
     await app.wait(() => app.window.localStorage.getItem('tmux_font_ui') === null);
-    assert.equal(input.value, '');
+    // Cleared = the default, and the field names it (board 312).
+    assert.equal(input.value, 'Inter Variable');
     assert.equal(app.document.querySelector('[role="alert"].font-error'), null);
   } finally { probe.resolve(); await app.close(); }
+});
+
+// Board 312 (owner, 2026-10-08): the field showed a grey "System default"
+// while the titles wore the bundled Space Grotesk, which no picker offered.
+// The fields name the real default in its own face, the bundled faces are
+// pickable without a local() probe, and Reset restores the default at once.
+test('font fields show the real default and reset to it (board 312)', async context => {
+  const app = await mount(context, {
+    setup(window) {
+      window.localStorage.setItem('tmux_font_display', 'LXGW WenKai');
+      window.FontFace = class {
+        src: string;
+        constructor(_name: string, src: string) { this.src = src; }
+        load() { return /LXGW WenKai|Menlo/.test(this.src) ? Promise.resolve(this) : Promise.reject(new Error('none')); }
+      };
+    },
+  });
+  try {
+    const inputs = () => [...app.document.querySelectorAll<HTMLInputElement>('.sel-combo input')];
+    const resets = () => [...app.document.querySelectorAll<HTMLButtonElement>('.font-field button')];
+    // ui · display · mono: the default by name, the display role's custom
+    // pick, each in its face. Mono has no nameable default (ui-monospace):
+    // empty, its placeholder worn in the mono stack — even with Menlo present.
+    await app.wait(() => JSON.stringify(inputs().map(i => i.value)) === JSON.stringify(['Inter Variable', 'LXGW WenKai', '']));
+    assert.match(inputs()[0]!.style.fontFamily, /Inter Variable/);
+    assert.equal(inputs()[2]!.placeholder, 'System monospace');
+    assert.match(inputs()[2]!.getAttribute('style') ?? '', /font-family: var\(--font-mono\)/);
+    // Reset is live only where something is customized.
+    assert.equal(JSON.stringify(resets().map(b => b.disabled)), JSON.stringify([true, false, true]));
+    resets()[1]!.click();
+    await app.wait(() => app.window.localStorage.getItem('tmux_font_display') === null && inputs()[1]!.value === 'Space Grotesk Variable');
+    assert.equal(resets()[1]!.disabled, true);
+    // A bundled face is valid without a probe; picking the default stores nothing.
+    const ui = inputs()[0]!;
+    ui.value = 'Space Grotesk Variable';
+    ui.dispatchEvent(new app.window.Event('input', { bubbles: true }));
+    ui.dispatchEvent(new app.window.FocusEvent('blur'));
+    await app.wait(() => app.window.localStorage.getItem('tmux_font_ui') === 'Space Grotesk Variable');
+    ui.value = 'Inter Variable';
+    ui.dispatchEvent(new app.window.Event('input', { bubbles: true }));
+    ui.dispatchEvent(new app.window.FocusEvent('blur'));
+    await app.wait(() => app.window.localStorage.getItem('tmux_font_ui') === null && ui.value === 'Inter Variable');
+  } finally { await app.close(); }
 });
 
 test('numeric preferences use shared bounds and apply without a page Save', async context => {

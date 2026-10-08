@@ -239,7 +239,7 @@ test('the three font pickers demonstrate themselves and name their scope (board 
   // #156 retires dense here: a font value shares the Agent form's body step,
   // even though it previews a different family.
   for (const [sel, hint] of [
-    [/bind:value=\{fontInput\} editable fontPreview/u, /use:hoverInfo=\{\(\) => \(\{ title: t\('fontFamily'\), text: t\('fontFamilyHint'\) \}\)\}/u],
+    [/bind:value=\{fontInput\} editable fontPreview emptyFace="var\(--font-mono\)"/u, /use:hoverInfo=\{\(\) => \(\{ title: t\('fontFamily'\), text: t\('fontFamilyHint'\) \}\)\}/u],
     [/bind:value=\{uiFontInput\} editable fontPreview/u, /use:hoverInfo=\{\(\) => \(\{ title: t\('uiFontBody'\), text: t\('uiFontBodyHint'\) \}\)\}/u],
     [/bind:value=\{displayFontInput\} editable fontPreview/u, /use:hoverInfo=\{\(\) => \(\{ title: t\('uiFontDisplay'\), text: t\('uiFontDisplayHint'\) \}\)\}/u],
   ] as const) {
@@ -250,6 +250,12 @@ test('the three font pickers demonstrate themselves and name their scope (board 
   const select = await readFile(new URL('../ui/Select.svelte', import.meta.url), 'utf8');
   assert.match(select, /style:font-family=\{fontPreview && o\.value \? `'\$\{o\.value\.replace\(\/\['"\]\/g, ''\)\}'` : undefined\}/u,
     'each option wears the family it names');
-  assert.match(select, /style:font-family=\{fontPreview && value\.trim\(\) \? `'\$\{value\.trim\(\)\.replace\(\/\['"\]\/g, ''\)\}'` : undefined\}/u,
+  assert.match(select, /style:font-family=\{fontPreview && value\.trim\(\) \? `'\$\{value\.trim\(\)\.replace\(\/\['"\]\/g, ''\)\}'` : \(fontPreview && emptyFace\) \|\| undefined\}/u,
     'the combo field wears the current value\u2019s face');
+  // Board 312: each font field carries its reset, the Slider's undo atom —
+  // never a second reset species.
+  for (const [role, pref] of [['ui', 'uiFont'], ['display', 'displayFont'], ['mono', 'fonts']]) {
+    assert.match(source, new RegExp(`<CommandButton variant="icon" icon="undo" label=\\{\\x60[^\\x60]*\\x60\\}\\s+disabled=\\{fontState\\.${role}\\.pending \\|\\| !${pref}\\.custom\\} onclick=\\{\\(\\) => resetFont\\('${role}'\\)\\} />`, 'u'),
+      `${role}: reset is the undo icon button, disabled at the default`);
+  }
 });

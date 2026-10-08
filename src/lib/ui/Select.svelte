@@ -39,6 +39,10 @@
      * lacks falls through to the app stack, which is also the honest answer:
      * what you see is what picking it gets you. */
     fontPreview = false,
+    /** With fontPreview: the face an EMPTY field wears, so the placeholder
+     * naming a default that has no single family name (the terminal's
+     * platform-keyword lead) still shows it (board 312). */
+    emptyFace = '',
     placeholder = '',
     ariaLabel = '',
     onchange = (_v: string) => {},
@@ -196,7 +200,7 @@
   <span class="sel-combo">
     <input class="sel-trigger control-field combo" class:open class:dense bind:this={inputEl}
       {disabled} {placeholder} bind:value
-      style:font-family={fontPreview && value.trim() ? `'${value.trim().replace(/['"]/g, '')}'` : undefined}
+      style:font-family={fontPreview && value.trim() ? `'${value.trim().replace(/['"]/g, '')}'` : (fontPreview && emptyFace) || undefined}
       role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? listId : undefined}
       aria-activedescendant={open && cursor >= 0 ? `${listId}-${cursor}` : undefined}
       aria-label={ariaLabel || undefined}

@@ -228,12 +228,17 @@
     ['openTerminal', 'shortcutOpenTerminal'],
     ['openFiles', 'shortcutOpenFiles'],
   ];
-  let fontInput = $state(fonts.custom);
+  // An uncustomized field names the face its role renders in (board 312,
+  // owner 2026-10-08: "你要在设置页面显示出来，不然我都没办法选"): it used to
+  // read a grey "System default" while the titles wore Space Grotesk. Picking
+  // that name back stores nothing — it IS the default.
+  const shownFont = (pref: typeof fonts) => pref.custom || pref.defaultFace;
+  let fontInput = $state(shownFont(fonts));
   // The other two roles (owner, 2026-08-25: "总之就三类…这些可以都是系统设
   // 置里的字体"): content prose and the chrome (titles/buttons/names). Same
   // validate-then-commit contract as the terminal font.
-  let uiFontInput = $state(uiFont.custom);
-  let displayFontInput = $state(displayFont.custom);
+  let uiFontInput = $state(shownFont(uiFont));
+  let displayFontInput = $state(shownFont(displayFont));
   // What the pickers OFFER: the suggestion pool filtered to families this
   // device resolves (FontPref.available, board #233) — a listed font that
   // fails validation on pick taught the owner the list was decoration
@@ -404,7 +409,8 @@
     const state = fontState[role];
     if (state.pending) return;
     const pref = { mono: fonts, ui: uiFont, display: displayFont }[role];
-    const value = { mono: fontInput, ui: uiFontInput, display: displayFontInput }[role].trim();
+    const typed = { mono: fontInput, ui: uiFontInput, display: displayFontInput }[role].trim();
+    const value = typed === pref.defaultFace ? '' : typed;
     state.pending = true;
     state.invalid = false;
     try {
@@ -413,12 +419,20 @@
     } catch { if (alive) state.invalid = true; }
     finally {
       if (alive) {
-        if (role === 'mono') fontInput = pref.custom;
-        else if (role === 'ui') uiFontInput = pref.custom;
-        else displayFontInput = pref.custom;
+        const shown = shownFont(pref);
+        if (role === 'mono') fontInput = shown;
+        else if (role === 'ui') uiFontInput = shown;
+        else displayFontInput = shown;
         state.pending = false;
       }
     }
+  }
+
+  function resetFont(role: keyof typeof fontState) {
+    if (role === 'mono') fontInput = '';
+    else if (role === 'ui') uiFontInput = '';
+    else displayFontInput = '';
+    void saveFont(role);
   }
 
   function setLineHeight(value: number) {
@@ -624,18 +638,26 @@
           <div class="preference-row">
             <div class="pref-label" use:hoverInfo={() => ({ title: t('uiFontBody'), text: t('uiFontBodyHint') })}><strong class="config-field-label">{t('uiFontBody')}</strong></div>
             <fieldset class="pref-control config-fields" aria-busy={fontState.ui.pending}>
-              <Select bind:value={uiFontInput} editable fontPreview options={fontOptions.ui}
-                placeholder={t('fontFamilySystem')} ariaLabel={`${t('uiFontBody')} — ${t('uiFontBodyHint')}`}
-                disabled={fontState.ui.pending} onchange={() => saveFont('ui')} />
+              <div class="font-field">
+                <Select bind:value={uiFontInput} editable fontPreview options={fontOptions.ui}
+                  placeholder={t('fontDefaultUi')} ariaLabel={`${t('uiFontBody')} — ${t('uiFontBodyHint')}`}
+                  disabled={fontState.ui.pending} onchange={() => saveFont('ui')} />
+                <CommandButton variant="icon" icon="undo" label={`${t('configReset')} ${t('uiFontBody')}`}
+                  disabled={fontState.ui.pending || !uiFont.custom} onclick={() => resetFont('ui')} />
+              </div>
               {#if fontState.ui.invalid}<small class="config-error font-error appear" role="alert">{t('fontFamilyInvalid')}</small>{/if}
             </fieldset>
           </div>
           <div class="preference-row">
             <div class="pref-label" use:hoverInfo={() => ({ title: t('uiFontDisplay'), text: t('uiFontDisplayHint') })}><strong class="config-field-label">{t('uiFontDisplay')}</strong></div>
             <fieldset class="pref-control config-fields" aria-busy={fontState.display.pending}>
-              <Select bind:value={displayFontInput} editable fontPreview options={fontOptions.display}
-                placeholder={t('fontFamilySystem')} ariaLabel={`${t('uiFontDisplay')} — ${t('uiFontDisplayHint')}`}
-                disabled={fontState.display.pending} onchange={() => saveFont('display')} />
+              <div class="font-field">
+                <Select bind:value={displayFontInput} editable fontPreview options={fontOptions.display}
+                  placeholder={t('fontDefaultDisplay')} ariaLabel={`${t('uiFontDisplay')} — ${t('uiFontDisplayHint')}`}
+                  disabled={fontState.display.pending} onchange={() => saveFont('display')} />
+                <CommandButton variant="icon" icon="undo" label={`${t('configReset')} ${t('uiFontDisplay')}`}
+                  disabled={fontState.display.pending || !displayFont.custom} onclick={() => resetFont('display')} />
+              </div>
               {#if fontState.display.invalid}<small class="config-error font-error appear" role="alert">{t('fontFamilyInvalid')}</small>{/if}
             </fieldset>
           </div>
@@ -648,9 +670,13 @@
           <div class="preference-row">
             <div class="pref-label" use:hoverInfo={() => ({ title: t('fontFamily'), text: t('fontFamilyHint') })}><strong class="config-field-label">{t('fontFamily')}</strong></div>
             <fieldset class="pref-control config-fields" aria-busy={fontState.mono.pending}>
-              <Select bind:value={fontInput} editable fontPreview options={fontOptions.mono}
-                placeholder={t('fontFamilySystem')} ariaLabel={`${t('fontFamily')} — ${t('fontFamilyHint')}`}
-                disabled={fontState.mono.pending} onchange={() => saveFont('mono')} />
+              <div class="font-field">
+                <Select bind:value={fontInput} editable fontPreview emptyFace="var(--font-mono)" options={fontOptions.mono}
+                  placeholder={t('fontFamilySystem')} ariaLabel={`${t('fontFamily')} — ${t('fontFamilyHint')}`}
+                  disabled={fontState.mono.pending} onchange={() => saveFont('mono')} />
+                <CommandButton variant="icon" icon="undo" label={`${t('configReset')} ${t('fontFamily')}`}
+                  disabled={fontState.mono.pending || !fonts.custom} onclick={() => resetFont('mono')} />
+              </div>
               {#if fontState.mono.invalid}<small class="config-error font-error appear" role="alert">{t('fontFamilyInvalid')}</small>{/if}
             </fieldset>
           </div>
@@ -882,6 +908,9 @@
   .conn-actions { display: flex; flex-wrap: wrap; gap: 8px; }
   .address-list { display: flex; flex-direction: column; gap: 8px; position: relative; }
   .address-row { display: flex; align-items: center; gap: 6px; }
+  /* A font field and its reset (board 312): the Slider's field + undo pair. */
+  .font-field { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .font-field > :global(.sel-combo) { flex: 1; min-width: 0; }
   /* Lifted = carrying the dragged row: it paints over its neighbours. */
   .address-row.lifted { position: relative; z-index: 2; }
   .address-choice { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; text-align: left; cursor: pointer; }

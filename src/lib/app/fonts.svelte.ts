@@ -107,6 +107,12 @@ const DISPLAY_STACK =
   "'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC', 'Source Han Sans CN', 'WenQuanYi Micro Hei', " +
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 
+// The faces main.ts bundles (board 312, owner 2026-10-08: the project titles'
+// face could not be picked back once replaced). They are always present, but
+// a `local()` probe cannot see a webfont, so the pickers offer them and the
+// validator accepts them without one. Offered in both prose roles.
+const BUNDLED_SANS = ['Inter Variable', 'Space Grotesk Variable'];
+
 function quote(name: string): string {
   // Wrap in single quotes for CSS; strip any quotes the user typed.
   const clean = name.trim().replace(/['"]/g, '');
@@ -149,6 +155,11 @@ export interface FontPref {
   /** The user's custom family name ('' = the role's default stack). */
   readonly custom: string;
   readonly common: string[];
+  /** Bundled webfonts: always offered, valid without a probe. */
+  readonly bundled: string[];
+  /** The bundled face the default stack leads with — what Settings shows
+   * when nothing is customized ('' = no nameable lead, see `fonts`). */
+  readonly defaultFace: string;
   /** Full CSS font-family stack (custom family first when set). */
   readonly stack: string;
   set(name: string): Promise<boolean>;
@@ -162,13 +173,13 @@ export interface FontPref {
  * (Settings) mounts rarely, and a probe is one registry lookup. */
 export async function availableFamilies(pref: FontPref): Promise<string[]> {
   const hits = await Promise.all(pref.common.map(async (name) => (await isAvailable(name)) ? name : ''));
-  const names = hits.filter(Boolean);
+  const names = [...pref.bundled, ...hits.filter(Boolean)];
   // The custom family joined through `set`, which validated it — offer it
   // even when it is not in the pool.
   return pref.custom && !names.includes(pref.custom) ? [pref.custom, ...names] : names;
 }
 
-function makeFontPref(key: string, defaultStack: string, cssVar: string, common: string[]): FontPref {
+function makeFontPref(key: string, defaultStack: string, cssVar: string, common: string[], defaultFace = '', bundled: string[] = []): FontPref {
   let custom = $state(localStorage.getItem(key) || '');
   const pref: FontPref = {
     get custom() {
@@ -177,13 +188,19 @@ function makeFontPref(key: string, defaultStack: string, cssVar: string, common:
     get common() {
       return common;
     },
+    get bundled() {
+      return bundled;
+    },
+    get defaultFace() {
+      return defaultFace;
+    },
     get stack() {
       const q = quote(custom);
       return q ? `${q}, ${defaultStack}` : defaultStack;
     },
     async set(name: string): Promise<boolean> {
       const next = normalizeFontFamily(name);
-      if (!await isAvailable(next)) return false;
+      if (!bundled.includes(next) && !await isAvailable(next)) return false;
       custom = next;
       try {
         if (custom) localStorage.setItem(key, custom);
@@ -206,10 +223,13 @@ function makeFontPref(key: string, defaultStack: string, cssVar: string, common:
 
 /** Terminal + data surfaces. Key predates the split — existing prefs keep working. */
 export const fonts = makeFontPref('tmux_font', SYSTEM_STACK, '--font-mono', COMMON_MONO);
+// The terminal has no defaultFace: its stack leads with the `ui-monospace`
+// keyword, which no probe can name (on a Mac it is SF Mono, which `local()`
+// does not resolve, so a probe would answer Menlo while SF Mono draws).
 /** Content prose. */
-export const uiFont = makeFontPref('tmux_font_ui', UI_STACK, '--font-ui', COMMON_SANS);
+export const uiFont = makeFontPref('tmux_font_ui', UI_STACK, '--font-ui', COMMON_SANS, 'Inter Variable', BUNDLED_SANS);
 /** Chrome: titles, buttons, names. */
-export const displayFont = makeFontPref('tmux_font_display', DISPLAY_STACK, '--font-display', COMMON_SANS);
+export const displayFont = makeFontPref('tmux_font_display', DISPLAY_STACK, '--font-display', COMMON_SANS, 'Space Grotesk Variable', BUNDLED_SANS);
 
 // --font-* live on <html> (app.css declares the defaults); the overrides just
 // rewrite the inline style so every var() consumer follows.
