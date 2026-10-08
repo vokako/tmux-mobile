@@ -383,6 +383,20 @@ test('the recorder ignores character input (IME, AltGr) and refuses terminal con
     await press({ key: 'ś', code: 'KeyS', ctrlKey: true, altKey: true });
     assert.equal(stored(), before, 'typing never becomes a binding');
     assert.ok(recorder.classList.contains('recording'), 'still waiting for a real chord');
+    // Composing Backspace / Escape are the IME's: no clear, no cancel, not consumed.
+    for (const init of [
+      { key: 'Backspace', code: 'Backspace', isComposing: true },
+      { key: 'Escape', code: 'Escape', isComposing: true },
+      { key: 'Backspace', code: 'Backspace', keyCode: 229 },
+      { key: 'Dead', code: 'Quote' },
+    ] as (KeyboardEventInit & { keyCode?: number })[]) {
+      const ev = new app.window.KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+      if (init.keyCode) Object.defineProperty(ev, 'keyCode', { value: init.keyCode });
+      recorder.dispatchEvent(ev); await app.flush();
+      assert.equal(ev.defaultPrevented, false, `${init.key} stays the input method's`);
+      assert.equal(stored(), before, `${init.key} did not clear the binding`);
+      assert.ok(recorder.classList.contains('recording'), `${init.key} did not end recording`);
+    }
     await press({ key: 'u', code: 'KeyU', ctrlKey: true });
     assert.match(app.document.querySelector('[role="alert"]')?.textContent ?? '', /control key in the terminal/);
     assert.equal(stored(), before);

@@ -18,7 +18,7 @@
   import { terminalPrefs, LINE_HEIGHT_MIN, LINE_HEIGHT_MAX } from './terminal-prefs.svelte.ts';
   import { hubPrefs } from '../hub/hub-prefs.svelte.ts';
   import { notifyEnabled, setNotifyEnabled, ensurePermission, previewCue, notifyPermission, systemNotify, notifyLevel, setNotifyLevel, NOTIFY_LEVELS, type NotifyLevel } from '../hub/notifications.ts';
-  import { SHORTCUTS, SHORTCUT_GROUPS, shortcutFromEvent, shortcutLabel, type ShortcutAction, type ShortcutDef, type ShortcutHost } from './shortcuts.ts';
+  import { SHORTCUTS, SHORTCUT_GROUPS, isCharacterInput, shortcutFromEvent, shortcutLabel, type ShortcutAction, type ShortcutDef, type ShortcutHost } from './shortcuts.ts';
   import { shortcuts } from './shortcuts.svelte.ts';
   import { moveMs } from '../ui/motion.ts';
   import { RAIL_DRAG_THRESHOLD, listDropAt, railDropIndex, railDropOffset } from './nav-order.ts';
@@ -511,6 +511,10 @@
   }
 
   function recordShortcut(action: ShortcutAction, event: KeyboardEvent) {
+    // Typing (IME, AltGr, a dead key) is neither a binding nor a command to
+    // the recorder: a composing Backspace must not clear, a composing Escape
+    // must not end recording, and the event stays the input method's.
+    if (isCharacterInput(event)) return;
     event.preventDefault();
     event.stopPropagation();
     if (event.key === 'Escape') { recordingShortcut = ''; shortcutError = ''; return; }

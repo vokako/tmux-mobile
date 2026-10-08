@@ -166,7 +166,9 @@ test('character input is never a shortcut: AltGr, IME composition, keyCode 229 (
     event('KeyS', { ctrlKey: true, altKey: true, altGraph: true, key: 'ś' }),
     event('KeyS', { ctrlKey: true, altKey: true, key: 'ś' }),
     event('Digit7', { ctrlKey: true, altKey: true, key: '{' }),          // German AltGr+7
-    event('KeyS', { ctrlKey: true, altKey: true, altGraph: true, key: 'Dead' }), // an AltGr dead key: only the state tells
+    event('KeyS', { ctrlKey: true, altKey: true, altGraph: true, key: 'Dead' }), // an AltGr dead key
+    event('KeyS', { ctrlKey: true, altKey: true, key: 'Dead' }),        // the same, reported without the AltGraph state
+    event('BracketRight', { ctrlKey: true, altKey: true, key: 'Dead' }),
     event('KeyS', { ctrlKey: true, altKey: true, isComposing: true, key: 's' }),
     event('KeyS', { ctrlKey: true, altKey: true, keyCode: 229, key: 'Process' }),
   ]) {
@@ -181,6 +183,7 @@ test('character input is never a shortcut: AltGr, IME composition, keyCode 229 (
   assert.deepEqual(real.calls, ['servers']);
   assert.equal(real.prevented, true);
   assert.equal(fire(event('Digit3', { ctrlKey: true, altKey: true, key: '3' })).ran, 'openTerminal');
+  assert.equal(fire(event('BracketRight', { ctrlKey: true, altKey: true, key: ']' })).ran, 'nextServer');
   // Plain Alt (the terminal window keys) is untouched by the AltGr rule.
   assert.equal(fire(event('KeyI', { altKey: true, key: 'i' })).ran, 'nextWindow');
   // The same parse entry serves the recorder: it yields no combo for typing.

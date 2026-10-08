@@ -45,7 +45,7 @@ export interface ShortcutDef {
   label: string;
   group: ShortcutGroup;
   /** Platform-neutral default: `Mod` is ⌘ on macOS and Ctrl elsewhere;
-   * `Mod2` is ⌘⌥ on macOS and Ctrl+Shift elsewhere. An object picks a
+   * `Mod2` is ⌘⌥ on macOS and Ctrl+Alt elsewhere. An object picks a
    * different key per platform. */
   default: string | { mac: string; other: string };
   need: Need;
@@ -185,10 +185,19 @@ const MODIFIER_CODES = new Set([
  * composition (isComposing / keyCode 229), or AltGr, which Windows and Linux
  * report as Ctrl+Alt while it types a character. Plain Alt stays usable (the
  * terminal window keys use it). */
+/** The one "is this character input?" predicate: an IME composition
+ * (isComposing / 229), AltGr (its modifier state), or a dead key (`Dead`: a
+ * composition start, whatever modifiers it is reported with). The handler
+ * (through shortcutFromEvent) and the recorder (before any of its own key
+ * handling) both ask it, so no key that is typing can act. */
+export function isCharacterInput(event: KeyboardEvent): boolean {
+  if (event.isComposing || event.keyCode === 229 || event.key === 'Dead') return true;
+  return typeof event.getModifierState === 'function' && event.getModifierState('AltGraph');
+}
+
 export function shortcutFromEvent(event: KeyboardEvent): string {
   if (!event.code || MODIFIER_CODES.has(event.code)) return '';
-  if (event.isComposing || event.keyCode === 229) return '';
-  if (typeof event.getModifierState === 'function' && event.getModifierState('AltGraph')) return '';
+  if (isCharacterInput(event)) return '';
   // A browser that reports AltGr as plain Ctrl+Alt (no AltGraph state) still
   // gives the TYPED character as `key` (Polish AltGr+S → 'ś', German AltGr+7 →
   // '{'). A real Ctrl+Alt chord's key is the key's own base character, so a
