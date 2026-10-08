@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import type { FeedBlock } from './hub.ts';
 import { wakeLine, localWhen, gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markMentions, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, HUMAN, parseQuote, quotePreview, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, runtimeLabel, agentHue, AGENT_HUES, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand, foldedCommandArgs, inputModeSwitch } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
+import { renderMarkdown } from '../core/markdown.ts';
 import { mentionPalette, rosterGroups, rosterMarker, sortAgentsForRoster, stoppedGroups } from './hub.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -1005,6 +1006,11 @@ test('markMentions marks every valid address, anywhere in the message (#273)', (
   assert.equal(markMentions('<p>请@bob看一下</p>', roster), '<p>请@bob看一下</p>',
     'glued CJK after it is part of the name (the server reads "bob看一下"), so it names nobody');
   assert.equal(markMentions('<p><strong>@bob</strong>: go</p>', roster), `<p><strong>${m('bob')}</strong>: go</p>`, 'inside emphasis');
+});
+
+test('the owner\'s CJK-bold line keeps its mention highlight (board 311)', () => {
+  const html = markMentions(renderMarkdown('@human **sdk-s3-ane 更省。**同场对比'), ['architect']);
+  assert.match(html, /<span class="m-to"[^>]*>@human<\/span> <strong>sdk-s3-ane 更省。<\/strong>同场对比/, `got: ${html}`);
 });
 
 test('markMentions leaves what names nobody plain (#273)', () => {

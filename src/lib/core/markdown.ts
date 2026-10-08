@@ -106,6 +106,30 @@ function renderMath(text: string, holes: string[]): string {
     .replace(/(?<![\w$])\$(?!\s)([^$\n\x00]*?[^\s$\x00])\$(?!\d)/g, hole(false));
 }
 
+/** CJK-friendly emphasis (board 311, owner 2026-10-08: `**sdk-s3-ane 更省。**同场对比`
+ * showed its asterisks). CommonMark §6.2 lets a delimiter run close only when it
+ * is right-flanking: a run after punctuation must be followed by whitespace or
+ * punctuation. Chinese and Japanese put the full stop INSIDE the bold and go on
+ * with no space, so `**粗体。**后面` never closed — while `**bold.**after` is the
+ * same rule working as intended for English, and stays literal. The fix is the
+ * cjk-friendly proposal: a CJK neighbour counts like punctuation for the
+ * flanking test. marked exposes no hook into its flanking regexes, so the run
+ * gets an invisible PUNCTUATION neighbour (U+FFFC, category So, which marked
+ * reads as punctuation) on its CJK side, and the mark is stripped from the HTML
+ * after parsing. Only maximal `*`/`_` runs with punctuation on one side and a
+ * CJK character on the other are touched; `a ** b`, `5 * 3 * 2` and every
+ * holed-out code span are not. The underscore's own intraword rule still applies
+ * (`前__粗体。__后` stays literal, as `snake__case` must). */
+const CJK = '\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}\\u3000-\\u303F\\uFF00-\\uFFEF';
+const FLANK = '\uFFFC';
+const CLOSE_BEFORE_CJK = new RegExp(`(?<=[\\p{P}\\p{S}])(?<![*_])(\\*+|_+)(?=[${CJK}])`, 'gu');
+const OPEN_AFTER_CJK = new RegExp(`(?<=[${CJK}])(\\*+|_+)(?![*_])(?=[\\p{P}\\p{S}])`, 'gu');
+function cjkFlanking(text: string): string {
+  return text
+    .replace(CLOSE_BEFORE_CJK, `$1${FLANK}`)
+    .replace(OPEN_AFTER_CJK, `${FLANK}$1`);
+}
+
 export function renderMarkdown(body: string | null | undefined): string {
   const src = body || '';
   const hit = cache.get(src);
@@ -119,6 +143,7 @@ export function renderMarkdown(body: string | null | undefined): string {
     .replace(/(`{3,}|~{3,})[\s\S]*?(?:\1|$)/g, (m) => { codeHoles.push(m); return `\x00CODE${codeHoles.length - 1}\x00`; })
     .replace(/`[^`\n]+`/g, (m) => { codeHoles.push(m); return `\x00CODE${codeHoles.length - 1}\x00`; });
   text = renderMath(text, mathHoles);
+  text = cjkFlanking(text); // code and math are holed out here, so neither is touched
   text = text.replace(/\x00CODE(\d+)\x00/g, (_m, i) => codeHoles[Number(i)]!);
   // Escape `&` and `<` — and deliberately NOT `>`. Those two are all that raw
   // HTML needs to be inert: a tag cannot start without `<`, so `&lt;script>`
@@ -130,6 +155,7 @@ export function renderMarkdown(body: string | null | undefined): string {
   let html: string;
   try { html = marked.parse(escaped, { gfm: true, breaks: true }) as string; }
   catch { html = escaped; }
+  html = html.replace(/\uFFFC|%EF%BF%BC/g, ''); // the flanking marks (cjkFlanking)
   html = html.replace(/\x00MATH(\d+)\x00/g, (_m, i) => mathHoles[Number(i)]!);
   cache.set(src, html); // evicts the least recently used past the bound
   return html;

@@ -134,3 +134,34 @@ test('inline code inside a dollar span is never swallowed as math', () => {
   assert.ok(!renderMarkdown('\\( a `b` c \\)').includes('CODE0'));
   assert.ok(!renderMarkdown('\\[ a `b` c \\]').includes('CODE0'));
 });
+
+test('emphasis closes after CJK punctuation when CJK text follows (board 311)', () => {
+  // The owner's line: the full stop sits inside the bold and the sentence goes
+  // on with no space, so CommonMark's right-flanking rule refused to close it.
+  const owner = renderMarkdown('@human **sdk-s3-ane 更省。**同场对比：s3-ane 比 s1-mlx 少 406 mW');
+  assert.match(owner, /<strong>sdk-s3-ane 更省。<\/strong>同场对比/, `got: ${owner}`);
+  assert.match(renderMarkdown('**粗体。**后面'), /<strong>粗体。<\/strong>后面/);
+  assert.match(renderMarkdown('**bold。**后'), /<strong>bold。<\/strong>后/);
+  assert.match(renderMarkdown('*斜体，*后'), /<em>斜体，<\/em>后/);
+  assert.match(renderMarkdown('**x**后面'), /<strong>x<\/strong>后面/);
+  // The mirror case: CJK before an opener that is followed by punctuation.
+  assert.match(renderMarkdown('中文**「引用」**后'), /中文<strong>「引用」<\/strong>后/);
+  assert.match(renderMarkdown('前文**粗体。**後'), /前文<strong>粗体。<\/strong>後/);
+  assert.match(renderMarkdown('**태그。**다음'), /<strong>태그。<\/strong>다음/);
+});
+
+test('the CJK flanking rule leaves English, literals, code and math alone', () => {
+  // English follows the spec: a run after `.` and before a letter does not close.
+  assert.ok(renderMarkdown('**bold.**after').includes('**bold.**after'));
+  assert.match(renderMarkdown('a ** b'), /a \*\* b/);
+  assert.match(renderMarkdown('5 * 3 * 2'), /5 \* 3 \* 2/);
+  // Underscore keeps its intraword rule (snake__case must not embolden).
+  assert.ok(renderMarkdown('前__粗体。__后').includes('__粗体。__'));
+  // Code spans and blocks are holed out before the rule runs.
+  assert.match(renderMarkdown('`**粗体。**后`'), /<code>\*\*粗体。\*\*后<\/code>/);
+  assert.match(renderMarkdown('```\n**粗体。**后\n```'), /<code>\*\*粗体。\*\*后\n<\/code>/);
+  // No flanking mark survives into the output, in text or in a link target.
+  const link = renderMarkdown('[看。**这](https://a.b/x。**后) **粗。**后');
+  assert.ok(!/\uFFFC|%EF%BF%BC/.test(link), `got: ${link}`);
+  assert.ok(!renderMarkdown('**粗体。**后面').includes('\uFFFC'));
+});
