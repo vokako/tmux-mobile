@@ -147,7 +147,7 @@ export function currentServerId(storage: Store): string {
  * migrates to an empty registry and the Settings form remains the front door.
  */
 export function migrateServers(storage: Store): ServerEntry[] {
-  if (storage.getItem(SERVERS_KEY) != null) return loadServers(storage);
+  if (storage.getItem(SERVERS_KEY) != null) return repairServers(storage);
   const servers: ServerEntry[] = [];
   // machineId → its addresses (the failover map is the identity authority).
   let machines: Record<string, string[]> = {};
@@ -240,6 +240,67 @@ function ownerOfAddr(machines: Record<string, string[]>, addr: string): string {
   return '';
 }
 
+/** Is this entry's name still a default (not typed by the user)? */
+const defaultName = (e: ServerEntry) => !e.named && (e.name === hostLabel(e.address) || e.name === e.hostname);
+
+/**
+ * THE invariant (board 318): one entry per address and one per machine. A
+ * twin — another entry with the survivor's address, or its machine id — is
+ * folded into the survivor and dropped. The survivor keeps its identity
+ * (id, machine, address, token); it takes the twin's name only when its own
+ * is still a default and the twin's was typed. The twin's parked per-server
+ * keys go with it, and if the twin was CURRENT, CURRENT moves to the survivor
+ * (its live keys are that server's, so nothing is lost). Before board 318 a
+ * machine-id-less entry (migrated from the address history, or recorded
+ * before the id was learned) holding the same address as the authenticated
+ * entry could never merge: recordServer matched the machine id first and
+ * never looked at the rest — the owner's "two same addresses, two servers".
+ * Pure on the array; returns the survivor's slot list and what was dropped.
+ */
+function absorbTwins(servers: ServerEntry[], survivor: ServerEntry): string[] {
+  const dropped: string[] = [];
+  for (let i = servers.length - 1; i >= 0; i--) {
+    const twin = servers[i]!;
+    if (twin === survivor) continue;
+    const same = twin.address === survivor.address || (!!survivor.machineId && twin.machineId === survivor.machineId);
+    if (!same) continue;
+    if (defaultName(survivor) && twin.named) { survivor.name = twin.name; survivor.named = true; }
+    if (!survivor.machineId && twin.machineId && twin.address === survivor.address) survivor.machineId = twin.machineId;
+    servers.splice(i, 1);
+    dropped.push(twin.id);
+  }
+  return dropped;
+}
+
+function forgetDropped(storage: Store, dropped: string[], survivorId: string): void {
+  if (!dropped.length) return;
+  if (dropped.includes(currentServerId(storage))) storage.setItem(CURRENT_KEY, survivorId);
+  for (const id of dropped) for (const key of PARKED_KEYS) storage.removeItem(`${key}::${id}`);
+}
+
+/**
+ * Heal a registry written before the invariant held (board 318): runs on
+ * every boot through migrateServers, idempotent (a healthy list is returned
+ * untouched and not rewritten). In each group of twins the survivor is the
+ * CURRENT entry if it is in the group, else the one that knows its machine,
+ * else the first.
+ */
+export function repairServers(storage: Store): ServerEntry[] {
+  const servers = loadServers(storage);
+  const cur = currentServerId(storage);
+  const rank = (e: ServerEntry) => (e.id === cur ? 2 : e.machineId ? 1 : 0);
+  let changed = false;
+  for (const e of [...servers].sort((a, b) => rank(b) - rank(a))) {
+    if (!servers.includes(e)) continue;          // already absorbed into a better survivor
+    const dropped = absorbTwins(servers, e);
+    if (!dropped.length) continue;
+    forgetDropped(storage, dropped, e.id);
+    changed = true;
+  }
+  if (changed) saveServers(storage, servers);
+  return servers;
+}
+
 /**
  * RECORD a connection in the registry — and nothing else (lead review #2:
  * recording and ACTIVATING are different acts; the first must never move
@@ -272,6 +333,7 @@ export function recordServer(
     };
     servers.push(entry);
   }
+  forgetDropped(storage, absorbTwins(servers, entry), entry.id);
   saveServers(storage, servers);
   return { servers, entry };
 }

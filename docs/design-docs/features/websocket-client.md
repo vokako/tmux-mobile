@@ -127,6 +127,7 @@ doc already describes. Design decisions, in the order they bit:
   machine, deep links and the boot auto-connect read them unchanged, and a
   downgraded client sees the single-server world it expects. The registry
   (`tmux_servers` + `tmux_server_current`) only remembers what else exists.
+- **One entry per address and per machine** (board 318, owner 2026-10-08: "为什么这里有两个一样的地址，但是显示成两个server了"). `recordServer` used to match the machine id first and never look further, so a machine-less entry with the same address (migrated from the address history, or recorded before the id was known) stayed as a ghost twin forever. Now every record absorbs twins (same address, or same machine id) into the resolved entry, and `migrateServers` runs `repairServers` on every boot to heal old lists once (idempotent; a healthy list is not rewritten). The survivor keeps its id, machine, address and token, takes a twin's name only if its own is a default and the twin's was typed, inherits CURRENT if the twin held it, and the twin's parked keys are removed.
 - **Identity is the MACHINE, not the address** (lead review). `tmux_machines`
   (machineId → addresses) is the existing failover authority; an entry
   persists `machineId` and upsert merges on it first, so a reconnect over

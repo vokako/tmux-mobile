@@ -439,3 +439,72 @@ test('renameServer marks the name as typed, and the flag survives a reload (#310
   assert.equal(entry!.named, true);
   assert.equal(adoptHostname([entry!], 'a', 'macmini')[0]!.name, 'Desk');
 });
+
+// --- One entry per address and per machine (board 318) ----------------------
+
+const CF = 'wss://d2luxl1l4s727q.cloudfront.net/tmuxmobile-i9pfjx56gbvq';
+
+test('the owner’s ghost twin: an authenticated connect folds the machine-less entry with the same address', () => {
+  // Exactly the screenshot: the current entry knows its machine; a migrated
+  // twin holds the same address, named after the URL host, no machine id.
+  const s = mem({
+    [SERVERS_KEY]: JSON.stringify([
+      { id: 'cur', name: 'dev-dsk-cfu', address: CF, token: 't', machineId: 'm-dev', hostname: 'dev-dsk-cfu' },
+      { id: 'mini', name: 'macmini.local', address: 'ws://127.0.0.1:9899', token: 't2', machineId: 'm-mini' },
+      { id: 'ghost', name: 'd2luxl1l4s727q.cloudfront.net', address: CF, token: 'old' },
+    ]),
+    [CURRENT_KEY]: 'cur',
+    'tmux_state::ghost': '{"page":"hub"}',
+  });
+  const { servers, entry } = recordServer(s, { address: CF, token: 't', machineId: 'm-dev' });
+  assert.equal(entry.id, 'cur');
+  assert.deepEqual(servers.map((x) => x.id), ['cur', 'mini'], 'the twin is gone, the other server untouched');
+  assert.equal(loadServers(s).find((x) => x.id === 'cur')!.name, 'dev-dsk-cfu', 'the survivor keeps its name');
+  assert.equal(currentServerId(s), 'cur');
+  assert.equal(s.getItem('tmux_state::ghost'), null, 'the twin’s parked state goes with it');
+});
+
+test('a twin that was CURRENT hands CURRENT to the survivor; a typed name survives a default one', () => {
+  const s = mem({
+    [SERVERS_KEY]: JSON.stringify([
+      { id: 'a', name: 'a.lan', address: 'ws://a.lan:1', token: 't', machineId: 'm-a' },
+      { id: 'b', name: 'My laptop', named: true, address: 'ws://a.lan:1', token: 't' },
+    ]),
+    [CURRENT_KEY]: 'b',
+  });
+  const { entry } = recordServer(s, { address: 'ws://a.lan:1', token: 't', machineId: 'm-a' });
+  assert.equal(entry.id, 'a');
+  assert.equal(loadServers(s).length, 1);
+  assert.equal(currentServerId(s), 'a', 'CURRENT followed the survivor');
+  assert.equal(loadServers(s)[0]!.name, 'My laptop', 'the user’s name is not lost to a default');
+});
+
+test('repair on boot heals an existing list once, and is idempotent', () => {
+  const list = [
+    { id: 'cur', name: 'dev-dsk-cfu', hostname: 'dev-dsk-cfu', address: CF, token: 't', machineId: 'm-dev' },
+    { id: 'ghost', name: 'd2luxl1l4s727q.cloudfront.net', address: CF, token: 'old' },
+    { id: 'alt', name: 'dev (lan)', named: true, address: 'ws://10.0.0.5:9899', token: 't', machineId: 'm-dev' },
+    { id: 'other', name: 'mini', address: 'ws://127.0.0.1:9899', token: 't2', machineId: 'm-mini' },
+  ];
+  const s = mem({ [SERVERS_KEY]: JSON.stringify(list), [CURRENT_KEY]: 'cur' });
+  const healed = migrateServers(s);
+  assert.deepEqual(healed.map((x) => x.id), ['cur', 'other'], 'same address and same machine both fold into the current entry');
+  assert.equal(healed[0]!.name, 'dev (lan)', 'a typed name on a twin replaces an adopted (default) one');
+  const once = s.getItem(SERVERS_KEY);
+  let writes = 0;
+  const watch = { ...s, setItem: (k: string, v: string) => { writes++; s.setItem(k, v); } };
+  assert.deepEqual(migrateServers(watch).map((x) => x.id), ['cur', 'other']);
+  assert.equal(writes, 0, 'a healthy list is not rewritten');
+  assert.equal(s.getItem(SERVERS_KEY), once);
+});
+
+test('no regression of #55: two addresses of one machine stay ONE entry, two machines stay two', () => {
+  const s = mem({ tmux_address: 'ws://a-lan:1', tmux_token: 't', tmux_machine_id: 'm-a',
+    tmux_machines: JSON.stringify({ 'm-a': ['ws://a-lan:1', 'ws://a-ts:2'] }) });
+  migrateServers(s);
+  recordServer(s, { address: 'ws://a-ts:2', token: 't', machineId: 'm-a' });
+  recordServer(s, { address: 'ws://b:3', token: 'tb', machineId: 'm-b' });
+  const list = loadServers(s);
+  assert.equal(list.length, 2);
+  assert.equal(list.find((x) => x.machineId === 'm-a')!.address, 'ws://a-ts:2');
+});
