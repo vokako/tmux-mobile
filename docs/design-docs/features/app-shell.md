@@ -366,7 +366,7 @@ day ("线条都去掉，直接用 icon 上面的背景阴影来滑动"). Two mec
 A rail icon, the server switcher, the gear and the split toggle wear
 `use:hoverInfo` (motion.md §1.16): resting a pointer opens the ONE shared
 card — a page's name with its shortcut as the note (read live from
-`shortcuts`, so a rebinding shows at once; only Terminal and Files have one),
+`shortcuts`, so a rebinding shows at once; every rail page has one since board 316, and the server switcher's card carries the switcher binding),
 the switcher's current server with its address and connection state, the
 gear's and the split toggle's names. Their native `title`s were removed: a
 browser tooltip next to the card is a second tooltip species, which is the

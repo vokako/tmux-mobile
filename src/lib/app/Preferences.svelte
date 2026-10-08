@@ -18,7 +18,7 @@
   import { terminalPrefs, LINE_HEIGHT_MIN, LINE_HEIGHT_MAX } from './terminal-prefs.svelte.ts';
   import { hubPrefs } from '../hub/hub-prefs.svelte.ts';
   import { notifyEnabled, setNotifyEnabled, ensurePermission, previewCue, notifyPermission, systemNotify, notifyLevel, setNotifyLevel, NOTIFY_LEVELS, type NotifyLevel } from '../hub/notifications.ts';
-  import { shortcutFromEvent, shortcutLabel, type ShortcutAction } from './shortcuts.ts';
+  import { SHORTCUTS, SHORTCUT_GROUPS, shortcutFromEvent, shortcutLabel, type ShortcutAction, type ShortcutDef, type ShortcutHost } from './shortcuts.ts';
   import { shortcuts } from './shortcuts.svelte.ts';
   import { moveMs } from '../ui/motion.ts';
   import { RAIL_DRAG_THRESHOLD, listDropAt, railDropIndex, railDropOffset } from './nav-order.ts';
@@ -31,6 +31,7 @@
     uiZoom = 1,
     showUiZoom = false,
     showShortcuts = false,
+    shortcutHost = null,
     serverInfo = { hostname: '', machineId: '' },
     activeAddress = '',
     pendingAddress = '',
@@ -64,6 +65,8 @@
     uiZoom?: number;
     showUiZoom?: boolean;
     showShortcuts?: boolean;
+    /** App's shortcut host: lets a row say it is unavailable here (board 316). */
+    shortcutHost?: ShortcutHost | null;
     serverInfo?: { hostname: string; machineId: string };
     activeAddress?: string;
     /** The address whose row was tapped and is still connecting — it wears the
@@ -224,14 +227,18 @@
     shortcuts: 'settingsShortcutsHint', agents: 'settingsAgentsHint', teams: 'settingsTeamsHint',
     skills: 'settingsSkillsHint', mcp: 'settingsMcpHint', connection: 'settingsConnectionHint',
   };
-  const shortcutActions: [ShortcutAction, string][] = [
-    ['previousPage', 'shortcutPreviousPage'],
-    ['nextPage', 'shortcutNextPage'],
-    ['previousWindow', 'shortcutPreviousWindow'],
-    ['nextWindow', 'shortcutNextWindow'],
-    ['openTerminal', 'shortcutOpenTerminal'],
-    ['openFiles', 'shortcutOpenFiles'],
-  ];
+  // The tab is DERIVED from the one registry (board 316): groups, rows,
+  // defaults. A reason that is about this device/server (no Hub, too narrow
+  // for split screen, one saved server) disables the row and says why; a
+  // reason about the moment (not on the terminal page) is the action's scope,
+  // not a reason to refuse a binding.
+  const CAPABILITY = new Set(['shortcutNeedHub', 'shortcutNeedWide', 'shortcutNeedServers']);
+  const shortcutGroups = SHORTCUT_GROUPS.map((group) => ({ group, defs: SHORTCUTS.filter((d) => d.group === group) }));
+  const unavailable = (def: ShortcutDef) => {
+    if (!shortcutHost) return '';
+    const why = def.need(shortcutHost);
+    return CAPABILITY.has(why) ? why : '';
+  };
   // An uncustomized field names the face its role renders in (board 312,
   // owner 2026-10-08: "你要在设置页面显示出来，不然我都没办法选"): it used to
   // read a grey "System default" while the titles wore Space Grotesk. Picking
@@ -515,8 +522,9 @@
     }
     const value = shortcutFromEvent(event);
     if (!value) return;
-    if (!shortcuts.set(action, value)) {
-      shortcutError = t('shortcutConflict');
+    const refused = shortcuts.set(action, value);
+    if (refused) {
+      shortcutError = t(refused).replace('{key}', shortcutLabel(value));
       return;
     }
     recordingShortcut = '';
@@ -749,21 +757,31 @@
         </div>
       {:else if tab === 'shortcuts'}
         <div class="config-section">
-          {#each shortcutActions as [action, label]}
-            <div class="preference-row">
-              <div class="pref-label"><strong class="config-field-label">{t(label)}</strong></div>
-              <div class="pref-control">
-              <button
-                type="button" class="config-input mono shortcut-key" aria-label={t(label)}
-                class:recording={recordingShortcut === action}
-                data-shortcut-recorder
-                onclick={() => { recordingShortcut = action; shortcutError = ''; }}
-                onkeydown={(event) => recordShortcut(action, event)}
-              >{recordingShortcut === action ? t('shortcutPressKeys') : shortcutLabel(shortcuts.get(action))}</button>
+          {#each shortcutGroups as { group, defs } (group)}
+            <div class="side-h shortcut-group">{t(`shortcutGroup_${group}`)}</div>
+            {#each defs as def (def.id)}
+              {@const why = unavailable(def)}
+              <div class="preference-row">
+                <div class="pref-label"><strong class="config-field-label">{t(def.label)}</strong>
+                  {#if why}<small class="config-note">{t(why)}</small>{/if}</div>
+                <div class="pref-control shortcut-control">
+                  <button
+                    type="button" class="config-input mono shortcut-key" aria-label={t(def.label)}
+                    class:recording={recordingShortcut === def.id}
+                    disabled={!!why}
+                    data-shortcut-recorder
+                    onclick={() => { recordingShortcut = def.id; shortcutError = ''; }}
+                    onkeydown={(event) => recordShortcut(def.id, event)}
+                  >{recordingShortcut === def.id ? t('shortcutPressKeys') : shortcutLabel(shortcuts.get(def.id))}</button>
+                  <CommandButton variant="icon" icon="undo" label={`${t('configReset')} ${t(def.label)}`}
+                    disabled={!!why || shortcuts.isDefault(def.id)}
+                    onclick={() => { const r = shortcuts.resetOne(def.id); shortcutError = r ? t(r).replace('{key}', '') : ''; recordingShortcut = ''; }} />
+                </div>
               </div>
-            </div>
+              {#if shortcutError && recordingShortcut === def.id}<div class="config-error appear" role="alert">{shortcutError}</div>{/if}
+            {/each}
           {/each}
-          {#if shortcutError}<div class="config-error appear" role="alert">{shortcutError}</div>{/if}
+          {#if shortcutError && !recordingShortcut}<div class="config-error appear" role="alert">{shortcutError}</div>{/if}
           <CommandButton label={t('shortcutReset')} icon="undo"
             onclick={() => { shortcuts.reset(); recordingShortcut = ''; shortcutError = ''; }} />
         </div>
@@ -914,6 +932,10 @@
      it brings its own list scroller and its own editor. */
   .agents-embed { flex: 1; min-width: 0; min-height: 0; }
   .pref-label { display: flex; flex-direction: column; gap: var(--config-label-gap); }
+  /* A recorder and its reset: the Slider's field + undo pair (board 316). */
+  .shortcut-control { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .shortcut-control .shortcut-key { flex: 1; min-width: 0; }
+  .shortcut-group { padding-inline: 0; }
   .shortcut-key { text-align: center; cursor: pointer; transition: background var(--t-fast), color var(--t-fast); }
   .shortcut-key.recording { border-color: var(--accent-line); background: var(--accent-bg); color: var(--accent-ink); }
   .connection-title { display: flex; flex-wrap: wrap; align-items: center; gap: var(--config-field-gap); margin-bottom: var(--config-field-gap); }

@@ -1,17 +1,8 @@
-import { SHORTCUT_DEFAULTS, SHORTCUT_STORAGE_KEY, actionForShortcut, type ShortcutAction } from './shortcuts.ts';
+import { SHORTCUTS, SHORTCUT_STORAGE_KEY, actionForShortcut, defaultBindings, migrateBindings, reservedReason, shortcutDef } from './shortcuts.ts';
 
-type Bindings = Record<ShortcutAction, string>;
-
-function loadShortcuts(): Bindings {
-  try {
-    const stored = JSON.parse(localStorage.getItem(SHORTCUT_STORAGE_KEY) || '{}');
-    return Object.fromEntries((Object.keys(SHORTCUT_DEFAULTS) as ShortcutAction[]).map(action => [
-      action,
-      typeof stored[action] === 'string' ? stored[action] : SHORTCUT_DEFAULTS[action],
-    ])) as Bindings;
-  } catch {
-    return { ...SHORTCUT_DEFAULTS };
-  }
+function loadShortcuts(): Record<string, string> {
+  try { return migrateBindings(JSON.parse(localStorage.getItem(SHORTCUT_STORAGE_KEY) || '{}')); }
+  catch { return defaultBindings(); }
 }
 
 const state = $state(loadShortcuts());
@@ -28,18 +19,35 @@ export function isShortcutInputTarget(target: EventTarget | null): boolean {
 }
 
 export const shortcuts = {
-  get(action: ShortcutAction) { return state[action] || ''; },
+  get(action: string) { return state[action] || ''; },
   action(value: string) { return actionForShortcut(state, value); },
-  set(action: ShortcutAction, value: string) {
-    if (!(action in SHORTCUT_DEFAULTS)) return false;
-    const conflict = actionForShortcut(state, value);
-    if (value && conflict && conflict !== action) return false;
+  /** '' on success; otherwise the i18n key of why the binding was refused. */
+  set(action: string, value: string): string {
+    if (!shortcutDef(action)) return 'shortcutUnknown';
+    if (value) {
+      const reserved = reservedReason(value);
+      if (reserved) return reserved;
+      const conflict = actionForShortcut(state, value);
+      if (conflict && conflict !== action) return 'shortcutConflict';
+    }
     state[action] = value;
     persist();
-    return true;
+    return '';
   },
+  /** One action back to its default (if the default is free). */
+  resetOne(action: string): string {
+    const def = defaultBindings()[action];
+    if (def == null) return 'shortcutUnknown';
+    const holder = actionForShortcut(state, def);
+    if (holder && holder !== action) return 'shortcutConflict';
+    state[action] = def;
+    persist();
+    return '';
+  },
+  isDefault(action: string) { return state[action] === defaultBindings()[action]; },
   reset() {
-    for (const [action, value] of Object.entries(SHORTCUT_DEFAULTS) as [ShortcutAction, string][]) state[action] = value;
+    const d = defaultBindings();
+    for (const s of SHORTCUTS) state[s.id] = d[s.id]!;
     persist();
   },
 };

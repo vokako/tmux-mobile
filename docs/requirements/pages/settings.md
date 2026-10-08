@@ -17,7 +17,7 @@ where Agents is a page of its own, reads as one plain list):
 - **Appearance** — how the app looks: theme, language, responsive layout, interface scale, the three font roles (content, display, terminal family), then the terminal's size and line spacing (owner, 2026-09-24: the terminal's style settings belong to Appearance; the one-row Terminal category is retired)
 - **Chat** — how much of the conversation the feed shows: chat detail and tool rows (moved out of Appearance 2026-09-25: they set what is said, not how it looks)
 - **Notifications** — message notifications On/Off, the level (Finished / Replies / Everything) and a test row (its own category, owner 2026-09-02)
-- **Shortcuts** — configurable desktop navigation and Terminal window bindings (desktop only)
+- **Shortcuts** — configurable bindings for pages, servers, panels and Terminal windows (every desktop form factor: browser, PWA and the desktop app; absent on the touch layout)
 - **Connection** — every saved server (switch/rename/remove/add), then the current server's addresses, optimize/share/disconnect (the global debug switch and its floating log panel were retired 2026-09-26)
 
 **Agent** (phone only, where Agents is not a page of its own)
@@ -59,8 +59,13 @@ where Agents is a page of its own, reads as one plain list):
 - Terminal font family (in Appearance with the other two font roles, followed by the terminal's size and line spacing; the list offers only families the DEVICE resolves — the suggestion pool is probed with the same registry check the validator uses, so nothing offered can fail on pick; another family may still be typed; only a valid local font is applied and persisted to localStorage `tmux_font`; empty = system default)
 - Terminal line spacing (0.40–1.60, persisted to localStorage `tmux_line_height`; applies live to every normal, split, and Team terminal)
 - Line spacing uses `ui/Slider`, with its native range semantics, visible numeric value and named reset command
-- Desktop shortcuts default to Cmd+U / Cmd+I for previous/next page, Option+U / Option+I for previous/next Terminal window, Cmd+T for Terminal, and Cmd+F for Files
-- Shortcut bindings can be recorded, cleared with Delete/Backspace, reset to defaults, or disabled; duplicate bindings are rejected
+- Shortcuts (board 316, owner 2026-10-08: "现在有一些快捷键，好像都不起作用…做成可以设定快捷键的配置，例如常见切换页面，切换连接，打开某些侧边栏"). Why they "did not work": the tab AND the handler were gated on the Tauri desktop shell, and the owner runs the app in a desktop browser. The gate is now the desktop form factor (`!layout.isTouchDevice`).
+  - ONE registry, `lib/app/shortcuts.ts` `SHORTCUTS`: each action declares its id (the `tmux_shortcuts` key), label, group, default and what it needs; App's handler and this tab are both derived from it. App only supplies the host primitives. A key whose action is not available at that moment (not connected, not on the Terminal page…) is left to the browser.
+  - Groups and defaults (`Mod` = ⌘ on macOS, Ctrl elsewhere): **Pages** previous/next page Mod+U / Mod+I, go to Chat / Board / Terminal / Files / Agents / Settings Mod+Alt+1…6; **Servers** previous/next server Mod+Alt+[ / ], open the server switcher Mod+Alt+S (switching goes through the in-app switch, board 315); **Panels** sidebar Mod+\, split screen Mod+Alt+\, type a message Mod+Alt+M, type in the terminal Mod+Alt+K; **Terminal windows** previous/next Option(Alt)+U / I.
+  - Reserved combos are refused in place with the reason (`reservedReason`): what Chrome, Safari and Firefox never let a page prevent (new tab/window, close, quit, tab switching incl. Mod+1…9 and Linux Alt+1…9, developer tools) and what the OS keeps (macOS screenshots ⌘⇧3/4/5, ⌘H, ⌘M, ⌘Space, ⌘\`; Ctrl+Alt+T/Delete). Conservative on purpose: a refused combo costs a second try, an accepted one that never fires is the original report. The old ⌘T default for Terminal was one of these, which is part of why Terminal "didn't work".
+  - Migration: the six old ids keep their keys; a stored value equal to its OLD default or now reserved follows the new default, any other stored choice stays, and a new default landing on a stored choice is left unbound.
+  - Rows: record (Delete/Backspace clears, Escape cancels), a per-row reset (the Slider's undo atom, resting at the default), Restore all defaults; duplicates are refused. An action this device or server cannot do (no Chat on this server, one saved server, a window too narrow for split screen) is shown disabled with the reason; a page scope (Terminal windows only on the Terminal page) is not a refusal.
+  - Not included: a Files reading-mode / tree toggle. Reading mode is touch-only (board #226) and Files has no desktop sidebar toggle; the sidebar action covers the pages that have one (Chat, Terminal, Board).
 - Disconnect button
 
 ## Interactions

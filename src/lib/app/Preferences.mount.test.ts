@@ -327,25 +327,57 @@ test('numeric preferences use shared bounds and apply without a page Save', asyn
 test('the native shortcut recorder keeps capture, conflict, clear, cancel and reset', async context => {
   const app = await mount(context, { tab: 'shortcuts', props: { showShortcuts: true } });
   try {
+    const stored = () => JSON.parse(app.window.localStorage.getItem('tmux_shortcuts') ?? '{}');
     const recorder = app.document.querySelector<HTMLButtonElement>('[data-shortcut-recorder]')!;
-    const key = async (key: string, code = key, metaKey = false) => {
-      recorder.dispatchEvent(new app.window.KeyboardEvent('keydown', { key, code, metaKey, bubbles: true, cancelable: true }));
+    const key = async (key: string, code = key, mods: Partial<KeyboardEventInit> = {}) => {
+      recorder.dispatchEvent(new app.window.KeyboardEvent('keydown', { key, code, bubbles: true, cancelable: true, ...mods }));
       await app.flush();
     };
+    const mod = app.window.navigator.platform.includes('Mac') ? { metaKey: true } : { ctrlKey: true };
+    const original = 'metaKey' in mod ? 'Meta+KeyU' : 'Ctrl+KeyU'; // the default, resolved for this platform
     recorder.click();
-    await key('i', 'KeyI', true);
-    assert.ok(app.document.querySelector('[role="alert"]'), 'another action owns Meta+I');
+    await key('i', 'KeyI', mod);
+    assert.match(app.document.querySelector('[role="alert"]')?.textContent ?? '', /already assigned/, 'another action owns Mod+I');
     await key('Escape');
     assert.equal(app.document.querySelector('[role="alert"]'), null);
+    // A combo the browser keeps is refused, in place, with the reason.
     recorder.click();
+    await key('t', 'KeyT', mod);
+    assert.match(app.document.querySelector('[role="alert"]')?.textContent ?? '', /belongs to the browser/);
+    assert.notEqual(stored().previousPage, 'Ctrl+KeyT', 'nothing stored');
+    assert.notEqual(stored().previousPage, 'Meta+KeyT');
     await key('Backspace');
-    assert.equal(JSON.parse(app.window.localStorage.getItem('tmux_shortcuts')!).previousPage, '');
+    assert.equal(stored().previousPage, '');
     recorder.click();
-    await key('x', 'KeyX', true);
-    assert.equal(JSON.parse(app.window.localStorage.getItem('tmux_shortcuts')!).previousPage, 'Meta+KeyX');
-    await app.click('Restore defaults');
-    assert.equal(JSON.parse(app.window.localStorage.getItem('tmux_shortcuts')!).previousPage, 'Meta+KeyU');
+    await key('x', 'KeyX', mod);
+    assert.match(stored().previousPage, /\+KeyX$/u);
+    // Per-row reset (the first row's undo), then reset-all.
+    const rowReset = app.document.querySelector<HTMLButtonElement>('.shortcut-control .command-button')!;
+    assert.equal(rowReset.disabled, false);
+    rowReset.click(); await app.flush();
+    assert.equal(stored().previousPage, original);
+    assert.equal(rowReset.disabled, true, 'at its default, the row reset rests');
+    recorder.click(); await key('x', 'KeyX', mod);
+    await app.click('Restore all defaults');
+    assert.equal(stored().previousPage, original);
     assert.equal(recorder.classList.contains('recording'), false);
+  } finally { await app.close(); }
+});
+
+test('the Shortcuts tab is grouped by the registry and names what is unavailable here (board 316)', async context => {
+  const host = { connected: true, hub: false, page: 'hub', terminalTarget: false, servers: 1, splitEligible: false, sidebarPage: true };
+  const app = await mount(context, { tab: 'shortcuts', props: { showShortcuts: true, shortcutHost: host } });
+  try {
+    const groups = [...app.document.querySelectorAll('.shortcut-group')].map((g) => g.textContent?.trim());
+    assert.equal(JSON.stringify(groups), JSON.stringify(['Pages', 'Servers', 'Panels', 'Terminal windows']));
+    const row = (label: string) => app.document.querySelector<HTMLButtonElement>(`[data-shortcut-recorder][aria-label="${label}"]`)!;
+    assert.equal(row('Go to Chat').disabled, true, 'no Hub on this server');
+    assert.equal(row('Next server').disabled, true, 'one saved server');
+    assert.equal(row('Split screen on or off').disabled, true, 'too narrow');
+    assert.equal(row('Go to Files').disabled, false);
+    assert.equal(row('Next terminal window').disabled, false, 'a page scope is not a refusal');
+    const notes = [...app.document.querySelectorAll('.preference-row .config-note')].map((n) => n.textContent?.trim());
+    assert.ok(notes.includes('This server has no Chat') && notes.includes('Needs a second saved server') && notes.includes('Needs a wider desktop window'));
   } finally { await app.close(); }
 });
 

@@ -39,7 +39,7 @@
   import HoverCard from './lib/ui/HoverCard.svelte';
   import ContextMenu from './lib/ui/ContextMenu.svelte';
   import CommandButton from './lib/ui/CommandButton.svelte';
-  import { cycleItem, shortcutFromEvent, shortcutLabel } from './lib/app/shortcuts.ts';
+  import { cycleItem, shortcutDef, shortcutFromEvent, shortcutLabel } from './lib/app/shortcuts.ts';
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.ts';
   import { installExternalLinkHandler } from './lib/core/external-links.ts';
   import { isTauri, isTauriDesktop } from './lib/core/platform.ts';
@@ -1326,9 +1326,9 @@
   // its address and state. The native `title`s went with it — a second
   // tooltip beside the card is the thing the rule forbids. Getters, so the
   // card reads the CURRENT binding / server when it opens.
-  const RAIL_SHORTCUT = { terminal: 'openTerminal', files: 'openFiles' };
+  const RAIL_SHORTCUT = { hub: 'goHub', board: 'goBoard', terminal: 'openTerminal', files: 'openFiles', agents: 'goAgents', prefs: 'goSettings' };
   function railInfo(slot) {
-    const key = RAIL_SHORTCUT[slot] ? shortcuts.get(RAIL_SHORTCUT[slot]) : '';
+    const key = RAIL_SHORTCUT[slot] && shortcutsOn ? shortcuts.get(RAIL_SHORTCUT[slot]) : '';
     return { title: t(RAIL_ITEMS[slot].label), note: key ? shortcutLabel(key) : undefined };
   }
   function serverCardInfo() {
@@ -1346,8 +1346,10 @@
         ],
       };
     }
+    const key = shortcutsOn ? shortcuts.get('openServers') : '';
     return {
       title: serverName,
+      note: key ? shortcutLabel(key) : undefined,
       lines: [
         { label: t('address'), value: activeAddress },
         reconnecting
@@ -1568,38 +1570,64 @@
     });
   }
 
+  // Keyboard shortcuts (board 316): ONE registry (shortcuts.ts) declares every
+  // action; this host is the only thing App adds — the primitives the actions
+  // call and what they need to know. The gate is the desktop form factor (the
+  // touch layout has no shortcuts), not the Tauri shell.
+  let railServerEl = $state(null);
+  const shortcutHost = {
+    get connected() { return connected && !switching; },
+    get hub() { return hubEligible; },
+    get page() { return page; },
+    get terminalTarget() { return !!terminalTarget; },
+    get servers() { return loadServers(localStorage).length; },
+    get splitEligible() { return splitEligible; },
+    get sidebarPage() { return pageHasSidebar; },
+    goTo(target) {
+      if (target === 'prefs') { if (page !== 'prefs') togglePrefs(); return; }
+      if (target === 'agents' && agentsLivesInSettings(layout.isTouchDevice)) { openAgentsConfig(); return; }
+      switchTab(target);
+    },
+    cyclePage(direction) {
+      const available = tabs();
+      if (!available.includes(page)) return;
+      switchTab(cycleItem(available, page, direction));
+    },
+    cycleServer(direction) {
+      const list = loadServers(localStorage);
+      const next = cycleItem(list.map((x) => x.id), serverCurId, direction);
+      if (next && next !== serverCurId) doServerSwitch(next);
+    },
+    openServers() { if (railServerEl && !serverMenuOpen) toggleServerMenu({ currentTarget: railServerEl }); },
+    toggleSidebar() { toggleShellSidebar(); },
+    toggleSplit() {
+      if (page !== 'terminal') switchTab('terminal');
+      setLayout(splitLayout > 1 ? 1 : 2);
+    },
+    async focusComposer() {
+      if (page !== 'hub') { switchTab('hub'); await tick(); }
+      document.querySelector('.page-layer:not(.hidden) .c-input')?.focus();
+    },
+    async focusTerminal() {
+      if (page !== 'terminal') { switchTab('terminal'); await tick(); }
+      document.querySelector('.term-page .xterm-helper-textarea')?.focus();
+    },
+    cycleWindow(direction) {
+      window.dispatchEvent(new CustomEvent('terminal-window-shortcut', { detail: { direction } }));
+    },
+  };
+  const shortcutsOn = $derived(!layout.isTouchDevice);
   $effect(() => {
-    if (!isTauriDesktop) return;
+    if (!shortcutsOn) return;
     const onShortcut = (event) => {
       if (isShortcutInputTarget(event.target)) return;
       if (activeModal(document)) return;
-      const action = shortcuts.action(shortcutFromEvent(event));
-      if (!action) return;
-
-      const consume = () => {
-        event.preventDefault();
-        event.stopPropagation();
-      };
-      if (action === 'previousPage' || action === 'nextPage') {
-        const available = tabs();
-        const current = page;
-        if (!available.includes(current)) return;
-        const step = action === 'previousPage' ? -1 : 1;
-        consume();
-        switchTab(cycleItem(available, current, step));
-      } else if (action === 'openTerminal') {
-        if (!terminalTarget) return;
-        consume();
-        switchTab('terminal');
-      } else if (action === 'openFiles') {
-        consume();
-        switchTab('files');
-      } else if ((action === 'previousWindow' || action === 'nextWindow') && page === 'terminal') {
-        consume();
-        window.dispatchEvent(new CustomEvent('terminal-window-shortcut', {
-          detail: { direction: action === 'previousWindow' ? -1 : 1 },
-        }));
-      }
+      const def = shortcutDef(shortcuts.action(shortcutFromEvent(event)));
+      // Not available here: the key stays the browser's.
+      if (!def || def.need(shortcutHost)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      def.run(shortcutHost);
     };
     window.addEventListener('keydown', onShortcut, { capture: true });
     return () => window.removeEventListener('keydown', onShortcut, { capture: true });
@@ -1673,6 +1701,7 @@
                (trigger side only — the menu itself does not animate). -->
           <button
             class="rail-btn rail-server"
+            bind:this={railServerEl}
             class:open={serverMenuOpen}
             aria-label={t('serversTitle')}
             use:hoverInfo={serverCardInfo}
@@ -1829,7 +1858,7 @@
       {optimizing} {linkCopied}
       onClose={togglePrefs}
       onTheme={setTheme}
-      {uiZoom} showUiZoom={true} showShortcuts={isTauriDesktop} onUiZoom={setUiZoom}
+      {uiZoom} showUiZoom={true} showShortcuts={shortcutsOn} {shortcutHost} onUiZoom={setUiZoom}
       onFontSize={setFontSize}
       onOptimize={optimizeConnection}
       onShare={shareConnectionLink}
