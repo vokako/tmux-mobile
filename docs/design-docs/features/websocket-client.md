@@ -251,12 +251,22 @@ doc already describes. Design decisions, in the order they bit:
 - **The phone's entry is a row at the top of Settings** (review, 2026-09-03):
   the rail does not exist on the touch layout, so the registry had no door
   there at all — named servers were invisible on the device the app is for.
-  App passes `onServers` (= `toggleServerMenu`) and the connected machine's
-  authenticated hostname (`serverInfo.hostname`, falling back to
-  `hostLabel(activeAddress)` before auth) to Preferences only when
-  `connected && layout.isTouchDevice`; Preferences renders a `.side-row`
-  (swap icon + HOSTNAME, never the registry alias or raw address) above the
-  category list that opens the SAME popover, anchored to the row.
+  App passes `onServers` (= `toggleServerMenu`) and `serverName` to
+  Preferences only when `connected && layout.isTouchDevice`; Preferences
+  renders a `.side-row` (swap icon + the server's NAME, never the raw
+  address) above the category list that opens the SAME popover, anchored to
+  the row.
+- **The current server has ONE name outside the list: its row's** (board
+  #319, owner 2026-10-08: "设置显示当前连接的名字，不是列表里的那个名字，不一致").
+  The row, the rail hover card's title and the switch panel's "Back to"
+  read `serverName = servers.ts currentServerName(...)`: the saved entry's
+  name (this machine's entry, else the current one), then the hostname, then
+  `hostLabel(address)`. Before #310 the entry name could be a stale URL host,
+  so these surfaces used the authenticated hostname; since #310 the name IS
+  the hostname unless the user renamed it, and a hostname-first title made a
+  renamed server read as two servers. The hover card adds a Hostname line
+  when it differs from the name; Settings › Connection keeps the hostname as
+  its fact row.
   The popover's outside-dismissal spares whichever control opened it
   (`serverMenuTrigger`), not a class name, so both doors toggle cleanly. The
   registry is read at boot and on open/rename, so the name follows a rename.

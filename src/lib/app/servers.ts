@@ -69,6 +69,21 @@ export function hostLabel(address: string): string {
   return m?.[1] || address.trim();
 }
 
+/** What the CURRENT server is called outside the list (rail hover card, the
+ *  phone's Settings row, the switch panel): the saved entry's name — the
+ *  same name its row shows, the hostname unless the user renamed it (board
+ *  #319, owner 2026-10-08: "设置显示当前连接的名字，不是列表里的那个名字").
+ *  The entry is this machine's, else the current one, the same lookup the
+ *  hostname adoption uses. With no entry yet: hostname, then the URL host. */
+export function currentServerName(
+  servers: ServerEntry[], currentId: string,
+  info: { hostname?: string; machineId?: string }, address: string,
+): string {
+  const entry = (info.machineId && servers.find((s) => s.machineId === info.machineId))
+    || servers.find((s) => s.id === currentId);
+  return entry?.name || info.hostname || hostLabel(address);
+}
+
 function sanitize(raw: unknown): ServerEntry[] {
   if (!Array.isArray(raw)) return [];
   const seen = new Set<string>();

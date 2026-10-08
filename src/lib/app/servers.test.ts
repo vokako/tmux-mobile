@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CURRENT_KEY, MACHINE_PREFIX, MAX_SERVERS, SERVERS_KEY, STATE_PREFIX,
-  activateConnected, activateSwitched, adoptHostname, currentServerId, parkFrom, pointTo, PARKED_KEYS, hostLabel, loadServers,
+  activateConnected, activateSwitched, adoptHostname, currentServerId, currentServerName, parkFrom, pointTo, PARKED_KEYS, hostLabel, loadServers,
   migrateServers, recordServer, removeServer, renameServer, saveMachineAddresses,
 } from './servers.ts';
 
@@ -575,3 +575,26 @@ test('a machine-less entry is attributed only when exactly one known machine sha
   assert.equal(folded[0]!.name, 'A');
   assert.equal(currentServerId(one), 'ghost');
 });
+
+test('currentServerName: the current server reads as its saved row, renamed or not (board #319)', () => {
+  const host = 'dev-dsk-cfu-2a.ap-northeast-1.amazon.com';
+  const s = mem();
+  const id = recordServer(s, { address: 'ws://10.0.0.5:9899', token: 'tok' }).entry.id;
+  saveServersAdopted(s, id, host);
+  const info = { hostname: host, machineId: 'm1' };
+  // Unrenamed: the adopted hostname, which is also what the row shows.
+  assert.equal(currentServerName(loadServers(s), id, info, 'ws://10.0.0.5:9899'), host);
+  // Renamed: the row's name, not the raw hostname (the owner's screenshot).
+  renameServer(s, id, 'devbox');
+  assert.equal(currentServerName(loadServers(s), id, info, 'ws://10.0.0.5:9899'), 'devbox');
+  // Found by machine even when the current id is stale.
+  const withMachine = loadServers(s).map((e) => ({ ...e, machineId: 'm1' }));
+  assert.equal(currentServerName(withMachine, 'gone', info, 'ws://10.0.0.5:9899'), 'devbox');
+  // No entry yet: hostname, then the URL host — never the raw URL.
+  assert.equal(currentServerName([], '', info, 'ws://10.0.0.5:9899'), host);
+  assert.equal(currentServerName([], '', {}, 'ws://10.0.0.5:9899'), '10.0.0.5');
+});
+
+function saveServersAdopted(s: ReturnType<typeof mem>, id: string, host: string) {
+  s.setItem(SERVERS_KEY, JSON.stringify(adoptHostname(loadServers(s), id, host)));
+}

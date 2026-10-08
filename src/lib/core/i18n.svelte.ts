@@ -461,6 +461,7 @@ const msgs: Record<string, Record<string, string>> = {
 
     connectTitle: 'Connect to your tmux server',
     address: 'Address',
+    hostname: 'Hostname',
     token: 'Token',
     tmuxSocket: 'tmux Socket',
     tmuxSocketHint: '(optional, -S path)',
@@ -1122,6 +1123,7 @@ const msgs: Record<string, Record<string, string>> = {
 
     connectTitle: '连接到 tmux 服务器',
     address: '地址',
+    hostname: '主机名',
     token: '令牌',
     tmuxSocket: 'tmux Socket',
     tmuxSocketHint: '(可选，-S 路径)',

@@ -601,8 +601,12 @@ test('navigation is reachable by keyboard: no nav item opts out of the Tab order
 test('the server registry has an entry on the touch layout (2026-09-03)', () => {
   assert.match(source, /onServers=\{connected && layout\.isTouchDevice \? toggleServerMenu : null\}/u,
     'Settings gets the opener only where the rail (and its switcher) does not exist');
-  assert.match(source, /const serverName = \$derived\(\s*serverInfo\.hostname \|\| hostLabel\(activeAddress\),/u,
-    'the switch control names the connected host, never a registry alias or raw URL');
+  // Board #319 (owner 2026-10-08): the row, the hover card and the switch
+  // panel name the current server as its registry row does — one derived.
+  assert.match(source, /const serverName = \$derived\(\s*currentServerName\(serverList, serverCurId, serverInfo, activeAddress\),/u,
+    'the current server is named by its saved entry, the same name the list shows');
+  assert.doesNotMatch(source, /serverInfo\.hostname \|\| hostLabel\(activeAddress\)/u, 'the hostname-first name cannot regrow');
+  assert.match(source, /currentName: \(\) => serverName,/u, 'the switch panel\'s "Back to" uses the same name');
   // The popover's outside-dismissal spares whichever control opened it.
   assert.match(source, /serverMenuTrigger\?\.contains\?\.\(e\.target\)/u);
   assert.doesNotMatch(source, /closest\?\.\('\.server-menu, \.rail-server'\)/u);
@@ -631,7 +635,7 @@ test('the rail explains itself with the one hover card, and no native title besi
   assert.match(rail, /aria-label=\{t\('serversTitle'\)\}\s*use:hoverInfo=\{serverCardInfo\}/u);
   assert.doesNotMatch(rail, /title=/u, 'no native title on the rail — the card took over');
   assert.match(source, /function railInfo\(slot\) \{[\s\S]*?shortcuts\.get\(RAIL_SHORTCUT\[slot\]\)[\s\S]*?note: key \? shortcutLabel\(key\) : undefined/u);
-  assert.match(source, /function serverCardInfo\(\) \{[\s\S]*?title: serverName,[\s\S]*?label: t\('address'\), value: activeAddress/u);
+  assert.match(source, /function serverCardInfo\(\) \{[\s\S]*?title: serverName,[\s\S]*?serverInfo\.hostname !== serverName[\s\S]*?label: t\('hostname'\), value: serverInfo\.hostname[\s\S]*?label: t\('address'\), value: activeAddress/u);
   // The gear and the split toggle: name on the card, label for the reader.
   assert.match(source, /class="gear-btn"[^>]*aria-label=\{t\('settings'\)\} use:hoverInfo=\{\(\) => \(\{ title: t\('settings'\) \}\)\}/u);
   assert.match(source, /class="split-toggle state-ctl"[^>]*aria-label=\{t\('split'\)\} use:hoverInfo=\{\(\) => \(\{ title: t\('split'\) \}\)\}/u);

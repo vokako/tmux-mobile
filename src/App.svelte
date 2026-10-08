@@ -30,7 +30,7 @@
   import { agentsLivesInSettings, defaultPage, restoreNav, retarget } from './lib/app/nav-state.ts';
   import { RAIL_DRAG_THRESHOLD, RAIL_GAP, RAIL_ORDER_KEY, parseRailOrder, railDropAt, railDropIndex, railDropOffset, railOrderToStore, visibleRailSlots } from './lib/app/nav-order.ts';
   import { createReconnectMachine } from './lib/app/reconnect.ts';
-  import { activateConnected, adoptHostname, currentServerId, hostLabel, loadServers, migrateServers, recordServer, removeServer, renameServer, saveMachineAddresses, saveServers } from './lib/app/servers.ts';
+  import { activateConnected, adoptHostname, currentServerId, currentServerName, hostLabel, loadServers, migrateServers, recordServer, removeServer, renameServer, saveMachineAddresses, saveServers } from './lib/app/servers.ts';
   import { confirmLeave } from './lib/app/leave-guards.ts';
   import { terminalFocusTarget } from './lib/sessions/split-focus.ts';
   import { createServerSwitch } from './lib/app/server-switch.ts';
@@ -743,12 +743,11 @@
   let serverMenuW = $state(0);
   let serverMenuH = $state(0);
   let serverListEl = $state(null);   // the ServerList instance: rename/IME state lives there
-  // The current connected HOSTNAME, for the rail hover card and the phone's
-  // Settings row. The registry's user-editable name is not the connection
-  // identity this control switches; before auth, hostLabel still strips the
-  // scheme/port/path instead of exposing the raw URL.
+  // The ONE name of the current server outside the list (rail hover card,
+  // the phone's Settings row, the switch panel's "Back to"): its saved
+  // entry's name, as its row reads (board #319).
   const serverName = $derived(
-    serverInfo.hostname || hostLabel(activeAddress),
+    currentServerName(serverList, serverCurId, serverInfo, activeAddress),
   );
   function loadServerRegistry() {
     serverList = loadServers(localStorage);
@@ -1352,6 +1351,10 @@
       title: serverName,
       note: key ? shortcutLabel(key) : undefined,
       lines: [
+        // The title is the entry's name; a renamed server still says which
+        // host it is (identity detail, board #319).
+        ...(serverInfo.hostname && serverInfo.hostname !== serverName
+          ? [{ label: t('hostname'), value: serverInfo.hostname }] : []),
         { label: t('address'), value: activeAddress },
         reconnecting
           ? { label: t('status'), value: t('reconnecting'), tone: 'warn' }

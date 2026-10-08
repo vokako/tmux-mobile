@@ -100,7 +100,8 @@
     onAddressesChange?: (addresses: string[]) => void;
     onDisconnect?: () => void | Promise<void>;
     onConnectionSetup?: () => void | Promise<void>;
-    /** The current connected hostname (auth result; URL host before auth). */
+    /** The current server's name as its registry row reads (App's
+     *  currentServerName: the hostname unless renamed; board #319). */
     serverName?: string;
     /** Touch layout only: opens App's server registry popover from the row
      *  at the top of the category list. The desktop rail has its own control,
