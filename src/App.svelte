@@ -13,11 +13,11 @@
   import SideHandle from './lib/ui/SideHandle.svelte';
   import InstallPrompt from './lib/ui/InstallPrompt.svelte';
   import Preferences from './lib/app/Preferences.svelte';
-  import ConfirmDialog from './lib/ui/ConfirmDialog.svelte';
   import { copyText } from './lib/core/clipboard.ts';
   import { createFeedbackLifetime } from './lib/ui/feedback-lifetime.ts';
   import { hubRooms, systemStatus } from './lib/core/ws.ts';
   import SystemStatus from './lib/system/SystemStatus.svelte';
+  import ServerList from './lib/app/ServerList.svelte';
   import { hubPrefs } from './lib/hub/hub-prefs.svelte.ts';
   import { moveTrack, pinTrack } from './lib/hub/reveal.ts';
   import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable, listPanes, listSessions, backendsList } from './lib/core/ws.ts';
@@ -701,11 +701,7 @@
   let serverMenuTrigger = null;      // the control that opened it — not "outside"
   let serverMenuW = $state(0);
   let serverMenuH = $state(0);
-  let serverRenaming = $state('');   // entry id whose name is an input
-  let serverRenameDraft = $state('');
-  let serverRenameComposing = null;
-  let serverRenameTrigger = null;
-  let serverRenamePending = null;
+  let serverListEl = $state(null);   // the ServerList instance: rename/IME state lives there
   // The current connected HOSTNAME, for the rail hover card and the phone's
   // Settings row. The registry's user-editable name is not the connection
   // identity this control switches; before auth, hostLabel still strips the
@@ -741,22 +737,12 @@
     serverMenuAnchor = anchorOf(e.currentTarget);
     serverMenuTrigger = e.currentTarget;
     serverMenuW = 0; serverMenuH = 0;
-    serverRenaming = '';
-    serverRenameComposing = null;
-    serverRenameTrigger = null;
-    serverRenamePending = null;
     serverMenuOpen = true;
   }
+  /** Outside dismissal waits for an open IME composition's final value
+   * (ServerList.finish returns false and calls onclose when it lands). */
   function closeServerPicker() {
-    if (serverRenameComposing) {
-      serverRenamePending = { id: serverRenaming, menu: serverMenuEl, close: true };
-      return;
-    }
-    serverRenameCommit();
-    serverRenaming = '';
-    serverRenameComposing = null;
-    serverRenameTrigger = null;
-    serverRenamePending = null;
+    if (serverListEl && !serverListEl.finish(true)) return;
     serverMenuOpen = false;
   }
   const serverMenuPos = $derived.by(() =>
@@ -782,11 +768,10 @@
     const onKey = (e) => {
       if (modalOwnsInteraction()) return;
       if (!menu.contains(document.activeElement)) return;
-      if (e.isComposing || e.keyCode === 229 || serverRenameComposing) return;
+      if (e.isComposing || e.keyCode === 229 || serverListEl?.isComposing()) return;
       if (e.key === 'Escape') {
         e.preventDefault(); e.stopPropagation();
-        if (serverRenaming) cancelServerRename();
-        else closeServerPicker();
+        if (!serverListEl?.cancelRename()) closeServerPicker();
       }
     };
     const onScroll = (e) => {
@@ -798,7 +783,7 @@
     };
     const onResize = () => {
       // The soft keyboard resizes a dialog containing its own editable field.
-      if ((serverRenaming || modalOwnsInteraction()) && origin?.isConnected) serverMenuAnchor = anchorOf(origin);
+      if ((menu.querySelector('.sm-rename') || modalOwnsInteraction()) && origin?.isConnected) serverMenuAnchor = anchorOf(origin);
       else closeServerPicker();
     };
     window.addEventListener('pointerdown', onDown, true);
@@ -827,95 +812,6 @@
     disconnect();
     if (applySwitch(localStorage, id)) location.reload();
     else serverMenuOpen = false; // stale row (entry vanished) — just close
-  }
-  /** Removing a saved server is DESTRUCTIVE (config + parked state gone for
-   *  good), so it goes through the shared ConfirmDialog like every other
-   *  discarding path (lead blocker #3; the × sits in a dense popover where a
-   *  stray tap is real). The row's IDENTITY is captured at click time — the
-   *  confirm never re-reads the menu or the current id, so a menu that
-   *  switched, refreshed or closed underneath cannot retarget the delete. */
-  let pendingServerRemove = $state(null);   // { id, name, address } | null
-  function serverRemoveAsk(s) {
-    pendingServerRemove = { id: s.id, name: s.name, address: s.address };
-  }
-  function serverRemoveConfirm() {
-    const victim = pendingServerRemove;
-    const menu = serverMenuEl;
-    pendingServerRemove = null;
-    if (!victim) return;
-    // removeServer's own guards keep a stale confirm harmless: the current
-    // entry is refused, an id that no longer exists filters to a no-op.
-    serverList = removeServer(localStorage, victim.id);
-    serverCurId = currentServerId(localStorage);
-    void restoreServerPickerFocus(null, menu);
-  }
-  function serverRenameStart(s, trigger) {
-    serverRenameTrigger = trigger;
-    serverRenameComposing = null;
-    serverRenamePending = null;
-    serverRenaming = s.id;
-    serverRenameDraft = s.name;
-  }
-  async function restoreServerPickerFocus(target, menu) {
-    await tick();
-    if (!serverMenuOpen || menu !== serverMenuEl || !menu?.isConnected || activeModal(document)) return;
-    if (document.activeElement !== document.body && !menu.contains(document.activeElement)) return;
-    (target?.isConnected ? target : menu).focus({ preventScroll: true });
-  }
-  function cancelServerRename() {
-    const trigger = serverRenameTrigger, menu = serverMenuEl;
-    serverRenaming = '';
-    serverRenameComposing = null;
-    serverRenameTrigger = null;
-    serverRenamePending = null;
-    void restoreServerPickerFocus(trigger, menu);
-  }
-  function serverRenameKey(e) {
-    if (e.isComposing || e.keyCode === 229 || serverRenameComposing) return;
-    e.stopPropagation();
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const trigger = serverRenameTrigger, menu = serverMenuEl;
-      serverRenameCommit();
-      void restoreServerPickerFocus(trigger, menu);
-    }
-  }
-  function serverRenameCompositionStart(e) {
-    serverRenameComposing = { id: serverRenaming, menu: serverMenuEl, input: e.currentTarget };
-  }
-  async function serverRenameCompositionEnd(e) {
-    const composition = serverRenameComposing;
-    if (!composition || composition.input !== e.currentTarget) return;
-    await tick(); // Keep every commit entry gated until the final native input lands.
-    if (serverRenameComposing !== composition || composition.menu !== serverMenuEl
-      || composition.id !== serverRenaming || !composition.input.isConnected) return;
-    serverRenameDraft = composition.input.value;
-    serverRenameComposing = null;
-    const request = serverRenamePending;
-    if (request && request.menu === serverMenuEl && request.id === serverRenaming) {
-      if (request.close) closeServerPicker();
-      else serverRenameCommit();
-    }
-  }
-  /** svelte action: focus + select the rename input the moment it mounts. */
-  function focusOnMount(el) {
-    el.focus();
-    el.select?.();
-  }
-  function serverRenameCommit() {
-    if (serverRenameComposing) {
-      serverRenamePending ??= { id: serverRenaming, menu: serverMenuEl, close: false };
-      return;
-    }
-    const id = serverRenaming;
-    const request = serverRenamePending;
-    if (serverRenaming) serverList = renameServer(localStorage, serverRenaming, serverRenameDraft);
-    serverRenaming = '';
-    serverRenameTrigger = null;
-    serverRenamePending = null;
-    if (request && request.id === id && request.menu === serverMenuEl && request.close) {
-      serverMenuOpen = false;
-    }
   }
   /** The `+` row: the Settings connect form IS the add flow (it upserts by
    *  address on success), so the row only takes you there. No disconnect —
@@ -1059,6 +955,75 @@
     linkFeedback.update(attempt, { kind: 'success', message: t('linkCopied') });
   }
 
+  /** Bring the app up against the server the socket just authenticated with:
+   * the boot path's half after `connect` resolves (board 315 shares it with
+   * the in-place switch, so "how the app comes up on a server" is written
+   * once). Records the machine identity onto the current entry, asks the
+   * server what it hosts, and restores the parked tmux_state. */
+  function bringUp(addr, token) {
+    connected = true;
+    serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
+    // RECORD the machine identity onto the current registry entry (board
+    // #55): the boot path is how most sessions connect, and without this
+    // stamp an entry never learns its machineId — a later connect to an
+    // alternate address of the SAME machine would then read as a new
+    // server. Record only: the entry booted as current, nothing activates.
+    try {
+      const mid = getMachineId?.();
+      if (mid) {
+        recordServer(localStorage, {
+          address: addr, token,
+          ...(localStorage.getItem('tmux_socket') ? { socket: localStorage.getItem('tmux_socket') } : {}),
+          machineId: mid,
+        });
+        // Boot's server IS the current entry — refreshing the live key
+        // here has no park to poison, and the reconnect machine needs it
+        // for the failover set (Settings no longer writes it).
+        localStorage.setItem('tmux_machine_id', mid);
+      }
+    } catch {}
+    serverReady();
+    try {
+      const s = JSON.parse(localStorage.getItem('tmux_state') || '{}');
+      // A saved target names a session that may not exist any more — killed
+      // while we were away, or RENAMED (a project rename renames its session).
+      // Restoring it anyway lands the user on a pane that cannot be captured,
+      // so check first and come back to the tab without a target instead.
+      if (s.terminalTarget && s.terminalSession) {
+        listSessions()
+          .then((sessions) => {
+            // list_sessions answers with a bare array (list_sessions_with_panes
+            // is the one that wraps).
+            if (!(sessions ?? []).some((x) => x.name === s.terminalSession)) {
+              terminalTarget = '';
+              terminalSession = '';
+              splitCells = splitCells.filter((c) => c.session !== s.terminalSession);
+            }
+          })
+          .catch(() => {});
+      }
+      if (s.terminalTarget) {
+        terminalTarget = s.terminalTarget;
+        terminalSession = s.terminalSession || '';
+        // Restore split layout only on eligible (desktop + wide) clients;
+        // a desktop-saved state silently stays single-pane on a phone.
+        if (splitEligible && s.splitLayout > 1 && Array.isArray(s.splitCells) && s.splitCells.length) {
+          splitCells = s.splitCells;
+          splitLayout = s.splitLayout;
+          nextCellId = Math.max(0, ...s.splitCells.map(c => c.id ?? 0)) + 1;
+          activeCellId = s.splitCells[0]?.id ?? null;
+        }
+      }
+      // The tab is restored whether or not a terminal came with it; only an
+      // unknown name falls back to the device default. On touch a saved
+      // `agents` resolves to Settings opened at its Agents category — there is
+      // no Agents tab to land on there.
+      const nav = restoreNav(s.page, layout.isTouchDevice);
+      page = nav.page;
+      if (nav.settingsTab) prefsOpenReq = { tab: nav.settingsTab, n: ++prefsOpenSeq };
+    } catch { page = defaultPage(layout.isTouchDevice); }
+  }
+
   // Auto-reconnect and restore state on page load
   let autoConnectAttempted = false;
 
@@ -1099,67 +1064,7 @@
 
     connect(addr, token).then(() => {
       clearTimeout(timeout);
-      connected = true;
-      serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
-      // RECORD the machine identity onto the current registry entry (board
-      // #55): the boot path is how most sessions connect, and without this
-      // stamp an entry never learns its machineId — a later connect to an
-      // alternate address of the SAME machine would then read as a new
-      // server. Record only: the entry booted as current, nothing activates.
-      try {
-        const mid = getMachineId?.();
-        if (mid) {
-          recordServer(localStorage, {
-            address: addr, token,
-            ...(localStorage.getItem('tmux_socket') ? { socket: localStorage.getItem('tmux_socket') } : {}),
-            machineId: mid,
-          });
-          // Boot's server IS the current entry — refreshing the live key
-          // here has no park to poison, and the reconnect machine needs it
-          // for the failover set (Settings no longer writes it).
-          localStorage.setItem('tmux_machine_id', mid);
-        }
-      } catch {}
-      serverReady();
-      try {
-        const s = JSON.parse(localStorage.getItem('tmux_state') || '{}');
-        // A saved target names a session that may not exist any more — killed
-        // while we were away, or RENAMED (a project rename renames its session).
-        // Restoring it anyway lands the user on a pane that cannot be captured,
-        // so check first and come back to the tab without a target instead.
-        if (s.terminalTarget && s.terminalSession) {
-          listSessions()
-            .then((sessions) => {
-              // list_sessions answers with a bare array (list_sessions_with_panes
-              // is the one that wraps).
-              if (!(sessions ?? []).some((x) => x.name === s.terminalSession)) {
-                terminalTarget = '';
-                terminalSession = '';
-                splitCells = splitCells.filter((c) => c.session !== s.terminalSession);
-              }
-            })
-            .catch(() => {});
-        }
-        if (s.terminalTarget) {
-          terminalTarget = s.terminalTarget;
-          terminalSession = s.terminalSession || '';
-          // Restore split layout only on eligible (desktop + wide) clients;
-          // a desktop-saved state silently stays single-pane on a phone.
-          if (splitEligible && s.splitLayout > 1 && Array.isArray(s.splitCells) && s.splitCells.length) {
-            splitCells = s.splitCells;
-            splitLayout = s.splitLayout;
-            nextCellId = Math.max(0, ...s.splitCells.map(c => c.id ?? 0)) + 1;
-            activeCellId = s.splitCells[0]?.id ?? null;
-          }
-        }
-        // The tab is restored whether or not a terminal came with it; only an
-        // unknown name falls back to the device default. On touch a saved
-        // `agents` resolves to Settings opened at its Agents category — there is
-        // no Agents tab to land on there.
-        const nav = restoreNav(s.page, layout.isTouchDevice);
-        page = nav.page;
-        if (nav.settingsTab) prefsOpenReq = { tab: nav.settingsTab, n: ++prefsOpenSeq };
-      } catch { page = defaultPage(layout.isTouchDevice); }
+      bringUp(addr, token);
     }).catch(() => {
       clearTimeout(timeout);
       page = 'settings';
@@ -1695,44 +1600,13 @@
       style:--pop-origin={serverMenuAnchor ? popOrigin(serverMenuAnchor, serverMenuPos) : undefined}
       bind:this={serverMenuEl} bind:offsetWidth={serverMenuW} bind:offsetHeight={serverMenuH}>
       <div class="menu-heading">{t('serversTitle')}</div>
-      {#each serverList as s (s.id)}
-        <div class="sm-row" class:cur={s.id === serverCurId}>
-          {#if serverRenaming === s.id}
-            <input class="sm-rename config-input" bind:value={serverRenameDraft} use:focusOnMount
-              aria-label={`${t('serverRename')} ${s.name}`}
-              onkeydown={serverRenameKey}
-              oncompositionstart={serverRenameCompositionStart}
-              oncompositionend={serverRenameCompositionEnd}
-              onblur={serverRenameCommit} />
-          {:else}
-            <button class="sm-pick menu-item" type="button" title={s.address} aria-current={s.id === serverCurId ? 'true' : undefined}
-              onclick={() => { serverMenuOpen = false; doServerSwitch(s.id); }}>
-              <span class="sm-name">{s.name}</span>
-              <span class="sm-addr">{s.address}</span>
-            </button>
-          {/if}
-          <CommandButton variant="icon" icon="edit" label={`${t('serverRename')} ${s.name}`}
-            disabled={serverRenaming === s.id} onclick={(e) => serverRenameStart(s, e.currentTarget)} />
-          {#if s.id === serverCurId}
-            <span class="sm-check" title={t('serverCurrent')}><Icon name="check" size={13} /></span>
-          {:else}
-            <CommandButton variant="danger" iconOnly icon="x" label={`${t('serverRemove')} ${s.name}`} onclick={() => serverRemoveAsk(s)} />
-          {/if}
-        </div>
-      {/each}
-      <button class="sm-add menu-item" type="button" onclick={serverAddRow}><Icon name="plus" size={13} /><span>{t('serverAdd')}</span></button>
+      <ServerList bind:this={serverListEl} servers={serverList} currentId={serverCurId} container={serverMenuEl}
+        onpick={(id) => { serverMenuOpen = false; doServerSwitch(id); }}
+        onrename={(id, name) => { serverList = renameServer(localStorage, id, name); }}
+        onremove={(id) => { serverList = removeServer(localStorage, id); serverCurId = currentServerId(localStorage); }}
+        onadd={serverAddRow} onclose={() => (serverMenuOpen = false)} />
     </div>
   {/if}
-
-  <!-- Forgetting a saved server (board #55): the shared confirmation, danger
-       tone — the entry, its token and its parked view state are gone for
-       good; the machine itself is untouched. -->
-  <ConfirmDialog open={!!pendingServerRemove}
-    confirmIcon="trash"
-    title={pendingServerRemove ? t('serverRemoveTitle').replace('{name}', pendingServerRemove.name) : ''}
-    note={t('serverRemoveNote')}
-    confirmLabel={t('serverRemove')}
-    onconfirm={serverRemoveConfirm} oncancel={() => (pendingServerRemove = null)} />
 
   {#if reconnecting && page !== 'settings'}
     <div class="reconnect-bar appear">
@@ -2013,20 +1887,6 @@
     max-height: calc(100vh / var(--ui-zoom, 1) - 16px); overflow-y: auto;
     /* Visibility and the intro are the shared .pop-layer atom (app.css). */
   }
-  .sm-row {
-    --menu-row-height: calc(2 * var(--control-line-height) + 2 * var(--menu-item-padding-y));
-    display: flex; align-items: center; gap: var(--menu-gap); min-width: 0;
-    min-height: var(--menu-row-height); flex: none;
-  }
-  .sm-pick {
-    flex: 1; min-width: 0; flex-direction: column; align-items: flex-start; gap: 0;
-  }
-  .sm-name { font-weight: 500; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sm-addr { font-family: var(--font-mono); font-size: var(--fs-meta); line-height: var(--control-line-height); color: var(--text2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sm-row.cur .sm-name { color: var(--accent-ink); }
-  .sm-check { color: var(--accent-ink); display: grid; place-items: center; width: var(--control-height); flex: none; }
-  .sm-rename { flex: 1; min-width: 0; }
-  .sm-add { border-top: 1px solid var(--border); margin-top: var(--menu-gap); }
 
   /* Reordering the rail. Two cues, because one is not enough to say both WHAT
      is moving and WHERE it lands: the pressed icon is CARRIED (it follows the

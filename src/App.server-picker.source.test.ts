@@ -32,20 +32,24 @@ test('server picker owns border-box placement and a bounded native scroller (#16
   assert.match(panel, /overflow-y: auto/u);
 });
 
-test('server picker keys yield to modals and composition, with a local rename cancellation (#165)', () => {
-  assert.match(source, /serverRenameComposing/u);
-  assert.match(picker, /oncompositionstart=\{serverRenameCompositionStart\}/u);
-  assert.match(picker, /oncompositionend=\{serverRenameCompositionEnd\}/u);
-  assert.match(source, /if \(serverRenameComposing\) \{\s*serverRenamePending = \{ id: serverRenaming, menu: serverMenuEl, close: true \};\s*return;/u,
+test('server picker keys yield to modals and composition, with a local rename cancellation (#165)', async () => {
+  // The rename and its IME contract live in the ONE ServerList (board 315).
+  const list = await readFile(new URL('./lib/app/ServerList.svelte', import.meta.url), 'utf8');
+  assert.match(list, /oncompositionstart=\{compositionStart\}/u);
+  assert.match(list, /oncompositionend=\{compositionEnd\}/u);
+  assert.match(list, /export function finish\(close = false\): boolean \{\s*if \(composing\) \{\s*pending = \{ id: renaming, close: pending\?\.close \|\| close \};\s*return false;/u,
     'outside dismissal must wait for the native final composition value');
-  const finish = source.slice(source.indexOf('async function serverRenameCompositionEnd'), source.indexOf('/** svelte action: focus'));
-  assert.ok(finish.indexOf('await tick()') >= 0 && finish.indexOf('await tick()') < finish.indexOf('serverRenameComposing = null'),
+  assert.match(source, /function closeServerPicker\(\) \{\s*if \(serverListEl && !serverListEl\.finish\(true\)\) return;/u);
+  const finish = list.slice(list.indexOf('async function compositionEnd'), list.indexOf('/** svelte action: focus'));
+  assert.ok(finish.indexOf('await tick()') >= 0 && finish.indexOf('await tick()') < finish.indexOf('composing = null'),
     'blur cannot bypass composition ending while the final input is still pending');
-  assert.match(finish, /serverRenameDraft = composition\.input\.value/u);
-  assert.match(picker, /serverRenameKey/u);
-  assert.match(source, /function serverRenameKey\(e\)[\s\S]*?e\.isComposing \|\| e\.keyCode === 229 \|\| serverRenameComposing/u);
-  assert.match(source, /function cancelServerRename/u);
+  assert.match(finish, /draft = composition\.input\.value/u);
+  assert.match(list, /onkeydown=\{key\}/u);
+  assert.match(list, /function key\(e: KeyboardEvent\) \{\s*if \(e\.isComposing \|\| e\.keyCode === 229 \|\| composing\) return;/u);
+  assert.match(list, /export function cancelRename/u);
   const effect = source.slice(source.indexOf('if (!serverMenuOpen'), source.indexOf('/** Switch:'));
+  assert.match(effect, /serverListEl\?\.isComposing\(\)/u);
+  assert.match(effect, /if \(!serverListEl\?\.cancelRename\(\)\) closeServerPicker\(\);/u);
   assert.match(effect, /activeModal\(document\)/u);
   assert.match(effect, /menu\.contains\(document\.activeElement\)/u);
   assert.match(effect, /menu\.focus\(\{ preventScroll: true \}\)/u);

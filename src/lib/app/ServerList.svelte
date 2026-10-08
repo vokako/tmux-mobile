@@ -1,0 +1,205 @@
+<script lang="ts">
+  // The ONE list of saved servers (board 315): the rail/phone switcher popover
+  // and Settings › Connection render this same component, so a row's state,
+  // its actions and their keyboard/IME contract cannot drift between the two
+  // (one mechanism per job). Popover vs page is the caller's layout only.
+  //
+  // It is a non-modal PICKER, not an action menu (#165): native Tab order, a
+  // click on a row switches at once, rename is its own sibling command, and
+  // removing a saved server goes through the shared ConfirmDialog.
+  import { tick } from 'svelte';
+  import Icon from '../ui/Icon.svelte';
+  import CommandButton from '../ui/CommandButton.svelte';
+  import ConfirmDialog from '../ui/ConfirmDialog.svelte';
+  import { activeModal } from '../ui/modal.ts';
+  import { t } from '../core/i18n.svelte.ts';
+  import type { ServerEntry } from './servers.ts';
+
+  interface Props {
+    servers: ServerEntry[];
+    /** The CONFIRMED current server (authenticated). Only it wears aria-current. */
+    currentId: string;
+    /** 'menu' inside the switcher popover; 'page' inside Settings › Connection. */
+    variant?: 'menu' | 'page';
+    onpick: (id: string) => void;
+    onrename: (id: string, name: string) => void;
+    onremove: (id: string) => void;
+    onadd: () => void;
+    /** A deferred close (asked while an IME composition was still open). */
+    onclose?: () => void;
+    /** The element focus returns to after a rename/remove (the popover or page). */
+    container?: HTMLElement | null;
+  }
+  let {
+    servers, currentId, variant = 'menu',
+    onpick, onrename, onremove, onadd, onclose = () => {}, container = null,
+  }: Props = $props();
+
+  let renaming = $state('');   // entry id whose name is an input
+  let draft = $state('');
+  let composing: { id: string; input: HTMLInputElement } | null = null;
+  let trigger: HTMLElement | null = null;
+  let pending: { id: string; close: boolean } | null = null;
+
+  async function restoreFocus(target: HTMLElement | null) {
+    const root = container;
+    await tick();
+    if (!root?.isConnected || activeModal(document)) return;
+    if (document.activeElement !== document.body && !root.contains(document.activeElement)) return;
+    (target?.isConnected ? target : root).focus({ preventScroll: true });
+  }
+
+  /** Commit any open rename. Returns false when an IME composition is still
+   * open: the final native value has not landed, so the caller's close waits
+   * for compositionend (which calls onclose). */
+  export function finish(close = false): boolean {
+    if (composing) {
+      pending = { id: renaming, close: pending?.close || close };
+      return false;
+    }
+    commit();
+    renaming = '';
+    trigger = null;
+    pending = null;
+    return true;
+  }
+  /** Drop an open rename without saving (Escape). */
+  export function cancelRename(): boolean {
+    if (!renaming) return false;
+    const back = trigger;
+    renaming = '';
+    composing = null;
+    trigger = null;
+    pending = null;
+    void restoreFocus(back);
+    return true;
+  }
+  export function isComposing() { return !!composing; }
+
+  function start(s: ServerEntry, el: HTMLElement) {
+    trigger = el;
+    composing = null;
+    pending = null;
+    renaming = s.id;
+    draft = s.name;
+  }
+  function commit() {
+    if (composing) {
+      pending ??= { id: renaming, close: false };
+      return;
+    }
+    const id = renaming;
+    const request = pending;
+    if (id) onrename(id, draft);
+    renaming = '';
+    trigger = null;
+    pending = null;
+    if (request && request.id === id && request.close) onclose();
+  }
+  function key(e: KeyboardEvent) {
+    if (e.isComposing || e.keyCode === 229 || composing) return;
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const back = trigger;
+      commit();
+      void restoreFocus(back);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelRename();
+    }
+  }
+  function compositionStart(e: CompositionEvent) {
+    composing = { id: renaming, input: e.currentTarget as HTMLInputElement };
+  }
+  async function compositionEnd(e: CompositionEvent) {
+    const composition = composing;
+    if (!composition || composition.input !== e.currentTarget) return;
+    await tick(); // Keep every commit entry gated until the final native input lands.
+    if (composing !== composition || composition.id !== renaming || !composition.input.isConnected) return;
+    draft = composition.input.value;
+    composing = null;
+    const request = pending;
+    if (request && request.id === renaming) {
+      if (request.close) { finish(); onclose(); }
+      else commit();
+    }
+  }
+  /** svelte action: focus + select the rename input the moment it mounts. */
+  function focusOnMount(el: HTMLInputElement) {
+    el.focus();
+    el.select?.();
+  }
+
+  /** Removing is DESTRUCTIVE (config + parked state gone), so it asks. The
+   * row's IDENTITY is captured at click time: a list that switched, refreshed
+   * or closed underneath cannot retarget the delete. */
+  let victim = $state<{ id: string; name: string } | null>(null);
+  function confirmRemove() {
+    const v = victim;
+    victim = null;
+    if (!v) return;
+    onremove(v.id);
+    void restoreFocus(null);
+  }
+</script>
+
+<div class="server-list" class:page={variant === 'page'}>
+  {#each servers as s (s.id)}
+    {@const cur = s.id === currentId}
+    <div class="sm-row" class:cur>
+      {#if renaming === s.id}
+        <input class="sm-rename config-input" bind:value={draft} use:focusOnMount
+          aria-label={`${t('serverRename')} ${s.name}`}
+          onkeydown={key}
+          oncompositionstart={compositionStart}
+          oncompositionend={compositionEnd}
+          onblur={commit} />
+      {:else}
+        <button class="sm-pick menu-item" type="button" title={s.address} aria-current={cur ? 'true' : undefined}
+          onclick={() => onpick(s.id)}>
+          <span class="sm-name">{s.name}</span>
+          <span class="sm-addr">{s.address}</span>
+        </button>
+      {/if}
+      <CommandButton variant="icon" icon="edit" label={`${t('serverRename')} ${s.name}`}
+        disabled={renaming === s.id} onclick={(e: MouseEvent) => { e.stopPropagation(); start(s, e.currentTarget as HTMLElement); }} />
+      {#if cur}
+        <span class="sm-check" title={t('serverCurrent')}><Icon name="check" size={13} /></span>
+      {:else}
+        <CommandButton variant="danger" iconOnly icon="x" label={`${t('serverRemove')} ${s.name}`}
+          onclick={(e: MouseEvent) => { e.stopPropagation(); victim = { id: s.id, name: s.name }; }} />
+      {/if}
+    </div>
+  {/each}
+  <button class="sm-add menu-item" type="button" onclick={onadd}><Icon name="plus" size={13} /><span>{t('serverAdd')}</span></button>
+</div>
+
+<!-- Forgetting a saved server (board #55): the shared confirmation, danger
+     tone — the entry, its token and its parked view state are gone for good;
+     the machine itself is untouched. -->
+<ConfirmDialog open={!!victim}
+  confirmIcon="trash"
+  title={victim ? t('serverRemoveTitle').replace('{name}', victim.name) : ''}
+  note={t('serverRemoveNote')}
+  confirmLabel={t('serverRemove')}
+  onconfirm={confirmRemove} oncancel={() => (victim = null)} />
+
+<style>
+  /* Two-line rows; shared atoms (menu-item, CommandButton, live-dot) own paint. */
+  .server-list { display: flex; flex-direction: column; min-width: 0; }
+  .sm-row {
+    --menu-row-height: calc(2 * var(--control-line-height) + 2 * var(--menu-item-padding-y));
+    display: flex; align-items: center; gap: var(--menu-gap); min-width: 0;
+    min-height: var(--menu-row-height); flex: none;
+  }
+  .sm-pick {
+    flex: 1; min-width: 0; flex-direction: column; align-items: flex-start; gap: 0;
+  }
+  .sm-name { font-weight: 500; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sm-addr { font-family: var(--font-mono); font-size: var(--fs-meta); line-height: var(--control-line-height); color: var(--text2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sm-row.cur .sm-name { color: var(--accent-ink); }
+  .sm-check { color: var(--accent-ink); display: grid; place-items: center; width: var(--control-height); flex: none; }
+  .sm-rename { flex: 1; min-width: 0; }
+  .sm-add { border-top: 1px solid var(--border); margin-top: var(--menu-gap); }
+</style>

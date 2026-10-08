@@ -429,7 +429,9 @@ test('the boot auto-connect RECORDS the machine identity, never activates (board
   // entry never learns its machineId and a later connect to an alternate
   // address of the SAME machine reads as a new server (live Chromium
   // finding). Record only — the entry booted as current.
-  const fn = source.match(/connect\(addr, token\)\.then\(\(\) => \{[\s\S]*?\n    \}\)/u)?.[0] ?? '';
+  // The boot's half after connect is bringUp (board 315 shares it).
+  assert.match(source, /connect\(addr, token\)\.then\(\(\) => \{\s*clearTimeout\(timeout\);\s*bringUp\(addr, token\);/u);
+  const fn = (source.match(/connect\(addr, token\)\.then\(\(\) => \{[\s\S]*?\n    \}\)/u)?.[0] ?? '') + (source.match(/function bringUp\(addr, token\) \{[\s\S]*?\n  \}/u)?.[0] ?? '');
   assert.match(fn, /recordServer\(localStorage, \{[\s\S]*?machineId: mid/u, 'boot stamps the identity');
   assert.ok(!fn.includes('activateConnected'), 'boot never activates — it IS the current server');
 });
@@ -444,26 +446,25 @@ test('doConnect never writes the live tmux_machine_id — activateConnected owns
   assert.ok(!fn.includes("setItem('tmux_machine_id'"), 'no live machine-id pre-write in the form');
   assert.match(fn, /setItem\('tmux_machines'/u, 'the identity MAP update stays');
   // The boot path may write it: its server IS the current entry, no park to poison.
-  const boot = source.match(/connect\(addr, token\)\.then\(\(\) => \{[\s\S]*?\n    \}\)/u)?.[0] ?? '';
+  const boot = (source.match(/connect\(addr, token\)\.then\(\(\) => \{[\s\S]*?\n    \}\)/u)?.[0] ?? '') + (source.match(/function bringUp\(addr, token\) \{[\s\S]*?\n  \}/u)?.[0] ?? '');
   assert.match(boot, /recordServer\(localStorage[\s\S]*?setItem\('tmux_machine_id', mid\)/u,
     'boot stamps the live key AFTER recording — it is the current server');
 });
 
-test('removing a saved server goes through the shared ConfirmDialog (board #55)', () => {
+test('removing a saved server goes through the shared ConfirmDialog (board #55)', async () => {
   // Lead blocker #3: the × called removeServer directly — a destructive path
-  // with no confirmation, in a dense popover. Now the × only CAPTURES the
-  // row's identity, the shared dialog asks, and the confirm consumes the
-  // captured id — never a re-read of the menu row or the current id, so a
-  // menu that switched or closed cannot retarget a delayed confirm.
-  assert.match(source, /onclick=\{\(\) => serverRemoveAsk\(s\)\}/u, 'the × only asks');
-  assert.ok(!/onclick=\{\(\) => serverRemoveRow/u.test(source), 'the direct-remove handler is retired');
-  assert.match(source, /pendingServerRemove = \{ id: s\.id, name: s\.name, address: s\.address \}/u,
-    'identity captured at click time');
-  const fn = source.match(/function serverRemoveConfirm\(\) \{[\s\S]*?\n  \}/u)?.[0] ?? '';
-  assert.match(fn, /const victim = pendingServerRemove/u, 'confirm consumes the CAPTURED identity');
-  assert.match(fn, /removeServer\(localStorage, victim\.id\)/u, 'and removes by that id alone');
-  assert.match(source, /<ConfirmDialog open=\{!!pendingServerRemove\}[\s\S]*?onconfirm=\{serverRemoveConfirm\} oncancel=\{\(\) => \(pendingServerRemove = null\)\}/u,
+  // with no confirmation, in a dense popover. The × only CAPTURES the row's
+  // identity, the shared dialog asks, and the confirm consumes the captured id
+  // — never a re-read of the list or the current id, so a list that switched
+  // or closed cannot retarget a delayed confirm. Lives in the ONE ServerList.
+  const list = await readFile(new URL('./lib/app/ServerList.svelte', import.meta.url), 'utf8');
+  assert.match(list, /victim = \{ id: s\.id, name: s\.name \}/u, 'the × only captures identity at click time');
+  const fn = list.match(/function confirmRemove\(\) \{[\s\S]*?\n  \}/u)?.[0] ?? '';
+  assert.match(fn, /const v = victim/u, 'confirm consumes the CAPTURED identity');
+  assert.match(fn, /onremove\(v\.id\)/u, 'and removes by that id alone');
+  assert.match(list, /<ConfirmDialog open=\{!!victim\}[\s\S]*?onconfirm=\{confirmRemove\} oncancel=\{\(\) => \(victim = null\)\}/u,
     'the shared dialog, cancel drops the capture');
+  assert.match(source, /onremove=\{\(id\) => \{ serverList = removeServer\(localStorage, id\)/u, 'App removes by the id it is handed');
 });
 
 test('one system-vitals strip serves desktop sidebar and an open phone drawer (board #85)', () => {
