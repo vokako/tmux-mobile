@@ -122,8 +122,11 @@ function renderMath(text: string, holes: string[]): string {
  * (`前__粗体。__后` stays literal, as `snake__case` must). */
 const CJK = '\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}\\u3000-\\u303F\\uFF00-\\uFFEF';
 const FLANK = '\uFFFC';
-const CLOSE_BEFORE_CJK = new RegExp(`(?<=[\\p{P}\\p{S}])(?<![*_])(\\*+|_+)(?=[${CJK}])`, 'gu');
-const OPEN_AFTER_CJK = new RegExp(`(?<=[${CJK}])(\\*+|_+)(?![*_])(?=[\\p{P}\\p{S}])`, 'gu');
+// `\x00` bounds a holed-out code span or formula. marked will see the span's
+// backtick there (punctuation), so the rule must read the boundary as one too.
+const PUNCT = '\\p{P}\\p{S}\\x00';
+const CLOSE_BEFORE_CJK = new RegExp(`(?<=[${PUNCT}])(?<![*_])(\\*+|_+)(?=[${CJK}])`, 'gu');
+const OPEN_AFTER_CJK = new RegExp(`(?<=[${CJK}])(\\*+|_+)(?![*_])(?=[${PUNCT}])`, 'gu');
 function cjkFlanking(text: string): string {
   return text
     .replace(CLOSE_BEFORE_CJK, `$1${FLANK}`)

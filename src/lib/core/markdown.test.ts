@@ -165,3 +165,20 @@ test('the CJK flanking rule leaves English, literals, code and math alone', () =
   assert.ok(!/\uFFFC|%EF%BF%BC/.test(link), `got: ${link}`);
   assert.ok(!renderMarkdown('**粗体。**后面').includes('\uFFFC'));
 });
+
+test('a bold code span or formula followed by CJK text renders bold (board 311)', () => {
+  // The run touches a holed-out span (`\x00`) while the rule runs, but marked
+  // sees the restored backtick, which is punctuation.
+  for (const [src, want] of [
+    ['**运行 `npm test`**后通过', /<strong>运行 <code>npm test<\/code><\/strong>后通过/],
+    ['运行**`npm test`**即可', /运行<strong><code>npm test<\/code><\/strong>即可/],
+    ['**`tmm send`**命令', /<strong><code>tmm send<\/code><\/strong>命令/],
+    ['公式**$x^2$**后面', /公式<strong><span class="katex">[\s\S]*<\/strong>后面/],
+  ] as const) {
+    const html = renderMarkdown(src);
+    assert.match(html, want, `got: ${html}`);
+    assert.ok(!html.includes('\uFFFC'), 'no flanking mark survives');
+  }
+  // Code content is byte-identical, asterisks inside it included.
+  assert.match(renderMarkdown('**`a**。`**后'), /<strong><code>a\*\*。<\/code><\/strong>后/);
+});
