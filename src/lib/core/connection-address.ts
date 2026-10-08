@@ -7,3 +7,11 @@ export function defaultConnectionAddress(location: LocationLike, dev: boolean): 
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${scheme}//${location.host}/ws`;
 }
+
+/** A typed address as a ws URL: a bare host gets the scheme the page needs
+ * (an https page can only open wss://). One rule for every connect form. */
+export function normalizeAddress(addr: string, protocol: string): string {
+  const a = addr.trim();
+  if (a.startsWith('ws://') || a.startsWith('wss://')) return a;
+  return (protocol === 'https:' ? 'wss://' : 'ws://') + a;
+}
