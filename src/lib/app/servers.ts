@@ -244,9 +244,12 @@ function ownerOfAddr(machines: Record<string, string[]>, addr: string): string {
 const defaultName = (e: ServerEntry) => !e.named && (e.name === hostLabel(e.address) || e.name === e.hostname);
 
 /**
- * THE invariant (board 318): one entry per address and one per machine. A
- * twin — another entry with the survivor's address, or its machine id — is
- * folded into the survivor and dropped. The survivor keeps its identity
+ * THE invariant (board 318, identity is the MACHINE per #55): one entry per
+ * known machine, and an address names one entry unless two different known
+ * machines have used it. A twin — another entry with the survivor's machine
+ * id, or with its address and no machine id of its own (or the same one) — is
+ * folded into the survivor and dropped; two entries whose known machine ids
+ * differ both stay, whatever their addresses. The survivor keeps its identity
  * (id, machine, address, token); it takes the twin's name only when its own
  * is still a default and the twin's was typed. The twin's parked per-server
  * keys go with it, and if the twin was CURRENT, CURRENT moves to the survivor
@@ -262,8 +265,12 @@ function absorbTwins(servers: ServerEntry[], survivor: ServerEntry): string[] {
   for (let i = servers.length - 1; i >= 0; i--) {
     const twin = servers[i]!;
     if (twin === survivor) continue;
-    const same = twin.address === survivor.address || (!!survivor.machineId && twin.machineId === survivor.machineId);
-    if (!same) continue;
+    // Identity is the machine (#55): an address is shared by two entries
+    // honestly when it reached two different known machines (a loopback
+    // tunnel, ws://127.0.0.1:9899, leads wherever the tunnel goes).
+    const sameMachine = !!survivor.machineId && twin.machineId === survivor.machineId;
+    const conflict = !!survivor.machineId && !!twin.machineId && twin.machineId !== survivor.machineId;
+    if (!sameMachine && (twin.address !== survivor.address || conflict)) continue;
     if (defaultName(survivor) && twin.named) { survivor.name = twin.name; survivor.named = true; }
     if (!survivor.machineId && twin.machineId && twin.address === survivor.address) survivor.machineId = twin.machineId;
     servers.splice(i, 1);
@@ -318,7 +325,9 @@ export function recordServer(
   const servers = loadServers(storage);
   const mid = conn.machineId || ownerOfAddr(machinesMap(storage), conn.address);
   let entry = mid ? servers.find((s) => s.machineId === mid) : undefined;
-  if (!entry) entry = servers.find((s) => s.address === conn.address);
+  // By address only when that entry is not ANOTHER known machine: a tunnel
+  // address that now reaches B must not rename A's entry into B.
+  if (!entry) entry = servers.find((s) => s.address === conn.address && (!mid || !s.machineId || s.machineId === mid));
   if (entry) {
     entry.address = conn.address;               // the address that just worked is the active one
     entry.token = conn.token;

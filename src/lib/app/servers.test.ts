@@ -508,3 +508,39 @@ test('no regression of #55: two addresses of one machine stay ONE entry, two mac
   assert.equal(list.length, 2);
   assert.equal(list.find((x) => x.machineId === 'm-a')!.address, 'ws://a-ts:2');
 });
+
+test('two different known machines that used the same address both stay — boot repair (validator, board 318)', () => {
+  const L = 'ws://127.0.0.1:9899';
+  const list = [
+    { id: 'a', name: '127.0.0.1', address: L, token: 'ta', machineId: 'm-a' },
+    { id: 'b', name: 'build box', named: true, address: L, token: 'tb', machineId: 'm-b' },
+  ];
+  const s = mem({ [SERVERS_KEY]: JSON.stringify(list), [CURRENT_KEY]: 'a', 'tmux_state::b': '{"page":"files"}' });
+  const out = migrateServers(s);
+  assert.deepEqual(out.map((x) => [x.id, x.name, x.token, x.machineId]),
+    [['a', '127.0.0.1', 'ta', 'm-a'], ['b', 'build box', 'tb', 'm-b']], 'both kept, names and tokens untouched');
+  assert.equal(s.getItem('tmux_state::b'), '{"page":"files"}');
+  assert.equal(currentServerId(s), 'a');
+});
+
+test('two different known machines on one address both stay — recordServer, and B never takes over A', () => {
+  const L = 'ws://127.0.0.1:9899';
+  const s = mem({
+    [SERVERS_KEY]: JSON.stringify([
+      { id: 'a', name: 'mac mini', named: true, address: L, token: 'ta', machineId: 'm-a' },
+      { id: 'b', name: 'b', address: 'ws://b:2', token: 'tb', machineId: 'm-b' },
+    ]),
+    [CURRENT_KEY]: 'a', 'tmux_state::a': '{"page":"hub"}',
+  });
+  const { entry } = recordServer(s, { address: L, token: 'tb', machineId: 'm-b' });
+  assert.equal(entry.id, 'b');
+  const list = loadServers(s);
+  assert.equal(list.length, 2);
+  assert.equal(list.find((x) => x.id === 'a')!.name, 'mac mini');
+  assert.equal(s.getItem('tmux_state::a'), '{"page":"hub"}');
+  // A third machine on the same address, with no entry yet: a new entry, not A's renamed.
+  const { entry: c } = recordServer(s, { address: L, token: 'tc', machineId: 'm-c' });
+  assert.notEqual(c.id, 'a');
+  assert.equal(loadServers(s).find((x) => x.id === 'a')!.machineId, 'm-a', 'A is still A');
+  assert.equal(loadServers(s).length, 3);
+});
