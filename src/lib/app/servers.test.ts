@@ -544,3 +544,34 @@ test('two different known machines on one address both stay — recordServer, an
   assert.equal(loadServers(s).find((x) => x.id === 'a')!.machineId, 'm-a', 'A is still A');
   assert.equal(loadServers(s).length, 3);
 });
+
+test('a machine-less entry is attributed only when exactly one known machine shares its address, in either direction (validator, board 318)', () => {
+  const L = 'ws://127.0.0.1:9899';
+  // Scenario 4: the ghost is CURRENT and two known machines share its address.
+  const s = mem({
+    [SERVERS_KEY]: JSON.stringify([
+      { id: 'ghost', name: '127.0.0.1', address: L, token: 'tg' },
+      { id: 'a', name: 'A', named: true, address: L, token: 'ta', machineId: 'm-a' },
+      { id: 'b', name: 'B', named: true, address: L, token: 'tb', machineId: 'm-b' },
+    ]),
+    [CURRENT_KEY]: 'ghost', 'tmux_state::b': '{"page":"files"}',
+  });
+  const out = migrateServers(s);
+  assert.deepEqual(out.map((x) => [x.id, x.name, x.token, x.machineId ?? null]),
+    [['ghost', '127.0.0.1', 'tg', null], ['a', 'A', 'ta', 'm-a'], ['b', 'B', 'tb', 'm-b']], 'all three kept as they were');
+  assert.equal(s.getItem('tmux_state::b'), '{"page":"files"}');
+  // One known machine on the address: the CURRENT ghost still folds it in.
+  const one = mem({
+    [SERVERS_KEY]: JSON.stringify([
+      { id: 'ghost', name: '127.0.0.1', address: L, token: 'tg' },
+      { id: 'a', name: 'A', named: true, address: L, token: 'ta', machineId: 'm-a' },
+    ]),
+    [CURRENT_KEY]: 'ghost',
+  });
+  const folded = migrateServers(one);
+  assert.equal(folded.length, 1);
+  assert.equal(folded[0]!.id, 'ghost');
+  assert.equal(folded[0]!.machineId, 'm-a');
+  assert.equal(folded[0]!.name, 'A');
+  assert.equal(currentServerId(one), 'ghost');
+});

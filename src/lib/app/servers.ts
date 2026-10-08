@@ -262,6 +262,13 @@ const defaultName = (e: ServerEntry) => !e.named && (e.name === hostLabel(e.addr
  */
 function absorbTwins(servers: ServerEntry[], survivor: ServerEntry): string[] {
   const dropped: string[] = [];
+  // How many different KNOWN machines have used the survivor's address. A
+  // machine-less entry on that address can be attributed only when there is
+  // exactly one; with several it is ambiguous and every entry stays as it is
+  // (validator, board 318: attributing by array order took one machine's
+  // token and parked state, from either direction).
+  const known = new Set(servers.filter((t) => t.address === survivor.address && t.machineId).map((t) => t.machineId));
+  const attributable = known.size <= 1;
   for (let i = servers.length - 1; i >= 0; i--) {
     const twin = servers[i]!;
     if (twin === survivor) continue;
@@ -269,10 +276,11 @@ function absorbTwins(servers: ServerEntry[], survivor: ServerEntry): string[] {
     // honestly when it reached two different known machines (a loopback
     // tunnel, ws://127.0.0.1:9899, leads wherever the tunnel goes).
     const sameMachine = !!survivor.machineId && twin.machineId === survivor.machineId;
-    const conflict = !!survivor.machineId && !!twin.machineId && twin.machineId !== survivor.machineId;
-    if (!sameMachine && (twin.address !== survivor.address || conflict)) continue;
+    const byAddress = twin.address === survivor.address && attributable
+      && (!twin.machineId || !survivor.machineId || twin.machineId === survivor.machineId);
+    if (!sameMachine && !byAddress) continue;
     if (defaultName(survivor) && twin.named) { survivor.name = twin.name; survivor.named = true; }
-    if (!survivor.machineId && twin.machineId && twin.address === survivor.address) survivor.machineId = twin.machineId;
+    if (!survivor.machineId && twin.machineId) survivor.machineId = twin.machineId;
     servers.splice(i, 1);
     dropped.push(twin.id);
   }
