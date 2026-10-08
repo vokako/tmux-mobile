@@ -6,7 +6,7 @@ import type { FeedBlock } from './hub.ts';
 import { wakeLine, localWhen, gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markMentions, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, HUMAN, parseQuote, quotePreview, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, runtimeLabel, agentHue, AGENT_HUES, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand, foldedCommandArgs, inputModeSwitch } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 import { renderMarkdown } from '../core/markdown.ts';
-import { mentionPalette, rosterGroups, rosterMarker, sortAgentsForRoster, stoppedGroups } from './hub.ts';
+import { drawerWindowPills, mentionPalette, rosterGroups, rosterMarker, sortAgentsForRoster, stoppedGroups } from './hub.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
   ts: 0, window: 'w1', kind: 'tool', text: '', ...e,
@@ -1958,4 +1958,29 @@ test('the card offers the OTHER input mode only where the running CLI can switch
   assert.equal(inputModeSwitch({ agent: 'kiro' }, kiroOnly), null, 'an older server sends no mode');
   assert.equal(inputModeSwitch({ agent: 'kiro', input_mode: 'queue' }, () => false), null, 'no served capability: no item');
   assert.equal(inputModeSwitch(undefined, kiroOnly), null);
+});
+
+test('drawerWindowPills: the shell window stays first and out of +N; other shells fold (#92, #320)', () => {
+  type W = { window: number; agent: string | null; name: string };
+  const w = (window: number, agent: string | null, name: string): W => ({ window, agent, name });
+  const wins = [w(1, 'kiro', 'builder'), w(0, null, 'zsh'), w(2, 'codex', 'reviewer'), w(3, null, 'logs'), w(4, null, 'notes')];
+  const none = () => false;
+  const names = (r: { pills: W[] }) => r.pills.map((p) => p.name);
+  // Collapsed: shell first (lowest non-agent index, derived — not hardcoded 0), agents, the rest folded.
+  const c = drawerWindowPills(wins, false, none);
+  assert.deepEqual(names(c), ['zsh', 'builder', 'reviewer']);
+  assert.equal(c.folded, 2, '+N counts logs and notes, never the shell');
+  // The pane on screen still shows inside the folded set.
+  assert.deepEqual(names(drawerWindowPills(wins, false, (x) => x.name === 'notes')), ['zsh', 'builder', 'reviewer', 'notes']);
+  // Expanded: everything, shell still first, nothing folded.
+  const e = drawerWindowPills(wins, true, none);
+  assert.deepEqual(names(e), ['zsh', 'builder', 'reviewer', 'logs', 'notes']);
+  assert.equal(e.folded, 0);
+  // The shell is whichever non-agent window comes first, even if not index 0.
+  assert.deepEqual(names(drawerWindowPills([w(0, 'kiro', 'a'), w(5, null, 'later'), w(2, null, 'sh')], false, none)), ['sh', 'a']);
+  // Negative control: no non-agent window → no fake pill, nothing folded.
+  const agentsOnly = drawerWindowPills([w(0, 'kiro', 'a'), w(1, 'claude', 'b')], false, none);
+  assert.deepEqual(names(agentsOnly), ['a', 'b']);
+  assert.equal(agentsOnly.folded, 0);
+  assert.deepEqual(drawerWindowPills([], false, none), { pills: [], folded: 0 });
 });

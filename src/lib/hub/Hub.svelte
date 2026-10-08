@@ -181,8 +181,9 @@
   // The switcher bar folds non-agent windows (board #92: "只 filter 出当前有效
   // 的 agent window，其他 window 可以帮我折叠起来"): shells and other windows
   // hide behind a +N pill so they never push the agent pills out of the bar.
-  // The one exception is the window the terminal is SHOWING — the bar may
-  // never hide the current pane, so it stays a pill even when folded-class.
+  // Two exceptions (hub.ts drawerWindowPills): the project's shell window
+  // stays first, a terminal always at hand (#320), and the window the
+  // terminal is SHOWING — the bar may never hide the current pane.
   let winsExpanded = $state(false);
 
   // New-project dialog.

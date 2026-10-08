@@ -180,6 +180,24 @@ export function pickLead(
   return managed.slice().sort((a, b) => a.window - b.window)[0]!.name;
 }
 
+/** The drawer bar's window pills (board #92 + #320). Collapsed, the bar is
+ * the project's SHELL — the lowest-indexed non-agent window, the one `up`
+ * creates first — then the agent windows; every other non-agent window folds
+ * behind `+N`, except the one the terminal is showing (`isCurrent`): the bar
+ * never hides the current pane. Expanded, every window, the shell still
+ * first. `folded` is what the `+N` counts; the shell is never in it (owner
+ * 2026-10-08: "启动的项目里有一个0的 window，这个在侧边栏应该不要自动给我hide起来"). */
+export function drawerWindowPills<T extends Pick<HubAgent, 'window' | 'agent'>>(
+  windows: readonly T[], expanded: boolean, isCurrent: (w: T) => boolean,
+): { pills: T[]; folded: number } {
+  let shell: T | undefined;
+  for (const w of windows) if (!w.agent && (!shell || w.window < shell.window)) shell = w;
+  const rest = windows.filter((w) => w !== shell);
+  const shown = expanded ? rest : rest.filter((w) => w.agent || isCurrent(w));
+  const pills = shell ? [shell, ...shown] : shown;
+  return { pills, folded: windows.length - pills.length };
+}
+
 /** Whose pane the terminal partition shows — ONE definition (board #209).
  * The recipient's, when the recipient is a named managed agent (#76: "应该优先
  * 跳转到当前所选的 agent 的 terminal window"); otherwise (room, ALL, nobody) the

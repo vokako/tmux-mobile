@@ -25,8 +25,11 @@ test('Drawer renders its original window list, real partitions and single head',
   assert.equal(empty.querySelectorAll('.drawer-head').length, 1);
   assert.ok(empty.querySelector('.side-handle.on-left'));
   assert.ok(empty.querySelector('.term-body .empty'));
-  assert.equal(empty.querySelectorAll('.win-pill:not(.more)').length, 2);
-  assert.equal(empty.querySelector('.win-pill.more')?.textContent?.trim(), '+2');
+  // #320: the project's shell (the first non-agent window) leads the bar and
+  // is never folded; the other non-agent window hides behind +1.
+  const pills = [...empty.querySelectorAll('.win-pill:not(.more)')].map((b) => b.textContent?.trim());
+  assert.deepEqual(pills, ['2:shell', '0:alice', '1:loosedirect']);
+  assert.equal(empty.querySelector('.win-pill.more')?.textContent?.trim(), '+1');
   assert.equal(empty.querySelector('.direct-tag')?.textContent, 'direct');
   assert.ok(empty.querySelector('.win-pill .live-dot'));
   // Board #179: the head's running count and the pill's live dot are ONE

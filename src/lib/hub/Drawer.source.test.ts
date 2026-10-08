@@ -16,10 +16,12 @@ test('the drawer pills show AGENT windows; the rest fold behind +N (board #92)',
   // behind a +N pill of the same family; the window currently ON SCREEN is
   // always a pill even when it belongs to the folded set — the bar may never
   // hide what the terminal is showing.
-  assert.match(source, /const winPills = \$derived\(winsExpanded \? agents\s*\n\s*: agents\.filter\(\(a\) => a\.agent \|\| termTarget\.startsWith\(`\$\{selected\}:\$\{a\.window\}\.`\)\)\);/u,
-    'collapsed = agent windows plus the one on screen; expanded = everything');
-  assert.match(source, /const winsFolded = \$derived\(agents\.length - winPills\.length\);/u,
-    'the +N counts what is hidden');
+  // #320 moved the rule into ONE pure function (hub.ts drawerWindowPills,
+  // unit-tested there): the shell window first, agents, the pane on screen.
+  assert.match(source, /const bar = \$derived\(drawerWindowPills\(agents, winsExpanded,\s*\(a\) => termTarget\.startsWith\(`\$\{selected\}:\$\{a\.window\}\.`\)\)\);/u,
+    'the bar reads the one definition, with the on-screen rule');
+  assert.match(source, /const winsFolded = \$derived\(bar\.folded\);/u, 'the +N counts what is hidden');
+  assert.doesNotMatch(source, /agents\.filter\(\(a\) => a\.agent/u, 'no private second fold rule');
   assert.match(source, /\{#each winPills as a \(a\.window\)\}/u, 'the pill loop reads the filtered list');
   assert.match(source, /\{#if winsFolded > 0 \|\| winsExpanded\}/u,
     'the toggle appears only when something is (or was) folded');

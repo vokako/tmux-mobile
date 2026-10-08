@@ -6,7 +6,7 @@
   import Icon from '../ui/Icon.svelte';
   import CommandButton from '../ui/CommandButton.svelte';
   import { t } from '../core/i18n.svelte.ts';
-  import { stateDotColor, stateIsLive } from './hub.ts';
+  import { drawerWindowPills, stateDotColor, stateIsLive } from './hub.ts';
   import { hoverInfo } from '../ui/hover.ts';
 
   let {
@@ -23,10 +23,11 @@
     onboard = () => {}, onnewissue = () => {}, onfilesback = null,
   } = $props();
 
-  const winPills = $derived(winsExpanded ? agents
-    : agents.filter((a) => a.agent || termTarget.startsWith(`${selected}:${a.window}.`)));
-
-  const winsFolded = $derived(agents.length - winPills.length);
+  // The shell window first, agents, the pane on screen; the rest fold (#92, #320).
+  const bar = $derived(drawerWindowPills(agents, winsExpanded,
+    (a) => termTarget.startsWith(`${selected}:${a.window}.`)));
+  const winPills = $derived(bar.pills);
+  const winsFolded = $derived(bar.folded);
 
   // ONE definition of "live" (stateIsLive) for the count and the pill dots:
   // the state is 'running' today ('working' is its pre-2026-08 name), and a
