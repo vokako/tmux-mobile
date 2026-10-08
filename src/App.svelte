@@ -32,6 +32,7 @@
   import { createReconnectMachine } from './lib/app/reconnect.ts';
   import { activateConnected, adoptHostname, currentServerId, hostLabel, loadServers, migrateServers, recordServer, removeServer, renameServer, saveMachineAddresses, saveServers } from './lib/app/servers.ts';
   import { confirmLeave } from './lib/app/leave-guards.ts';
+  import { terminalFocusTarget } from './lib/sessions/split-focus.ts';
   import { createServerSwitch } from './lib/app/server-switch.ts';
   import { forgetAll as forgetDownloadRows } from './lib/files/downloads.svelte.ts';
   import { hoverCard } from './lib/ui/hover.svelte.ts';
@@ -39,7 +40,7 @@
   import HoverCard from './lib/ui/HoverCard.svelte';
   import ContextMenu from './lib/ui/ContextMenu.svelte';
   import CommandButton from './lib/ui/CommandButton.svelte';
-  import { cycleItem, shortcutDef, shortcutFromEvent, shortcutLabel } from './lib/app/shortcuts.ts';
+  import { cycleItem, dispatchShortcut, shortcutLabel } from './lib/app/shortcuts.ts';
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.ts';
   import { installExternalLinkHandler } from './lib/core/external-links.ts';
   import { isTauri, isTauriDesktop } from './lib/core/platform.ts';
@@ -1610,7 +1611,10 @@
     },
     async focusTerminal() {
       if (page !== 'terminal') { switchTab('terminal'); await tick(); }
-      document.querySelector('.term-page .xterm-helper-textarea')?.focus();
+      // The ACTIVE pane (board 316 review): in split screen the active cell,
+      // never the first terminal on the page; an empty active cell takes no
+      // input at all rather than handing it to another cell.
+      terminalFocusTarget(termPageEl, splitActive ? activeCellId : null)?.focus();
     },
     cycleWindow(direction) {
       window.dispatchEvent(new CustomEvent('terminal-window-shortcut', { detail: { direction } }));
@@ -1622,12 +1626,9 @@
     const onShortcut = (event) => {
       if (isShortcutInputTarget(event.target)) return;
       if (activeModal(document)) return;
-      const def = shortcutDef(shortcuts.action(shortcutFromEvent(event)));
-      // Not available here: the key stays the browser's.
-      if (!def || def.need(shortcutHost)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      def.run(shortcutHost);
+      // Parse → binding → need → run (shortcuts.ts); an unavailable key and
+      // character input (IME, AltGr) stay the page's.
+      dispatchShortcut(event, shortcuts.action, shortcutHost);
     };
     window.addEventListener('keydown', onShortcut, { capture: true });
     return () => window.removeEventListener('keydown', onShortcut, { capture: true });

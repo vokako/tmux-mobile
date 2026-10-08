@@ -2,12 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
-  SHORTCUTS, SHORTCUT_GROUPS, actionForShortcut, cycleItem, defaultBindings, migrateBindings,
+  SHORTCUTS, SHORTCUT_GROUPS, actionForShortcut, cycleItem, defaultBindings, dispatchShortcut, migrateBindings,
   reservedReason, resolveDefault, shortcutFromEvent, shortcutLabel, type ShortcutHost,
 } from './shortcuts.ts';
 
-function event(code: string, modifiers: Partial<KeyboardEvent> = {}): KeyboardEvent {
-  return { code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...modifiers } as KeyboardEvent;
+type Ev = Partial<KeyboardEvent> & { altGraph?: boolean };
+function event(code: string, modifiers: Ev = {}): KeyboardEvent & { prevented: boolean } {
+  const { altGraph = false, ...rest } = modifiers;
+  const e = {
+    code, key: '', keyCode: 0, isComposing: false, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, prevented: false,
+    getModifierState: (m: string) => m === 'AltGraph' && altGraph,
+    preventDefault() { e.prevented = true; }, stopPropagation() {},
+    ...rest,
+  };
+  return e as unknown as KeyboardEvent & { prevented: boolean };
 }
 
 test('normalizes Command and Option shortcuts by physical key', () => {
@@ -35,14 +43,30 @@ test('the registry: unique ids, every group used, every default resolvable and u
     assert.equal(new Set(values).size, values.length, `no two defaults share a combo (mac=${mac})`);
     for (const [id, v] of Object.entries(d)) assert.equal(reservedReason(v, mac), '', `${id} default ${v} is not reserved (mac=${mac})`);
   }
-  assert.equal(resolveDefault('Mod+Alt+Digit1', true), 'Meta+Alt+Digit1');
-  assert.equal(resolveDefault('Mod+Alt+Digit1', false), 'Ctrl+Alt+Digit1');
+  assert.equal(resolveDefault('Mod2+Digit1', true), 'Meta+Alt+Digit1');
+  assert.equal(resolveDefault('Mod2+Digit1', false), 'Ctrl+Alt+Digit1');
+});
+
+test('no default on either platform is a terminal control key (validator, board 316)', () => {
+  for (const mac of [true, false]) {
+    for (const [id, v] of Object.entries(defaultBindings(mac))) {
+      const mods = v.split('+').slice(0, -1);
+      assert.ok(!(mods.includes('Ctrl') && !mods.includes('Alt') && !mods.includes('Meta')), `${id} = ${v} is a Ctrl-only chord (mac=${mac})`);
+    }
+  }
+  // And a user cannot bind one either, on any platform.
+  for (const mac of [true, false]) {
+    assert.equal(reservedReason('Ctrl+KeyU', mac), 'shortcutReservedTerminal');
+    assert.equal(reservedReason('Ctrl+Backslash', mac), 'shortcutReservedTerminal');
+    assert.equal(reservedReason('Ctrl+Shift+KeyL', mac), 'shortcutReservedTerminal');
+    assert.equal(reservedReason('Ctrl+Alt+KeyS', mac), '', 'a full Ctrl+Alt chord is not a control key');
+  }
 });
 
 test('reserved combos are refused with a reason; ordinary ones are not', () => {
   assert.equal(reservedReason('Meta+KeyT', true), 'shortcutReservedBrowser', 'new tab');
   assert.equal(reservedReason('Meta+Shift+KeyT', true), 'shortcutReservedBrowser', 'reopen tab');
-  assert.equal(reservedReason('Ctrl+KeyW', false), 'shortcutReservedBrowser', 'close tab');
+  assert.notEqual(reservedReason('Ctrl+KeyW', false), '', 'close tab');
   assert.equal(reservedReason('Meta+Digit2', true), 'shortcutReservedBrowser', 'tab 2');
   assert.equal(reservedReason('Alt+Digit2', false), 'shortcutReservedBrowser', 'tab 2 on Linux');
   assert.equal(reservedReason('Meta+Alt+KeyI', true), 'shortcutReservedBrowser', 'devtools');
@@ -52,6 +76,8 @@ test('reserved combos are refused with a reason; ordinary ones are not', () => {
   assert.equal(reservedReason('Ctrl+Alt+KeyT', false), 'shortcutReservedSystem', 'Linux terminal');
   assert.equal(reservedReason('Meta+KeyU', true), '');
   assert.equal(reservedReason('Meta+Alt+Digit2', true), '');
+  assert.equal(reservedReason('Meta+Alt+KeyK', true), 'shortcutReservedBrowser', 'Firefox console');
+  assert.equal(reservedReason('Meta+Alt+KeyM', true), 'shortcutReservedSystem', 'minimize all');
   assert.equal(reservedReason('Alt+KeyI', false), '');
 });
 
@@ -104,10 +130,13 @@ test('every action runs one host primitive, and says why when it cannot', () => 
 test('App’s handler reads only the registry: one lookup, one need check, one run (board 316)', async () => {
   const app = await readFile(new URL('../../App.svelte', import.meta.url), 'utf8');
   const handler = app.match(/const onShortcut = \(event\) => \{[\s\S]*?\n    \};/u)?.[0] ?? '';
-  assert.match(handler, /const def = shortcutDef\(shortcuts\.action\(shortcutFromEvent\(event\)\)\);/u);
-  assert.match(handler, /if \(!def \|\| def\.need\(shortcutHost\)\) return;/u);
-  assert.match(handler, /def\.run\(shortcutHost\);/u);
-  assert.doesNotMatch(handler, /action ===|'previousPage'|'openFiles'/u, 'no per-action branch');
+  assert.match(handler, /dispatchShortcut\(event, shortcuts\.action, shortcutHost\);/u, 'the one dispatch: parse → binding → need → run');
+  assert.doesNotMatch(handler, /action ===|'previousPage'|'openFiles'|shortcutFromEvent/u, 'no per-action branch, no second parse');
+  const mod = await readFile(new URL('./shortcuts.ts', import.meta.url), 'utf8');
+  const dispatch = mod.match(/export function dispatchShortcut[\s\S]*?\n\}/u)?.[0] ?? '';
+  assert.match(dispatch, /const def = shortcutDef\(actionOf\(shortcutFromEvent\(event\)\)\);\s*if \(!def \|\| def\.need\(host\)\) return '';/u);
+  const prefs = await readFile(new URL('./Preferences.svelte', import.meta.url), 'utf8');
+  assert.match(prefs, /function recordShortcut[\s\S]*?const value = shortcutFromEvent\(event\);/u, 'the recorder parses through the same entry');
   assert.match(app, /const shortcutsOn = \$derived\(!layout\.isTouchDevice\);/u, 'the gate is the desktop form factor');
   assert.match(app, /showShortcuts=\{shortcutsOn\}/u);
   assert.doesNotMatch(app, /showShortcuts=\{isTauriDesktop\}/u);
@@ -121,4 +150,40 @@ test('cycles page and window lists in both directions', () => {
   assert.equal(cycleItem(items, 'sessions', -1), 'files');
   assert.equal(cycleItem(items, 'files', 1), 'sessions');
   assert.equal(cycleItem(items, 'terminal', 1), 'team');
+});
+
+test('character input is never a shortcut: AltGr, IME composition, keyCode 229 (review P1)', () => {
+  const bindings = defaultBindings(false);           // Ctrl+Alt defaults (Windows/Linux)
+  const actionOf = (v: string) => actionForShortcut(bindings, v);
+  const fire = (ev: KeyboardEvent & { prevented: boolean }) => {
+    const h = host({ page: 'terminal' });
+    const ran = dispatchShortcut(ev, actionOf, h);
+    return { ran, calls: h.calls, prevented: ev.prevented };
+  };
+  // Polish AltGr+S types ś: with the AltGraph state, and without it (a browser
+  // that reports AltGr as plain Ctrl+Alt) — neither opens the switcher.
+  for (const ev of [
+    event('KeyS', { ctrlKey: true, altKey: true, altGraph: true, key: 'ś' }),
+    event('KeyS', { ctrlKey: true, altKey: true, key: 'ś' }),
+    event('Digit7', { ctrlKey: true, altKey: true, key: '{' }),          // German AltGr+7
+    event('KeyS', { ctrlKey: true, altKey: true, altGraph: true, key: 'Dead' }), // an AltGr dead key: only the state tells
+    event('KeyS', { ctrlKey: true, altKey: true, isComposing: true, key: 's' }),
+    event('KeyS', { ctrlKey: true, altKey: true, keyCode: 229, key: 'Process' }),
+  ]) {
+    const r = fire(ev);
+    assert.equal(r.ran, '', `not a shortcut: ${ev.key}`);
+    assert.deepEqual(r.calls, [], 'nothing navigated or switched');
+    assert.equal(r.prevented, false, 'the character reaches the terminal');
+  }
+  // The real chord still fires.
+  const real = fire(event('KeyS', { ctrlKey: true, altKey: true, key: 's' }));
+  assert.equal(real.ran, 'openServers');
+  assert.deepEqual(real.calls, ['servers']);
+  assert.equal(real.prevented, true);
+  assert.equal(fire(event('Digit3', { ctrlKey: true, altKey: true, key: '3' })).ran, 'openTerminal');
+  // Plain Alt (the terminal window keys) is untouched by the AltGr rule.
+  assert.equal(fire(event('KeyI', { altKey: true, key: 'i' })).ran, 'nextWindow');
+  // The same parse entry serves the recorder: it yields no combo for typing.
+  assert.equal(shortcutFromEvent(event('KeyS', { ctrlKey: true, altKey: true, altGraph: true, key: 'ś' })), '');
+  assert.equal(shortcutFromEvent(event('KeyS', { ctrlKey: true, altKey: true, isComposing: true })), '');
 });

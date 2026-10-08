@@ -61,6 +61,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="cell"
+      data-cell-id={cell.id}
       class:active={cell.id === activeCellId}
       onmousedowncapture={() => onActivate(cell.id)}
     >

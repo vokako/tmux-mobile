@@ -333,11 +333,13 @@ test('the native shortcut recorder keeps capture, conflict, clear, cancel and re
       recorder.dispatchEvent(new app.window.KeyboardEvent('keydown', { key, code, bubbles: true, cancelable: true, ...mods }));
       await app.flush();
     };
-    const mod = app.window.navigator.platform.includes('Mac') ? { metaKey: true } : { ctrlKey: true };
-    const original = 'metaKey' in mod ? 'Meta+KeyU' : 'Ctrl+KeyU'; // the default, resolved for this platform
+    const mac = app.window.navigator.platform.includes('Mac');
+    const mod = mac ? { metaKey: true } : { ctrlKey: true };
+    const mod2 = mac ? { metaKey: true, altKey: true } : { ctrlKey: true, altKey: true };
+    const original = mac ? 'Meta+KeyU' : 'Ctrl+Alt+KeyU'; // the default, resolved for this platform
     recorder.click();
-    await key('i', 'KeyI', mod);
-    assert.match(app.document.querySelector('[role="alert"]')?.textContent ?? '', /already assigned/, 'another action owns Mod+I');
+    await key('i', 'KeyI', mac ? mod : mod2);
+    assert.match(app.document.querySelector('[role="alert"]')?.textContent ?? '', /already assigned/, 'Next page owns it');
     await key('Escape');
     assert.equal(app.document.querySelector('[role="alert"]'), null);
     // A combo the browser keeps is refused, in place, with the reason.
@@ -349,8 +351,8 @@ test('the native shortcut recorder keeps capture, conflict, clear, cancel and re
     await key('Backspace');
     assert.equal(stored().previousPage, '');
     recorder.click();
-    await key('x', 'KeyX', mod);
-    assert.match(stored().previousPage, /\+KeyX$/u);
+    await key('x', 'KeyX', mod2);
+    assert.match(stored().previousPage, /\+Alt\+KeyX$/u);
     // Per-row reset (the first row's undo), then reset-all.
     const rowReset = app.document.querySelector<HTMLButtonElement>('.shortcut-control .command-button')!;
     assert.equal(rowReset.disabled, false);
@@ -361,6 +363,29 @@ test('the native shortcut recorder keeps capture, conflict, clear, cancel and re
     await app.click('Restore all defaults');
     assert.equal(stored().previousPage, original);
     assert.equal(recorder.classList.contains('recording'), false);
+  } finally { await app.close(); }
+});
+
+test('the recorder ignores character input (IME, AltGr) and refuses terminal control keys (board 316 review)', async context => {
+  const app = await mount(context, { tab: 'shortcuts', props: { showShortcuts: true } });
+  try {
+    const stored = () => JSON.parse(app.window.localStorage.getItem('tmux_shortcuts') ?? '{}').previousPage;
+    const before = stored();
+    const recorder = app.document.querySelector<HTMLButtonElement>('[data-shortcut-recorder]')!;
+    recorder.click(); await app.flush();
+    const press = async (init: KeyboardEventInit & { keyCode?: number }) => {
+      const ev = new app.window.KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+      if (init.keyCode) Object.defineProperty(ev, 'keyCode', { value: init.keyCode });
+      recorder.dispatchEvent(ev); await app.flush();
+    };
+    await press({ key: 's', code: 'KeyS', ctrlKey: true, altKey: true, isComposing: true });
+    await press({ key: 'Process', code: 'KeyS', ctrlKey: true, altKey: true, keyCode: 229 });
+    await press({ key: 'ś', code: 'KeyS', ctrlKey: true, altKey: true });
+    assert.equal(stored(), before, 'typing never becomes a binding');
+    assert.ok(recorder.classList.contains('recording'), 'still waiting for a real chord');
+    await press({ key: 'u', code: 'KeyU', ctrlKey: true });
+    assert.match(app.document.querySelector('[role="alert"]')?.textContent ?? '', /control key in the terminal/);
+    assert.equal(stored(), before);
   } finally { await app.close(); }
 });
 
