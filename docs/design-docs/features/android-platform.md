@@ -237,3 +237,11 @@ settles asynchronously). Verified here with
 `cargo check --features gui --target aarch64-linux-android` under the NDK
 toolchain env (`CC_aarch64_linux_android` etc. — `aws-lc-sys` needs the
 NDK clang, which `tauri android build` exports itself).
+
+## Fixed shell elements carry the status-bar inset themselves (board #332)
+
+Owner, 2026-10-09, Android tablet: "左侧 icon 选项卡的侧边栏，以及侧边栏上面的收回按钮，跑到了屏幕最顶端，和消息上面的状态栏重叠了。其他区域顶端的位置好像是正确的".
+
+A tablet in the desktop layout shows the icon rail. `main` reserves the status bar ONCE with `padding-top: var(--sat)` (`--sat` is `env(safe-area-inset-top)`, overridden inline by MainActivity from WindowInsetsCompat). Padding only moves in-flow content. The rail (`.rail`) and the sidebar collapse button (`.shell-side-toggle`) are `position: fixed`, so they ignored it and started at the top of the screen. Each now adds the inset itself: `.rail { top: var(--sat) }` and the toggle's `top: calc(var(--sat) + …)`. On a desktop `--sat` is 0, so nothing moves there. The bottom-anchored `.sys-sidebar` and the full-screen dialog backdrops need no inset. The side sheet already pads with `--sat`.
+
+Measured in the browser harness at 1280×800, desktop layout, touch, `--sat: 24px` (this machine has no Android emulator image). Before: rail top 0, collapse button top −1, page head and sidebar top 24. After: rail top 24 (brand 34), collapse button 23 (centred on the 24 px-down page-head row), page head and sidebar unchanged at 24. `App.source.test.ts` pins both insets and `main`'s.

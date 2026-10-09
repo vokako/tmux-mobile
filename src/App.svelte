@@ -2136,10 +2136,14 @@
   }
 
   /* Connected desktop: the left icon rail. The top bar is gone — every page
-     gets its vertical space back and switching is one always-visible click. */
+     gets its vertical space back and switching is one always-visible click.
+     `top: var(--sat)` (board #332, owner 2026-10-09: on an Android tablet in
+     the desktop layout the rail "跑到了屏幕最顶端，和消息上面的状态栏重叠了"):
+     the rail is FIXED, so `main`'s `padding-top: var(--sat)` never reached it —
+     only in-flow content starts under the status bar. It is 0 on a desktop. */
   .rail {
     position: fixed;
-    left: 0; top: 0; bottom: 0;
+    left: 0; top: var(--sat); bottom: 0;
     width: 46px;
     display: flex;
     flex-direction: column;
@@ -2158,7 +2162,8 @@
   .shell-side-toggle {
     position: fixed; z-index: 11;
     left: calc(46px + var(--side-toggle-x));
-    top: calc((var(--page-head-h) - var(--control-height)) / 2);
+    /* Fixed like the rail, so it adds the status-bar inset itself (#332). */
+    top: calc(var(--sat) + (var(--page-head-h) - var(--control-height)) / 2);
   }
   /* The per-slot wrapper mirrors the rail's own column so the layout is the
      one it had before the wrapper existed: a page slot is its 34px button,

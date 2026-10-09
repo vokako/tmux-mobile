@@ -725,7 +725,7 @@ test('THE sidebar toggle is one fixed shell node at the content area\'s top-left
   const seat = style.match(/\.shell-side-toggle \{([^}]*)\}/u)?.[1] ?? '';
   assert.match(seat, /position: fixed/u, 'fixed: neither the track nor a page scroll moves it');
   assert.match(seat, /left: calc\(46px \+ var\(--side-toggle-x\)\)/u, 'the rail\'s width in, one inset');
-  assert.match(seat, /top: calc\(\(var\(--page-head-h\) - var\(--control-height\)\) \/ 2\)/u, 'centred on the page-head row');
+  assert.match(seat, /top: calc\(var\(--sat\) \+ \(var\(--page-head-h\) - var\(--control-height\)\) \/ 2\)/u, 'centred on the page-head row, under the status bar (#332)');
   assert.doesNotMatch(seat, /--side-open|transition/u, 'it does NOT ride the partition (#197)');
   assert.match(style, /\.rail-brand \{ border-radius: var\(--ui-radius-control\); margin-bottom: 8px; flex: none; \}/u, 'the brand spaces itself again (#215\'s head group is gone whole)');
   assert.doesNotMatch(style, /rail-head/u);
@@ -790,4 +790,16 @@ test('a connect lands on the default page, Chat — never a hard-coded Terminal 
   assert.doesNotMatch(connected, /page = 'terminal'/u);
   // The one hubless fallback stays: Chat on a server without the Hub becomes Terminal.
   assert.match(source, /if \(\(page === 'hub' \|\| page === 'agents' \|\| page === 'board'\) && hubState\.probed && !hubState\.available\) page = 'terminal';/u);
+});
+
+test('the fixed rail and the sidebar toggle start under the Android status bar (#332)', () => {
+  // `main` pads in-flow content by --sat; a position: fixed element is not
+  // in that flow, so each one adds the inset itself. 0 on a desktop.
+  const style = source.match(/<style>[\s\S]*<\/style>/u)?.[0] ?? '';
+  const rail = style.match(/\n  \.rail \{([^}]*)\}/u)?.[1] ?? '';
+  assert.match(rail, /position: fixed;/u);
+  assert.match(rail, /left: 0; top: var\(--sat\); bottom: 0;/u, 'the rail starts under the status bar');
+  const seat = style.match(/\.shell-side-toggle \{([^}]*)\}/u)?.[1] ?? '';
+  assert.match(seat, /var\(--sat\)/u, 'and so does the collapse button');
+  assert.match(style, /main \{[\s\S]*?padding-top: var\(--sat\);/u, 'in-flow content keeps main\'s one inset');
 });
