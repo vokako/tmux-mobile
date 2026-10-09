@@ -890,11 +890,16 @@
   let centreEl = $state(null);
   let centreW = $state(0);
   let centreH = $state(0);
-  const centrePos = $derived.by(() => {
-    if (!centre.anchor || !centre.anchor.isConnected) return { x: 0, y: 0, maxW: 0, maxH: 0 };
+  // ONE resolved placement for the centre: the position, the room AND the
+  // grow origin come out of the same `popoverFrom` answer, so the intro can
+  // never start at a corner the popover was not placed against (#326 review).
+  const centrePlace = $derived.by(() => {
+    if (!centre.anchor || !centre.anchor.isConnected) return null;
     const { anchor, side } = popoverFrom(centre.anchor);
-    return menuPlacement(anchor, { w: centreW, h: centreH }, viewBox(), POPOVER_GAP, POPOVER_EDGE, 'right', side);
+    const pos = menuPlacement(anchor, { w: centreW, h: centreH }, viewBox(), POPOVER_GAP, POPOVER_EDGE, 'right', side);
+    return { pos, origin: popOrigin(anchor, pos, 'right', side) };
   });
+  const centrePos = $derived(centrePlace?.pos ?? { x: 0, y: 0, maxW: 0, maxH: 0 });
   $effect(() => {
     const origin = centre.anchor;
     if (!origin || !centreEl) return;
@@ -1901,6 +1906,7 @@
       role="dialog" aria-modal="false" aria-label={t('notifyCentre')} tabindex="-1"
       style:left="{centrePos.x}px" style:top="{centrePos.y}px"
       style:--pop-maxw="{centrePos.maxW}px" style:--pop-maxh="{centrePos.maxH}px"
+      style:--pop-origin={centrePlace?.origin}
       bind:this={centreEl} bind:offsetWidth={centreW} bind:offsetHeight={centreH}>
       <NotifyCentre onpick={(a) => { centre.close(); centre.requestJump(a); if (page !== 'hub') switchTab('hub'); }} />
     </div>

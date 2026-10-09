@@ -1005,7 +1005,15 @@ press-scale/brightness details below do not override it.
   The rail is not gated on 760px — a forced Desktop layout shows it in a
   narrow window — so the guarantee is by construction, not by breakpoint.
   `popOrigin` takes the same `side`: a beside-right popover grows from its
-  left edge.
+  left edge, and both rail popovers resolve position, room and origin from ONE
+  `popoverFrom` answer, so an intro can never start at a corner the popover
+  was not placed against.
+  An ICON-ONLY segmented option (the scratch panel's two edges) carries its
+  name on the shared hover card, never a native `title`: a second tooltip
+  species beside the one card is the regression this section exists to
+  prevent. A row is iconic only when EVERY option has an icon; a mixed row
+  draws text for all of them, because the travelling pill cannot cross cells
+  of two shapes.
 - **A click trigger may opt into staying clear (2026-09-11, #173).**
   `ContextMenu` accepts `at.keepTriggerClear` with a rect anchor. The shared
   `menuHeightLimit` caps height to the larger space above/below, rounded down

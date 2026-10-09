@@ -9,6 +9,7 @@
   // (On/Off rows pass `true`/`false`).
   import { slideIndicator } from './indicator.ts';
   import Icon from './Icon.svelte';
+  import { hoverInfo } from './hover.ts';
 
   let {
     options,
@@ -17,11 +18,13 @@
     ariaLabel = undefined,
     disabled = false,
   }: {
-    /** An option with an `icon` draws that glyph instead of its text, and the
-     * `label` becomes its accessible name (board #326: two edges the owner
-     * wanted as icons — "上面的按钮不用写'bottom'之类的文字了 你用两个小图标去
-     * 做状态切换"). Icons and words do not mix inside one row: the pill would
-     * travel between cells of two different widths. */
+    /** An option with an `icon` draws that glyph instead of its text; the
+     * `label` becomes its accessible name and the name on the ONE hover card
+     * (board #326: two edges the owner wanted as icons — "上面的按钮不用写
+     * 'bottom'之类的文字了 你用两个小图标去做状态切换"). A row is iconic only
+     * when EVERY option has an icon — a MIXED row falls back to text for all
+     * of them, because the travelling pill cannot cross cells of two
+     * different shapes; `Segmented.mount.test.ts` pins that fallback. */
     options: { value: T; label: string; icon?: string }[];
     value: T;
     onchange: (value: T) => void;
@@ -36,9 +39,10 @@
   <span class="slide-pill control" aria-hidden="true"></span>
   {#each options as o (String(o.value))}
     <button type="button" class="state-ctl" class:active={o.value === value} aria-pressed={o.value === value} {disabled}
-      aria-label={o.icon ? o.label : undefined} title={undefined}
+      aria-label={iconic ? o.label : undefined}
+      use:hoverInfo={iconic ? () => ({ title: o.label }) : null}
       onclick={() => { if (!disabled) onchange(o.value); }}
-    >{#if o.icon}<Icon name={o.icon} size={14} />{:else}{o.label}{/if}</button>
+    >{#if iconic}<Icon name={o.icon ?? ''} size={14} />{:else}{o.label}{/if}</button>
   {/each}
 </div>
 

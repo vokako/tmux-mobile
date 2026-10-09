@@ -123,9 +123,15 @@ make a workspace. Two consequences fall out of that:
     on — a refusal whose pane is now live is success (someone else won the
     race), and anything still not live is an error naming the target — and an
     UNREADABLE liveness answer (`pane_live` → `None`) falls on the repair side,
-    which costs nothing now that a repair cannot kill anything. A repeated
-    ensure is pinned to keep the shell pid across three calls and across a
-    running command.
+    which costs nothing now that a repair cannot kill anything. Everything
+    after the first read names the pane by its tmux `%id`, read once:
+    `session:window.pane` is a POSITION and a pane created beside ours
+    renumbers it, so the check and the repair could otherwise land on two
+    different panes; the `%id` is stable for the pane's life and is what
+    `respawn-pane` keeps, while the client still gets the positional target it
+    subscribes with. A repeated ensure is pinned to keep the shell pid across
+    three calls, across a running command, and across the review's exact race
+    (observed dead, revived by another path, then repaired).
   - **Explicit Kill is still the only way to end it.** `pane-died` is a session
     option, so it goes with the session: measured, `kill-session` on a session
     carrying the hook leaves no session behind rather than a respawned pane.

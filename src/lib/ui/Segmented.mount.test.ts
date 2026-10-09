@@ -31,3 +31,36 @@ test('disabled segments block activation', async context => {
     }
   } finally { await app.close(); }
 });
+
+test('an icon row names its options for assistive tech; a MIXED row falls back to text (#326)', async context => {
+  const icons = [{ value: 'bottom', label: 'Bottom', icon: 'panel-bottom' }, { value: 'right', label: 'Right', icon: 'panel-right' }];
+  const app = await (await compiled).mount(context, {
+    props: { options: icons, value: 'bottom', ariaLabel: 'Panel edge', onchange: () => {} }, modules: [],
+  });
+  try {
+    const buttons = [...app.document.querySelectorAll('button')];
+    assert.deepEqual(buttons.map((b) => b.getAttribute('aria-label')), ['Bottom', 'Right'],
+      'the label is the accessible name when the glyph replaces it');
+    assert.ok(buttons.every((b) => !b.textContent?.trim()), 'and no words are drawn');
+    assert.ok(buttons.every((b) => b.querySelector('svg')), 'each option draws its glyph');
+    assert.equal(buttons[0]!.getAttribute('aria-pressed'), 'true', 'the state contract is the row’s own');
+    assert.ok(app.document.querySelector('.segmented')!.classList.contains('iconic'));
+  } finally { await app.close(); }
+});
+
+test('a mixed icon/text row draws TEXT for every option', async context => {
+  // The pill travels between cells, so it cannot cross two shapes: a row that
+  // is not wholly iconic is wholly textual. Pinned because the alternative —
+  // rendering each option in its own dialect — looks reasonable in a diff.
+  const mixed = [{ value: 'a', label: 'Alpha', icon: 'panel-bottom' }, { value: 'b', label: 'Beta' }];
+  const app = await (await compiled).mount(context, {
+    props: { options: mixed, value: 'a', onchange: () => {} }, modules: [],
+  });
+  try {
+    const buttons = [...app.document.querySelectorAll('button')];
+    assert.deepEqual(buttons.map((b) => b.textContent?.trim()), ['Alpha', 'Beta']);
+    assert.ok(buttons.every((b) => !b.querySelector('svg')), 'no half-iconic row');
+    assert.ok(!app.document.querySelector('.segmented')!.classList.contains('iconic'));
+    assert.ok(buttons.every((b) => !b.getAttribute('aria-label')), 'the words are the name again');
+  } finally { await app.close(); }
+});

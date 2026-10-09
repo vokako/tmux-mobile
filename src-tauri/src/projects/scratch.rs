@@ -177,12 +177,20 @@ pub fn ensure() -> Result<serde_json::Value, String> {
     }
     let target = first_pane()?;
     keep_alive(&target)?;
+    // Everything from here on names the pane by its tmux `%id`, read once:
+    // `session:window.pane` is a POSITION, and a window or pane created beside
+    // ours renumbers it, so the check and the repair could otherwise land on
+    // two different panes. The id is stable for the pane's whole life — it is
+    // what `respawn-pane` keeps — while the client needs the positional target
+    // for its subscription, which is what we answer with.
+    let id = tmux::pane_format(&target, "#{pane_id}")
+        .ok_or_else(|| format!("the scratch terminal's pane {target} cannot be read"))?;
     // Unless the pane is PROVEN live, offer it a shell: an unreadable answer
     // falls on the repair side, which costs nothing now that the repair cannot
     // kill anything.
-    if tmux::pane_live(&target) != Some(true) {
-        let attempt = tmux::respawn_pane(&target);
-        if tmux::pane_live(&target) != Some(true) {
+    if tmux::pane_live(&id) != Some(true) {
+        let attempt = tmux::respawn_pane(&id);
+        if tmux::pane_live(&id) != Some(true) {
             return Err(attempt.err().unwrap_or_else(||
                 format!("the scratch terminal's shell will not start in {target}")));
         }
@@ -299,6 +307,24 @@ mod tests {
         assert_eq!(tmux::session_hook(&n, "pane-died"), None);
         tmux::send_command(&target, "exit").expect("typed exit");
         assert!(settles(|| tmux::pane_live(&target) == Some(false)), "with no hook the pane stays dead");
+        // The review's exact sequence: this path has OBSERVED the pane dead,
+        // and another path (the hook, or a concurrent ensure) revives it
+        // before the repair runs. The repair must kill nothing.
+        assert_eq!(tmux::pane_live(&target), Some(false), "observed dead");
+        tmux::respawn_pane(&target).expect("another path revives it first");
+        let winner = pane_pid(&target);
+        assert_eq!(tmux::pane_live(&target), Some(true));
+        assert!(tmux::respawn_pane(&target).is_err(), "the late repair is refused, not applied");
+        assert_eq!(pane_pid(&target), winner, "the winner's shell is untouched");
+        // ensure over that same state is idempotent: same pane, still alive.
+        let after_race = ensure().expect("idempotent over a revived pane");
+        assert_eq!(after_race["target"], target.as_str());
+        assert_eq!(pane_pid(&target), winner);
+        // Back to dead, so the repair path itself is still exercised below.
+        // (That last ensure re-installed the hook, as it is meant to.)
+        tmux::run_tmux(&["set-hook", "-u", "-t", &n, "pane-died"]).expect("hook removed again");
+        tmux::send_command(&target, "exit").expect("typed exit");
+        assert!(settles(|| tmux::pane_live(&target) == Some(false)), "dead again, with no hook");
         let repaired = ensure().expect("ensure repairs a dead pane");
         assert_eq!(repaired["target"], target.as_str());
         assert_eq!(tmux::pane_live(&target), Some(true), "the target handed back is a LIVE pane");
@@ -324,6 +350,17 @@ mod tests {
         assert_eq!(pane_pid(&target), running, "ensure did not restart a live shell");
         tmux::send_keys(&target, "C-c", false).ok();
 
+        // The check and the repair name the pane by its %id, so a window
+        // created beside ours (which renumbers positions) cannot make them
+        // land on two different panes.
+        let id = tmux::pane_format(&target, "#{pane_id}").expect("a pane id");
+        assert!(id.starts_with('%'));
+        assert_eq!(tmux::pane_live(&id), tmux::pane_live(&target), "both names, one pane");
+        // The three liveness states tmux can report, each distinguished —
+        // 'unreadable' is its own answer and never passes for 'live'.
+        assert_eq!(tmux::pane_live("tmm-no-such-session-326:9.9"), None, "a pane that is not there is unknown, not live");
+        assert_eq!(tmux::pane_live("%999999"), None, "and so is an id that is not there");
+
         // Explicit Kill is still the one way to end it: the hook is a session
         // option, so it dies with the session instead of rebuilding the pane.
         assert_eq!(kill().unwrap()["killed"], true);
@@ -334,6 +371,36 @@ mod tests {
         assert_eq!(tmux::session_exists(SCRATCH_SESSION), real_before, "the real scratch session was never touched");
         assert_eq!(tmux::session_hook(SCRATCH_SESSION, "pane-died"), real_hook_before, "nor its hooks");
         assert_eq!(global_hook(), global_hook_before, "and no global hook was set");
+    }
+
+    /// Why the repair names the pane by `%id` and not by its position
+    /// (#326 review): a POSITION is reused. Measured here on real tmux, so
+    /// the rule's reason cannot quietly expire.
+    #[test]
+    fn a_pane_position_is_reused_but_an_id_is_not() {
+        let mut guard = tmux::Scratch::new("id");
+        let s = guard.session("i");
+        if tmux::new_session(&s, None, None).is_err() {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        let panes = tmux::list_panes(&s).unwrap();
+        let first = panes.iter().min_by_key(|p| (p.window, p.pane)).unwrap();
+        let target = format!("{}:{}.{}", s, first.window, first.pane);
+        let held = tmux::pane_format(&target, "#{pane_id}").expect("an id");
+        // A second pane, then the FIRST one dies: the survivor inherits the
+        // index the first one had.
+        tmux::run_tmux(&["split-window", "-d", "-t", &target]).expect("split");
+        tmux::run_tmux(&["kill-pane", "-t", &held]).expect("kill the first pane");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let now = tmux::pane_format(&target, "#{pane_id}").expect("the position still resolves");
+        assert_ne!(now, held, "the position was handed to another pane");
+        // Which is the whole point: the id we read answers honestly that ITS
+        // pane is gone (so ensure errors), while the stale position answers
+        // for a pane we never examined — the one a positional repair would
+        // have respawned.
+        assert_eq!(tmux::pane_live(&held), None, "our pane is gone, and we can tell");
+        assert_eq!(tmux::pane_live(&target), Some(true), "the position reads as a live stranger");
     }
 
     /// Hidden from the listings only while it is OURS (board #326).

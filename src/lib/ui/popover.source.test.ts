@@ -69,6 +69,10 @@ test('a popover opened from the RAIL clears the rail — one rule, derived from 
   assert.match(app, /style:--pop-maxw="\{serverMenuPos\.maxW\}px" style:--pop-maxh="\{serverMenuPos\.maxH\}px"/u);
   assert.match(app, /style:--pop-maxw="\{centrePos\.maxW\}px" style:--pop-maxh="\{centrePos\.maxH\}px"/u);
   // The grow origin reads the SAME side, so the intro starts at the edge the
-  // popover is actually placed against.
+  // popover is actually placed against — for BOTH of them (#326 review P2:
+  // the centre used to fall back to the atom's default corner).
   assert.match(app, /popOrigin\(serverMenuAnchor, serverMenuPos, 'right', serverMenuSide\)/u);
+  assert.match(app, /const pos = menuPlacement\(anchor, \{ w: centreW, h: centreH \}[^;]*\);\s*\n\s*return \{ pos, origin: popOrigin\(anchor, pos, 'right', side\) \};/u,
+    'one resolved placement carries the centre\u2019s position, room and origin');
+  assert.match(app, /style:--pop-origin=\{centrePlace\?\.origin\}/u);
 });

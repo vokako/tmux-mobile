@@ -62,9 +62,14 @@ test('an icon option draws a glyph and keeps its words as the accessible name (#
   assert.match(source, /options: \{ value: T; label: string; icon\?: string \}\[\];/u, 'the icon is part of the option');
   assert.match(source, /const iconic = \$derived\(options\.every\(\(o\) => !!o\.icon\)\);/u,
     'a row is iconic only when EVERY option is — the pill cannot travel between cells of two shapes');
-  assert.match(source, /aria-label=\{o\.icon \? o\.label : undefined\}/u, 'the label becomes the accessible name');
-  assert.match(source, /\{#if o\.icon\}<Icon name=\{o\.icon\} size=\{14\} \/>\{:else\}\{o\.label\}\{\/if\}/u);
-  assert.doesNotMatch(source, /title=\{o\./u, 'no native title beside the shared hover card');
+  assert.match(source, /aria-label=\{iconic \? o\.label : undefined\}/u, 'the label becomes the accessible name');
+  assert.match(source, /\{#if iconic\}<Icon name=\{o\.icon \?\? ''\} size=\{14\} \/>\{:else\}\{o\.label\}\{\/if\}/u,
+    'and the whole row follows one verdict, so a mixed row cannot render half-iconic');
+  // An icon-only control needs a NAME on hover, and the app has exactly one
+  // way to give it: the shared hover card (design-language §3 — a native
+  // `title` next to it would be a second tooltip species).
+  assert.match(source, /use:hoverInfo=\{iconic \? \(\) => \(\{ title: o\.label \}\) : null\}/u);
+  assert.doesNotMatch(source, /title=/u, 'no native title beside the shared hover card');
   // Icon cells are square and wear the icon-only ink families; the text rows
   // keep their own padding and size untouched.
   assert.match(style, /\.segmented\.iconic button \{ display: grid; place-items: center; padding: 0; color: var\(--text2\); \}/u);
