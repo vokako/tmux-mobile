@@ -147,7 +147,15 @@ make a workspace. Two consequences fall out of that:
     The verdict is a pure function, so every refusal — gone, malformed, moved
     out — is pinned without racing a live call; the races themselves are
     closed by construction and pinned by "the answer names the pane we
-    checked". A repeated ensure is pinned to keep the shell pid across
+    checked".
+    TWO facts are checked before a target is handed out, and neither stands in
+    for the other: that one is about THE PANE, and `still_ours(owned()?)` is
+    about THE SESSION — its mark can be unset, a project declaration can claim
+    its name, or it can be gone and recreated by someone else while we work,
+    none of which a pane-position read can see. Ownership was true at the top
+    of the call; answering asserts it is still true. A `Taken` session answers
+    with the sentence `owned` already composed, so a mid-call refusal reads
+    exactly like a refusal at the start. A repeated ensure is pinned to keep the shell pid across
     three calls, across a running command, and across the review's exact race
     (observed dead, revived by another path, then repaired).
   - **Explicit Kill is still the only way to end it.** `pane-died` is a session

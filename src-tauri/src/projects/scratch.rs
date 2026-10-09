@@ -209,6 +209,14 @@ pub fn ensure() -> Result<serde_json::Value, String> {
         &name(),
         &id,
     )?;
+    // Two different facts, both checked at the end, neither standing in for
+    // the other (#326 review): the one above is about THE PANE — a
+    // `move-pane` can carry it into another session while its `%id` stays
+    // valid — and this one is about THE SESSION: its mark can be unset, a
+    // project declaration can claim its name, or it can be gone and
+    // recreated by someone else while we work. Ownership was true at the top
+    // of this call; handing out a target asserts it is still true now.
+    still_ours(owned()?)?;
     Ok(serde_json::json!({ "session": name(), "target": target }))
 }
 
@@ -230,6 +238,21 @@ fn target_in_our_session(raw: Option<&str>, ours: &str, id: &str) -> Result<Stri
         return Err(format!("the scratch terminal's pane {id} is in session '{session}', not '{ours}'"));
     }
     Ok(format!("{session}:{pos}"))
+}
+
+/// The end-of-call ownership verdict (pure, so each outcome is pinned without
+/// racing a live call). A `Taken` session answers with the reason `owned`
+/// already composed — the same sentence the reader would have got had the
+/// refusal happened at the start.
+fn still_ours(verdict: Ownership) -> Result<(), String> {
+    match verdict {
+        Ownership::Ours => Ok(()),
+        Ownership::Taken(why) => Err(why),
+        Ownership::Absent => Err(format!(
+            "the scratch terminal's session '{}' disappeared while it was being prepared",
+            name()
+        )),
+    }
 }
 
 fn first_pane() -> Result<String, String> {
@@ -283,6 +306,20 @@ mod tests {
             let e = target_in_our_session(Some(odd), "tmm-scratch", "%7").unwrap_err();
             assert!(e.contains("not a pane position") || e.contains("is in session"), "{odd:?} -> {e}");
         }
+    }
+
+    /// Ownership is re-checked before a target is handed out, and each
+    /// verdict has one answer (#326 review): the pane check cannot see a
+    /// session that lost its mark or gained a project declaration mid-call,
+    /// and this one cannot see a pane that was moved out — so both run.
+    #[test]
+    fn still_ours_refuses_a_session_that_stopped_being_ours() {
+        assert!(still_ours(Ownership::Ours).is_ok());
+        let taken = still_ours(Ownership::Taken("the name 'x' belongs to project 'p'".into())).unwrap_err();
+        assert_eq!(taken, "the name 'x' belongs to project 'p'", "the reason owned() composed, verbatim");
+        let gone = still_ours(Ownership::Absent).unwrap_err();
+        assert!(gone.contains("disappeared while it was being prepared"), "{gone}");
+        assert!(gone.contains(&name()), "and it names the session: {gone}");
     }
 
     #[test]
