@@ -292,6 +292,63 @@ a session may contain any character a human types, including the separator —
 and it is tagged by kind so one map can hold a project, its session, its room
 and a pane that all share a name.
 
+### A server the app can hold: runtime and fleet
+
+Three layers, one job each:
+
+| module | owns |
+|---|---|
+| `core/connection-registry.ts` | object LIFETIME — one connection per key |
+| `app/servers.ts` | IDENTITY — which saved entry is which |
+| `app/server-fleet.ts` | the SET of runtimes the app is holding |
+
+`createServerRuntime(entry, { storage, slot })` is the join of the first two: a
+saved `ServerEntry` plus the connection and bound API that serve it, plus the
+capabilities that server answered for itself (`hub`, `backends` — `null` means
+"not answered", which is not "no", because a timeout must not unmount the
+always-mounted Hub). `createServerFleet({ storage })` is the membership, and
+like `registry.ensure` its `include` never dials and holds no "current": a
+fleet is a set, not a focus.
+
+Identity, which is the reason a runtime exists rather than a field on
+`Connection`:
+
+- **`id` is `ServerEntry.id` and it is immutable for the object's lifetime.**
+  Every phase-② view, store slot and persisted key hangs off it, so a runtime
+  whose id could change under its holders would re-point them at another
+  machine.
+- **The server that answers decides.** `dial()` authenticates and then asks
+  `recordServer` which entry that machine is. If the canonical entry is not
+  this runtime's, the dial does NOT become a connected runtime under this id:
+  it closes the socket and reports the entry of the machine that did answer, so
+  the caller can include that one instead. Two cases collapse into that one
+  result — an entry that knew its machine and reached a different one (a
+  loopback tunnel or a reused LAN address), and an entry that knew no machine
+  and authenticated as one that already has an entry (a migrated
+  address-history row). The old entry's name, token and address are untouched
+  either way.
+- **Recording is never activating.** A dial writes through `recordServer` and
+  `adoptHostname` only; CURRENT and the live mirror keys stay the switch
+  path's, or a background server could take the screen.
+- **An address is a route, not an identity** (board #55: one machine is one
+  entry, however many addresses answer for it). The fleet matches by entry id
+  and machine id; `server-fleet.source.test.ts` fails if the word `address`
+  appears in it at all.
+
+A runtime deliberately does not own RECONNECT yet: `app/reconnect.ts` reads
+`tmux_address`, `tmux_token`, `tmux_machine_id` and `tmux_machines` off the
+live unprefixed keys — off whichever server is current — so a second runtime
+would reconnect to the wrong machine. It needs one scoped target reader, which
+is ②b's commit; a key-remapping storage proxy would be a second mechanism to
+delete two commits later.
+
+One simplification falls out of binding the API to a connection: App's capability
+probe needs a switch-generation guard (`serverSwitch.owns(intent)`) because the
+module socket could move to another server while `hub_rooms` was in flight. A
+runtime's probe needs none — the answer came over that runtime's own
+connection, so it cannot be about another server. Only the "was this runtime
+dropped" guard remains.
+
 ## Multi-Server (board #55)
 
 `src/lib/app/servers.ts` is the named-server registry over the same keys this
@@ -549,6 +606,24 @@ every import but `nav-state.retarget`; and `retargetRef` takes the rename's
 serverId with its `from`/`to`, so applying server A's rename to server B's
 same-named session is unwritable rather than merely untested. A `RoomRef` and a
 `ProjectRef` never follow a rename at all.
+
+### A runtime is an entry plus its transport; the server that answers decides (#335 ②)
+
+`createServerRuntime(entry, { storage, slot })` binds one `ServerEntry` to one
+connection, and its `id` is `ServerEntry.id` — immutable for the object's
+lifetime, because every phase-② view and store slot keys off it. `dial()`
+authenticates and then asks `recordServer` whose machine answered: if the
+canonical entry is not this runtime's, it closes the socket and reports that
+entry instead of publishing under this id, so an address that has come to
+reach another machine cannot route that machine's panes into this entry's
+views. A dial RECORDS and never ACTIVATES — CURRENT and the live mirror keys
+belong to the switch path, or a background server could take the screen. The
+fleet matches by entry id and machine id only; one machine never gets two
+runtimes, and `server-fleet.source.test.ts` fails if `address`, the ws.ts
+facade or `localStorage` appears in either module. Capabilities are the asked
+server's answer and `null` means "not answered yet" — a timeout must not flip
+`hub` off, because false unmounts the always-mounted Hub and destroys the state
+it exists to preserve.
 
 ### Connection-link copy feedback belongs to its attempt (#167, 2026-09-12)
 
