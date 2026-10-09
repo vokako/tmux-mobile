@@ -56,6 +56,7 @@ JSON-RPC over WebSocket (`ws://` or `wss://`).
 | `new_session` | `name?`, `path?`, `command?` | OK |
 | `kill_session` | `name` | OK |
 | `scratch_session` | — | `{session, target}` — ensures the scratch terminal's session (board #324: `tmm-scratch`, in `$HOME`, marked `@tmm-scratch=1`, never a project) and answers its first window's first pane as `session:window.pane`, always a LIVE one: #326 applies the keep-alive (`remain-on-exit` + a `pane-died: respawn-pane` hook) and repairs a pane that is already dead — `respawn-pane` without `-k`, so tmux itself refuses to restart a pane whose shell or command is still running; refuses with the reason when the name belongs to a plain session or a project |
+| `scratch_release` | — | `{released, project, renamed_to}` — frees the scratch terminal's reserved session name from the project that holds it by renaming that project's session to `tmm-scratch-recovered` (board #337). Only ever called on the reader's confirmation from the panel's refusal; refuses when no project holds the name. The refusal it answers carries its own error code `-32010`, so the client offers the action without parsing the message |
 | `scratch_kill` | — | `{killed}` — kills the scratch session only when it is ours; `false` when absent; refuses when the name belongs to something else |
 | `new_window` | `session` | OK |
 | `kill_window` | `target` | OK |

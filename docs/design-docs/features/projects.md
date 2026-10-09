@@ -70,6 +70,54 @@ make a workspace. Two consequences fall out of that:
   is pointed at a `tmux::Scratch`-guarded name per test (testing.md: every cargo
   run shares one tmux server); verified with a live `tmm-scratch` canary that
   survives `npm run test:rust` — since #326 the canary covers its hooks too.
+- **Its NAME is reserved from every claiming path** (board #337, owner
+  2026-10-09: "我打开快捷 terminal 的时候，直接报这个错误，完全用不了"). This AMENDS
+  the "recognised by ownership, never by name" rule above for the paths that
+  CLAIM a session, and the two point in opposite directions rather than
+  conflicting: ownership-by-mark is what stops us STEALING a session that is
+  not ours (`ensure` and `kill` still refuse an unmarked same-name session,
+  unchanged), and the reservation is what stops us CLAIMING one. Declining a
+  name is always safe; claiming it is what broke.
+  - **The incident.** The dev stack's watcher journal dates it exactly: the
+    server running at 05:03:38 had started at 04:06:58, seven minutes before
+    `7cce2857` (04:13) introduced the mark and the `is_scratch` guard. That
+    build had no scratch concept, so its `auto_adopt_once` claimed an unmarked
+    `tmm-scratch` session (whose shell sat in /tmp, hence `path=/tmp`) 120 s
+    after it appeared. The next build had the guard, but a project row now
+    declared the name, so `owned()` answered
+    `Taken("the name 'tmm-scratch' belongs to project 'tmm-scratch'")` from
+    then on. `project up` on that row later created the session that was live.
+    The panel's only affordance, "Open again", re-asked and got the same
+    refusal: one stale session had permanently disabled the feature.
+  - **The rule.** `scratch::reserved(session)` is the one predicate. The
+    AUTOMATIC claim (`auto_adopt_with`) skips the name whoever holds it; a
+    direct `adopt` refuses it with the reservation as the reason;
+    `free_session_name` treats it as taken, so `create` suffixes past it
+    whether or not a session is running (a DECLARATION is what kills the
+    panel, not a live session); and `rename` REFUSES it rather than quietly
+    decorating it, like every other taken name.
+  - **Recovery is the reader's, not ours.** The first design repaired the
+    hijacked row at server start, gated on `adopted = 1`. Review refused it,
+    correctly: `adopt_in` sets that flag for a session the USER asked us to
+    track as well as for one the capturer found, so it cannot tell our own
+    hijacked row from somebody's workspace — and renaming a person's project
+    under them while they are not looking is not a repair. So
+    `scratch::release()` runs only on an explicit, confirmed request from the
+    panel (`scratch_release`), renames the holder's session to
+    `tmm-scratch-recovered` (deterministic, and short enough to survive
+    `slug`'s 24-character bound unchanged), verifies the name is actually free
+    afterwards, and logs one line. Nothing is deleted and nothing is archived:
+    the row keeps its id, path, room and history, and `projects::rename`
+    carries a live session with it, so a shell inside survives. Archiving
+    would not have worked — an archived project still holds its session name
+    on purpose, since it can be restored and brought up.
+  - **Occupancy is the CURRENT session only.** `declaring_project` asks
+    `project_by_session`, not `projects::project_for_session`, which also
+    matches a project's `prev_session` — a historical alias kept so a renamed
+    project's room still resolves. A project that USED to be called
+    `tmm-scratch` does not occupy the name, and counting it would keep the
+    panel refused forever, including immediately after a release, which
+    leaves exactly such an alias behind.
 - **It is HIDDEN, and its shell can exit** (board #326, owner 2026-10-09:
   "不需要作为一个真实的 project 显示出来，就是一个隐藏的会话就好…退出这个隐藏
   会话时，也不要关掉"). This REPLACES the earlier rule that Sessions and

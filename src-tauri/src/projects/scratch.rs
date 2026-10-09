@@ -47,6 +47,11 @@ const MARK: &str = "@tmm-scratch";
 ///   instead of killing the shell the reader is already typing into
 ///   (`tmux::respawn_pane`).
 const RESPAWN_HOOK: &str = "respawn-pane";
+/// Where a project that held the reserved name is renamed to when the reader
+/// releases it. Deterministic and short enough to survive `projects::slug`'s
+/// 24-character bound unchanged, so the recovered name is the one the message
+/// promises (`tmm-scratch-recovered` is 21).
+const RECOVERED: &str = "tmm-scratch-recovered";
 
 /// The session name every path below uses. Production: `SCRATCH_SESSION`.
 /// A test points it at a name its `tmux::Scratch` guard owns, so a test run
@@ -88,8 +93,30 @@ pub(crate) fn verdict(exists: bool, marked: bool, project: Option<&str>) -> Owne
     }
 }
 
+/// The project that holds the name RIGHT NOW, if any.
+///
+/// Deliberately not `projects::project_for_session`: that one also matches a
+/// project's `prev_session`, which is a HISTORICAL alias kept so a renamed
+/// project's old room and messages still resolve. A project that used to be
+/// called `tmm-scratch` and has since been renamed does not occupy the name
+/// any more, and treating it as an occupant would keep the scratch terminal
+/// refused forever — including right after a release, which renames the
+/// holder and therefore leaves exactly such an alias behind (board #337).
+fn declaring_project() -> Result<Option<super::store::Project>, String> {
+    crate::projects::with_store(|store| store.project_by_session(&name()))
+}
+
 fn declared_by() -> Result<Option<String>, String> {
-    Ok(super::project_for_session(&name())?.map(|p| p.name))
+    Ok(declaring_project()?.map(|p| p.name))
+}
+
+/// The project holding the reserved name, for a caller that must know WHICH
+/// refusal it got without parsing the sentence (the `scratch_session` RPC
+/// turns this into its own error code, board #337). A failed read is `None`:
+/// the panel then shows the refusal without an action, which is the safe way
+/// round.
+pub fn held_by() -> Option<String> {
+    declared_by().ok().flatten()
 }
 
 /// THE predicate.
@@ -104,6 +131,28 @@ pub fn owned() -> Result<Ownership, String> {
 /// the other project paths share.
 pub fn is_scratch(session: &str) -> bool {
     session == name() && matches!(owned(), Ok(Ownership::Ours))
+}
+
+/// The scratch session's name is RESERVED: no path that CLAIMS a session for
+/// the projects store may take it, whoever currently holds it (board #337).
+///
+/// This amends #324's "recognised by ownership, never by name" for the
+/// claiming paths only, and the two rules point in opposite directions rather
+/// than conflicting: ownership-by-mark is what stops us STEALING a session
+/// that is not ours (`ensure` and `kill` still refuse an unmarked same-name
+/// session, unchanged), and the reservation is what stops us CLAIMING one.
+/// Declining a name is always safe; claiming it is what broke.
+///
+/// The incident (owner, 2026-10-09: "完全用不了"): `auto_adopt_with` skipped a
+/// session only when it was ours by MARK, so an UNMARKED `tmm-scratch` — left
+/// by a build that predated the mark, created by hand, or left behind by an
+/// `ensure` that failed between creating the session and marking it — was
+/// adopted after the 120 s settle. A project row then declared the name, so
+/// `owned()` answered `Taken` forever and the panel's only affordance, "Open
+/// again", re-asked and got the same refusal. One stale session permanently
+/// disabled the feature, with no way out through the UI.
+pub fn reserved(session: &str) -> bool {
+    session == name()
 }
 
 /// The session every listing HIDES (board #326) — `Some` only while it is
@@ -136,6 +185,42 @@ pub fn hidden_session() -> Option<String> {
 fn keep_alive(pane: &str) -> Result<(), String> {
     tmux::set_window_option(pane, "remain-on-exit", "on")?;
     tmux::set_hook(&name(), "pane-died", RESPAWN_HOOK)
+}
+
+/// Release the reserved name from the project that holds it, on an explicit
+/// request from the reader (board #337, orchestrator's revised ruling).
+///
+/// NOT automatic. The first cut did this at server start for any row with
+/// `adopted = 1`, which review refused and was right to: `adopt_in` sets that
+/// flag for a session the USER asked us to track as well as for one the
+/// capturer found, so the flag cannot tell our own hijacked row from someone's
+/// workspace — and renaming a person's project under them while they are not
+/// looking is not a repair. So the panel shows the refusal with an action, and
+/// this runs only when the reader has confirmed it.
+///
+/// The row is RENAMED, not deleted and not archived: it keeps its id, path,
+/// room and history, `projects::rename` carries the live tmux session with it
+/// so a shell inside survives, and the scratch panel can create its own
+/// session on the next open. Archiving would not have worked — an archived
+/// project still holds its session name on purpose, since it can be restored
+/// and brought up.
+pub fn release() -> Result<serde_json::Value, String> {
+    let n = name();
+    let Some(row) = declaring_project()? else {
+        return Err(format!("no project holds the name '{n}'"));
+    };
+    let recovered = RECOVERED.to_string();
+    super::rename(&row.id, &recovered)?;
+    // Verified, not assumed: a rename that refused would otherwise report a
+    // release while the name stayed held.
+    if let Some(still) = declaring_project()? {
+        return Err(format!(
+            "'{n}' is still held by project '{}' after the rename",
+            still.name
+        ));
+    }
+    eprintln!("scratch: project '{}' released the reserved session name '{n}' (board #337)", row.name);
+    Ok(serde_json::json!({ "released": true, "project": row.name, "renamed_to": recovered }))
 }
 
 /// Ensure the scratch session exists and answer `{session, target}`: the
@@ -332,6 +417,31 @@ mod tests {
         assert!(matches!(verdict(true, true, Some("scratchpad")), Ownership::Taken(_)), "a declaration wins over a stale mark");
     }
 
+    /// The state the #337 incident left: a row DECLARING the reserved session
+    /// name. Written through the store because no public path will do it any
+    /// more — which is the fix, and the reason the repair needs testing.
+    fn hijacked_row(session: &str, path: &str, adopted: bool, ts: u64) -> String {
+        let id = format!("{session}-row");
+        crate::projects::with_store(|store| {
+            store.insert_project(&crate::projects::store::Project {
+                id: id.clone(),
+                name: session.to_string(),
+                path: path.to_string(),
+                icon: None,
+                session: session.to_string(),
+                adopted,
+                autostart: false,
+                created_at: ts,
+                last_up_at: None,
+                last_seen_at: None,
+                archived: false,
+                room: String::new(),
+            })
+        })
+        .expect("the row the incident left");
+        id
+    }
+
     /// Poll a tmux fact that an asynchronous hook changes. The hook fires in
     /// milliseconds; the budget is for a loaded host, not for the mechanism.
     fn settles(mut done: impl FnMut() -> bool) -> bool {
@@ -505,6 +615,104 @@ mod tests {
         assert_eq!(tmux::pane_live(&target), Some(true), "the position reads as a live stranger");
     }
 
+    /// The #337 incident, reproduced and then refused: an UNMARKED session
+    /// with the scratch name used to be auto-adopted after the settle, and
+    /// the row it created made `owned()` answer `Taken` forever — the panel
+    /// dead with no way out. The reservation is by NAME, so it holds for a
+    /// session we do not own; a session we DO own was already skipped.
+    #[test]
+    fn an_unmarked_session_with_the_reserved_name_is_never_auto_adopted() {
+        crate::projects::tests::use_test_store();
+        let mut guard = tmux::Scratch::new("resv");
+        let n = guard.session("r");
+        use_test_name(&n);
+        let other = guard.session("plain");
+        if tmux::new_session(&other, None, None).is_err() {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        // An UNMARKED session with the reserved name: exactly what the
+        // pre-mark binary adopted at 05:03 on 2026-10-09.
+        tmux::new_session(&n, None, None).unwrap();
+        assert!(matches!(owned().unwrap(), Ownership::Taken(_)), "not ours — the old guard would not have skipped it");
+        assert!(!is_scratch(&n), "and `is_scratch` agrees, which is why the old guard let it through");
+        assert!(reserved(&n));
+
+        // Both sessions are old enough to settle. The plain one IS adopted,
+        // which is what makes this a sharp test rather than a no-op; the
+        // reserved one is not, whoever holds it.
+        let ts = 10_000_000u64;
+        let ages = [(n.clone(), 0u64), (other.clone(), 0u64)];
+        let adopted = crate::projects::projects::auto_adopt_with(&ages, ts).unwrap();
+        assert_eq!(adopted, vec![other.clone()], "the reserved name is declined, the ordinary session is claimed");
+        assert!(crate::projects::project_for_session(&n).unwrap().is_none(), "nothing declares the reserved name");
+        // A hand adoption is refused too, with the reservation as the reason.
+        let by_hand = crate::projects::adopt(&n, None).unwrap_err();
+        assert!(by_hand.contains("reserves"), "{by_hand}");
+        // And `ensure` still refuses to TAKE a session that is not ours —
+        // the #324 rule the reservation does not weaken.
+        assert!(ensure().is_err(), "an unmarked same-name session is still never taken over");
+        assert!(tmux::session_exists(&n), "and never killed");
+        // create/rename cannot declare it either, live or not.
+        let dir = guard.path();
+        let made = crate::projects::create(&dir, Some("pad"), Some(&n), None).unwrap();
+        assert_ne!(made["session"], n.as_str(), "create suffixes past the reserved name");
+        assert!(crate::projects::rename(made["id"].as_str().unwrap(), &n).unwrap_err().contains("reserves"));
+        tmux::kill_session(&n).unwrap();
+        // Not live either: a DECLARATION on the name is what killed the panel.
+        let made2 = crate::projects::create(&dir, Some("pad2"), Some(&n), None).unwrap();
+        assert_ne!(made2["session"], n.as_str(), "still suffixed with no session running");
+        for id in [made["id"].as_str().unwrap(), made2["id"].as_str().unwrap()] {
+            crate::projects::delete(id).ok();
+        }
+    }
+
+    /// The reader's way out of the dead end the incident left (board #337).
+    /// Nothing automatic: this runs only because someone confirmed it.
+    #[test]
+    fn release_frees_the_reserved_name_on_request_and_verifies_it() {
+        crate::projects::tests::use_test_store();
+        let mut guard = tmux::Scratch::new("rel");
+        let n = guard.session("l");
+        use_test_name(&n);
+        if tmux::new_session(&guard.session("probe"), None, None).is_err() {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        let dir = guard.path();
+        // Nothing to release yet: the refusal names that, rather than
+        // pretending to have done something.
+        assert!(release().unwrap_err().contains("no project holds"));
+        // The state the incident left, written at the STORE level because no
+        // public path can declare that name any more — which is the fix.
+        tmux::new_session(&n, None, None).unwrap();
+        let row_id = hijacked_row(&n, &dir, true, 10_000);
+        assert!(matches!(owned().unwrap(), Ownership::Taken(_)), "the panel's dead end");
+        assert!(ensure().is_err());
+
+        let out = release().expect("released on request");
+        assert_eq!(out["released"], true);
+        assert_eq!(out["renamed_to"], RECOVERED);
+        assert!(declaring_project().unwrap().is_none(), "the name is free");
+        let moved = crate::projects::with_store(|store| store.project(&row_id)).unwrap().expect("the row still exists");
+        assert_eq!(moved.session, RECOVERED, "renamed, not deleted and not archived");
+        assert!(!moved.archived);
+        assert!(tmux::session_exists(RECOVERED), "and the live shell came with it");
+        assert!(!tmux::session_exists(&n), "so the reserved name is unoccupied");
+        // Which is the point: the panel works again. (And the renamed row's
+        // prev_session alias must not read as an occupant — that is why
+        // `declaring_project` asks about the CURRENT session only.)
+        let fresh = ensure().expect("the scratch terminal opens again");
+        assert_eq!(fresh["session"], n.as_str());
+        assert_eq!(owned().unwrap(), Ownership::Ours);
+        // A second release has nothing to do and says so; ours is untouched.
+        assert!(release().unwrap_err().contains("no project holds"));
+        assert_eq!(owned().unwrap(), Ownership::Ours);
+        kill().unwrap();
+        tmux::kill_session(RECOVERED).ok();
+        crate::projects::delete(&row_id).ok();
+    }
+
     /// Hidden from the listings only while it is OURS (board #326).
     #[test]
     fn only_an_owned_scratch_session_is_hidden_from_the_listings() {
@@ -583,13 +791,19 @@ mod tests {
         assert!(!is_scratch(&n), "so it is adoptable like any session");
         tmux::kill_session(&n).unwrap();
         // A PROJECT that declares the name holds it even while it is down.
-        let p = crate::projects::create(&dir, Some("held"), Some(&n), None).unwrap();
-        assert_eq!(p["session"], n.as_str());
+        // Since #337 `create` suffixes past the reserved name whether or not a
+        // session is live — that no public path can produce this state any
+        // more IS the fix — so the declaration is written at the store level,
+        // because the state still has to be handled where it already exists.
+        let suffixed = crate::projects::create(&dir, Some("held"), Some(&n), None).unwrap();
+        assert_ne!(suffixed["session"], n.as_str(), "create never declares the reserved name");
+        crate::projects::delete(suffixed["id"].as_str().unwrap()).ok();
+        let held = hijacked_row(&n, &dir, false, 10_000);
         assert!(!tmux::session_exists(&n), "declared, not up");
         assert!(matches!(owned().unwrap(), Ownership::Taken(_)), "a down project still owns its name");
         assert!(ensure().is_err(), "ensure refuses instead of creating over a declaration");
         assert!(!tmux::session_exists(&n));
-        crate::projects::delete(p["id"].as_str().unwrap()).ok();
+        crate::projects::delete(&held).ok();
         assert_eq!(tmux::session_exists(SCRATCH_SESSION), real_before, "the real scratch session was never touched");
     }
 }

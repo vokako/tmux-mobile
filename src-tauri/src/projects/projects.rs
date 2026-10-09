@@ -138,10 +138,16 @@ pub fn adopt(session: &str, name: Option<&str>) -> Result<Value, String> {
     if !tmux::session_exists(session) {
         return Err(format!("no such tmux session: {session}"));
     }
-    // The scratch terminal's session is not a project (board #324), by the
-    // same ownership predicate auto-adopt asks.
-    if super::scratch::is_scratch(session) {
-        return Err(format!("'{session}' is the scratch terminal's session, not a project"));
+    // The scratch terminal's session is not a project (board #324), and its
+    // NAME is reserved (board #337) — so this refuses even when the session
+    // is not (yet) ours, instead of letting a hand adoption recreate the dead
+    // end the reservation exists to prevent. The reason says which it is.
+    if super::scratch::reserved(session) {
+        return Err(if super::scratch::is_scratch(session) {
+            format!("'{session}' is the scratch terminal's session, not a project")
+        } else {
+            format!("'{session}' is the name the scratch terminal reserves — rename that session to adopt it as a project")
+        });
     }
     let ts = now();
     let facts = adopt_facts(session)?;
@@ -240,8 +246,13 @@ pub(super) fn auto_adopt_with(created: &[(String, u64)], ts: u64) -> Result<Vec<
             continue;
         }
         // The scratch terminal's session is the one tmux session that is not
-        // a project (board #324) — by ownership, not by name.
-        if super::scratch::is_scratch(session) {
+        // a project (board #324). By NAME here, not by ownership (board #337):
+        // an UNMARKED session with that name used to be adopted after the
+        // settle, and the row it created made `owned()` answer `Taken` for
+        // good — the panel dead with no way out. The automatic claim declines
+        // the reserved name whoever holds it; `ensure`/`kill` still refuse a
+        // session that is not ours, which is the rule that protects the user's.
+        if super::scratch::reserved(session) {
             continue;
         }
         match adopt_facts(session) {
@@ -322,6 +333,13 @@ pub fn rename(id: &str, name: &str) -> Result<Value, String> {
         // that moved the label and then failed on the session left the project
         // wearing two names again — the exact bug this feature exists to fix.
         if wanted != project.session {
+            // The scratch terminal's name is reserved (board #337): a project
+            // that declares it makes `owned()` answer `Taken` forever, which
+            // is the dead end the reservation exists to prevent — and a
+            // rename REFUSES a taken name rather than decorating one.
+            if super::scratch::reserved(&wanted) {
+                return Err(format!("'{wanted}' is the name the scratch terminal reserves — choose another"));
+            }
             if tmux::session_exists(&wanted) {
                 return Err(format!("a tmux session named '{wanted}' already exists"));
             }
@@ -450,7 +468,11 @@ pub(super) fn load(id: &str) -> Result<(Project, Vec<Slot>), String> {
 
 /// A session name that is free both in tmux and in the store.
 pub(super) fn free_session_name(store: &Store, base: &str, id: &str) -> Result<String, String> {
-    if !tmux::session_exists(base) && !store.session_taken_by_other(base, id)? {
+    // The scratch terminal's name is taken whether or not a session is running
+    // under it (board #337): a DECLARATION on that name is what made `owned()`
+    // answer `Taken` forever, so `create` must suffix past it even when
+    // nothing is live. This is the one place create/rename ask.
+    if !super::scratch::reserved(base) && !tmux::session_exists(base) && !store.session_taken_by_other(base, id)? {
         return Ok(base.to_string());
     }
     let suffixed = format!("{base}-{}", digest(id));

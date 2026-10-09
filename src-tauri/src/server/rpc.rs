@@ -45,6 +45,11 @@ pub(super) const ERR_METHOD_NOT_FOUND: i32 = -32601;
 pub(super) const ERR_INVALID_PARAMS: i32 = -32602;
 pub(super) const ERR_INTERNAL: i32 = -32603;
 pub(super) const ERR_AUTH: i32 = -32000;
+/// A project holds the scratch terminal's reserved session name (board #337).
+/// Its own code so the panel can OFFER the way out without reading the
+/// sentence the server composed for the human — one definition of the
+/// message, one machine-readable fact beside it.
+pub(super) const ERR_SCRATCH_HELD: i32 = -32010;
 
 impl Response {
     pub(super) fn ok(id: Option<u64>, result: serde_json::Value) -> Self {
@@ -68,6 +73,7 @@ impl Response {
             RpcError::InvalidParams(m) => Self::err(id, ERR_INVALID_PARAMS, m),
             RpcError::Internal(m) => Self::err(id, ERR_INTERNAL, m),
             RpcError::MethodNotFound(m) => Self::err(id, ERR_METHOD_NOT_FOUND, m),
+            RpcError::ScratchHeld(m) => Self::err(id, ERR_SCRATCH_HELD, m),
         }
     }
     /// Fold a dispatcher's `Result` into a response.
@@ -93,6 +99,9 @@ pub(super) enum RpcError {
     InvalidParams(String),
     Internal(String),
     MethodNotFound(String),
+    /// `scratch_session` refused because a PROJECT holds the reserved name —
+    /// the one refusal the client can act on (board #337).
+    ScratchHeld(String),
 }
 
 /// The scratch terminal's session is hidden from every listing (board #326,
@@ -266,9 +275,23 @@ fn dispatch(req: &Request, token: &str) -> Result<serde_json::Value, RpcError> {
         // Desktop-gated like `projects` (lib.rs): a phone is a client of a
         // desktop server, so on Android/iOS these are MethodNotFound.
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        "scratch_session" => crate::projects::scratch::ensure().map_err(RpcError::Internal),
+        "scratch_session" => crate::projects::scratch::ensure().map_err(|why| {
+            // One refusal the panel can DO something about: a project holds
+            // the name. Classified by asking the same predicate the refusal
+            // came from, never by reading its sentence (board #337).
+            if crate::projects::scratch::held_by().is_some() {
+                RpcError::ScratchHeld(why)
+            } else {
+                RpcError::Internal(why)
+            }
+        }),
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         "scratch_kill" => crate::projects::scratch::kill().map_err(RpcError::Internal),
+        // Board #337: the reserved name is held by a project, so the panel is
+        // refused — this is the reader's confirmed way out. Never automatic:
+        // it renames someone's project row, so only they can ask for it.
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        "scratch_release" => crate::projects::scratch::release().map_err(RpcError::Internal),
 
         "kill_session" => {
             let name = param(p, "name")?;
