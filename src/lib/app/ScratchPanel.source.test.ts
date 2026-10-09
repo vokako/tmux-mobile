@@ -49,3 +49,8 @@ test('the panel size is clamped by the layout itself, on restore and as the wind
   assert.match(source, /<Terminal \{target\} \{session\}/u, 'the server\'s returned session name, never spelled here');
   assert.doesNotMatch(source, /setTimeout|setInterval/u, 'no timed resize');
 });
+
+test('the left-docked panel starts under the Android status bar (#332)', () => {
+  const left = source.match(/\.scratch\.left \{([^}]*)\}/u)?.[1] ?? '';
+  assert.match(left, /right: auto; top: var\(--sat, 0px\); height: auto;/u, 'fixed, so it carries --sat itself');
+});

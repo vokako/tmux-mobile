@@ -162,7 +162,9 @@
     transition: transform var(--t-move) ease, visibility 0s linear var(--t-move);
   }
   .scratch.left {
-    right: auto; top: 0; height: auto;
+    /* Fixed, so it adds the status-bar inset itself (#332): a tablet in the
+       desktop layout shows this panel, and main's padding never reaches it. */
+    right: auto; top: var(--sat, 0px); height: auto;
     width: min(var(--scratch-w, 560px), calc(100vw / var(--ui-zoom, 1) - var(--shell-left, 0px) - 80px));
     border-top: none; border-right: 1px solid var(--border);
     box-shadow: 8px 0 24px rgba(0, 0, 0, 0.18);
