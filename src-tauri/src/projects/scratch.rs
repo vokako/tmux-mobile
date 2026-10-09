@@ -195,6 +195,13 @@ pub fn ensure() -> Result<serde_json::Value, String> {
                 format!("the scratch terminal's shell will not start in {target}")));
         }
     }
+    // The answer is the position of the pane we actually verified, read from
+    // its %id at the END (#326 review): the string `first_pane` gave us is a
+    // POSITION, and a pane created or killed beside ours while we worked
+    // renumbers it, so handing back the pre-repair string could name a pane
+    // this call never checked. Reading it back from the id cannot.
+    let target = tmux::pane_format(&id, "#{session_name}:#{window_index}.#{pane_index}")
+        .ok_or_else(|| format!("the scratch terminal's pane {id} vanished while it was being prepared"))?;
     Ok(serde_json::json!({ "session": name(), "target": target }))
 }
 
@@ -349,6 +356,14 @@ mod tests {
         assert_eq!(ensure().unwrap()["target"], target.as_str());
         assert_eq!(pane_pid(&target), running, "ensure did not restart a live shell");
         tmux::send_keys(&target, "C-c", false).ok();
+
+        // The target ensure ANSWERS with is read back from that same %id at
+        // the end, so the client can only ever be handed the position of the
+        // pane this call verified.
+        let answered = ensure().unwrap()["target"].as_str().unwrap().to_string();
+        let answered_id = tmux::pane_format(&answered, "#{pane_id}");
+        assert_eq!(answered_id, tmux::pane_format(&target, "#{pane_id}"), "the answer names the pane we checked");
+        assert_eq!(tmux::pane_live(&answered), Some(true), "and it is live");
 
         // The check and the repair name the pane by its %id, so a window
         // created beside ours (which renumbers positions) cannot make them

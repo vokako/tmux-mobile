@@ -133,8 +133,13 @@ make a workspace. Two consequences fall out of that:
     `session:window.pane` is a POSITION and a pane created beside ours
     renumbers it, so the check and the repair could otherwise land on two
     different panes; the `%id` is stable for the pane's life and is what
-    `respawn-pane` keeps, while the client still gets the positional target it
-    subscribes with. A repeated ensure is pinned to keep the shell pid across
+    `respawn-pane` keeps. The positional target the client subscribes with is
+    read BACK from that id at the END of the call, never handed over as the
+    pre-repair string: a pane created or killed beside ours while we work
+    renumbers positions, so the earlier string could name a pane this call
+    never checked. That window needs a race to observe, so it is closed by
+    construction and pinned by "the answer names the pane we checked" rather
+    than by a failing control. A repeated ensure is pinned to keep the shell pid across
     three calls, across a running command, and across the review's exact race
     (observed dead, revived by another path, then repaired).
   - **Explicit Kill is still the only way to end it.** `pane-died` is a session
