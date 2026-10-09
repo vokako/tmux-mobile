@@ -3000,3 +3000,44 @@ test('a first-page poll in flight when a jump lands at the tail cannot reset the
     assert.equal(befores.at(-1), 48, 'the cursor is still the jump page\'s');
   } finally { await app.close(); }
 });
+
+test('a manual room choice ends a pending jump at once, even B → C → B (#322 review r3)', { timeout: 60000 }, async (context) => {
+  let bLoad: ((v: unknown) => void) | null = null;
+  let arounds = 0;
+  let bCalls = 0;
+  const f = jumpFixture();
+  const three = ['fixture', 'other', 'third'];
+  const rpc = { ...f.rpc,
+    projectList: async () => ({ projects: three.map((session) => ({ project: { id: session, name: session, session, path: `/${session}` }, live: true, slots: [] })) }),
+    hubLog: async (session: string, sinceTs = 0) => {
+      if (session === 'other' && sinceTs === 0 && ++bCalls === 1) return new Promise((r) => { bLoad = r; });
+      if (session === 'third') return { has_more: false, messages: [{ ...f.msg(900), room: 'proj:third', id: 'c1' }] };
+      return f.rpc.hubLog(session);
+    },
+    hubLogAround: async () => { arounds++; return { has_more: true, newer_more: true, oldest_seq: 48, messages: f.around }; } };
+  const app = await mountJump(context, rpc);
+  const pick = async (name: string) => {
+    app.document.querySelector<HTMLElement>(`.proj-row[aria-label^="${name}"] .proj-pick`)!.click();
+    await until(app, () => app.document.querySelector('.h1-text')?.textContent === name);
+  };
+  try {
+    await until(app, () => !!app.document.querySelector('.proj-row[aria-label^="third"]'));
+    const centre = centreOf(app);
+    // Above the manual tail (209), so reading B to its tail does not mark it.
+    centre.record(alertFor('target', 999));
+    centre.requestJump(centre.items[0]);
+    await until(app, () => !!bLoad);
+    await pick('third');
+    assert.equal(centre.jump, null, 'the manual choice spent the pending jump at once');
+    for (let i = 0; i < 4; i++) await app.flush();
+    assert.ok(JSON.parse(app.window.localStorage.getItem('tmux_hub_seen') ?? '{}').third, 'C reads normally: markSeen is not held by the old jump');
+    await pick('other');
+    await until(app, () => !!app.document.querySelector('[data-msg="id209"]'));
+    bLoad!({ has_more: true, oldest_seq: 200, messages: f.tail });
+    for (let i = 0; i < 8; i++) await app.flush();
+    assert.equal(arounds, 0, 'the old jump never asked for its page');
+    assert.equal(app.document.querySelector('.jump-hit'), null, 'nothing ringed');
+    assert.equal(centre.items[0].viewed, false);
+    assert.ok(app.document.querySelector('[data-msg="id209"]'), 'the manual B reading is intact');
+  } finally { await app.close(); }
+});

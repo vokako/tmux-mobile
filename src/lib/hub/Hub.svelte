@@ -303,7 +303,12 @@
     justLoadedTimer = setTimeout(() => { justLoaded = false; }, revealMs());
   }
 
-  async function selectProject(session) {
+  /** `claim` is the centre jump that is opening this room (board #322); any
+   * other call is the reader choosing a room, which ends a pending jump at
+   * once — it may not land later, and it stops suppressing this room's
+   * markSeen now. */
+  async function selectProject(session, claim = 0) {
+    if (jumpIntent && jumpIntent !== claim) { const n = jumpIntent; jumpIntent = 0; centre.consume(n); }
     headerCopyLifetime.clear();
     commandFeedbackLifetime.clear();
     selectionGeneration++;
@@ -594,13 +599,21 @@
     jumpIntent = n;
     let g = 0;
     let row = null;
-    const claimed = () => centre.isCurrent(n) && jumpIntent === n && alive && visible && !!row && selected === row.project.session;
+    let sel = selectionGeneration;
+    // The selection generation this jump caused (or found): a reader's own
+    // room choice — even back to the same room — moves it, so a stale
+    // continuation can never re-claim by the room's name.
+    const claimed = () => centre.isCurrent(n) && jumpIntent === n && alive && visible && !!row && selected === row.project.session && selectionGeneration === sel;
     const current = () => claimed() && readGen === g;
     try {
       if (alert.server && alert.server !== serverId()) { centre.failed(alert.key, t('hubJumpOtherServer')); return; }
       row = rows.find((r) => r.project.session === alert.session || roomKey(r) === alert.room) ?? null;
       if (!row) { centre.failed(alert.key, t('hubJumpNoProject')); return; }
-      if (selected !== row.project.session) await selectProject(row.project.session);
+      if (selected !== row.project.session) {
+        const opening = selectProject(row.project.session, n);
+        sel = selectionGeneration; // our own switch's generation, taken before it awaits
+        await opening;
+      }
       if (!claimed()) return;
       g = newReading(); // this jump owns the visible feed from here on
       if (!current()) return;
