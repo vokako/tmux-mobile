@@ -121,7 +121,9 @@ pub fn wizard(input: &mut dyn BufRead, out: &mut dyn Write, start: &Start, new_t
     }
     let sock_default = start.tmux_socket.clone().unwrap_or_default();
     let abs = |v: &str| absolute(v, &start.cwd, start.home.as_deref());
-    let tmux_socket = get!("tmux socket (-S path, empty = default)", &sock_default, |v: &str| {
+    // With a value already set, Enter KEEPS it; `-` is how to clear it.
+    let sock_prompt = if sock_default.is_empty() { "tmux socket (-S path, empty = default)" } else { "tmux socket (-S path; Enter keeps it, - = default)" };
+    let tmux_socket = get!(sock_prompt, &sock_default, |v: &str| {
         if v.is_empty() || v == "-" { Ok(None) } else { abs(v).map(Some) }
     });
     let token = match &start.token {
@@ -136,7 +138,8 @@ pub fn wizard(input: &mut dyn BufRead, out: &mut dyn Write, start: &Start, new_t
         None => new_token(),
     };
     let tls_default = start.tls.as_ref().map(|(c, _)| c.clone()).unwrap_or_default();
-    let cert = get!("TLS certificate (PEM path, empty = no TLS)", &tls_default, |v: &str| {
+    let cert_prompt = if tls_default.is_empty() { "TLS certificate (PEM path, empty = no TLS)" } else { "TLS certificate (PEM path; Enter keeps it, - = no TLS)" };
+    let cert = get!(cert_prompt, &tls_default, |v: &str| {
         if v.is_empty() || v == "-" { return Ok(None) }
         let a = abs(v)?;
         if Path::new(&a).is_file() { Ok(Some(a)) } else { Err(format!("no file at {a}")) }
@@ -334,6 +337,12 @@ mod tests {
         assert_eq!(o, Outcome::Done(Answers { port: 8080, host: "127.0.0.1".into(), tmux_socket: Some("/tmp/s".into()), token: "fresh-token".into(), tls: None }));
         assert_eq!(run("", "8080\n").0, Outcome::Cancelled, "EOF mid-way writes nothing");
         assert_eq!(run("", "x\nx\nx\n").0, Outcome::Cancelled, "three bad answers cancel");
+        // An existing value: Enter keeps it, and the prompt says how to clear it.
+        let (o, out) = run("tmux_socket = \"/s\"\ntls_cert = \"/c\"\ntls_key = \"/k\"\n", "\n\n\n-\n");
+        assert!(out.contains("Enter keeps it, - = default") && out.contains("Enter keeps it, - = no TLS"), "{out}");
+        assert!(matches!(o, Outcome::Done(Answers { tmux_socket: Some(ref s), tls: None, .. }) if s == "/s"), "{o:?}");
+        let (_, out) = run("", "\n\n\n\n");
+        assert!(!out.contains("Enter keeps"), "no value: the plain prompt");
         let (o, _) = run("token = \"old\"\n", "\n\n\nn\n\n");
         assert!(matches!(o, Outcome::Done(Answers { ref token, .. }) if token == "fresh-token"), "declining to keep the token makes a new one");
     }
