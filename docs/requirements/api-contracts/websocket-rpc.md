@@ -229,3 +229,16 @@ Content is omitted when only cursor position changed.
 ```json
 {"error": {"code": -1, "message": "description"}}
 ```
+
+The `message` is the server's ONE sentence for the human and may be
+translated or reworded; a client that needs to act on a particular failure
+keys on the CODE, never on the text (board #337).
+
+| Code | Name | Meaning |
+|---|---|---|
+| `-32700` | parse error | the frame was not JSON we could read |
+| `-32601` | method not found | unknown method, or one this build does not serve (a phone build answers this for every desktop-only method, which is how the client probes for the projects/hub features) |
+| `-32602` | invalid params | a required parameter is missing or the wrong type |
+| `-32603` | internal error | the operation failed; `message` carries the reason |
+| `-32000` | auth required | the connection has not authenticated, or the token was refused |
+| `-32010` | scratch name held | `scratch_session` refused because a PROJECT holds the scratch terminal's reserved session name. The one refusal a client can act on: the panel offers "Release the name" (`scratch_release`) on this code alone, so its copy and its action cannot drift apart (board #337) |

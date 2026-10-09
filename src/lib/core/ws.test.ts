@@ -341,3 +341,24 @@ test('a server that does not advertise e2e gets the v1 handshake', () => withWeb
   assert.deepEqual(await pending, []);
   wsClient.disconnect();
 }));
+
+test('the documented error codes are the server\'s, and the client keys on one of them (#337)', async () => {
+  // A client that acts on a FAILURE must key on the code, because the message
+  // is the server's one sentence for the human — translated, reworded, and in
+  // #337's case naming a project. The table in the contract doc is what other
+  // clients read, so it has to be the Rust constants, not a copy that drifts.
+  const { readFile } = await import('node:fs/promises');
+  const doc = await readFile(new URL('../../../docs/requirements/api-contracts/websocket-rpc.md', import.meta.url), 'utf8');
+  const rpc = await readFile(new URL('../../../src-tauri/src/server/rpc.rs', import.meta.url), 'utf8');
+  const codes = new Map<string, string>();
+  for (const [, name, value] of rpc.matchAll(/const (ERR_[A-Z_]+): i32 = (-?\d+);/gu)) codes.set(name!, value!);
+  assert.ok(codes.size >= 6, `found the server's codes: ${[...codes.keys()].join(', ')}`);
+  const table = doc.slice(doc.indexOf('## Error Format'));
+  for (const [name, value] of codes) {
+    assert.ok(table.includes(`\`${value}\``), `${name} = ${value} is missing from the error table in websocket-rpc.md`);
+  }
+  // And the one the client acts on is the same number on both sides.
+  assert.equal(codes.get('ERR_SCRATCH_HELD'), '-32010');
+  const client = await readFile(new URL('./ws.ts', import.meta.url), 'utf8');
+  assert.match(client, /export const ERR_SCRATCH_HELD = -32010;/u, 'ws.ts mirrors it for the panel');
+});
