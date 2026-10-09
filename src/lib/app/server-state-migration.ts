@@ -99,9 +99,17 @@ export interface MigrationReport {
   /**
    * `folded`: it ran and is recorded.
    * `unrecorded`: it ran but the marker could not be written — storage is
-   *   failing. The caller must NOT go on to switch servers, because the
-   *   inputs still read as unconsumed and the next server to become current
-   *   would receive them; a later run records it.
+   *   failing. The inputs still read as unconsumed, so the next server to
+   *   become current would receive them.
+   *
+   *   ②b must treat this — and a thrown error — as BOOT MIGRATION NOT
+   *   COMPLETE, which is stronger than "do not switch servers" (reviewer,
+   *   2026-10-09): it must also not bring up the pages that WRITE resident
+   *   state and retry afterwards. A writable page plus an unconsumed input set
+   *   is the half-migrated client this whole design exists to avoid — the
+   *   page's new writes land in the slot, and the retry then folds the stale
+   *   unprefixed values over them. Retry before anything can write, or come
+   *   up read-only.
    * `no-current` / `unknown-current`: nothing to fold into. No writes, no
    *   marker; ask again once a connect has resolved the server.
    * `already-done`: the inputs were consumed by an earlier run, and reading

@@ -439,8 +439,13 @@ twice is worse than not knowing which fold ran. The marker is written AFTER the
 move, so a failure part-way leaves the inputs readable and the next run redoes
 the whole fold rather than half of it — and when the marker write itself fails,
 the report says `unrecorded` rather than `folded`, because `localStorage` has
-no transaction and the caller must not switch servers while the inputs still
-read as unconsumed.
+no transaction. ②b must treat `unrecorded`, and a thrown error, as BOOT
+MIGRATION NOT COMPLETE — which is stronger than "do not switch servers": it
+must also not bring up the pages that WRITE resident state and retry
+afterwards, because a writable page plus an unconsumed input set is exactly
+the half-migrated client this design exists to avoid. The page's writes land
+in the slot, and the retry folds the stale unprefixed values over them. Retry
+before anything can write, or come up read-only.
 
 **The live set is authoritative in full, not just its present keys.** An absent
 live key means the value was CLEARED, and for the current server that is a
