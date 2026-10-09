@@ -374,7 +374,7 @@ stops resolving the instant tmux renames the session, so the Hub dispatches a
 through `retarget` (pure, tested — only an exact session-name prefix moves, so
 `older:1.0` is left alone).
 
-## The capture rule## The capture rule
+## The capture rule
 
 **A window must survive `SETTLE_SECS` (120 s) before it becomes restorable.**
 The window you opened to grep one file and closed again must not reappear on
