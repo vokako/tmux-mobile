@@ -92,7 +92,7 @@
   // ConfirmDialog. The board keeps its current project until the user
   // explicitly cancels/creates/saves; the effect reads both flags, so the
   // moment they clear it follows again.
-  $effect(() => { if (session && (!picked || !cur) && !dirty && !noteDirty && !createDirty) cur = session; });
+  $effect(() => { if (session && (!picked || !cur) && !dirty && !noteDirty && !createDirty && !submitting) cur = session; });
   // A jump from the feed's board line (board #13 follow-up): the request names
   // its OWN session — a manual pick may have parked this page on another
   // project, and the issue id is session-gated. The dirty-draft guard still
@@ -222,6 +222,10 @@
   // discard clears them); a confirmed DELETE does not, and drops the issue's
   // staged images with it — never into the next issue opened.
   let stagedFor: number | null = null;
+  // Opening or closing the create form is a new editor too: a picker opened
+  // in the previous one is revoked (its files go nowhere).
+  let formWas = false;
+  $effect(() => { const c = creating; if (c !== formWas) { formWas = c; untrack(() => { opGen++; }); } });
   $effect(() => {
     const id = sel?.id ?? null;
     if (id === stagedFor) return;
@@ -282,10 +286,15 @@
   // The Lightbox (the shared viewer): opened from any image in the detail;
   // Back and Escape close IT before the detail (backLayers order below).
   let shotView = $state('');
-  /** The viewer URL is signed at the tap, asynchronously: the generation at
-   * the CLICK is remembered, and an answer arriving after the issue or
-   * project changed — even back to the same one (A→B→A) — is dropped. */
-  let viewClickGen = -1;
+  /** The viewer URL is signed at the tap, asynchronously. Each tap takes its
+   * OWN claim — the generation then, and a sequence number — and only the
+   * answer to the LATEST tap, in the generation it was made, may open the
+   * viewer: an answer from another issue (A→B→A) or an older tap is dropped. */
+  let viewSeq = 0;
+  const claimView = () => ({ gen: opGen, n: ++viewSeq });
+  const acceptView = (u: string, c: { gen: number; n: number } | undefined) => {
+    if (alive && c && c.gen === opGen && c.n === viewSeq) shotView = u;
+  };
   /** Body/note text and its images (the feed's own parser). Text without an
    * image is returned BYTE-FOR-BYTE — history is shown verbatim (#28/#11);
    * only a text that carries images is split. */
@@ -424,12 +433,13 @@
   let segEl = $state<HTMLElement | null>(null);
   let segDrag = $state(false);
   function segPick(e: PointerEvent) {
-    if (!segEl) return;
+    if (!segEl || submitting) return;
     const r = segEl.getBoundingClientRect();
     const i = Math.min(STATUSES.length - 1, Math.max(0, Math.floor(((e.clientX - r.left) / r.width) * STATUSES.length)));
     draft.status = STATUSES[i]!;
   }
   function segDown(e: PointerEvent) {
+    if (submitting) return; // the draft is locked while it is being saved
     segDrag = true;
     segEl?.setPointerCapture?.(e.pointerId);
     segPick(e);
@@ -527,6 +537,11 @@
       if (assignee !== undefined && alive) await dispatchAssign(ctx, id, assignee, saved.title, saved.body, notes);
       if (!owns(ctx)) return;
       err = '';
+      // What was SENT is now the server's: the draft and its base both take
+      // the materialized fields (refs, not [img:n] — the map is about to be
+      // cleared), so the three-way refetch never reads a committed token as
+      // a new edit. The note box is not part of this save and is untouched.
+      for (const f of Object.keys(patch) as (keyof typeof saved)[]) { draft[f] = saved[f]; draftBase[f] = saved[f]; }
       bodyStage.clear(); // persisted
       // The ✓ ANSWERS the edit (board #48 v2: back to the board) — unless the
       // NOTE box still holds a draft: the body save is not the note's, so the
@@ -896,7 +911,7 @@
           <button class="icon-btn appear-pop" title={t('cancel')} aria-label={t('cancel')} disabled={busy} onclick={() => guard(() => {})}>
             <Icon name="undo" size={14} />
           </button>
-          <button class="icon-btn go appear-pop" title={t('save')} aria-label={t('save')} disabled={busy || !draftValid(draft) || blocked(bodyStage)} onclick={saveDraft}>
+          <button class="icon-btn go appear-pop" title={t('save')} aria-label={t('save')} disabled={busy || !draftValid({ ...draft, body: bodyStage.body(draft.body) }) || blocked(bodyStage)} onclick={saveDraft}>
             <Icon name="check" size={14} />
           </button>
         {/if}
@@ -912,7 +927,7 @@
            edit" — a disabled input would be the same lie). The workflow
            stays live either way: status slider, assignee, note reply. -->
       {#if sel.editable}
-        <input class="d-title-input" bind:value={draft.title} placeholder={t('boardTitlePh')} />
+        <input class="d-title-input" bind:value={draft.title} placeholder={t('boardTitlePh')} readonly={submitting} />
       {:else if sel.title.trim()}
         <div class="d-title-static">{sel.title}</div>
       {/if}
@@ -933,12 +948,12 @@
           <span class="slide-pill" aria-hidden="true"></span>
           {#each STATUSES as st (st)}
             <button class="seg-b" class:on={draft.status === st} role="radio" aria-checked={draft.status === st}
-              onclick={() => (draft.status = st)}>{statusLabel(st)}</button>
+              disabled={submitting} onclick={() => { if (!submitting) draft.status = st; }}>{statusLabel(st)}</button>
           {/each}
         </div>
-        <Select value={draft.assignee} dense
+        <Select value={draft.assignee} dense disabled={submitting}
           options={[{ value: '', label: t('boardUnassigned') }, ...agents.map((a) => ({ value: a.name, label: a.name, ink: agentHue(a.name) }))]}
-          onchange={(v: string) => (draft.assignee = v)} />
+          onchange={(v: string) => { if (!submitting) draft.assignee = v; }} />
         {#if sel.created_by}<span class="meta-bit">{t('boardOpenedBy')} <span class="m-name">{sel.created_by}</span></span>{/if}
       </div>
       {#if sel.editable}
@@ -947,7 +962,7 @@
         <div class="attach-line">
           <CommandButton variant="icon" icon="plus" label={t('hubAttach')} disabled={submitting || bodyStage.attaching}
             pending={bodyStage.attaching} onclick={() => pickFor(bodyStage)} />
-          <AttachStrip pending={bodyStage.pending} onremove={(i) => bodyStage.remove(i)} onpreview={(u) => { shotView = u; }} />
+          <AttachStrip pending={bodyStage.pending} onremove={(i) => { if (!submitting) bodyStage.remove(i); }} onpreview={(u) => { shotView = u; }} />
         </div>
         <!-- The SAVED images (board #329): the refs already in the stored body,
              seen through the feed's image atom; the chips above are only
@@ -1000,7 +1015,7 @@
           {/each}
         {/if}
       </div>
-      <AttachStrip pending={noteStage.pending} onremove={(i) => noteStage.remove(i)} onpreview={(u) => { shotView = u; }} />
+      <AttachStrip pending={noteStage.pending} onremove={(i) => { if (!submitting) noteStage.remove(i); }} onpreview={(u) => { shotView = u; }} />
       <div class="note-add">
         <CommandButton variant="icon" icon="plus" label={t('hubAttach')} disabled={submitting || noteStage.attaching}
           pending={noteStage.attaching} onclick={() => pickFor(noteStage)} />
@@ -1038,15 +1053,15 @@
            with its text; assign comes next; the body takes whatever height is
            left and scrolls INSIDE itself. -->
       <!-- svelte-ignore a11y_autofocus -->
-      <textarea class="n-title one-line" rows="1" placeholder={t('boardTitlePh')} bind:value={nTitle} autofocus
+      <textarea class="n-title one-line" rows="1" placeholder={t('boardTitlePh')} bind:value={nTitle} autofocus readonly={submitting}
         use:autoGrow={nTitle}
         onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); createIssue(); } }}></textarea>
       <!-- Assign at birth: the same dispatch as the detail picker — the agent
            is briefed the moment the issue exists (board #11). -->
       <div class="d-meta">
-        <Select value={nAssignee} dense
+        <Select value={nAssignee} dense disabled={submitting}
           options={[{ value: '', label: t('boardUnassigned') }, ...agents.map((a) => ({ value: a.name, label: a.name, ink: agentHue(a.name) }))]}
-          onchange={(v: string) => (nAssignee = v)} />
+          onchange={(v: string) => { if (!submitting) nAssignee = v; }} />
       </div>
       <!-- The body is MULTI-LINE, so Enter must stay a newline — the submit
            chord is Cmd+Enter (mac) / Ctrl+Enter (elsewhere), the pair every
@@ -1061,7 +1076,7 @@
       <div class="attach-line">
         <CommandButton variant="icon" icon="plus" label={t('hubAttach')} disabled={submitting || createStage.attaching}
           pending={createStage.attaching} onclick={() => pickFor(createStage)} />
-        <AttachStrip pending={createStage.pending} onremove={(i) => createStage.remove(i)} onpreview={(u) => { shotView = u; }} />
+        <AttachStrip pending={createStage.pending} onremove={(i) => { if (!submitting) createStage.remove(i); }} onpreview={(u) => { shotView = u; }} />
       </div>
     </div>
   {:else}
@@ -1118,9 +1133,9 @@
   </div>
   {#snippet shots(images: string[])}
     {#if images.length}
-      <div class="shots" onclickcapture={() => { viewClickGen = opGen; }}>
+      <div class="shots">
         {#each images as src, k (`${k}-${src}`)}
-          <ChatImage {src} alt={t('hubImage')} onview={(u: string) => { if (alive && viewClickGen === opGen) shotView = u; }} />
+          <ChatImage {src} alt={t('hubImage')} onviewstart={claimView} onview={acceptView} />
         {/each}
       </div>
     {/if}

@@ -14,8 +14,10 @@ const issueA = { id: 1, title: 'A', body: 'Body A', status: 'todo', assignee: ''
 const issueB = { id: 2, title: 'B', body: 'Body B', status: 'todo', assignee: '', editable: true, created_at: 100, updated_at: 100, notes: [] };
 
 type Calls = { saves: any[]; notes: any[]; posts: any[]; uploads: string[] };
-type Opts = { issues?: any[]; upload?: (path: string) => Promise<unknown>; agents?: any[]; save?: (patch: any) => Promise<unknown>; note?: () => Promise<unknown> };
+type Opts = { projects?: string[]; stateful?: boolean; download?: (path: string) => Promise<{ url: string }>; issues?: any[]; upload?: (path: string) => Promise<unknown>; agents?: any[]; save?: (patch: any) => Promise<unknown>; note?: () => Promise<unknown> };
 const guardsSeen: LeaveGuard[] = [];
+const cleanups = new Map<LeaveGuard, () => void>();
+const unregister = (g: LeaveGuard) => cleanups.get(g)?.();
 const walk = () => confirmLeave({ current: 'hub', reveal: async () => {}, hold: () => {} });
 async function mount(context: TestContext, opts: Opts = {}) {
   clearLeaveGuardsForTests(); guardsSeen.length = 0;
@@ -34,13 +36,19 @@ async function mount(context: TestContext, opts: Opts = {}) {
       w.URL.revokeObjectURL = () => {};
     },
     modules: [{
-      projectList: async () => ({ projects: [{ project: { id: 'fixture', session: 'fixture', name: 'Fixture', path: WS }, live: true }] }),
+      projectList: async () => ({ projects: (opts.projects ?? ['fixture']).map((p) => ({ project: { id: p, session: p, name: p, path: `/work/${p}` }, live: true })) }),
       hubRooms: async () => ({ rooms: {} }),
-      boardCounts: async () => ({ counts: { fixture: { todo: issues.length, doing: 0, review: 0, done: 0, total: issues.length } } }),
+      boardCounts: async () => ({ counts: Object.fromEntries((opts.projects ?? ['fixture']).map((p) => [p, { todo: issues.length, doing: 0, review: 0, done: 0, total: issues.length }])) }),
       hubAgents: async () => ({ agents: opts.agents ?? [] }),
       boardList: async () => ({ issues }),
       boardGet: async (_s: string, id: number) => issues.find((i) => i.id === id),
-      boardSave: async (session: string, patch: any) => { calls.saves.push({ ...patch, session }); if (opts.save) await opts.save(patch); return { id: patch.id ?? 9 }; },
+      boardSave: async (session: string, patch: any) => {
+        calls.saves.push({ ...patch, session });
+        if (opts.save) await opts.save(patch);
+        // A stateful fake: the stored issue takes the patch, so boardGet answers what was saved.
+        if (opts.stateful && patch.id != null) { const i = issues.find((x) => x.id === patch.id); if (i) Object.assign(i, Object.fromEntries(Object.entries(patch).filter(([k]) => k !== 'id'))); }
+        return { id: patch.id ?? 9 };
+      },
       boardDelete: async () => ({}),
       boardNote: async (session: string, id: number, body: string) => { calls.notes.push({ id, body, session }); if (opts.note) await opts.note(); return {}; },
       hubPost: async (session: string, body: string) => { calls.posts.push({ session, body }); return {}; },
@@ -50,11 +58,14 @@ async function mount(context: TestContext, opts: Opts = {}) {
         calls.uploads.push(path);
         return opts.upload ? opts.upload(path) : {};
       },
-      fsDownloadHttp: async (path: string) => ({ url: `https://dl.test/?p=${encodeURIComponent(path)}` }),
+      fsDownloadHttp: opts.download ?? (async (path: string) => ({ url: `https://dl.test/?p=${encodeURIComponent(path)}` })),
     }, {
       // The REAL registry and walk (this realm's leave-guards.ts) receive the
       // Board's own guard object; the cleanup it returns cannot cross realms.
-      registerLeaveGuard: (g: LeaveGuard) => { registerLeaveGuard(g); guardsSeen.push(g); return undefined; },
+      // The cleanup the Board's $effect returns is called at destroy; the
+      // realm boundary drops the function, so the test runs it explicitly
+      // (unregister) — and asserts the guard answers 'leave' once destroyed.
+      registerLeaveGuard: (g: LeaveGuard) => { cleanups.set(g, registerLeaveGuard(g)); guardsSeen.push(g); return undefined; },
     }],
   });
   const flush = async () => { for (let i = 0; i < 10; i++) await app.flush(); };
@@ -401,4 +412,155 @@ test('removing one of two tokens removes only it; a file token too', async (cont
     app.q<HTMLButtonElement>('.pend-chip .pend-x')!.click(); await app.flush();
     assert.equal(body.value, 'a b', 'then the file token');
   } finally { await app.close(); }
+});
+
+test('after a body save with images, the draft holds refs (not orphan tokens) and a later save keeps them', async (context) => {
+  const a = { ...issueA, notes: [] };
+  const app = await mount(context, { issues: [a, issueB], stateful: true });
+  try {
+    app.q<HTMLButtonElement>('.card')!.click(); await app.flush();
+    const body = app.q<HTMLTextAreaElement>('.d-body-edit')!;
+    await app.type(body, 'Body A ');
+    await app.paste(body);
+    await app.type(app.q<HTMLTextAreaElement>('.note-input')!, 'pending note'); // the note keeps the detail open
+    const save = () => [...app.document.querySelectorAll<HTMLButtonElement>('.detail button')].find((b) => b.getAttribute('aria-label') === 'Save')!;
+    save().click(); await app.flush();
+    const stored = app.calls.saves[0].body;
+    assert.match(stored, REF);
+    assert.equal(app.q<HTMLTextAreaElement>('.d-body-edit')!.value, stored, 'the draft shows the stored ref — no orphan [img:1]');
+    assert.ok(!app.q<HTMLTextAreaElement>('.d-body-edit')!.value.includes('[img:'), 'and no token is left to be re-sent');
+    // Another edit (status), saved: the body ref survives.
+    [...app.document.querySelectorAll<HTMLButtonElement>('.seg-b')].find((b) => b.textContent === 'Doing')!.click(); await app.flush();
+    save().click(); await app.flush();
+    assert.equal(app.calls.saves.length, 2);
+    assert.equal(app.calls.saves[1].body, undefined, 'the body is not re-sent');
+    assert.equal(a.body, stored, 'the stored body still has its image');
+    assert.equal(app.q<HTMLTextAreaElement>('.note-input')!.value, 'pending note', 'the note was never part of either save');
+  } finally { await app.close(); }
+});
+
+test('while a save or create runs, NOTHING of its draft can change: title, status, assignee, chip ✕', async (context) => {
+  let release!: () => void;
+  const app = await mount(context, { agents: [{ name: 'alice', managed: true, state: 'idle', agent: 'kiro' }], save: () => new Promise<void>((r) => { release = r; }) });
+  try {
+    app.q<HTMLButtonElement>('.card')!.click(); await app.flush();
+    const body = app.q<HTMLTextAreaElement>('.d-body-edit')!;
+    await app.type(body, 'x ');
+    await app.paste(body);
+    [...app.document.querySelectorAll<HTMLButtonElement>('.detail button')].find((b) => b.getAttribute('aria-label') === 'Save')!.click();
+    await app.flush();
+    const title = app.q<HTMLInputElement>('.d-title-input')!;
+    assert.equal(title.readOnly, true, 'title');
+    const doing = [...app.document.querySelectorAll<HTMLButtonElement>('.seg-b')].find((b) => b.textContent === 'Doing')!;
+    assert.equal(doing.disabled, true, 'status stops');
+    doing.click(); await app.flush();
+    assert.ok(!doing.classList.contains('on'), 'a click does not move the status');
+    assert.ok(app.document.querySelector('.detail .d-meta button[disabled], .detail [aria-haspopup][disabled], .detail .sel[aria-disabled="true"]'), 'the assignee picker is disabled');
+    app.q<HTMLButtonElement>('.pend-thumb .pend-x')!.click(); await app.flush();
+    assert.ok(app.q('.pend-thumb'), 'the chip ✕ does nothing');
+    assert.equal(body.value, 'x [img:1]', 'and the token stays');
+    release(); await app.flush();
+  } finally { release?.(); await app.close(); }
+});
+
+test('a viewer answer opens only for the LATEST tap in its own issue: A→B, A→B→A and two taps in one issue', async (context) => {
+  const pending: Array<{ path: string; done: (v: { url: string }) => void }> = [];
+  const img = (n: string) => `![](/work/fixture/.tmm/uploads/${n}-12345678.webp)`;
+  const a = { ...issueA, body: `${img('a1')}\n${img('a2')}` };
+  const b = { ...issueB, body: img('b1') };
+  const app = await mount(context, { issues: [a, b], download: (path) => new Promise((done) => pending.push({ path, done })) });
+  const lb = () => app.q<HTMLImageElement>('.lb img');
+  const cards = () => [...app.document.querySelectorAll<HTMLButtonElement>('.card')];
+  const tap = async (k = 0) => { app.document.querySelectorAll<HTMLButtonElement>('.shots .ci-link')[k]!.click(); await app.flush(); };
+  const answer = async (i: number) => { const p = pending[i]!; p.done({ url: `https://dl.test/${p.path.split('/').pop()}` }); await app.flush(); };
+  try {
+    // A: two taps, answered out of order — only the second opens.
+    cards()[0]!.click(); await app.flush();
+    pending.length = 0; // the thumbnails' own signatures (answered or not, they are not taps)
+    await tap(0); await tap(1);
+    const [first, second] = [pending.length - 2, pending.length - 1];
+    await answer(second);
+    assert.match(lb()!.src, /a2-/u, 'the latest tap opens');
+    await answer(first);
+    assert.match(lb()!.src, /a2-/u, 'an older tap answering late does not replace it');
+    // A→B: A tapped, B opened and tapped; A's late answer must not open over B.
+    assert.equal(app.back(), true); await app.flush(); // close the viewer
+    await tap(0);
+    const aTap = pending.length - 1;
+    assert.equal(app.back(), true); await app.flush(); // leave A
+    cards()[1]!.click(); await app.flush();
+    await tap(0);
+    const bTap = pending.length - 1;
+    await answer(aTap);
+    assert.equal(lb(), null, 'A\u2019s answer is not B\u2019s');
+    await answer(bTap);
+    assert.match(lb()!.src, /b1-/u);
+    // B→A: back on A, B's earlier claim cannot open anything there.
+    assert.equal(app.back(), true); await app.flush();
+    await tap(0); const b2 = pending.length - 1;
+    assert.equal(app.back(), true); await app.flush();
+    cards()[0]!.click(); await app.flush();
+    await answer(b2);
+    assert.equal(lb(), null, 'back on A: a tap made on B opens nothing');
+  } finally { for (const p of pending) p.done({ url: 'https://dl.test/x' }); await app.close(); }
+});
+
+test('a picker opened in one create form delivers nothing into the next one', async (context) => {
+  const app = await mount(context);
+  try {
+    const open = async () => { [...app.document.querySelectorAll<HTMLButtonElement>('button')].find((b) => /new/i.test(b.getAttribute('aria-label') ?? b.title ?? ''))?.click(); await app.flush(); };
+    await open();
+    app.q<HTMLButtonElement>('.attach-line button')!.click(); // opens the picker for THIS form
+    assert.equal(app.back(), true); await app.flush(); // the clean form closes
+    await open();
+    const picker = app.document.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(picker, 'files', { value: [new app.window.File(['x'], 'shot.png', { type: 'image/png' })] });
+    picker.dispatchEvent(new app.window.Event('change', { bubbles: true }));
+    await app.flush();
+    assert.equal(app.calls.uploads.length, 0, 'nothing uploaded into the new form');
+    assert.equal(app.q('.pend-thumb'), null);
+  } finally { await app.close(); }
+});
+
+test('the walk reveals a hidden Board before it asks, and a destroyed Board unregisters', async (context) => {
+  const revealed: string[] = [];
+  const app = await mount(context);
+  app.q<HTMLButtonElement>('.card')!.click(); await app.flush();
+  await app.type(app.q<HTMLTextAreaElement>('.note-input')!, 'unsent');
+  const asked = confirmLeave({ current: 'terminal', reveal: async (p) => { revealed.push(p); }, hold: () => {} });
+  await app.flush();
+  assert.deepEqual(revealed, ['board'], 'its own page is revealed first');
+  app.q<HTMLButtonElement>('.dlg-actions button:first-child')!.click();
+  assert.equal(await asked, false);
+  assert.deepEqual(revealed, ['board', 'terminal'], 'and the user is put back');
+  // Destroyed: the walk no longer reaches it (the cleanup removes it).
+  await app.close();
+  for (const g of guardsSeen) unregister(g);
+  assert.equal(await confirmLeave({ current: 'terminal', reveal: async () => {}, hold: () => {} }), true, 'nothing left to ask');
+});
+
+test('a note in flight holds the project: a pick waits, and the answer lands on the board it was written on', async (context) => {
+  let release!: () => void;
+  const app = await mount(context, { projects: ['fixture', 'other'], note: () => new Promise<void>((r) => { release = r; }) });
+  const current = () => app.document.querySelector('.proj-row.open .p-name')?.textContent;
+  const pickOther = async () => {
+    [...app.document.querySelectorAll<HTMLButtonElement>('button.proj-row')].find((r) => r.querySelector('.p-name')?.textContent === 'other')!.click();
+    await app.flush();
+    // A user who would discard: confirm any question that appears.
+    app.q<HTMLButtonElement>('[role=alertdialog] .dlg-actions button:last-child')?.click();
+    await app.flush();
+  };
+  try {
+    app.q<HTMLButtonElement>('.card')!.click(); await app.flush();
+    await app.type(app.q<HTMLTextAreaElement>('.note-input')!, 'for fixture');
+    app.q<HTMLButtonElement>('.note-add .icon-btn.go')!.click(); await app.flush();
+    await pickOther();
+    assert.equal(current(), 'fixture', 'no switch under a running note — not even through the discard question');
+    release(); await app.flush();
+    assert.deepEqual(app.calls.notes.map((n) => [n.session, n.id, n.body]), [['fixture', 1, 'for fixture']]);
+    assert.equal(app.q<HTMLTextAreaElement>('.note-input')!.value, '', 'answered on its own board: its box clears');
+    await pickOther();
+    assert.equal(current(), 'other', 'after the answer the pick goes');
+    assert.equal(app.q('.detail'), null, 'and no issue of the old board is painted into the new one');
+  } finally { release?.(); await app.close(); }
 });

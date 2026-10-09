@@ -14,7 +14,7 @@ test('the issue detail is a DRAFT: explicit save, clean cancel, guarded exits (b
   assert.match(source, /const patch = draftPatch\(saved, draftBase\);/u,
     'save diffs against the draft BASE — diffing the live issue ships stale untouched fields (#11 review)');
   assert.match(source, /onclick=\{saveDraft\}/u, 'save is a button, not a side effect');
-  assert.match(source, /disabled=\{busy \|\| !draftValid\(draft\) \|\| blocked\(bodyStage\)\}/u, 'saving twice / a blank title is unclickable');
+  assert.match(source, /disabled=\{busy \|\| !draftValid\(\{ \.\.\.draft, body: bodyStage\.body\(draft\.body\) \}\) \|\| blocked\(bodyStage\)\}/u, 'saving twice / a blank title is unclickable');
   // Cancel ASKS since board #15 ("当前状态没有保存，是否退出"): it routes
   // through the same guard every exit uses, and the dialog's confirm is the
   // one place that restores the base.
@@ -312,12 +312,12 @@ test('the detail speaks board #15: project-named page, status slider, confirmed 
   const seg = /\.seg \{([^}]*)\}/u.exec(source)?.[1] ?? '';
   assert.match(seg, /position: relative/u, 'the track is the pill\u2019s offset parent');
   assert.match(/\.seg-b \{([^}]*)\}/u.exec(source)?.[1] ?? '', /position: relative; z-index: 1;/u, 'the stops sit above the pill');
-  assert.match(source, /onclick=\{\(\) => \(draft\.status = st\)\}/u, 'tapping a stop picks it — into the DRAFT');
+  assert.match(source, /onclick=\{\(\) => \{ if \(!submitting\) draft\.status = st; \}\}/u, 'tapping a stop picks it — into the DRAFT');
   assert.ok(!source.includes('Select value={sel.status}'), 'the status Select is retired');
   // ③ The assignee edits the draft too — dirty raises the head\u2019s ✓/undo,
   // and only saveDraft dispatches.
   assert.match(source, /<Select value=\{draft\.assignee\}/u, 'the picker shows the draft');
-  assert.match(source, /onchange=\{\(v: string\) => \(draft\.assignee = v\)\}/u, 'changing it is an edit, not a write');
+  assert.match(source, /onchange=\{\(v: string\) => \{ if \(!submitting\) draft\.assignee = v; \}\}/u, 'changing it is an edit, not a write');
 });
 
 test('the four areas use the whole width; only the detail keeps a reading cap (board #96)', () => {
@@ -655,7 +655,7 @@ test('every destructive/discarding path confirms through the SHARED dialog (boar
   // and wipe it with no dialog at all. The gate blocks on BOTH kinds of
   // unsaved work and resumes the moment they clear; the other cur writes are
   // guard-wrapped (pick, the feed jump) or fire only while no board shows.
-  assert.match(source, /\$effect\(\(\) => \{ if \(session && \(!picked \|\| !cur\) && !dirty && !noteDirty && !createDirty\) cur = session; \}\);/u,
+  assert.match(source, /\$effect\(\(\) => \{ if \(session && \(!picked \|\| !cur\) && !dirty && !noteDirty && !createDirty && !submitting\) cur = session; \}\);/u,
     'the follow gate blocks dirty AND createDirty');
 });
 
@@ -939,4 +939,14 @@ test('every submit acts on its frozen context, never the live cur/sel; the page 
   assert.match(source, /const owns = \(c: OpCtx\) => alive && c\.gen === opGen;/u);
   assert.match(source, /registerLeaveGuard\(\{\s*page: guardPage,/u, 'the #315 walk reaches the Board');
   assert.match(source, /if \(noteDirty\) \{ await refetchSel\(ctx\); return; \}/u, 'a body save keeps a note draft on screen');
+});
+
+test('the whole draft is locked while it is submitted, and a saved draft adopts what was sent (board #329 review)', () => {
+  assert.match(source, /<input class="d-title-input" bind:value=\{draft\.title\} placeholder=\{t\('boardTitlePh'\)\} readonly=\{submitting\} \/>/u);
+  assert.match(source, /disabled=\{submitting\} onclick=\{\(\) => \{ if \(!submitting\) draft\.status = st; \}\}/u);
+  assert.equal([...source.matchAll(/<Select value=\{(?:draft\.assignee|nAssignee)\} dense disabled=\{submitting\}/gu)].length, 2);
+  assert.equal([...source.matchAll(/onremove=\{\(i\) => \{ if \(!submitting\) \w+Stage\.remove\(i\); \}\}/gu)].length, 3);
+  assert.match(source, /for \(const f of Object\.keys\(patch\) as \(keyof typeof saved\)\[\]\) \{ draft\[f\] = saved\[f\]; draftBase\[f\] = saved\[f\]; \}\s*bodyStage\.clear\(\);/u,
+    'the snapshot is adopted BEFORE the map is cleared and the refetch rebases');
+  assert.match(source, /onviewstart=\{claimView\} onview=\{acceptView\}/u, 'each tap claims for itself');
 });

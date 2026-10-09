@@ -22,7 +22,10 @@
   import { isDirectUrl } from './hub.ts';
   import { fsDownloadHttp } from '../core/ws.ts';
 
-  let { src = '', alt = '', onview = null } = $props();
+  // `onviewstart` (optional, board #329): called at the TAP, before the
+  // signature is minted; whatever it returns is handed back with the URL, so
+  // the host can tell this tap's answer from a later one's.
+  let { src = '', alt = '', onview = null, onviewstart = null } = $props();
 
   let url = $state('');
   let failed = $state(false);
@@ -90,7 +93,8 @@
   /** The viewer opens what the server signs NOW — a thumbnail viewed five
    * minutes later would otherwise open a 403. */
   function view() {
-    resolve(src).then((u) => onview?.(u)).catch(() => { failed = true; });
+    const claim = onviewstart?.();
+    resolve(src).then((u) => onview?.(u, claim)).catch(() => { failed = true; });
   }
 </script>
 
