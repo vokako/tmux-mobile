@@ -60,7 +60,14 @@ test('every module-level store is reset on a switch or named global (board 315)'
     for (const m of text.matchAll(decl)) {
       const name = m[1]!;
       if (/^[A-Z_0-9]+$/u.test(name)) continue; // constants
-      if (rel === 'core/ws.ts') continue;       // the transport: cleared by disconnect()
+      // The transport layer (board #335 ①). A connection's mutable state —
+      // socket, pending, listeners, refcounts, ciphers, timers — lives on the
+      // object `createConnection()` returns and is released by that object's
+      // own disconnect()/dispose(), so it cannot be a module cache this list
+      // is about. What stays module-level in ws.ts is the DEVICE reachability
+      // memory (probeFailedAt), global by design: see
+      // websocket-client.md § The transport is an object, not a module.
+      if (/^core\/(ws|connection|ws-api|connection-registry)\.ts$/u.test(rel)) continue;
       found.push(`${rel}:${name}`);
       const per = PER_SERVER[rel]?.[name];
       const glob = GLOBAL[rel]?.[name];

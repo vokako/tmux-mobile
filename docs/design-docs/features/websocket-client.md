@@ -4,7 +4,12 @@
 Mobile connections are unreliable. WebSocket client must handle disconnects, reconnects, and edge cases gracefully.
 
 ## Decision
-Custom WebSocket client (`ws.ts`) with auto-reconnect, pending promise cleanup, and multi-address failover.
+Custom WebSocket client with auto-reconnect, pending promise cleanup, and
+multi-address failover. Since board #335 ① it is four modules —
+`core/connection.ts` (one link as an object), `core/ws-api.ts` (every RPC,
+bound to one connection), `core/connection-registry.ts` (object lifetime) and
+`core/ws.ts`, the facade every caller still imports. See
+§ The transport is an object, not a module.
 
 ## How It Works
 - **Browser development has one public origin.** `npm run dev:all` exposes
@@ -116,6 +121,102 @@ Custom WebSocket client (`ws.ts`) with auto-reconnect, pending promise cleanup, 
   both sides are pinned to shared vectors in `ws.test.ts` and `wire.rs`.
 - `JSON.parse` wrapped in try-catch in `onmessage`
 - Optional chaining on server push params (`data.params?.target`)
+
+## The transport is an object, not a module (board #335 ①)
+
+`ws.ts` was the connection: a module-level `ws`, `pending`, `requestId`, the
+pane/team listener maps, the subscription refcounts, the liveness timers and
+the RPC-timeout counter all sat at file scope, and every RPC wrapper read
+whichever socket was current when its promise settled. That is exactly one
+connection per page, so the aggregate mode owner asked for (#335 — show the
+projects of two or three servers at once) was not reachable by "open more
+WebSockets": the second one would have landed in the first one's routing
+tables. Phase ① turns the transport into an object and leaves the app on one
+of them.
+
+Four modules, one direction of dependency (`ws.ts` → registry → `ws-api.ts` →
+`connection.ts`):
+
+- **`core/connection.ts` — `createConnection()`.** One link to one server.
+  Everything mutable about it is closure state of that object: socket and
+  dialled URL, request counter and pending map, `paneOutput` / `paneClosed` /
+  `teamMessage` listeners, `subRefcount`, `onDisconnect` + `recoveryEnabled` +
+  `disconnectNotified`, the idle-probe clock and timer, `rpcTimeouts`. The
+  per-socket attachments (send queue, receive queue, the two AES-GCM keys and
+  their counters) stay where #315 put them — on the socket. Two connections
+  may therefore use the same request id, subscribe to the same `app:0.0` and
+  carry the same room name without colliding: neither has a table the other
+  can reach.
+- **`core/ws-api.ts` — `createWsApi(connection)`.** Every RPC wrapper declared
+  once and bound to one connection by closure. The wire is unchanged (same
+  method names, parameters, per-call timeouts, return types).
+- **`core/connection-registry.ts` — `createConnectionRegistry()`.** Object
+  lifetime only: `ensure` (idempotent, builds an IDLE object and never dials),
+  `get`, `remove` (disposes just that one), `disposeAll`. It never reads
+  storage, never parses a URL, never compares machine ids and holds no notion
+  of a current entry — `app/servers.ts` remains the one authority on which
+  saved server is which.
+- **`core/ws.ts` — the facade.** Every export name, type and return shape
+  callers had, forwarding to ONE registry slot. No app file changed.
+
+Decisions worth keeping:
+
+- **`disconnect()` keeps listeners and refcounts; `dispose()` is what releases
+  them.** A connection OUTLIVES its socket — a reconnect to the same server
+  replaces the socket inside one object, and the Terminals that registered
+  those listeners are still mounted in hidden page layers (that is the
+  `resubscribeActive()` contract in Lessons Learned). Had `disconnect()`
+  cleared them, every reconnect would have silently frozen the panes. `dispose()`
+  is idempotent and touches no other object.
+- **The facade's slot key is a Symbol, in memory only.** Not persisted, not
+  derived from a URL and not a stand-in for `ServerEntry.id`. A facade that
+  picked its object by address or by the machine id a candidate CLAIMS would
+  have had to guess during a #315 switch, before auth decides what the target
+  even is — and it would have handed Aggregate a back door for choosing a
+  "current" server implicitly. One stable object instead, replaced socket by
+  socket, which is precisely the old behaviour. Phase ② gives every server an
+  explicit runtime keyed by its entry id and the slot goes away with it.
+- **`reconnect.ts` is untouched** and App still creates the one reconnect
+  machine. Retry policy, backoff and address round-robin are app-layer
+  concerns; importing them into `core/` to give a Connection its own recovery
+  would have inverted the layering and added a second recovery strategy.
+  Phase ② composes one connection with one existing reconnect machine per
+  server.
+- **Device reachability stays global, in `ws.ts`.** `probeFailedAt`,
+  `isAddressViable`, `noteAddressUnreachable`, `findBestAddress`,
+  `classifyAddress` and the `online` / connection-change listeners describe
+  the NETWORK THE DEVICE IS ON, not a server: every connection shares the
+  answer, and the invalidation is a platform event. Keeping it here is also
+  what lets `connection.ts` stay free of `window` (pinned by
+  `connection.source.test.ts`). A viable address is not authentication and not
+  machine identity.
+- **The download origin comes from the connection, not from a module.**
+  `fsDownloadHttp` read the module's `wsUrl` after its `fs_download_url` round
+  trip; it now reads its own connection's `url()` before it. A signature is
+  issued by one server, so the base it is appended to must be that server's.
+  On one connection the two readings cannot disagree — `connect()` rejects
+  every pending RPC, so a reply from the socket being replaced never arrives —
+  which is why this is a structural change, not a behaviour change. Across two
+  connections it is the whole difference: the module reading would have given
+  A's signature whichever origin dialled last, and
+  `connection.test.ts` fails under exactly that mutation.
+- **Zero behaviour change, and the proof is the tests nobody edited.**
+  `ws.test.ts` (plain-token lifecycle, stale close, async send after
+  replacement, request order, the v1/v2 handshake vectors, decrypt-failure
+  disconnect, ordered dispatch), `server-switch.test.ts`, `reconnect.test.ts`
+  and every mount test import the facade and pass unchanged. On top of that:
+  `connection.test.ts` runs two real connections with real Web Crypto (same
+  request ids, out-of-order replies, same pane target and room name, A's
+  timeout / close / auth failure / dispose / reconnect leaving B's pending,
+  subscriptions, cipher and recovery callback alone, refcount 0→1→2→1→0,
+  signed-download origin, and a negative control for each),
+  `connection-registry.test.ts` pins lifetime, and `connection-facade.test.ts`
+  drives the real facade through A→B→A.
+
+What phase ① does NOT do: there is no connection mode, no second live socket
+in production, no serverId on any runtime reference, no change to parking
+(#315), read marks (#334) or the default page (#333). The union views and the
+Aggregate switch are phases ② and ③.
 
 ## Multi-Server (board #55)
 
@@ -332,6 +433,28 @@ Each entry is a decision with the reason it was made; treat them as normative. T
 ### WebSocket lifecycle
 
 `connect()` cleans up existing. `onclose` rejects pending. `doDisconnect()` clears timers. Heartbeat ping every 15s; 2 consecutive RPC timeouts → auto-close → reconnect.
+
+### One connection is one object; `ws.ts` is a facade over one slot (#335 ①)
+
+The transport's mutable state belongs to the object `createConnection()`
+returns, never to a module: socket, pending map, request counter, pane/team
+listeners, subscription refcounts, recovery flags, liveness timers and the
+RPC-timeout counter. Add per-connection state to `connection.ts` inside the
+factory, never at file scope. `createWsApi(connection)` declares every RPC
+once and binds it by closure, so a call cannot resolve onto a different
+connection; `createConnectionRegistry()` owns object lifetime and nothing else
+(it must not dial, read storage, parse a URL, compare machine ids or hold a
+"current"). `connection.ts` must not import `localStorage`, a Svelte store,
+anything under `src/lib/app`, or `window` — identity, persistence, reconnect
+policy and device reachability are the app layer's, and
+`connection.source.test.ts` fails the build if that leaks back.
+`disconnect()` KEEPS listeners and refcounts (a connection outlives its
+socket; the Terminals are still mounted) and only `dispose()` releases them —
+confusing the two silently freezes panes after a reconnect. `ws.ts` holds one
+memory-only Symbol slot, never persisted and never chosen by URL or machine
+id, which retires in phase ② when every server gets an explicit runtime keyed
+by its entry id; adding a second door onto the facade re-creates the implicit
+"current server" this slot exists to avoid.
 
 ### Connection-link copy feedback belongs to its attempt (#167, 2026-09-12)
 
