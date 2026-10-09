@@ -48,27 +48,19 @@ pub fn local_url(cfg: &Config) -> String {
     format!("{scheme}://{host}:{}", cfg.port)
 }
 
-/// The pure verdict over what the login answered (tested without a socket).
+/// The pure verdict over a DECRYPTED login answer (tested without a socket).
+/// Peer text never reaches the reason.
 pub(crate) fn judge(answer: &serde_json::Value, our_machine: &str, url: &str) -> Verdict {
-    if let Some(err) = answer.get("error") {
-        let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("auth refused");
-        return Verdict::Occupied(format!("a gateway answers at {url} but refused this machine's token ({msg})"));
-    }
     let r = answer.get("result");
     if r.and_then(|r| r.get("authenticated")).and_then(|v| v.as_bool()) != Some(true) {
-        return Verdict::Occupied(format!("{url} answered, but not as a tmux-mobile gateway ({})", excerpt(answer)));
+        return Verdict::Occupied(format!("{url} answered, but not as a tmux-mobile gateway"));
     }
     let id = r.and_then(|r| r.get("machine_id")).and_then(|v| v.as_str()).unwrap_or("");
     if id == our_machine && !id.is_empty() {
         Verdict::Ours { machine_id: id.to_string(), url: url.to_string() }
     } else {
-        Verdict::Occupied(format!("{url} is another machine's gateway (machine id {id})"))
+        Verdict::Occupied(format!("{url} is another machine's gateway"))
     }
-}
-
-fn excerpt(v: &serde_json::Value) -> String {
-    let t = v.to_string();
-    t.chars().take(120).collect()
 }
 
 pub async fn probe(cfg: &Config) -> Verdict {
@@ -97,34 +89,88 @@ async fn attempt(cfg: &Config, url: &str) -> Verdict {
     };
     match answer {
         Ok(v) => judge(&v, &cfg.machine_id, url),
-        Err(e) => Verdict::Occupied(format!("{url} is not a tmux-mobile gateway ({e})")),
+        Err(r) => Verdict::Occupied(r.say(url)),
     }
 }
 
-async fn login<S>(stream: S, url: &str, token: &str) -> Result<serde_json::Value, String>
+/// The server's own challenge login, so the token never crosses the wire:
+/// wait for the `server_nonce` greeting (anything else is not our gateway),
+/// answer with a fresh client nonce and an HMAC proof under the v2 proof
+/// key, and accept only a reply ENCRYPTED under the s2c key — which only a
+/// holder of the same token can produce. A peer that does not greet, or
+/// whose reply does not decrypt, is classified, never quoted.
+async fn login<S>(stream: S, url: &str, token: &str) -> Result<serde_json::Value, Refusal>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
-    let (mut ws, _) = tokio_tungstenite::client_async(url, stream).await.map_err(|e| e.to_string())?;
-    let hello = serde_json::json!({ "id": 1, "method": "auth", "params": { "token": token } });
-    ws.send(Message::Text(hello.to_string().into())).await.map_err(|e| e.to_string())?;
-    while let Some(m) = ws.next().await {
-        match m.map_err(|e| e.to_string())? {
-            Message::Text(t) => {
-                let v: serde_json::Value = serde_json::from_str(&t).map_err(|e| e.to_string())?;
-                // The server greets every connection with its nonce before
-                // any reply; only the answer to OUR request (id 1) decides.
-                if v.get("id").is_none() && v.get("server_nonce").is_some() {
-                    continue;
-                }
-                let _ = ws.close(None).await;
-                return Ok(v);
+    use aes_gcm::aead::Aead;
+    use aes_gcm::KeyInit;
+    use hmac::Mac;
+    use rand::RngCore;
+    let (mut ws, _) = tokio_tungstenite::client_async(url, stream).await.map_err(|_| Refusal::NotWebSocket)?;
+    // 1. The greeting.
+    let server_nonce = loop {
+        match ws.next().await {
+            Some(Ok(Message::Text(t))) => {
+                let v: serde_json::Value = serde_json::from_str(&t).map_err(|_| Refusal::NoGreeting)?;
+                let hex = v.get("server_nonce").and_then(|n| n.as_str()).ok_or(Refusal::NoGreeting)?;
+                let bytes = hex::decode(hex).map_err(|_| Refusal::NoGreeting)?;
+                break <[u8; 16]>::try_from(bytes.as_slice()).map_err(|_| Refusal::NoGreeting)?;
             }
-            Message::Close(_) => return Err("closed before answering".into()),
-            _ => {}
+            Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
+            _ => return Err(Refusal::NoGreeting),
+        }
+    };
+    // 2. Prove, never send, the token.
+    let mut client_nonce = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut client_nonce);
+    let keys = crate::server::derive_session_keys(token, &server_nonce, &client_nonce);
+    let mut mac = <hmac::Hmac<sha2::Sha256> as Mac>::new_from_slice(&keys.proof).map_err(|_| Refusal::NoGreeting)?;
+    mac.update(&server_nonce);
+    mac.update(&client_nonce);
+    let proof = hex::encode(mac.finalize().into_bytes());
+    let hello = serde_json::json!({ "id": 1, "method": "auth",
+        "params": { "client_nonce": hex::encode(client_nonce), "proof": proof, "e2e": crate::server::E2E_VERSION } });
+    ws.send(Message::Text(hello.to_string().into())).await.map_err(|_| Refusal::NoGreeting)?;
+    // 3. Only an answer sealed under our s2c key counts.
+    while let Some(m) = ws.next().await {
+        match m {
+            Ok(Message::Binary(b)) => {
+                let cipher = aes_gcm::Aes256Gcm::new_from_slice(&keys.s2c).map_err(|_| Refusal::Undecryptable)?;
+                let nonce = [0u8; 12]; // the first frame of the s2c stream
+                let plain = cipher.decrypt(aes_gcm::Nonce::from_slice(&nonce), b.as_ref()).map_err(|_| Refusal::Undecryptable)?;
+                let json = crate::server::decode_wire_payload(&plain).map_err(|_| Refusal::Undecryptable)?;
+                let _ = ws.close(None).await;
+                return serde_json::from_str(&json).map_err(|_| Refusal::Undecryptable);
+            }
+            // A plain answer here is an auth error (or not our gateway).
+            Ok(Message::Text(_)) => return Err(Refusal::TokenRefused),
+            Ok(Message::Ping(_) | Message::Pong(_)) => continue,
+            _ => return Err(Refusal::TokenRefused),
         }
     }
-    Err("closed before answering".into())
+    Err(Refusal::TokenRefused)
+}
+
+/// Why a listener is not provably ours — classified, so no peer bytes (which
+/// could be our own request echoed back) ever reach a message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Refusal {
+    NotWebSocket,
+    NoGreeting,
+    TokenRefused,
+    Undecryptable,
+}
+
+impl Refusal {
+    fn say(self, url: &str) -> String {
+        match self {
+            Refusal::NotWebSocket => format!("{url} is not a WebSocket server"),
+            Refusal::NoGreeting => format!("{url} speaks WebSocket but not the tmux-mobile protocol"),
+            Refusal::TokenRefused => format!("a gateway at {url} refused this machine's token"),
+            Refusal::Undecryptable => format!("{url} answered without knowing this machine's token"),
+        }
+    }
 }
 
 async fn tls_connect(
@@ -134,49 +180,57 @@ async fn tls_connect(
 ) -> Result<tokio_rustls::client::TlsStream<TcpStream>, String> {
     use tokio_rustls::rustls;
     let path = cfg.tls_cert.as_deref().ok_or("no certificate configured")?;
-    let pem = std::fs::read(path).map_err(|e| format!("read {path}: {e}"))?;
-    let pinned: Vec<Vec<u8>> = rustls_pemfile::certs(&mut &pem[..]).filter_map(|c| c.ok()).map(|c| c.as_ref().to_vec()).collect();
-    let leaf = pinned.first().cloned().ok_or_else(|| format!("{path} holds no certificate"))?;
-    let host = authority.rsplit_once(':').map(|(h, _)| h).unwrap_or(authority).trim_matches(['[', ']']).to_string();
-    let name = rustls::pki_types::ServerName::try_from(host.clone()).map_err(|e| e.to_string())?;
+    let pem = std::fs::read(path).map_err(|e| format!("cannot read {path}: {e}"))?;
+    let certs: Vec<_> = rustls_pemfile::certs(&mut &pem[..]).filter_map(|c| c.ok()).collect();
+    let leaf = certs.first().cloned().ok_or_else(|| format!("{path} holds no certificate"))?;
+    let mut roots = rustls::RootCertStore::empty();
+    for c in &certs {
+        roots.add(c.clone()).map_err(|e| e.to_string())?;
+    }
     let provider = rustls::crypto::CryptoProvider::get_default().cloned()
         .unwrap_or_else(|| Arc::new(rustls::crypto::aws_lc_rs::default_provider()));
-    let verifier = Arc::new(Pinned { leaf, host, provider: provider.clone() });
+    // The TLS library's own verification (signature, validity period,
+    // subjectAltName against the dialled address), with the configured
+    // certificate as the only trust anchor — plus a pin, so a different leaf
+    // that the configured file could vouch for is not accepted either.
+    let webpki = rustls::client::WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider.clone())
+        .build().map_err(|e| e.to_string())?;
+    let verifier = Arc::new(Pinned { leaf: leaf.as_ref().to_vec(), inner: webpki });
     let config = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions().map_err(|e| e.to_string())?
         .dangerous().with_custom_certificate_verifier(verifier).with_no_client_auth();
-    tokio_rustls::TlsConnector::from(Arc::new(config)).connect(name, tcp).await.map_err(|e| e.to_string())
+    let host = authority.rsplit_once(':').map(|(h, _)| h).unwrap_or(authority).trim_matches(['[', ']']).to_string();
+    let name = rustls::pki_types::ServerName::try_from(host).map_err(|e| e.to_string())?;
+    tokio_rustls::TlsConnector::from(Arc::new(config)).connect(name, tcp).await.map_err(|e| {
+        let msg = e.to_string();
+        if msg.contains("CaUsedAsEndEntity") {
+            "the configured certificate is a CA certificate; the gateway needs a leaf certificate (basicConstraints CA:FALSE) naming this address".into()
+        } else {
+            msg
+        }
+    })
 }
 
-/// Trust exactly the configured certificate (pinned by its bytes — a
-/// self-signed gateway cert, often a CA:TRUE one from the usual openssl
-/// recipe, proves itself) AND require it to name the address dialled. Not
-/// "any certificate": a different cert, or the right cert without the name,
-/// fails, and the probe reports Occupied.
+/// The pinned leaf, then the library's full verification.
 #[derive(Debug)]
 struct Pinned {
     leaf: Vec<u8>,
-    host: String,
-    provider: Arc<tokio_rustls::rustls::crypto::CryptoProvider>,
+    inner: Arc<tokio_rustls::rustls::client::WebPkiServerVerifier>,
 }
 
 impl tokio_rustls::rustls::client::danger::ServerCertVerifier for Pinned {
     fn verify_server_cert(
         &self,
         end_entity: &tokio_rustls::rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[tokio_rustls::rustls::pki_types::CertificateDer<'_>],
-        _server_name: &tokio_rustls::rustls::pki_types::ServerName<'_>,
-        _ocsp: &[u8],
-        _now: tokio_rustls::rustls::pki_types::UnixTime,
+        intermediates: &[tokio_rustls::rustls::pki_types::CertificateDer<'_>],
+        server_name: &tokio_rustls::rustls::pki_types::ServerName<'_>,
+        ocsp: &[u8],
+        now: tokio_rustls::rustls::pki_types::UnixTime,
     ) -> Result<tokio_rustls::rustls::client::danger::ServerCertVerified, tokio_rustls::rustls::Error> {
-        use tokio_rustls::rustls::Error;
         if end_entity.as_ref() != self.leaf.as_slice() {
-            return Err(Error::General("the gateway's certificate is not the configured one".into()));
+            return Err(tokio_rustls::rustls::Error::General("the gateway's certificate is not the configured one".into()));
         }
-        if !cert_names(end_entity.as_ref(), &self.host) {
-            return Err(Error::General(format!("the configured certificate does not name {}", self.host)));
-        }
-        Ok(tokio_rustls::rustls::client::danger::ServerCertVerified::assertion())
+        self.inner.verify_server_cert(end_entity, intermediates, server_name, ocsp, now)
     }
     fn verify_tls12_signature(
         &self,
@@ -184,7 +238,7 @@ impl tokio_rustls::rustls::client::danger::ServerCertVerifier for Pinned {
         cert: &tokio_rustls::rustls::pki_types::CertificateDer<'_>,
         dss: &tokio_rustls::rustls::DigitallySignedStruct,
     ) -> Result<tokio_rustls::rustls::client::danger::HandshakeSignatureValid, tokio_rustls::rustls::Error> {
-        tokio_rustls::rustls::crypto::verify_tls12_signature(message, cert, dss, &self.provider.signature_verification_algorithms)
+        self.inner.verify_tls12_signature(message, cert, dss)
     }
     fn verify_tls13_signature(
         &self,
@@ -192,61 +246,11 @@ impl tokio_rustls::rustls::client::danger::ServerCertVerifier for Pinned {
         cert: &tokio_rustls::rustls::pki_types::CertificateDer<'_>,
         dss: &tokio_rustls::rustls::DigitallySignedStruct,
     ) -> Result<tokio_rustls::rustls::client::danger::HandshakeSignatureValid, tokio_rustls::rustls::Error> {
-        tokio_rustls::rustls::crypto::verify_tls13_signature(message, cert, dss, &self.provider.signature_verification_algorithms)
+        self.inner.verify_tls13_signature(message, cert, dss)
     }
     fn supported_verify_schemes(&self) -> Vec<tokio_rustls::rustls::SignatureScheme> {
-        self.provider.signature_verification_algorithms.supported_schemes()
+        self.inner.supported_verify_schemes()
     }
-}
-
-/// Does the DER certificate name `host` in its subjectAltName (an IP
-/// address entry for an IP, a DNS entry otherwise)? A small, exact reader of
-/// the one extension (OID 2.5.29.17) — no CN fallback, no wildcards.
-pub(crate) fn cert_names(der: &[u8], host: &str) -> bool {
-    const SAN_OID: &[u8] = &[0x06, 0x03, 0x55, 0x1d, 0x11];
-    let Some(at) = der.windows(SAN_OID.len()).position(|w| w == SAN_OID) else { return false };
-    let mut i = at + SAN_OID.len();
-    // optional critical BOOLEAN
-    if der.get(i) == Some(&0x01) { i += 3; }
-    // OCTET STRING wrapping the GeneralNames SEQUENCE
-    let Some((_, body, _)) = tlv(der, i, 0x04) else { return false };
-    let Some((_, seq, _)) = tlv(body, 0, 0x30) else { return false };
-    let ip: Option<std::net::IpAddr> = host.parse().ok();
-    let mut j = 0;
-    while j < seq.len() {
-        let tag = seq[j];
-        let Some((_, value, next)) = tlv_any(seq, j) else { return false };
-        match (tag, ip) {
-            (0x87, Some(std::net::IpAddr::V4(a))) if value == a.octets() => return true,
-            (0x87, Some(std::net::IpAddr::V6(a))) if value == a.octets() => return true,
-            (0x82, None) if value.eq_ignore_ascii_case(host.as_bytes()) => return true,
-            _ => {}
-        }
-        j = next;
-    }
-    false
-}
-
-fn tlv(buf: &[u8], at: usize, tag: u8) -> Option<(u8, &[u8], usize)> {
-    (buf.get(at) == Some(&tag)).then_some(())?;
-    tlv_any(buf, at)
-}
-
-fn tlv_any(buf: &[u8], at: usize) -> Option<(u8, &[u8], usize)> {
-    let tag = *buf.get(at)?;
-    let first = *buf.get(at + 1)? as usize;
-    let (len, head) = if first < 0x80 {
-        (first, 2)
-    } else {
-        let n = first & 0x7f;
-        if n == 0 || n > 4 { return None; }
-        let mut l = 0usize;
-        for k in 0..n { l = (l << 8) | *buf.get(at + 2 + k)? as usize; }
-        (l, 2 + n)
-    };
-    let start = at + head;
-    let end = start.checked_add(len)?;
-    Some((tag, buf.get(start..end)?, end))
 }
 
 #[cfg(test)]
@@ -286,8 +290,6 @@ mod tests {
         assert!(matches!(judge(&ok("m-ours"), "m-ours", url), Verdict::Ours { .. }));
         assert!(matches!(judge(&ok("m-else"), "m-ours", url), Verdict::Occupied(_)), "another machine");
         assert!(matches!(judge(&ok(""), "m-ours", url), Verdict::Occupied(_)));
-        let refused = serde_json::json!({ "id": 1, "error": { "code": -32001, "message": "invalid token" } });
-        assert!(matches!(judge(&refused, "m-ours", url), Verdict::Occupied(_)), "a refused token is not free");
         assert!(matches!(judge(&serde_json::json!({ "hello": 1 }), "m-ours", url), Verdict::Occupied(_)));
     }
 
@@ -297,26 +299,33 @@ mod tests {
         let p = l.local_addr().unwrap().port();
         (l, p)
     }
-    async fn ws_answering(answer: serde_json::Value) -> u16 {
+    /// A WebSocket peer that greets like a gateway (or not) and then sends
+    /// one plain text frame.
+    async fn ws_answering(greet: bool, answer: serde_json::Value) -> u16 {
         let (l, port) = listener().await;
         tokio::spawn(async move {
             let (s, _) = l.accept().await.unwrap();
             let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
-            let _ = ws.send(Message::Text(serde_json::json!({ "server_nonce": "00", "e2e": 2 }).to_string().into())).await;
-            let _ = ws.next().await;
+            if greet {
+                let _ = ws.send(Message::Text(serde_json::json!({ "server_nonce": "00112233445566778899aabbccddeeff", "e2e": 2 }).to_string().into())).await;
+                let _ = ws.next().await;
+            }
             let _ = ws.send(Message::Text(answer.to_string().into())).await;
         });
         port
     }
 
     #[tokio::test]
-    async fn the_probe_tells_ours_occupied_and_free_apart() {
-        let ours = ws_answering(serde_json::json!({ "id": 1, "result": { "authenticated": true, "machine_id": "m-ours" } })).await;
-        assert!(matches!(probe(&cfg(ours)).await, Verdict::Ours { .. }));
-        let other = ws_answering(serde_json::json!({ "id": 1, "result": { "authenticated": true, "machine_id": "m-else" } })).await;
-        assert!(matches!(probe(&cfg(other)).await, Verdict::Occupied(_)));
-        let refused = ws_answering(serde_json::json!({ "id": 1, "error": { "code": -32001, "message": "invalid token" } })).await;
-        assert!(matches!(probe(&cfg(refused)).await, Verdict::Occupied(_)));
+    async fn the_probe_tells_occupied_and_free_apart_without_quoting_the_peer() {
+        // A gateway-shaped peer refusing the proof (a plain error frame).
+        let refused = ws_answering(true, serde_json::json!({ "id": 1, "error": { "code": -32001, "message": "LEAK-ME" } })).await;
+        match probe(&cfg(refused)).await { Verdict::Occupied(w) => assert!(w.contains("refused") && !w.contains("LEAK-ME"), "{w}"), v => panic!("{v:?}") }
+        // A plain-text "authenticated" answer cannot be ours: ours is sealed.
+        let forged = ws_answering(true, serde_json::json!({ "id": 1, "result": { "authenticated": true, "machine_id": "m-ours" } })).await;
+        assert!(matches!(probe(&cfg(forged)).await, Verdict::Occupied(_)), "an unsealed success is a forgery");
+        // A WebSocket that does not greet with a nonce.
+        let mute = ws_answering(false, serde_json::json!({ "hello": "LEAK-ME" })).await;
+        match probe(&cfg(mute)).await { Verdict::Occupied(w) => assert!(w.contains("not the tmux-mobile protocol") && !w.contains("LEAK-ME"), "{w}"), v => panic!("{v:?}") }
         // A listener that is not a WebSocket at all.
         let (l, plain) = listener().await;
         tokio::spawn(async move {
@@ -339,76 +348,6 @@ mod tests {
         let (l, free) = listener().await;
         drop(l);
         assert_eq!(probe(&cfg(free)).await, Verdict::None);
-    }
-
-    #[tokio::test]
-    async fn a_tls_gateway_with_a_certificate_that_does_not_name_loopback_is_occupied_not_free() {
-        // A configured cert that cannot be read or does not cover the address
-        // dialled is never accepted and never reads as free.
-        let (l, port) = listener().await;
-        tokio::spawn(async move { let _ = l.accept().await; tokio::time::sleep(Duration::from_secs(3)).await; });
-        let mut c = cfg(port);
-        c.tls_cert = Some("/nonexistent/cert.pem".into());
-        c.tls_key = Some("/nonexistent/key.pem".into());
-        match probe(&c).await {
-            Verdict::Occupied(why) => assert!(why.contains("TLS"), "{why}"),
-            v => panic!("{v:?}"),
-        }
-    }
-
-    /// A self-signed cert for `san`, written beside `dir` (openssl; skipped
-    /// when the host has none).
-    fn self_signed(dir: &std::path::Path, san: &str) -> Option<(String, String)> {
-        let (c, k) = (dir.join("c.pem"), dir.join("k.pem"));
-        let ok = std::process::Command::new("openssl")
-            .args(["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-days", "1", "-subj", "/CN=gw",
-                "-addext", &format!("subjectAltName={san}"), "-keyout"])
-            .arg(&k).arg("-out").arg(&c)
-            .stderr(std::process::Stdio::null()).stdout(std::process::Stdio::null())
-            .status().map(|s| s.success()).unwrap_or(false);
-        ok.then(|| (c.to_string_lossy().into(), k.to_string_lossy().into()))
-    }
-
-    /// A real TLS gateway (the server's own TLS path), trusted through the
-    /// configured cert: Ours when the cert names 127.0.0.1, Occupied — never
-    /// None, never a looser check — when it names something else.
-    #[tokio::test]
-    async fn a_tls_gateway_is_ours_only_when_its_trusted_certificate_names_the_address() {
-        let guard = crate::tmux::Scratch::new("tlsprobe");
-        for (san, ours) in [("IP:127.0.0.1", true), ("DNS:gateway.example", false), ("IP:127.0.0.1#other", false)] {
-            let other_cert = san.ends_with("#other");
-            let san = san.trim_end_matches("#other");
-            let dir = std::path::Path::new(&guard.path()).join(format!("{san}-{other_cert}").replace([':', '.'], "_"));
-            std::fs::create_dir_all(&dir).unwrap();
-            let Some((cert, key)) = self_signed(&dir, san) else { eprintln!("no openssl — skipping"); return };
-            let (l, port) = listener().await;
-            drop(l);
-            let (c2, k2) = (cert.clone(), key.clone());
-            tokio::spawn(async move {
-                let _ = crate::server::start_with_socket("127.0.0.1", port, "tok-ours", "m-ours", None, Some(c2), Some(k2), 5).await;
-            });
-            let mut c = cfg(port);
-            c.host = "127.0.0.1".into();
-            c.tls_key = Some(key);
-            // The right name, but the client was configured with a different
-            // certificate: pinning refuses it.
-            c.tls_cert = Some(if other_cert {
-                let d2 = dir.join("other");
-                std::fs::create_dir_all(&d2).unwrap();
-                self_signed(&d2, san).unwrap().0
-            } else { cert });
-            let mut v = Verdict::None;
-            for _ in 0..40 {
-                v = probe(&c).await;
-                if v != Verdict::None { break; }
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-            if ours {
-                assert!(matches!(v, Verdict::Ours { .. }), "{san}: {v:?}");
-            } else {
-                match v { Verdict::Occupied(why) => assert!(why.contains("TLS"), "{why}"), v => panic!("{san}: {v:?}") }
-            }
-        }
     }
 
     /// The real (plain) server: Ours with our token, Occupied with another
@@ -435,19 +374,114 @@ mod tests {
         assert!(matches!(probe(&other).await, Verdict::Occupied(_)), "our token, another machine id");
     }
 
-    #[test]
-    fn a_certificate_names_only_what_its_san_lists() {
-        let guard = crate::tmux::Scratch::new("sanparse");
-        let dir = std::path::Path::new(&guard.path()).to_path_buf();
-        let Some((cert, _)) = self_signed(&dir, "IP:127.0.0.1,DNS:gw.local,IP:::1") else { eprintln!("no openssl — skipping"); return };
-        let pem = std::fs::read(cert).unwrap();
-        let der = rustls_pemfile::certs(&mut &pem[..]).next().unwrap().unwrap();
-        assert!(cert_names(der.as_ref(), "127.0.0.1"));
-        assert!(cert_names(der.as_ref(), "::1"));
-        assert!(cert_names(der.as_ref(), "gw.local"));
-        assert!(!cert_names(der.as_ref(), "127.0.0.2"));
-        assert!(!cert_names(der.as_ref(), "gw"), "no CN fallback, no partial match");
-        assert!(!cert_names(b"garbage", "127.0.0.1"));
+    #[tokio::test]
+    async fn a_tls_gateway_with_a_certificate_that_does_not_name_loopback_is_occupied_not_free() {
+        // A configured cert that cannot be read or does not cover the address
+        // dialled is never accepted and never reads as free.
+        let (l, port) = listener().await;
+        tokio::spawn(async move { let _ = l.accept().await; tokio::time::sleep(Duration::from_secs(3)).await; });
+        let mut c = cfg(port);
+        c.tls_cert = Some("/nonexistent/cert.pem".into());
+        c.tls_key = Some("/nonexistent/key.pem".into());
+        match probe(&c).await {
+            Verdict::Occupied(why) => assert!(why.contains("TLS"), "{why}"),
+            v => panic!("{v:?}"),
+        }
+    }
+
+    /// A self-signed cert for `san` (openssl; None when the host has none).
+    /// `extra` adds openssl args (validity window, CA flag).
+    fn self_signed(dir: &std::path::Path, san: &str, extra: &[&str]) -> Option<(String, String)> {
+        let (c, k) = (dir.join("c.pem"), dir.join("k.pem"));
+        let ok = std::process::Command::new("openssl")
+            .args(["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-days", "2", "-subj", "/CN=gw",
+                "-addext", &format!("subjectAltName={san}")])
+            .args(extra)
+            .arg("-keyout").arg(&k).arg("-out").arg(&c)
+            .stderr(std::process::Stdio::null()).stdout(std::process::Stdio::null())
+            .status().map(|s| s.success()).unwrap_or(false);
+        ok.then(|| (c.to_string_lossy().into(), k.to_string_lossy().into()))
+    }
+
+    /// A real TLS gateway (the server's own TLS path). Ours only for a LEAF
+    /// certificate that names 127.0.0.1, is in its validity window and is the
+    /// configured one; every other case is Occupied — never None.
+    #[tokio::test]
+    async fn a_tls_gateway_is_ours_only_for_the_configured_valid_leaf_naming_the_address() {
+        const LEAF: &str = "basicConstraints=critical,CA:FALSE";
+        let guard = crate::tmux::Scratch::new("tlsprobe");
+        let cases: &[(&str, &[&str], bool, bool, &str)] = &[
+            ("ok", &["-addext", LEAF], true, false, ""),
+            ("dns-only", &["-addext", LEAF], false, false, "DNS:gateway.example"),
+            ("expired", &["-addext", LEAF, "-not_before", "20200101000000Z", "-not_after", "20200102000000Z"], false, false, ""),
+            ("not-yet", &["-addext", LEAF, "-not_before", "20990101000000Z", "-not_after", "20990102000000Z"], false, false, ""),
+            ("ca", &[], false, false, ""),
+            ("other-cert", &["-addext", LEAF], false, true, ""),
+        ];
+        for (tag, extra, ours, other, san) in cases {
+            let san = if san.is_empty() { "IP:127.0.0.1" } else { san };
+            let dir = std::path::Path::new(&guard.path()).join(tag);
+            std::fs::create_dir_all(&dir).unwrap();
+            let Some((cert, key)) = self_signed(&dir, san, extra) else { eprintln!("no openssl — skipping"); return };
+            let (l, port) = listener().await;
+            drop(l);
+            let (c2, k2) = (cert.clone(), key.clone());
+            tokio::spawn(async move {
+                let _ = crate::server::start_with_socket("127.0.0.1", port, "tok-ours", "m-ours", None, Some(c2), Some(k2), 5).await;
+            });
+            let mut c = cfg(port);
+            c.host = "127.0.0.1".into();
+            c.tls_key = Some(key);
+            c.tls_cert = Some(if *other {
+                let d2 = dir.join("other");
+                std::fs::create_dir_all(&d2).unwrap();
+                self_signed(&d2, san, extra).unwrap().0
+            } else { cert });
+            let mut v = Verdict::None;
+            for _ in 0..40 {
+                v = probe(&c).await;
+                if v != Verdict::None { break; }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            if *ours {
+                assert!(matches!(v, Verdict::Ours { .. }), "{tag}: {v:?}");
+            } else {
+                match v { Verdict::Occupied(why) => assert!(why.contains("TLS"), "{tag}: {why}"), v => panic!("{tag}: {v:?}") }
+            }
+        }
+    }
+
+    /// The token never crosses the wire, and nothing a peer sends is quoted:
+    /// an echo server receives only a nonce and a proof, and the verdict
+    /// carries no peer bytes.
+    #[tokio::test]
+    async fn an_echo_server_learns_nothing_and_is_never_quoted() {
+        const SECRET: &str = "DUMMY-TOKEN-0123456789abcdef";
+        let (l, port) = listener().await;
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen2 = seen.clone();
+        tokio::spawn(async move {
+            for _ in 0..2 {
+                let (s, _) = l.accept().await.unwrap();
+                let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
+                // Pretend to be a gateway: greet, then echo whatever arrives.
+                let _ = ws.send(Message::Text(serde_json::json!({ "server_nonce": "00112233445566778899aabbccddeeff", "e2e": 2 }).to_string().into())).await;
+                while let Some(Ok(m)) = ws.next().await {
+                    if let Message::Text(t) = &m { seen2.lock().unwrap().push(t.to_string()); }
+                    let _ = ws.send(m).await;
+                }
+            }
+        });
+        let mut c = cfg(port);
+        c.token = SECRET.into();
+        let v = probe(&c).await;
+        match &v {
+            Verdict::Occupied(why) => assert!(!why.contains(SECRET) && !why.contains("proof") && !why.contains("client_nonce"), "{why}"),
+            v => panic!("an echo is not our gateway: {v:?}"),
+        }
+        let sent = seen.lock().unwrap().join("\n");
+        assert!(!sent.is_empty(), "the probe did talk to it");
+        assert!(!sent.contains(SECRET), "the token never crosses the wire: {sent}");
+        assert!(sent.contains("\"proof\"") && sent.contains("\"client_nonce\""), "a challenge proof instead");
     }
 }
-
