@@ -106,7 +106,7 @@ function host(over: Partial<ShortcutHost> = {}): ShortcutHost & { calls: string[
     cycleServer: (d: number) => calls.push(`server ${d}`), openServers: () => calls.push('servers'),
     toggleSidebar: () => calls.push('sidebar'), toggleSplit: () => calls.push('split'),
     focusComposer: () => calls.push('composer'), focusTerminal: () => calls.push('terminal'),
-    cycleWindow: (d: number) => calls.push(`window ${d}`), calls, ...over,
+    cycleWindow: (d: number) => calls.push(`window ${d}`), toggleScratch: () => calls.push('scratch'), calls, ...over,
   };
   return h;
 }
@@ -189,4 +189,19 @@ test('character input is never a shortcut: AltGr, IME composition, keyCode 229 (
   // The same parse entry serves the recorder: it yields no combo for typing.
   assert.equal(shortcutFromEvent(event('KeyS', { ctrlKey: true, altKey: true, altGraph: true, key: 'ś' })), '');
   assert.equal(shortcutFromEvent(event('KeyS', { ctrlKey: true, altKey: true, isComposing: true })), '');
+});
+
+test('the scratch terminal has a registry shortcut, ⌘⌥` / Ctrl+Alt+`, free of the reserved chords (#324)', () => {
+  const def = SHORTCUTS.find((x) => x.id === 'toggleScratch')!;
+  assert.equal(def.default, 'Mod2+Backquote');
+  for (const mac of [true, false]) {
+    const b = defaultBindings(mac);
+    assert.ok(b.toggleScratch, `bound on ${mac ? 'mac' : 'other'}`);
+    assert.equal(reservedReason(b.toggleScratch!, mac), '', 'not a system or browser chord');
+    assert.equal(Object.values(b).filter((v) => v === b.toggleScratch).length, 1, 'no other action shares it');
+  }
+  const h = host();
+  def.run(h);
+  assert.deepEqual(h.calls, ['scratch']);
+  assert.equal(def.need(host({ connected: false })), 'shortcutNeedConnection');
 });

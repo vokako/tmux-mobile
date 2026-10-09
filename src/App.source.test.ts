@@ -164,7 +164,10 @@ test('every page icon is draggable and the brand is not', () => {
   // brand is the app's mark, not a page; the server switcher (board #55) is
   // the one CONTROL among the buttons — no slot, no drag, only a popover.
   const buttons = rail.match(/<button[\s\S]*?<\/button>/gu) ?? [];
-  assert.equal(buttons.length, 3, 'the templated page button and two controls: the notification centre (#322) and the server switcher');
+  assert.equal(buttons.length, 4, 'the templated page button and three controls: the scratch terminal (#324), the notification centre (#322) and the server switcher');
+  const scratchBtn = buttons.find((b) => b.includes('rail-scratch')) ?? '';
+  assert.match(String(scratchBtn), /aria-pressed=\{scratchOpen\}/u, 'the toggle states whether the panel is open');
+  assert.doesNotMatch(String(scratchBtn), /data-rail-slot|onpointerdown/u, 'the scratch toggle is a control too');
   const bellBtn = buttons.find((b) => b.includes('rail-bell')) ?? '';
   assert.doesNotMatch(String(bellBtn), /data-rail-slot|onpointerdown/u, 'the bell is a control too');
   const pageBtn = buttons.find((b) => b.includes('data-rail-slot={slot}')) ?? '';

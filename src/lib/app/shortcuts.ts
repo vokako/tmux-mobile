@@ -32,6 +32,7 @@ export interface ShortcutHost {
   focusComposer(): void;
   focusTerminal(): void;
   cycleWindow(direction: number): void;
+  toggleScratch(): void;
 }
 
 /** '' = available; otherwise the i18n key of the reason it is not. A reason
@@ -83,6 +84,8 @@ export const SHORTCUTS: readonly ShortcutDef[] = Object.freeze([
   { id: 'focusComposer', label: 'shortcutFocusComposer', group: 'panels', default: { mac: 'Mod2+Semicolon', other: 'Mod2+KeyM' }, need: hub, run: (h) => h.focusComposer() },
   { id: 'focusTerminal', label: 'shortcutFocusTerminal', group: 'panels', default: { mac: 'Mod2+Quote', other: 'Mod2+KeyK' },
     need: (h) => connected(h) || (h.terminalTarget ? '' : 'shortcutNeedPane'), run: (h) => h.focusTerminal() },
+  // Board #324: the scratch terminal, from any page (⌘⌥` / Ctrl+Alt+`).
+  { id: 'toggleScratch', label: 'shortcutToggleScratch', group: 'panels', default: 'Mod2+Backquote', need: connected, run: (h) => h.toggleScratch() },
   { id: 'previousWindow', label: 'shortcutPreviousWindow', group: 'terminal', default: 'Alt+KeyU',
     need: (h) => connected(h) || (h.page === 'terminal' ? '' : 'shortcutNeedTerminalPage'), run: (h) => h.cycleWindow(-1) },
   { id: 'nextWindow', label: 'shortcutNextWindow', group: 'terminal', default: 'Alt+KeyI',

@@ -702,6 +702,11 @@ export const listSessionsWithPanes = () => call<{ sessions: TmuxSession[]; panes
 export const capturePane = (target: string, lines?: number) => call('capture_pane', { target, lines });
 export const sendKeys = (target: string, keys: string, literal = true) => call('send_keys', { target, keys, literal });
 export const pasteText = (target: string, text: string) => call('paste_text', { target, text });
+/** The scratch terminal's session (board #324): ensure it and get its pane
+ * target, or kill it. The server decides ownership; a name held by anything
+ * else is refused with the reason. */
+export const scratchSession = () => call<{ session: string; target: string }>('scratch_session', {});
+export const scratchKill = () => call<{ killed: boolean }>('scratch_kill', {});
 export const newSession = (name: string, path?: string, command?: string) => call('new_session', { name, path, command });
 export const killSession = (name: string) => call('kill_session', { name });
 export const newWindow = (session: string) => call('new_window', { session });

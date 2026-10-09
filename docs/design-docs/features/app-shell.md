@@ -77,6 +77,55 @@ setting something up rather than while working, and pairing it with the gear
 says that without a label. Order within the pair puts Agents above the gear,
 which stays the last item in the rail as the app-wide convention.
 
+## The scratch terminal is a shell panel, not a page (board #324)
+
+Owner, 2026-10-09: "帮我再加一个全局可呼出的 Terminal 菜单…有点像 iTerm 或 Ghost
+里的那种全局 Terminal 模式…可以放到桌面版的左下角。至于是从下侧还是左侧弹出，可以加个按钮让我自己去设定…这个
+Terminal 只是临时用的，并且跟你的项目没有关系". Desktop only (the #316 gate,
+`!layout.isTouchDevice`).
+
+- **Doors.** A rail control at the top of the bottom group (above the
+  notification bell and the server switcher; a control, never draggable;
+  `aria-pressed`; hover card with its shortcut) and the registry shortcut
+  `toggleScratch` (⌘⌥` / Ctrl+Alt+`, free of the reserved chords). Both toggle;
+  so does the panel's × . **Escape belongs to the shell** (vim, readline, agent
+  TUIs): it closes the panel only from the head's own controls.
+- **Panel.** `app/ScratchPanel.svelte`, fixed over the content area right of the
+  rail, no backdrop (a tool panel, not a modal), one `--t-move` slide (reduced
+  motion: none). Edge `bottom` (default) or `left`, chosen in its own head (one
+  place, no Settings row; `tmux_scratch_edge`); its size per edge through the one
+  `SideHandle` (`edge="top"` on `--scratch-h`, `edge="right"` on `--scratch-w`,
+  `always`, clamped to the viewport), restored by App like `--sidebar-w`. Closed
+  it is off-screen, `visibility: hidden` after the slide and `inert`, so nothing
+  in it takes focus. Opening focuses the terminal once it is mounted and shown;
+  closing returns focus to what had it, only if focus is still in the panel and
+  that control is still there and visible.
+- **Session.** `scratch_session` ensures the one project-less session the server
+  owns (projects.md § the scratch terminal's session) and answers its concrete
+  `session:window.pane`; the panel embeds the ONE Terminal on it (`embedded
+  chromeless`, app `fontSize`, same keys/resize contract). Close HIDES (the
+  session runs on; the Terminal stays mounted and records frames without
+  rendering, rule 7); the head's stop icon is Kill, behind a ConfirmDialog
+  (close ≠ kill). A session that ends (Ctrl-D, external kill) shows "Session
+  ended · Open again"; nothing recreates it in the background. A name held by a
+  plain session or a project shows the server's refusal with the same re-try.
+- **Server boundary (#315).** App keeps the frame's state (open, edge, sizes)
+  outside the server key; the panel and its Terminal mount INSIDE
+  `{#key serverEpoch}`, so a switch destroys them with the subscription. The
+  panel closes the moment a switch starts (`switching`), its `live` goes false so
+  every pending ensure/kill/focus completion is dropped (one intent counter), and
+  nothing ensures on the new server until the reader opens it there.
+- **Independence.** The Terminal page's window switcher, split and the Hub
+  drawer never retarget to it; Sessions lists it like any tmux session (we do not
+  hide tmux), and it is not a project.
+
+`ScratchPanel.mount.test.ts` pins lazy ensure, focus in and back, inert when
+closed, hide-not-kill, Kill behind its confirmation, "Open again", the edge
+switch, and a switch dropping a pending ensure without re-ensuring (negative
+controls: no intent guard, ensure on every open, no `inert`);
+`ScratchPanel.source.test.ts` pins the shared Terminal/SideHandle, the tempo, the
+head-only Escape and App's mount inside the key.
+
 ## The tab slide belongs to the swipe, not to the app
 
 `switchTab` plays a one-shot `slide-in-left/right` on the page layer — but only

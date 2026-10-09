@@ -18,6 +18,7 @@
   import { hubRooms, systemStatus } from './lib/core/ws.ts';
   import SystemStatus from './lib/system/SystemStatus.svelte';
   import ServerList from './lib/app/ServerList.svelte';
+  import ScratchPanel from './lib/app/ScratchPanel.svelte';
   import NotifyCentre from './lib/hub/NotifyCentre.svelte';
   import { centre } from './lib/hub/notify-centre.svelte.ts';
   import AddServerDialog from './lib/app/AddServerDialog.svelte';
@@ -172,6 +173,22 @@
       document.documentElement.style.setProperty('--sidebar-w', saved + 'px');
     }
   });
+
+  // The scratch terminal (board #324): App owns the frame's state — open,
+  // edge, sizes — outside the server key; the panel itself (and its Terminal)
+  // mounts inside `{#key serverEpoch}`, so a switch destroys it. A switch
+  // closes it the moment it starts; the next explicit open ensures the
+  // session on the server you are on.
+  let scratchOpen = $state(false);
+  let scratchEdge = $state(localStorage.getItem('tmux_scratch_edge') === 'left' ? 'left' : 'bottom');
+  function setScratchEdge(e) { scratchEdge = e; localStorage.setItem('tmux_scratch_edge', e); }
+  $effect(() => {
+    for (const [v, k, lo, hi] of [['--scratch-h', 'tmux_scratch_h', 160, 1200], ['--scratch-w', 'tmux_scratch_w', 280, 1400]]) {
+      const saved = parseInt(localStorage.getItem(k) || '', 10);
+      if (saved >= lo && saved <= hi) document.documentElement.style.setProperty(v, saved + 'px');
+    }
+  });
+  $effect(() => { if (switching) scratchOpen = false; });
 
   // Overlay geometry vars for fixed-position panels (Preferences): they must
   // clear whatever shell chrome exists — top bar when disconnected, the left
@@ -903,6 +920,7 @@
    * their ws.ts listeners/subscriptions went with the unmount. A source test
    * pins this list against the module-level stores. */
   function resetServerMemory() {
+    scratchOpen = false;                // the panel closes; its Terminal goes with the keyed tree
     resetFilesMemory();                 // browse positions keyed by session name
     forgetDownloadRows();               // this session's rows; parts on disk carry their server
     setServedBackends(null);            // the backend list is the server's answer
@@ -1656,6 +1674,7 @@
     cycleWindow(direction) {
       window.dispatchEvent(new CustomEvent('terminal-window-shortcut', { detail: { direction } }));
     },
+    toggleScratch() { scratchOpen = !scratchOpen; },
   };
   const shortcutsOn = $derived(!layout.isTouchDevice);
   $effect(() => {
@@ -1734,6 +1753,16 @@
           <!-- The notification centre (board #322): above the server switcher,
                a CONTROL like it. The badge counts unviewed alerts, static
                accent ink — the unread language, never red. -->
+          <!-- The scratch terminal (board #324): "可以放到桌面版的左下角" — the
+               bottom group's first control, never draggable. -->
+          <button
+            class="rail-btn rail-scratch"
+            class:open={scratchOpen}
+            aria-label={t('scratchTitle')}
+            aria-pressed={scratchOpen}
+            use:hoverInfo={() => { const key = shortcutsOn ? shortcuts.get('toggleScratch') : ''; return { title: t('scratchTitle'), note: key ? shortcutLabel(key) : undefined }; }}
+            onclick={() => (scratchOpen = !scratchOpen)}
+          ><Icon name="terminal" size={17} /></button>
           {#if centreShown}
             <button
               class="rail-btn rail-bell"
@@ -2021,6 +2050,10 @@
       {/if}
       </div>
     </div>
+    {#if !layout.isTouchDevice && connected}
+      <ScratchPanel open={scratchOpen} live={!switching} edge={scratchEdge} {fontSize}
+        onclose={() => (scratchOpen = false)} onedge={setScratchEdge} />
+    {/if}
     {/key}
     {/if}
   </div>
@@ -2154,6 +2187,7 @@
   /* Server picker geometry and two-line rows are local; shared atoms own paint. */
   .rail-server { margin-bottom: 4px; }
   .rail-bell { position: relative; }
+  .rail-scratch.open { color: var(--accent); }
   .bell-badge {
     position: absolute; top: 3px; right: 2px; min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box;
     border-radius: var(--ui-radius-pill); background: var(--accent-ink); color: var(--bg);

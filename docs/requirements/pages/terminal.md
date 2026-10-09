@@ -85,6 +85,7 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
   WebView
 - Every unassigned hardware Ctrl / Option combination is encoded as terminal input and sent to tmux, including Ctrl+X, Ctrl+F, letters, punctuation, navigation keys, and F1–F12; touch-capable desktop browsers and devices with attached keyboards follow the same path
 - Cmd combinations remain owned by the macOS app/browser unless explicitly configured as an app shortcut
+- **Scratch terminal** (board #324): a rail control (bottom-left) or ⌘⌥` / Ctrl+Alt+` slides a panel in from the bottom or the left (switch in its head) with a shell in `$HOME` that belongs to no project; × or the toggle hides it and the shell keeps running; the stop icon kills it after a confirmation; an ended shell offers "Open again". Escape stays with the shell.
 
 ## API Calls
 - `subscribe(target)` — start streaming pane output (200ms polling, includes cursor position and command changes)
@@ -94,6 +95,7 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
 - `capture_pane(target, lines)` — initial content load
 - `list_panes(session)` — populate window switcher (current session)
 - `resize_pane(target, cols, rows)` — resize pane to match client viewport (auto-restores on disconnect)
+- `scratch_session()` / `scratch_kill()` — the scratch terminal's session (ensure + its pane target / kill ours only)
 
 ## State Management
 - Active pane target (session:window.pane)

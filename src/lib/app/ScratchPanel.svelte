@@ -1,0 +1,164 @@
+<script>
+  // The scratch terminal (board #324, owner 2026-10-09: "有点像 iTerm 或 Ghost
+  // 里的那种全局 Terminal 模式…跟你的项目没有关系，我就是单纯想在系统上去运行个
+  // Terminal"): a quake-style panel over the current page, from the bottom or
+  // the left, hosting the ONE project-less tmux session the server owns
+  // (projects/scratch.rs). Desktop only — App renders it only off touch.
+  //
+  // App keeps the frame's STATE (open, edge, sizes) outside the server key;
+  // this component is rendered INSIDE `{#key serverEpoch}`, so a server switch
+  // destroys it with its Terminal and subscription. `live` goes false the
+  // moment a switch starts: every pending ensure/kill/focus completion is
+  // dropped from then on (one intent counter), and nothing ensures again until
+  // the reader opens the panel on the server they are on.
+  //
+  // Closing HIDES the panel (the session keeps running, the Terminal stays
+  // mounted and records frames without rendering, rule 7); Kill ends the
+  // session. Escape belongs to the shell inside: it closes the panel only from
+  // the head's own controls.
+  import { tick } from 'svelte';
+  import Terminal from '../terminal/Terminal.svelte';
+  import SideHandle from '../ui/SideHandle.svelte';
+  import Segmented from '../ui/Segmented.svelte';
+  import CommandButton from '../ui/CommandButton.svelte';
+  import ConfirmDialog from '../ui/ConfirmDialog.svelte';
+  import { t } from '../core/i18n.svelte.ts';
+  import { scratchSession, scratchKill } from '../core/ws.ts';
+
+  let {
+    open = false, live = true, edge = 'bottom', fontSize = 14,
+    onclose = () => {}, onedge = (_e) => {},
+  } = $props();
+
+  let phase = $state('idle');     // idle | opening | ready | ended | error
+  let target = $state('');
+  let error = $state('');
+  let killAsk = $state(false);
+  let killing = $state(false);
+  let killError = $state('');
+  let panelEl = $state(null);
+  let opener = null;              // what had focus when the panel opened
+  let intent = 0;                 // one counter for every async completion
+  const mine = (n) => n === intent && live;
+
+  async function ensure() {
+    const n = ++intent;
+    phase = 'opening'; error = '';
+    try {
+      const r = await scratchSession();
+      if (!mine(n)) return;
+      target = r.target;
+      phase = 'ready';
+      if (open) void focusTerminal(n);
+    } catch (e) {
+      if (!mine(n)) return;
+      phase = 'error'; error = e?.message ?? String(e);
+    }
+  }
+  /** Focus only once the Terminal is mounted AND the panel is shown. */
+  async function focusTerminal(n) {
+    await tick();
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+    if (!mine(n) || !open || !panelEl) return;
+    panelEl.querySelector('.xterm-helper-textarea')?.focus({ preventScroll: true });
+  }
+
+  $effect(() => {
+    if (!live) { intent++; return; }
+    if (open) {
+      const a = document.activeElement;
+      if (a instanceof HTMLElement && !panelEl?.contains(a)) opener = a;
+      if (phase === 'idle' || phase === 'error') void ensure();
+      else if (phase === 'ready') void focusTerminal(intent);
+    } else if (panelEl?.contains(document.activeElement)) {
+      // Back to where the reader was — only if focus is still ours to give
+      // and that control is still there to take it.
+      const back = opener;
+      opener = null;
+      if (back?.isConnected && back.checkVisibility?.() !== false && !back.closest('[inert]')) back.focus({ preventScroll: true });
+      else (document.activeElement)?.blur?.();
+    }
+  });
+
+  function ended() { target = ''; phase = 'ended'; }
+
+  async function kill() {
+    const n = intent;
+    killing = true; killError = '';
+    try {
+      await scratchKill();
+      if (!mine(n)) return;
+      killAsk = false;
+      ended();
+      onclose();
+    } catch (e) {
+      if (mine(n)) killError = e?.message ?? String(e);
+    } finally { killing = false; }
+  }
+  function onHeadKey(e) {
+    if (e.key === 'Escape' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); onclose(); }
+  }
+</script>
+
+<section class="scratch" class:open class:left={edge === 'left'} bind:this={panelEl}
+  inert={!open} aria-hidden={!open} aria-label={t('scratchTitle')}>
+  {#if edge === 'left'}
+    <SideHandle varName="--scratch-w" storeKey="tmux_scratch_w" min={280} max={1400} def={560} edge="right" label={t('scratchTitle')} always />
+  {:else}
+    <SideHandle varName="--scratch-h" storeKey="tmux_scratch_h" min={160} max={1200} def={320} edge="top" label={t('scratchTitle')} always />
+  {/if}
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <header class="scratch-head" onkeydown={onHeadKey} role="toolbar" aria-label={t('scratchTitle')} tabindex="-1">
+    <span class="scratch-name">{t('scratchTitle')}</span>
+    <span class="spacer"></span>
+    <Segmented options={[{ value: 'bottom', label: t('scratchBottom') }, { value: 'left', label: t('scratchLeft') }]}
+      value={edge} onchange={(v) => onedge(v)} ariaLabel={t('scratchEdge')} />
+    <CommandButton variant="icon" icon="stop" label={t('scratchKill')} disabled={phase !== 'ready'} onclick={() => { killError = ''; killAsk = true; }} />
+    <CommandButton variant="icon" icon="x" label={t('close')} onclick={onclose} />
+  </header>
+  <div class="scratch-body">
+    {#if target}
+      <Terminal {target} session="tmm-scratch" {fontSize} embedded chromeless active={open} visible={open} onPaneExit={ended} />
+    {:else}
+      <div class="scratch-state">
+        {#if phase === 'opening'}<span>{t('scratchOpening')}</span>
+        {:else if phase === 'ended'}<span>{t('scratchEnded')}</span><CommandButton variant="secondary" label={t('scratchOpenAgain')} onclick={ensure} />
+        {:else if phase === 'error'}<span class="scratch-err">{error}</span><CommandButton variant="secondary" label={t('scratchOpenAgain')} onclick={ensure} />
+        {/if}
+      </div>
+    {/if}
+  </div>
+</section>
+
+<ConfirmDialog open={killAsk} busy={killing} error={killError} confirmIcon="stop"
+  title={t('scratchKillTitle')} note={t('scratchKillNote')} confirmLabel={t('scratchKill')}
+  onconfirm={kill} oncancel={() => { if (!killing) killAsk = false; }} />
+
+<style>
+  /* Over the content area (right of the rail), a tool panel, not a modal: no
+     backdrop. One slide on --t-move; closed it is off-screen, hidden and
+     inert, so nothing in it is reachable. */
+  .scratch {
+    position: fixed; z-index: 20; display: flex; flex-direction: column;
+    left: var(--shell-left, 0px); right: 0; bottom: 0; height: var(--scratch-h, 320px);
+    background: var(--bg); border-top: 1px solid var(--border);
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.18);
+    transform: translateY(100%); visibility: hidden;
+    transition: transform var(--t-move) ease, visibility 0s linear var(--t-move);
+  }
+  .scratch.left {
+    right: auto; top: 0; height: auto; width: var(--scratch-w, 560px);
+    border-top: none; border-right: 1px solid var(--border);
+    box-shadow: 8px 0 24px rgba(0, 0, 0, 0.18);
+    transform: translateX(-100%);
+  }
+  .scratch.open { transform: none; visibility: visible; transition: transform var(--t-move) ease; }
+  .scratch-head { display: flex; align-items: center; gap: 6px; padding: 4px 8px; min-height: 36px; box-sizing: border-box; border-bottom: 1px solid var(--border); outline: none; }
+  .scratch-name { font-size: var(--fs-meta); color: var(--text2); font-family: var(--font-mono); }
+  .spacer { flex: 1; }
+  .scratch-body { position: relative; flex: 1; min-height: 0; display: flex; }
+  .scratch-body > :global(*) { flex: 1; min-width: 0; }
+  .scratch-state { display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--text3); font-size: var(--fs-ui); }
+  .scratch-err { color: var(--danger-ink); }
+  @media (prefers-reduced-motion: reduce) { .scratch, .scratch.open { transition: none; } }
+</style>
