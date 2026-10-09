@@ -4425,6 +4425,7 @@ dependencies = [
  "hkdf",
  "hmac",
  "libc",
+ "plist",
  "rand 0.8.5",
  "rusqlite",
  "rustls-pemfile",

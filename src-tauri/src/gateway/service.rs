@@ -1,32 +1,40 @@
 //! The per-user service that keeps the gateway running (board #323): a
 //! launchd LaunchAgent on macOS, a systemd user unit on Linux.
 //!
-//! IDENTITY, not name: an installed file is ours only if it runs THIS `tmm`
-//! (absolute path) with THIS config root (the `XDG_CONFIG_HOME` base, passed
-//! in the file's environment — never a token, never in argv). Every verb reads
-//! the installed file back first; a file of our name that names another
-//! executable or root is refused with what it names, never adopted or
-//! overwritten (`--replace` backs it up first, for a migration). Install is
-//! idempotent: same bytes and running → nothing happens; only `restart`
-//! forces one.
+//! IDENTITY, not name: an installed file is ours only if it is EXACTLY the
+//! shape we write — for this name, running THIS `tmm` (absolute path) as
+//! `gateway start --service` with THIS config root (the `XDG_CONFIG_HOME`
+//! base in the file's environment; never a token, never in argv). The plist
+//! is read as a structure (XML or binary; Label == the file's name, the
+//! whole ProgramArguments array); the unit by a strict line grammar (the
+//! last `Environment=` assignment of a key wins, as systemd reads it).
+//! Only a file that does not exist is absent; any other read or parse
+//! problem refuses. A file of our name that is not ours is refused with what
+//! it names — never adopted, overwritten or removed; `--replace` backs it up
+//! first, for a migration, and restores it step by step on failure.
 //!
-//! The service name is a parameter with ONE production default per platform
-//! (`LABEL`, `UNIT`); a smoke run passes its own test name, so it can never
-//! match — exact string compare — the real service.
+//! `--service` makes the started gateway read config.toml ALONE, so the
+//! service and `status` always see the same thing whatever the user
+//! manager's environment holds.
 //!
-//! Rendering is pure (tested on bytes). The file runs `tmm gateway start`
-//! directly: no shell, so no `sh -c` and no shell quoting; systemd's own
-//! quoting, specifier (`%`) and expansion (`$`) rules are escaped, the plist
-//! is XML-escaped, and a newline in any value is refused.
+//! Native operations go through `Sys` (tests inject a fake): an unload that
+//! fails aborts unless the service is confirmed not loaded; install and
+//! restart wait (bounded) until OUR instance runs and the probe says Ours,
+//! and fail otherwise. Same bytes and running → nothing happens; only
+//! `restart` forces one.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::time::Duration;
+
+use super::probe::Verdict;
 
 /// launchd label (the one clawdbjs already runs, #313; deliberately not the
 /// app bundle id `com.tmuxmobile.dev`).
 pub const LABEL: &str = "cc.voka.tmux-mobile";
 /// systemd user unit.
 pub const UNIT: &str = "tmux-mobile-gateway.service";
+/// How long install/restart wait for our instance to answer.
+pub const READY: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Identity {
@@ -45,16 +53,31 @@ pub struct Spec {
     pub log: String,
 }
 
+/// A service name is a bare file name: no separator, no `..`, no leading
+/// `.`/`-`, a conservative character set, and `.service` on Linux.
+pub fn valid_name(name: &str, mac: bool) -> Result<(), String> {
+    let ok_chars = name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '@'));
+    if name.is_empty() || !ok_chars || name.contains("..") || name.starts_with('.') || name.starts_with('-') {
+        return Err(format!("{name:?} is not a valid service name"));
+    }
+    if !mac && !name.ends_with(".service") {
+        return Err(format!("{name:?} must end in .service"));
+    }
+    Ok(())
+}
+
 fn no_newline(what: &str, v: &str) -> Result<(), String> {
-    if v.contains('\n') || v.contains('\r') {
-        Err(format!("{what} contains a newline: {v:?}"))
+    if v.contains('\n') || v.contains('\r') || v.contains('\0') {
+        Err(format!("{what} contains a newline or NUL: {v:?}"))
     } else {
         Ok(())
     }
 }
 
-/// One argument in a systemd ExecStart= line: double-quoted, `\` and `"`
-/// escaped, `%` doubled (specifiers) and `$` doubled (variable expansion).
+// ─── systemd ────────────────────────────────────────────────────────────────
+
+/// One argument in an ExecStart= line: double-quoted, `\` and `"` escaped,
+/// `%` doubled (specifiers), `$` doubled (variable expansion).
 pub(crate) fn systemd_arg(s: &str) -> String {
     let mut out = String::from("\"");
     for c in s.chars() {
@@ -70,8 +93,8 @@ pub(crate) fn systemd_arg(s: &str) -> String {
     out
 }
 
-/// One `Environment=` assignment: quoted, `\` and `"` escaped, `%` doubled
-/// (systemd does not expand `$` there, so it stays literal).
+/// One `Environment=` assignment: quoted, `\` and `"` escaped, `%` doubled;
+/// `$` is literal there (systemd does not expand it in Environment=).
 pub(crate) fn systemd_env(key: &str, value: &str) -> String {
     let mut v = String::new();
     for c in value.chars() {
@@ -83,6 +106,40 @@ pub(crate) fn systemd_env(key: &str, value: &str) -> String {
         }
     }
     format!("Environment=\"{key}={v}\"")
+}
+
+/// The inverse of `systemd_arg` for one whole quoted token.
+fn unquote_arg(s: &str) -> Option<String> {
+    let inner = s.strip_prefix('"')?.strip_suffix('"')?;
+    let mut out = String::new();
+    let mut it = inner.chars();
+    while let Some(c) = it.next() {
+        match c {
+            '\\' => out.push(it.next()?),
+            '%' => { if it.next()? != '%' { return None; } out.push('%'); }
+            '$' => { if it.next()? != '$' { return None; } out.push('$'); }
+            '"' => return None,
+            c => out.push(c),
+        }
+    }
+    Some(out)
+}
+
+/// The inverse of `systemd_env`: `"KEY=value"` → (key, value).
+fn unquote_env(s: &str) -> Option<(String, String)> {
+    let inner = s.strip_prefix('"')?.strip_suffix('"')?;
+    let mut out = String::new();
+    let mut it = inner.chars();
+    while let Some(c) = it.next() {
+        match c {
+            '\\' => out.push(it.next()?),
+            '%' => { if it.next()? != '%' { return None; } out.push('%'); }
+            '"' => return None,
+            c => out.push(c),
+        }
+    }
+    let (k, v) = out.split_once('=')?;
+    Some((k.to_string(), v.to_string()))
 }
 
 pub fn render_systemd(spec: &Spec) -> Result<String, String> {
@@ -97,7 +154,7 @@ pub fn render_systemd(spec: &Spec) -> Result<String, String> {
          \n\
          [Service]\n\
          Type=simple\n\
-         ExecStart={} gateway start\n\
+         ExecStart={} gateway start --service\n\
          {}\n\
          {}\n\
          {}\n\
@@ -113,81 +170,83 @@ pub fn render_systemd(spec: &Spec) -> Result<String, String> {
     ))
 }
 
-pub(crate) fn xml(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
+/// The identity a unit names, by the strict grammar we write: exactly one
+/// `ExecStart=` of `"<exe>" gateway start --service`, `Environment=` lines
+/// in our quoted form (the last value of a key wins), and nothing that
+/// would change what runs (`ExecStartPre`, `EnvironmentFile`, a second
+/// `ExecStart`, a drop-in-style `[Service]` override is not in the file).
+pub fn unit_identity(text: &str) -> Result<Identity, String> {
+    let mut exec = Vec::new();
+    let mut root: Option<String> = None;
+    for line in text.lines() {
+        let line = line.trim_end();
+        if let Some(v) = line.strip_prefix("ExecStart=") {
+            exec.push(v.to_string());
+        } else if let Some(v) = line.strip_prefix("Environment=") {
+            let (k, val) = unquote_env(v).ok_or_else(|| format!("an Environment= line tmm did not write: {line}"))?;
+            if k == "XDG_CONFIG_HOME" {
+                root = Some(val);
+            }
+        } else if ["ExecStartPre=", "ExecStartPost=", "EnvironmentFile=", "UnsetEnvironment=", "ExecStop="].iter().any(|p| line.starts_with(p)) {
+            return Err(format!("a line tmm does not write: {line}"));
+        }
+    }
+    let [exec] = exec.as_slice() else { return Err(format!("{} ExecStart= lines (expected one)", exec.len())) };
+    let quoted = exec.strip_suffix(" gateway start --service").ok_or("ExecStart is not `<tmm> gateway start --service`")?;
+    let exe = unquote_arg(quoted).ok_or("ExecStart's executable is not in tmm's quoting")?;
+    let config_home = root.ok_or("no XDG_CONFIG_HOME in the unit")?;
+    Ok(Identity { exe, config_home })
 }
 
+// ─── launchd ────────────────────────────────────────────────────────────────
+
 pub fn render_plist(spec: &Spec) -> Result<String, String> {
+    use plist::{Dictionary, Value};
     for (w, v) in [("label", &spec.name), ("executable", &spec.id.exe), ("config root", &spec.id.config_home), ("PATH", &spec.path_env), ("HOME", &spec.home), ("log", &spec.log)] {
         no_newline(w, v)?;
     }
-    Ok(format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
-         <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
-         <!-- Managed by `tmm gateway install` (board #323). Edit with tmm, not by hand. -->\n\
-         <plist version=\"1.0\">\n\
-         <dict>\n\
-         \t<key>Label</key><string>{label}</string>\n\
-         \t<key>ProgramArguments</key>\n\
-         \t<array>\n\
-         \t\t<string>{exe}</string>\n\
-         \t\t<string>gateway</string>\n\
-         \t\t<string>start</string>\n\
-         \t</array>\n\
-         \t<key>EnvironmentVariables</key>\n\
-         \t<dict>\n\
-         \t\t<key>XDG_CONFIG_HOME</key><string>{root}</string>\n\
-         \t\t<key>HOME</key><string>{home}</string>\n\
-         \t\t<key>PATH</key><string>{path}</string>\n\
-         \t</dict>\n\
-         \t<key>RunAtLoad</key><true/>\n\
-         \t<key>KeepAlive</key><true/>\n\
-         \t<key>StandardOutPath</key><string>{log}</string>\n\
-         \t<key>StandardErrorPath</key><string>{log}</string>\n\
-         </dict>\n\
-         </plist>\n",
-        label = xml(&spec.name),
-        exe = xml(&spec.id.exe),
-        root = xml(&spec.id.config_home),
-        home = xml(&spec.home),
-        path = xml(&spec.path_env),
-        log = xml(&spec.log),
-    ))
+    let mut env = Dictionary::new();
+    env.insert("XDG_CONFIG_HOME".into(), Value::String(spec.id.config_home.clone()));
+    env.insert("HOME".into(), Value::String(spec.home.clone()));
+    env.insert("PATH".into(), Value::String(spec.path_env.clone()));
+    let mut d = Dictionary::new();
+    d.insert("Label".into(), Value::String(spec.name.clone()));
+    d.insert(
+        "ProgramArguments".into(),
+        Value::Array(["gateway", "start", "--service"].iter().fold(vec![Value::String(spec.id.exe.clone())], |mut a, s| {
+            a.push(Value::String((*s).into()));
+            a
+        })),
+    );
+    d.insert("EnvironmentVariables".into(), Value::Dictionary(env));
+    d.insert("RunAtLoad".into(), Value::Boolean(true));
+    d.insert("KeepAlive".into(), Value::Boolean(true));
+    d.insert("StandardOutPath".into(), Value::String(spec.log.clone()));
+    d.insert("StandardErrorPath".into(), Value::String(spec.log.clone()));
+    let mut out = Vec::new();
+    Value::Dictionary(d).to_writer_xml(&mut out).map_err(|e| e.to_string())?;
+    let mut text = String::from_utf8(out).map_err(|e| e.to_string())?;
+    text.push('\n');
+    Ok(text)
 }
 
-fn unescape_systemd(s: &str) -> String {
-    let inner = s.trim().trim_start_matches('"').trim_end_matches('"');
-    let mut out = String::new();
-    let mut it = inner.chars().peekable();
-    while let Some(c) = it.next() {
-        match (c, it.peek()) {
-            ('\\', Some(&n)) => { out.push(n); it.next(); }
-            ('%', Some('%')) | ('$', Some('$')) => { out.push(c); it.next(); }
-            _ => out.push(c),
-        }
+/// The identity a plist names, read as a structure: Label == `name`, and
+/// ProgramArguments exactly `[<exe>, gateway, start, --service]`.
+pub fn plist_identity(bytes: &[u8], name: &str) -> Result<Identity, String> {
+    let v = plist::Value::from_reader(std::io::Cursor::new(bytes)).map_err(|e| format!("not a readable plist: {e}"))?;
+    let d = v.as_dictionary().ok_or("the plist is not a dictionary")?;
+    let label = d.get("Label").and_then(|l| l.as_string()).ok_or("no Label")?;
+    if label != name {
+        return Err(format!("its Label is {label:?}, not {name:?}"));
     }
-    out
-}
-
-fn unxml(s: &str) -> String {
-    s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
-}
-
-/// The identity an installed file names, or None when it is not a file we
-/// could have written.
-pub fn identity_of(text: &str, mac: bool) -> Option<Identity> {
-    if mac {
-        let args = text.split("<key>ProgramArguments</key>").nth(1)?;
-        let exe = args.split("<string>").nth(1)?.split("</string>").next()?;
-        let env = text.split("<key>XDG_CONFIG_HOME</key>").nth(1)?;
-        let root = env.split("<string>").nth(1)?.split("</string>").next()?;
-        Some(Identity { exe: unxml(exe), config_home: unxml(root) })
-    } else {
-        let exec = text.lines().find_map(|l| l.strip_prefix("ExecStart="))?;
-        let quoted = exec.strip_suffix(" gateway start")?;
-        let root = text.lines().find_map(|l| l.strip_prefix("Environment=\"XDG_CONFIG_HOME="))?;
-        Some(Identity { exe: unescape_systemd(quoted), config_home: unescape_systemd(&format!("\"{root}")) })
-    }
+    let args: Vec<&str> = d.get("ProgramArguments").and_then(|a| a.as_array()).ok_or("no ProgramArguments")?
+        .iter().map(|a| a.as_string()).collect::<Option<_>>().ok_or("a ProgramArguments entry is not a string")?;
+    let [exe, "gateway", "start", "--service"] = args.as_slice() else {
+        return Err(format!("it runs {args:?}, not `<tmm> gateway start --service`"));
+    };
+    let root = d.get("EnvironmentVariables").and_then(|e| e.as_dictionary())
+        .and_then(|e| e.get("XDG_CONFIG_HOME")).and_then(|r| r.as_string()).ok_or("no XDG_CONFIG_HOME")?;
+    Ok(Identity { exe: (*exe).to_string(), config_home: root.to_string() })
 }
 
 /// Where the file for `name` lives.
@@ -199,40 +258,192 @@ pub fn file_for(name: &str, mac: bool, home: &Path) -> PathBuf {
     }
 }
 
-/// What `install` will do, decided from the file on disk (pure).
+// ─── The decision ───────────────────────────────────────────────────────────
+
+/// What is on disk for a name.
 #[derive(Debug, PartialEq, Eq)]
-pub enum Plan {
-    Create,
-    /// Same identity, same bytes: only (re)start when it is not running.
-    Keep,
-    /// Same identity, different bytes (a new PATH, a moved log): rewrite + reload.
-    Update,
-    /// A file of our name that is not ours.
-    Refuse(String),
+pub enum OnDisk {
+    Absent,
+    Ours { bytes: Vec<u8> },
+    NotOurs(String),
 }
 
-pub fn plan(existing: Option<&str>, rendered: &str, ours: &Identity, mac: bool) -> Plan {
-    let Some(text) = existing else { return Plan::Create };
-    match identity_of(text, mac) {
-        Some(id) if id == *ours => {
-            if text == rendered { Plan::Keep } else { Plan::Update }
-        }
-        Some(id) => Plan::Refuse(format!(
-            "an installed service of this name runs {} with config root {} — not this tmm ({}, {}); use --replace to back it up and take over",
-            id.exe, id.config_home, ours.exe, ours.config_home
-        )),
-        None => Plan::Refuse("an installed service of this name was not written by tmm gateway; use --replace to back it up and take over".into()),
+pub fn read_on_disk(file: &Path, name: &str, me: &Identity, mac: bool) -> OnDisk {
+    let bytes = match std::fs::read(file) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return OnDisk::Absent,
+        Err(e) => return OnDisk::NotOurs(format!("{} cannot be read ({e})", file.display())),
+    };
+    let id = if mac {
+        plist_identity(&bytes, name)
+    } else {
+        std::str::from_utf8(&bytes).map_err(|_| "not UTF-8".to_string()).and_then(unit_identity)
+    };
+    match id {
+        Ok(id) if id == *me => OnDisk::Ours { bytes },
+        Ok(id) => OnDisk::NotOurs(format!("{} runs {} with config root {} — not this tmm ({}, {})", file.display(), id.exe, id.config_home, me.exe, me.config_home)),
+        Err(why) => OnDisk::NotOurs(format!("{} was not written by tmm gateway for this name ({why})", file.display())),
     }
 }
 
-// ─── Effects ────────────────────────────────────────────────────────────────
-
-pub fn mac() -> bool {
-    cfg!(target_os = "macos")
+/// What `install` will do (pure).
+#[derive(Debug, PartialEq, Eq)]
+pub enum Plan {
+    Create,
+    Keep,
+    Update,
+    Refuse(String),
 }
 
-fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
+pub fn plan(on_disk: &OnDisk, rendered: &str) -> Plan {
+    match on_disk {
+        OnDisk::Absent => Plan::Create,
+        OnDisk::Ours { bytes } if bytes.as_slice() == rendered.as_bytes() => Plan::Keep,
+        OnDisk::Ours { .. } => Plan::Update,
+        OnDisk::NotOurs(why) => Plan::Refuse(format!("{why}; use --replace to back it up and take over")),
+    }
+}
+
+// ─── Effects, through an injectable system ──────────────────────────────────
+
+pub struct Sys {
+    pub mac: bool,
+    pub home: PathBuf,
+    pub uid: String,
+    pub me: Identity,
+    pub path_env: String,
+    /// Run a native command: Ok(stdout) or Err(stderr).
+    pub run: Box<dyn Fn(&str, &[&str]) -> Result<String, String>>,
+    /// The local probe of the config the service reads.
+    pub probe: Box<dyn Fn() -> Verdict>,
+    pub sleep: Box<dyn Fn(Duration)>,
+}
+
+impl Sys {
+    /// The real system for this process.
+    pub fn real() -> Result<Sys, String> {
+        let me = current_identity()?;
+        Ok(Sys {
+            mac: cfg!(target_os = "macos"),
+            home: std::env::var_os("HOME").map(PathBuf::from).ok_or("HOME is not set")?,
+            // SAFETY: getuid has no preconditions.
+            uid: unsafe { libc::getuid() }.to_string(),
+            me,
+            path_env: std::env::var("PATH").unwrap_or_default(),
+            run: Box::new(|cmd, args| {
+                let out = std::process::Command::new(cmd).args(args).output().map_err(|e| format!("{cmd}: {e}"))?;
+                if out.status.success() {
+                    Ok(String::from_utf8_lossy(&out.stdout).into())
+                } else {
+                    Err(format!("{cmd} {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim()))
+                }
+            }),
+            probe: Box::new(|| {
+                let cfg = crate::config::Config::peek_service();
+                tokio::runtime::Builder::new_current_thread().enable_all().build()
+                    .map(|rt| rt.block_on(super::probe::probe(&cfg)))
+                    .unwrap_or_else(|e| Verdict::Occupied(e.to_string()))
+            }),
+            sleep: Box::new(std::thread::sleep),
+        })
+    }
+
+    pub fn file(&self, name: &str) -> PathBuf {
+        file_for(name, self.mac, &self.home)
+    }
+
+    pub fn spec(&self, name: &str) -> Spec {
+        let log = Path::new(&self.me.config_home).join("tmux-mobile").join("gateway.log");
+        Spec { name: name.into(), id: self.me.clone(), path_env: self.path_env.clone(), home: self.home.to_string_lossy().into(), log: log.to_string_lossy().into() }
+    }
+
+    fn target(&self, name: &str) -> String {
+        format!("gui/{}/{name}", self.uid)
+    }
+
+    /// The running pid of the service, if it runs.
+    pub fn running(&self, name: &str) -> Option<u32> {
+        if self.mac {
+            let out = (self.run)("launchctl", &["print", &self.target(name)]).ok()?;
+            out.lines().find_map(|l| l.trim().strip_prefix("pid = ")).and_then(|p| p.trim().parse().ok())
+        } else {
+            let out = (self.run)("systemctl", &["--user", "show", name, "--property=ActiveState,MainPID"]).ok()?;
+            let active = out.lines().any(|l| l.trim() == "ActiveState=active");
+            let pid = out.lines().find_map(|l| l.trim().strip_prefix("MainPID=")).and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
+            (active && pid > 0).then_some(pid)
+        }
+    }
+
+    /// Is the service loaded at all (so an unload is needed)?
+    fn loaded(&self, name: &str) -> bool {
+        if self.mac {
+            (self.run)("launchctl", &["print", &self.target(name)]).is_ok()
+        } else {
+            match (self.run)("systemctl", &["--user", "show", name, "--property=LoadState,ActiveState,UnitFileState"]) {
+                Ok(out) => {
+                    let not_found = out.lines().any(|l| l.trim() == "LoadState=not-found");
+                    let inactive = out.lines().any(|l| l.trim() == "ActiveState=inactive");
+                    let disabled = out.lines().any(|l| matches!(l.trim(), "UnitFileState=disabled" | "UnitFileState="));
+                    !(not_found || (inactive && disabled))
+                }
+                Err(_) => true, // cannot tell: treat as loaded, so a failed unload aborts
+            }
+        }
+    }
+
+    fn load(&self, name: &str, file: &Path) -> Result<(), String> {
+        if self.mac {
+            (self.run)("launchctl", &["bootstrap", &format!("gui/{}", self.uid), &file.to_string_lossy()]).map(|_| ())
+        } else {
+            (self.run)("systemctl", &["--user", "daemon-reload"])?;
+            (self.run)("systemctl", &["--user", "enable", "--now", name]).map(|_| ())
+        }
+    }
+
+    /// Stop and unload; a failure is fine only when it is confirmed not loaded.
+    fn unload(&self, name: &str) -> Result<(), String> {
+        let r = if self.mac {
+            (self.run)("launchctl", &["bootout", &self.target(name)]).map(|_| ())
+        } else {
+            (self.run)("systemctl", &["--user", "disable", "--now", name]).map(|_| ())
+        };
+        match r {
+            Ok(()) => Ok(()),
+            Err(e) if !self.loaded(name) => { let _ = e; Ok(()) }
+            Err(e) => Err(format!("could not stop {name}: {e}")),
+        }
+    }
+
+    /// Wait (bounded) until OUR instance runs (a stable pid) and the probe
+    /// says Ours.
+    fn ready(&self, name: &str) -> Result<u32, String> {
+        let step = Duration::from_millis(250);
+        let mut waited = Duration::ZERO;
+        let mut last = String::from("it did not start");
+        while waited <= READY {
+            if let Some(pid) = self.running(name) {
+                match (self.probe)() {
+                    Verdict::Ours { .. } if self.running(name) == Some(pid) => return Ok(pid),
+                    Verdict::Ours { .. } => last = "it restarted while being checked".into(),
+                    Verdict::Occupied(w) => last = w,
+                    Verdict::None => last = "it runs but does not listen yet".into(),
+                }
+            } else {
+                last = format!("{name} is not running");
+            }
+            (self.sleep)(step);
+            waited += step;
+        }
+        Err(format!("{name} is not answering after {} s: {last}", READY.as_secs()))
+    }
+
+    fn write(&self, file: &Path, text: &str) -> Result<(), String> {
+        let dir = file.parent().ok_or("service file has no directory")?;
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        let tmp = dir.join(format!(".{}.tmm-new", file.file_name().unwrap_or_default().to_string_lossy()));
+        std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, file).map_err(|e| { let _ = std::fs::remove_file(&tmp); e.to_string() })
+    }
 }
 
 /// This tmm and this config root.
@@ -245,190 +456,151 @@ pub fn current_identity() -> Result<Identity, String> {
     Ok(Identity { exe: exe.to_string_lossy().into(), config_home: base.to_string_lossy().into() })
 }
 
-pub fn spec(name: &str) -> Result<Spec, String> {
-    let id = current_identity()?;
-    let log = Path::new(&id.config_home).join("tmux-mobile").join("gateway.log");
-    Ok(Spec {
-        name: name.to_string(),
-        id,
-        path_env: std::env::var("PATH").unwrap_or_default(),
-        home: home().to_string_lossy().into(),
-        log: log.to_string_lossy().into(),
-    })
-}
-
-fn run(cmd: &str, args: &[&str]) -> Result<String, String> {
-    let out = Command::new(cmd).args(args).output().map_err(|e| format!("{cmd}: {e}"))?;
-    if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).into())
-    } else {
-        Err(format!("{cmd} {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim()))
-    }
-}
-
-fn uid() -> String {
-    // SAFETY: getuid has no preconditions.
-    unsafe { libc::getuid() }.to_string()
-}
-
-/// Is the service running? (pid when it is)
-pub fn running(name: &str) -> Option<u32> {
-    if mac() {
-        let out = run("launchctl", &["print", &format!("gui/{}/{name}", uid())]).ok()?;
-        out.lines().find_map(|l| l.trim().strip_prefix("pid = ")).and_then(|p| p.trim().parse().ok())
-    } else {
-        let out = run("systemctl", &["--user", "show", name, "--property=ActiveState,MainPID"]).ok()?;
-        let active = out.lines().any(|l| l == "ActiveState=active");
-        let pid = out.lines().find_map(|l| l.strip_prefix("MainPID=")).and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
-        (active && pid > 0).then_some(pid)
-    }
-}
-
-fn load(name: &str, file: &Path) -> Result<(), String> {
-    if mac() {
-        run("launchctl", &["bootstrap", &format!("gui/{}", uid()), &file.to_string_lossy()]).map(|_| ())
-    } else {
-        run("systemctl", &["--user", "daemon-reload"])?;
-        run("systemctl", &["--user", "enable", "--now", name]).map(|_| ())
-    }
-}
-
-fn unload(name: &str) -> Result<(), String> {
-    if mac() {
-        run("launchctl", &["bootout", &format!("gui/{}/{name}", uid())]).map(|_| ())
-    } else {
-        run("systemctl", &["--user", "disable", "--now", name]).map(|_| ())
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Done {
-    Installed,
-    AlreadyRunning,
-    Started,
-    Updated,
-    Replaced(PathBuf),
+    Installed(u32),
+    AlreadyRunning(u32),
+    Started(u32),
+    Updated(u32),
+    Replaced { pid: u32, backup: PathBuf },
+}
+
+/// A backup name no earlier backup has.
+fn backup_for(file: &Path) -> Result<PathBuf, String> {
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let base = file.file_name().unwrap_or_default().to_string_lossy().to_string();
+    for n in 0..1000 {
+        let p = file.with_file_name(format!("{base}.bak-{stamp}-{n}"));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&p) {
+            Ok(_) => return Ok(p),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Err("no free backup name".into())
 }
 
 /// Install (or keep) the service `name` for this tmm and config root.
-pub fn install(name: &str, replace: bool) -> Result<Done, String> {
-    let spec = spec(name)?;
-    let mac = mac();
-    let rendered = if mac { render_plist(&spec)? } else { render_systemd(&spec)? };
-    let file = file_for(name, mac, Path::new(&spec.home));
-    let existing = std::fs::read_to_string(&file).ok();
-    let decided = plan(existing.as_deref(), &rendered, &spec.id, mac);
-    let write = |f: &Path| -> Result<(), String> {
-        if let Some(dir) = f.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+pub fn install(sys: &Sys, name: &str, replace: bool) -> Result<Done, String> {
+    valid_name(name, sys.mac)?;
+    let spec = sys.spec(name);
+    let rendered = if sys.mac { render_plist(&spec)? } else { render_systemd(&spec)? };
+    let file = sys.file(name);
+    let on_disk = read_on_disk(&file, name, &sys.me, sys.mac);
+    // Nothing of ours runs: the port must be free, or a new instance could
+    // only fail — and another gateway answering would mask that.
+    let ours_running = matches!(on_disk, OnDisk::Ours { .. }) && sys.running(name).is_some();
+    if !ours_running {
+        match (sys.probe)() {
+            Verdict::None => {}
+            Verdict::Ours { url, .. } => return Err(format!("this machine's gateway already answers at {url}, outside this service (a foreground `tmm gateway start`, or another service); stop it first")),
+            Verdict::Occupied(who) => return Err(format!("the port is held: {who}")),
         }
-        if mac {
-            std::fs::create_dir_all(Path::new(&spec.log).parent().unwrap_or(Path::new("."))).map_err(|e| e.to_string())?;
+    }
+    if sys.mac {
+        std::fs::create_dir_all(Path::new(&spec.log).parent().unwrap_or(Path::new("."))).map_err(|e| e.to_string())?;
+    }
+    match plan(&on_disk, &rendered) {
+        Plan::Keep if ours_running => {
+            let pid = sys.ready(name)?;
+            Ok(Done::AlreadyRunning(pid))
         }
-        let tmp = f.with_extension("tmm-new");
-        std::fs::write(&tmp, &rendered).map_err(|e| e.to_string())?;
-        std::fs::rename(&tmp, f).map_err(|e| e.to_string())
-    };
-    match decided {
-        Plan::Keep if running(name).is_some() => Ok(Done::AlreadyRunning),
         Plan::Keep => {
-            if mac {
-                let _ = unload(name);
-            }
-            load(name, &file)?;
-            Ok(Done::Started)
+            sys.unload(name)?;
+            sys.load(name, &file)?;
+            Ok(Done::Started(sys.ready(name)?))
         }
         Plan::Create => {
-            write(&file)?;
-            load(name, &file)?;
-            Ok(Done::Installed)
+            sys.write(&file, &rendered)?;
+            sys.load(name, &file)?;
+            Ok(Done::Installed(sys.ready(name)?))
         }
         Plan::Update => {
-            let _ = unload(name);
-            write(&file)?;
-            load(name, &file)?;
-            Ok(Done::Updated)
+            sys.unload(name)?;
+            sys.write(&file, &rendered)?;
+            sys.load(name, &file)?;
+            Ok(Done::Updated(sys.ready(name)?))
         }
         Plan::Refuse(why) if !replace => Err(why),
         Plan::Refuse(_) => {
-            // A migration (the #313 hand-written plist): back up, take over,
-            // and put the old one back if ours does not come up.
-            let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-            let backup = file.with_file_name(format!("{}.bak-{stamp}", file.file_name().unwrap_or_default().to_string_lossy()));
+            let backup = backup_for(&file)?;
             std::fs::copy(&file, &backup).map_err(|e| format!("back up {}: {e}", file.display()))?;
-            let _ = unload(name);
-            let up = write(&file).and_then(|_| load(name, &file)).and_then(|_| {
-                std::thread::sleep(std::time::Duration::from_secs(2));
-                running(name).map(|_| ()).ok_or_else(|| "the new service did not start".to_string())
-            });
-            if let Err(e) = up {
-                let _ = unload(name);
-                let _ = std::fs::copy(&backup, &file);
-                let _ = load(name, &file);
-                return Err(format!("{e}; the previous service file was restored from {}", backup.display()));
+            sys.unload(name).map_err(|e| format!("{e}; nothing changed, the old file is still in place (copy at {})", backup.display()))?;
+            let up = sys.write(&file, &rendered).and_then(|_| sys.load(name, &file)).and_then(|_| sys.ready(name));
+            match up {
+                Ok(pid) => Ok(Done::Replaced { pid, backup }),
+                Err(e) => {
+                    let restored = sys.unload(name)
+                        .and_then(|_| std::fs::copy(&backup, &file).map(|_| ()).map_err(|e| format!("copy back: {e}")))
+                        .and_then(|_| sys.load(name, &file))
+                        .and_then(|_| if sys.running(name).is_some() { Ok(()) } else { Err("the restored service did not start".into()) });
+                    match restored {
+                        Ok(()) => Err(format!("{e}; the previous service was restored from {} and runs again", backup.display())),
+                        Err(r) => Err(format!("{e}; restoring the previous service ALSO failed ({r}) — the old file is kept at {}", backup.display())),
+                    }
+                }
             }
-            Ok(Done::Replaced(backup))
         }
     }
 }
 
-/// The installed file, checked to be ours.
-fn ours_installed(name: &str) -> Result<Option<PathBuf>, String> {
-    let file = file_for(name, mac(), &home());
-    let Ok(text) = std::fs::read_to_string(&file) else { return Ok(None) };
-    let me = current_identity()?;
-    match identity_of(&text, mac()) {
-        Some(id) if id == me => Ok(Some(file)),
-        Some(id) => Err(format!("the installed {name} runs {} with config root {} — not this tmm; refusing", id.exe, id.config_home)),
-        None => Err(format!("the installed {name} was not written by tmm gateway; refusing")),
+fn ours_installed(sys: &Sys, name: &str) -> Result<Option<PathBuf>, String> {
+    valid_name(name, sys.mac)?;
+    let file = sys.file(name);
+    match read_on_disk(&file, name, &sys.me, sys.mac) {
+        OnDisk::Absent => Ok(None),
+        OnDisk::Ours { .. } => Ok(Some(file)),
+        OnDisk::NotOurs(why) => Err(format!("{why}; refusing")),
     }
 }
 
-pub fn uninstall(name: &str) -> Result<bool, String> {
-    let Some(file) = ours_installed(name)? else { return Ok(false) };
-    let _ = unload(name);
+pub fn uninstall(sys: &Sys, name: &str) -> Result<bool, String> {
+    let Some(file) = ours_installed(sys, name)? else { return Ok(false) };
+    sys.unload(name)?;
     std::fs::remove_file(&file).map_err(|e| e.to_string())?;
-    if !mac() {
-        let _ = run("systemctl", &["--user", "daemon-reload"]);
+    if !sys.mac {
+        (sys.run)("systemctl", &["--user", "daemon-reload"])?;
     }
     Ok(true)
 }
 
-pub fn restart(name: &str) -> Result<(), String> {
-    let file = ours_installed(name)?.ok_or_else(|| format!("{name} is not installed: run tmm gateway install"))?;
-    if mac() {
-        run("launchctl", &["kickstart", "-k", &format!("gui/{}/{name}", uid())]).map(|_| ()).or_else(|_| load(name, &file))
-    } else {
-        run("systemctl", &["--user", "restart", name]).map(|_| ())
-    }
-}
-
-/// Installed (and ours?), running pid.
-pub fn state(name: &str) -> (Result<bool, String>, Option<u32>) {
-    (ours_installed(name).map(|f| f.is_some()), running(name))
-}
-
-pub fn logs_command(name: &str, follow: bool) -> (String, Vec<String>) {
-    if mac() {
-        let log = spec(name).map(|s| s.log).unwrap_or_default();
-        let mut a = vec!["-n".to_string(), "100".into()];
-        if follow {
-            a.push("-f".into());
+pub fn restart(sys: &Sys, name: &str) -> Result<u32, String> {
+    let file = ours_installed(sys, name)?.ok_or_else(|| format!("{name} is not installed: run tmm gateway install"))?;
+    if sys.mac {
+        if (sys.run)("launchctl", &["kickstart", "-k", &sys.target(name)]).is_err() {
+            sys.load(name, &file)?;
         }
-        a.push(log);
+    } else {
+        (sys.run)("systemctl", &["--user", "restart", name])?;
+    }
+    sys.ready(name)
+}
+
+/// Installed (ours?) and the running pid — read-only.
+pub fn state(sys: &Sys, name: &str) -> (Result<bool, String>, Option<u32>) {
+    (ours_installed(sys, name).map(|f| f.is_some()), sys.running(name))
+}
+
+/// The command that shows the service's log — for OUR service only.
+pub fn logs_command(sys: &Sys, name: &str, follow: bool) -> Result<(String, Vec<String>), String> {
+    ours_installed(sys, name)?.ok_or_else(|| format!("{name} is not installed"))?;
+    Ok(if sys.mac {
+        let mut a = vec!["-n".to_string(), "100".into()];
+        if follow { a.push("-f".into()); }
+        a.push(sys.spec(name).log);
         ("tail".into(), a)
     } else {
         let mut a = vec!["--user".to_string(), "-u".into(), name.into(), "-n".into(), "100".into(), "--no-pager".into()];
-        if follow {
-            a.push("-f".into());
-        }
+        if follow { a.push("-f".into()); }
         ("journalctl".into(), a)
-    }
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     fn spec_with(exe: &str, root: &str) -> Spec {
         Spec {
@@ -449,51 +621,249 @@ mod tests {
     }
 
     #[test]
-    fn a_rendered_unit_runs_tmm_gateway_start_with_its_config_root_and_reads_back_as_the_same_identity() {
-        let s = spec_with("/home/u/My Tools/tmm", "/home/u/.config scratch/%x");
+    fn a_rendered_unit_and_plist_read_back_as_the_same_identity() {
+        // `$$` in a root must stay `$$` (Environment= does not fold it), `%` doubles.
+        let s = spec_with("/home/u/My Tools/$tmm", "/home/u/.config $$x/%y");
         let unit = render_systemd(&s).unwrap();
-        assert!(unit.contains("ExecStart=\"/home/u/My Tools/tmm\" gateway start\n"));
-        assert!(unit.contains("Environment=\"XDG_CONFIG_HOME=/home/u/.config scratch/%%x\"\n"));
-        assert!(unit.contains("Restart=on-failure") && unit.contains("WantedBy=default.target"));
+        assert!(unit.contains("ExecStart=\"/home/u/My Tools/$$tmm\" gateway start --service\n"));
+        assert!(unit.contains("Environment=\"XDG_CONFIG_HOME=/home/u/.config $$x/%%y\"\n"));
         assert!(!unit.contains("sh -c") && !unit.to_lowercase().contains("token"), "no shell, no secret");
-        assert_eq!(identity_of(&unit, false), Some(s.id.clone()));
+        assert_eq!(unit_identity(&unit), Ok(s.id.clone()));
         let plist = render_plist(&s).unwrap();
-        assert!(plist.contains("<string>/home/u/My Tools/tmm</string>\n\t\t<string>gateway</string>\n\t\t<string>start</string>"));
-        assert!(plist.contains("<key>KeepAlive</key><true/>"));
-        assert_eq!(identity_of(&plist, true), Some(s.id.clone()));
+        assert_eq!(plist_identity(plist.as_bytes(), &s.name), Ok(s.id.clone()));
         let odd = spec_with("/a&b/<tmm>", "/r'\"");
-        assert_eq!(identity_of(&render_plist(&odd).unwrap(), true), Some(odd.id), "XML escaping round-trips");
+        assert_eq!(plist_identity(render_plist(&odd).unwrap().as_bytes(), &odd.name), Ok(odd.id), "XML round-trips");
     }
 
     #[test]
-    fn install_is_idempotent_and_never_takes_a_file_that_is_not_ours() {
+    fn identity_is_structural_and_strict() {
         let s = spec_with("/opt/tmm", "/home/u/.config");
         let unit = render_systemd(&s).unwrap();
-        assert_eq!(plan(None, &unit, &s.id, false), Plan::Create);
-        assert_eq!(plan(Some(&unit), &unit, &s.id, false), Plan::Keep, "same bytes: nothing to rewrite");
-        let other_path = render_systemd(&Spec { path_env: "/new".into(), ..s.clone() }).unwrap();
-        assert_eq!(plan(Some(&other_path), &unit, &s.id, false), Plan::Update, "same identity, new environment");
-        let elsewhere = render_systemd(&spec_with("/usr/local/bin/tmm", "/home/u/.config")).unwrap();
-        assert!(matches!(plan(Some(&elsewhere), &unit, &s.id, false), Plan::Refuse(_)), "another executable");
-        let other_root = render_systemd(&spec_with("/opt/tmm", "/tmp/scratch")).unwrap();
-        assert!(matches!(plan(Some(&other_root), &unit, &s.id, false), Plan::Refuse(_)), "another config root");
-        let hand = "[Service]\nExecStart=/usr/bin/node server.js\n";
-        assert!(matches!(plan(Some(hand), &unit, &s.id, false), Plan::Refuse(_)), "a hand-written unit is not ours");
-        // The #313 hand-written plist on clawdbjs.
-        let old_plist = "<plist><dict><key>Label</key><string>cc.voka.tmux-mobile</string><key>ProgramArguments</key><array><string>/Users/clawd/workplace/tmux-mobile/src-tauri/target/release/server</string></array></dict></plist>";
-        assert!(matches!(plan(Some(old_plist), &render_plist(&s).unwrap(), &s.id, true), Plan::Refuse(_)));
+        // The last Environment= of a key wins, as systemd reads it.
+        let later = format!("{unit}Environment=\"XDG_CONFIG_HOME=/elsewhere\"\n");
+        assert_eq!(unit_identity(&later).unwrap().config_home, "/elsewhere");
+        assert!(unit_identity(&format!("{unit}ExecStartPre=/bin/true\n")).is_err(), "an extra pre-step is not ours");
+        assert!(unit_identity(&format!("{unit}EnvironmentFile=/x\n")).is_err());
+        assert!(unit_identity(&unit.replace("ExecStart=", "ExecStart=\"/x\" gateway start --service\nExecStart=")).is_err(), "two ExecStart");
+        assert!(unit_identity(&unit.replace(" --service", "")).is_err(), "not the managed start");
+        // plist: Label must be this name; the whole argv must be ours.
+        let plist = render_plist(&s).unwrap();
+        assert!(plist_identity(plist.as_bytes(), "other.label").is_err(), "Label mismatch");
+        let wrong_argv = plist.replace("<string>--service</string>", "<string>--evil</string>");
+        assert!(plist_identity(wrong_argv.as_bytes(), &s.name).is_err());
+        let extra_argv = plist.replace("<string>--service</string>", "<string>--service</string>\n\t\t<string>x</string>");
+        assert!(plist_identity(extra_argv.as_bytes(), &s.name).is_err());
+        // A binary plist is parsed, not mistaken for absent.
+        let mut bin = Vec::new();
+        plist::Value::from_reader(std::io::Cursor::new(plist.as_bytes())).unwrap().to_writer_binary(&mut bin).unwrap();
+        assert_eq!(plist_identity(&bin, &s.name), Ok(s.id.clone()));
+        // The #313 hand-written plist.
+        let old = "<plist><dict><key>Label</key><string>cc.voka.tmux-mobile</string><key>ProgramArguments</key><array><string>/Users/clawd/workplace/tmux-mobile/src-tauri/target/release/server</string></array></dict></plist>";
+        assert!(plist_identity(old.as_bytes(), LABEL).is_err());
     }
 
     #[test]
-    fn a_test_service_name_can_never_address_the_real_one() {
+    fn names_are_bare_and_the_test_name_never_addresses_the_real_one() {
+        for bad in ["", "../x.service", "a/b.service", ".hidden.service", "-x.service", "a..b.service", "x.service\n", "x y.service"] {
+            assert!(valid_name(bad, false).is_err(), "{bad:?}");
+        }
+        assert!(valid_name("tmux-mobile-gateway", false).is_err(), "Linux needs .service");
+        assert!(valid_name(UNIT, false).is_ok() && valid_name(LABEL, true).is_ok() && valid_name("cc.voka.tmux-mobile.test", true).is_ok());
         let home = Path::new("/home/u");
         for mac in [false, true] {
             let real = file_for(if mac { LABEL } else { UNIT }, mac, home);
             let test = file_for(if mac { "cc.voka.tmux-mobile.test" } else { "tmux-mobile-gateway-test.service" }, mac, home);
-            assert_ne!(real, test);
             assert_ne!(real.file_name(), test.file_name(), "exact names, no prefix match");
         }
-        assert_eq!(file_for(LABEL, true, home), Path::new("/home/u/Library/LaunchAgents/cc.voka.tmux-mobile.plist"));
-        assert_eq!(file_for(UNIT, false, home), Path::new("/home/u/.config/systemd/user/tmux-mobile-gateway.service"));
+    }
+
+    // ─── Native operations against a fake system ────────────────────────────
+
+    /// A fake init system: records calls; `fail` makes a command fail;
+    /// `pid` is what `show`/`print` reports; the probe answers `verdict`.
+    struct Fake {
+        calls: Rc<RefCell<Vec<String>>>,
+        fail: Rc<RefCell<Vec<&'static str>>>,
+        pid: Rc<RefCell<Option<u32>>>,
+        verdict: Rc<RefCell<Verdict>>,
+        loaded: Rc<RefCell<bool>>,
+    }
+
+    fn fake(home: &Path, mac: bool) -> (Sys, Fake) {
+        let f = Fake {
+            calls: Rc::default(), fail: Rc::default(), pid: Rc::new(RefCell::new(None)),
+            verdict: Rc::new(RefCell::new(Verdict::None)), loaded: Rc::new(RefCell::new(false)),
+        };
+        let (calls, fail, pid, verdict, loaded) = (f.calls.clone(), f.fail.clone(), f.pid.clone(), f.verdict.clone(), f.loaded.clone());
+        let (pid2, verdict2) = (f.pid.clone(), f.verdict.clone());
+        let sys = Sys {
+            mac,
+            home: home.to_path_buf(),
+            uid: "501".into(),
+            me: Identity { exe: "/opt/tmm".into(), config_home: home.join(".config").to_string_lossy().into() },
+            path_env: "/usr/bin".into(),
+            run: Box::new(move |cmd, args| {
+                let line = format!("{cmd} {}", args.join(" "));
+                calls.borrow_mut().push(line.clone());
+                if let Some(f) = fail.borrow().iter().find(|f| line.contains(**f)) {
+                    return Err(format!("{f} failed"));
+                }
+                let verb = args.iter().find(|a| ["enable", "disable", "restart", "bootstrap", "bootout", "kickstart", "show", "print"].contains(a)).copied().unwrap_or("");
+                match verb {
+                    "enable" | "bootstrap" | "restart" | "kickstart" => {
+                        *loaded.borrow_mut() = true;
+                        let next = pid.borrow().map(|p| p + 1).unwrap_or(100);
+                        *pid.borrow_mut() = Some(next);
+                        *verdict.borrow_mut() = Verdict::Ours { machine_id: "m".into(), url: "ws://x".into() };
+                        Ok(String::new())
+                    }
+                    "disable" | "bootout" => {
+                        *loaded.borrow_mut() = false;
+                        *pid.borrow_mut() = None;
+                        *verdict.borrow_mut() = Verdict::None;
+                        Ok(String::new())
+                    }
+                    "show" => {
+                        let p = *pid.borrow();
+                        let l = *loaded.borrow();
+                        Ok(format!("ActiveState={}\nMainPID={}\nLoadState={}\nUnitFileState={}\n",
+                            if p.is_some() { "active" } else { "inactive" }, p.unwrap_or(0),
+                            if l { "loaded" } else { "not-found" }, if l { "enabled" } else { "" }))
+                    }
+                    "print" => match (*loaded.borrow(), *pid.borrow()) {
+                        (false, _) => Err("not loaded".into()),
+                        (true, Some(p)) => Ok(format!("state = running\npid = {p}\n")),
+                        (true, None) => Ok("state = waiting\n".into()),
+                    },
+                    _ => Ok(String::new()),
+                }
+            }),
+            probe: Box::new(move || verdict2.borrow().clone()),
+            sleep: Box::new(move |_| { let _ = &pid2; }),
+        };
+        (sys, f)
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("svc-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+    const N: &str = "tmux-mobile-gateway-test.service";
+
+    #[test]
+    fn install_creates_waits_for_our_instance_and_is_a_no_op_the_second_time() {
+        let home = scratch("create");
+        let (sys, f) = fake(&home, false);
+        assert_eq!(install(&sys, N, false), Ok(Done::Installed(100)));
+        assert!(sys.file(N).exists());
+        f.calls.borrow_mut().clear();
+        assert_eq!(install(&sys, N, false), Ok(Done::AlreadyRunning(100)), "same bytes and running");
+        assert!(!f.calls.borrow().iter().any(|c| c.contains("enable") || c.contains("disable") || c.contains("restart")), "{:?}", f.calls.borrow());
+        assert_eq!(restart(&sys, N), Ok(101), "restart is the forced one");
+        assert_eq!(uninstall(&sys, N), Ok(true));
+        assert!(!sys.file(N).exists());
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn a_service_that_exits_or_never_answers_is_a_failed_install() {
+        let home = scratch("notready");
+        let (sys, f) = fake(&home, false);
+        // It starts, but the probe never says Ours (e.g. it exited on a held port).
+        f.fail.borrow_mut().push("never");
+        let sys = Sys { probe: Box::new(|| Verdict::None), ..sys };
+        let e = install(&sys, N, false).unwrap_err();
+        assert!(e.contains("not answering"), "{e}");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn a_held_port_refuses_before_writing_anything() {
+        let home = scratch("held");
+        let (sys, f) = fake(&home, false);
+        *f.verdict.borrow_mut() = Verdict::Occupied("another gateway".into());
+        assert!(install(&sys, N, false).unwrap_err().contains("held"));
+        assert!(!sys.file(N).exists(), "nothing written");
+        *f.verdict.borrow_mut() = Verdict::Ours { machine_id: "m".into(), url: "ws://x".into() };
+        assert!(install(&sys, N, false).unwrap_err().contains("outside this service"), "a foreground gateway would mask a dead service");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn a_failed_stop_aborts_before_the_file_changes() {
+        let home = scratch("stopfail");
+        let (sys, f) = fake(&home, false);
+        install(&sys, N, false).unwrap();
+        let before = std::fs::read(sys.file(N)).unwrap();
+        let sys = Sys { path_env: "/new/path".into(), ..sys }; // an Update
+        f.fail.borrow_mut().push("disable");
+        let e = install(&sys, N, false).unwrap_err();
+        assert!(e.contains("could not stop"), "{e}");
+        assert_eq!(std::fs::read(sys.file(N)).unwrap(), before, "the file is untouched");
+        let e = uninstall(&sys, N).unwrap_err();
+        assert!(e.contains("could not stop") && sys.file(N).exists(), "uninstall keeps the file when the stop fails");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn a_failed_load_is_an_error_not_an_install() {
+        let home = scratch("loadfail");
+        let (sys, f) = fake(&home, false);
+        f.fail.borrow_mut().push("enable");
+        assert!(install(&sys, N, false).unwrap_err().contains("enable failed"));
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn replace_backs_up_restores_on_failure_and_reports_a_failed_restore() {
+        let home = scratch("replace");
+        let (sys, f) = fake(&home, true);
+        let file = sys.file(LABEL);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let old = "<plist><dict><key>Label</key><string>cc.voka.tmux-mobile</string><key>ProgramArguments</key><array><string>/old/server</string></array></dict></plist>";
+        std::fs::write(&file, old).unwrap();
+        assert!(install(&sys, LABEL, false).unwrap_err().contains("--replace"), "not ours: refused without --replace");
+        // Success: ours runs, the old file is backed up.
+        let done = install(&sys, LABEL, true).unwrap();
+        let Done::Replaced { backup, .. } = &done else { panic!("{done:?}") };
+        assert_eq!(std::fs::read_to_string(backup).unwrap(), old);
+        // Two backups in one second do not collide.
+        std::fs::write(&file, old).unwrap();
+        *f.pid.borrow_mut() = None; *f.loaded.borrow_mut() = false; *f.verdict.borrow_mut() = Verdict::None;
+        let Done::Replaced { backup: b2, .. } = install(&sys, LABEL, true).unwrap() else { panic!() };
+        assert_ne!(&b2, backup);
+        // Failure: ours never answers → the old file is put back and loaded.
+        std::fs::write(&file, old).unwrap();
+        *f.pid.borrow_mut() = None; *f.loaded.borrow_mut() = false; *f.verdict.borrow_mut() = Verdict::None;
+        let never = Sys { probe: Box::new(|| Verdict::None), ..fake(&home, true).0 };
+        let e = install(&never, LABEL, true).unwrap_err();
+        assert!(e.contains("restored") && e.contains("runs again"), "{e}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), old, "the old file is back");
+        // Failure, and the restore fails too: both errors, the backup kept.
+        let (bad, bf) = fake(&home, true);
+        let bad = Sys { probe: Box::new(|| Verdict::None), ..bad };
+        std::fs::write(&file, old).unwrap();
+        bf.fail.borrow_mut().push("bootstrap");
+        let e = install(&bad, LABEL, true).unwrap_err();
+        assert!(e.contains("ALSO failed") && e.contains("kept at"), "{e}");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn an_unreadable_or_foreign_file_is_never_absent() {
+        let home = scratch("foreign");
+        let (sys, _f) = fake(&home, false);
+        let file = sys.file(N);
+        std::fs::create_dir_all(&file).unwrap(); // a directory where the file should be: read fails, not NotFound
+        assert!(matches!(read_on_disk(&file, N, &sys.me, false), OnDisk::NotOurs(_)));
+        assert!(install(&sys, N, false).is_err(), "never Create over something unreadable");
+        std::fs::remove_dir_all(&file).unwrap();
+        std::fs::write(&file, "[Service]\nExecStart=/usr/bin/node server.js\n").unwrap();
+        assert!(uninstall(&sys, N).is_err() && file.exists(), "a hand-written unit is never removed");
+        assert!(logs_command(&sys, N, false).is_err(), "logs follow the same identity check");
+        assert!(install(&sys, "../../evil.service", false).is_err(), "a name cannot leave the service directory");
+        std::fs::remove_dir_all(&home).ok();
     }
 }

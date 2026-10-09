@@ -98,6 +98,9 @@ sysinfo = { version = "=0.39.6", default-features = false, features = ["system",
 # Local wall-clock formatting for the lines we type into an agent's pane and for
 # `tmm log`; desktop-gated because those two paths are.
 chrono = { version = "0.4.44", default-features = false, features = ["clock", "std"] }
+# The gateway's launchd plist is read and written as a STRUCTURE (board #323),
+# XML or binary, never by string splitting. Already in the graph via tauri.
+plist = "1.8"
 
 # `npm run tauri:dev:release` and `tauri build` use this profile.
 #
