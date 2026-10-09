@@ -23,6 +23,7 @@ struct FileConfig {
     kiro_engine: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct Config {
     pub host: String,
     pub port: u16,
@@ -152,16 +153,29 @@ fn optional_env_override(value: Option<String>, fallback: Option<String>) -> Opt
     }
 }
 
+/// The environment variables that override config.toml (`Config::load`).
+pub const ENV_OVERRIDES: &[&str] = &["HOST", "PORT", "TOKEN", "TMUX_SOCKET", "TLS_CERT", "TLS_KEY", "SCROLLBACK", "DISCONNECT_GRACE_SECS", "KIRO_ENGINE"];
+
 impl Config {
     /// Load config: file < env vars. Auto-generates token if missing everywhere.
     pub fn load() -> Self {
+        Self::load_with(&|k| std::env::var(k).ok())
+    }
+
+    /// What an installed gateway service runs with (board #323): config.toml
+    /// alone. The service does not inherit the installing shell's
+    /// `ENV_OVERRIDES`, so `tmm gateway` judges and probes this one.
+    pub fn load_service() -> Self {
+        Self::load_with(&|_| None)
+    }
+
+    fn load_with(env: &dyn Fn(&str) -> Option<String>) -> Self {
         let file_cfg = std::fs::read_to_string(config_path())
             .ok()
             .and_then(|s| toml::from_str::<FileConfig>(&s).ok())
             .unwrap_or_default();
 
-        let token = std::env::var("TOKEN")
-            .ok()
+        let token = env("TOKEN")
             .or(file_cfg.token)
             .unwrap_or_else(|| {
                 let t = uuid::Uuid::new_v4().to_string();
@@ -170,32 +184,28 @@ impl Config {
             });
 
         Config {
-            host: std::env::var("HOST")
-                .ok()
+            host: env("HOST")
                 .or(file_cfg.host)
                 .unwrap_or("0.0.0.0".into()),
-            port: std::env::var("PORT")
-                .ok()
+            port: env("PORT")
                 .and_then(|p| p.parse().ok())
                 .or(file_cfg.port)
                 .unwrap_or(9899),
             token,
             machine_id: load_or_create_machine_id(),
-            tmux_socket: std::env::var("TMUX_SOCKET").ok().or(file_cfg.tmux_socket),
-            tls_cert: optional_env_override(std::env::var("TLS_CERT").ok(), file_cfg.tls_cert),
-            tls_key: optional_env_override(std::env::var("TLS_KEY").ok(), file_cfg.tls_key),
-            scrollback: std::env::var("SCROLLBACK")
-                .ok()
+            tmux_socket: env("TMUX_SOCKET").or(file_cfg.tmux_socket),
+            tls_cert: optional_env_override(env("TLS_CERT"), file_cfg.tls_cert),
+            tls_key: optional_env_override(env("TLS_KEY"), file_cfg.tls_key),
+            scrollback: env("SCROLLBACK")
                 .and_then(|s| s.parse().ok())
                 .or(file_cfg.scrollback)
                 .unwrap_or(500),
-            disconnect_grace_secs: std::env::var("DISCONNECT_GRACE_SECS")
-                .ok()
+            disconnect_grace_secs: env("DISCONNECT_GRACE_SECS")
                 .and_then(|s| s.parse().ok())
                 .or(file_cfg.disconnect_grace_secs)
                 .unwrap_or(600),
             kiro_engine: normalize_engine(
-                &std::env::var("KIRO_ENGINE").ok().or(file_cfg.kiro_engine).unwrap_or_default(),
+                &env("KIRO_ENGINE").or(file_cfg.kiro_engine).unwrap_or_default(),
             ),
         }
     }

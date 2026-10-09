@@ -17,6 +17,11 @@ pub mod tmux;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod projects;
 
+/// The gateway (board #323): the one start path, the local probe and the
+/// per-user service. Desktop-gated like `projects`.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub mod gateway;
+
 /// Server system vitals (board #56). Desktop-gated like `projects`: only the
 /// desktop server answers `system_status` — a phone is a client of one, so
 /// compiling a sampler into the mobile shell would be dead weight.

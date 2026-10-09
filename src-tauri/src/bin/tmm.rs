@@ -87,6 +87,14 @@ USAGE (background tasks — LOCAL tmux only, no server needed, never exits 2):
 USAGE (human or agent — self-management):
   tmm scratch [--kill]                the desktop's scratch terminal session (no project):
                                       ensure it and print its pane target, or kill it
+  tmm gateway                         ensure this machine's gateway service is installed and
+                                      running (launchd agent / systemd user unit)
+  tmm gateway start                   run the gateway in the foreground (what the service runs)
+  tmm gateway install [--replace]     install the user service for THIS tmm + config root;
+                                      a same-name service that is not ours is refused
+  tmm gateway status [--show-token]   service state, the local probe's verdict, address
+  tmm gateway restart|uninstall       restart / remove our service (only ours)
+  tmm gateway logs [-f]               the service's log
   tmm agent list                      agents in this project and their states
   tmm agent interrupt <name>          cancel the turn it is running (Escape into its pane)
   tmm agent mode <name> queue|steer   switch a kiro agent's queue/steer mode for this session
@@ -223,6 +231,13 @@ async fn main() {
         )
     {
         cmd_mcp_local(&pos[1..], &flags, json);
+        return;
+    }
+
+    // `gateway` is local too (board #323): it starts, probes and manages this
+    // machine's server rather than talking to one.
+    if pos[0] == "gateway" {
+        cmd_gateway(&pos[1..], &flags).await;
         return;
     }
 
@@ -1366,6 +1381,103 @@ async fn resolve_project_id(ctx: &Ctx, name: &str) -> String {
         }
     }
     fail(EXIT_NOT_FOUND, &format!("no project with session or id '{name}' — try `tmm project list`"))
+}
+
+/// `tmm gateway …` (board #323). `TMM_GATEWAY_SERVICE` names the service
+/// (default: the production label / unit); a smoke run sets its own, which
+/// can never address the real one.
+async fn cmd_gateway(rest: &[String], flags: &Flags) {
+    use tmux_mobile::gateway::{self, probe, service};
+    let name = std::env::var("TMM_GATEWAY_SERVICE").ok().filter(|s| !s.is_empty())
+        .unwrap_or_else(|| (if service::mac() { service::LABEL } else { service::UNIT }).to_string());
+    let sub = rest.first().map(String::as_str).unwrap_or("");
+    // The service reads config.toml only; this shell's overrides do not reach it.
+    if sub != "start" {
+        let set: Vec<&str> = tmux_mobile::config::ENV_OVERRIDES.iter().copied().filter(|k| std::env::var_os(k).is_some()).collect();
+        if !set.is_empty() {
+            eprintln!("note: {} set in this shell — the service does not inherit them; it runs with {}", set.join(", "), tmux_mobile::config::config_dir().join("config.toml").display());
+        }
+    }
+    match sub {
+        "start" => {
+            let cfg = tmux_mobile::config::Config::load();
+            if let Err(e) = gateway::start(cfg.clone()).await {
+                // A taken port says WHO holds it (never another port, never a kill).
+                let why = match probe::probe(&cfg).await {
+                    probe::Verdict::Ours { url, .. } => format!("{e} — this machine's gateway already answers at {url}"),
+                    probe::Verdict::Occupied(who) => format!("{e} — {who}"),
+                    probe::Verdict::None => e,
+                };
+                fail(EXIT_ERR, &format!("gateway: {why}"));
+            }
+        }
+        "" | "install" => {
+            let replace = flags.contains_key("replace");
+            match service::install(&name, replace) {
+                Ok(done) => {
+                    let what = match done {
+                        service::Done::Installed => "installed and started".to_string(),
+                        service::Done::AlreadyRunning => "already installed and running".to_string(),
+                        service::Done::Started => "installed; started".to_string(),
+                        service::Done::Updated => "updated and restarted".to_string(),
+                        service::Done::Replaced(b) => format!("replaced (previous file kept at {})", b.display()),
+                    };
+                    println!("✓ {name}: {what}");
+                    print_status(&name, false).await;
+                }
+                Err(e) => fail(EXIT_ERR, &format!("gateway install: {e}")),
+            }
+        }
+        "uninstall" => match service::uninstall(&name) {
+            Ok(true) => println!("✓ {name} removed"),
+            Ok(false) => println!("{name} is not installed"),
+            Err(e) => fail(EXIT_ERR, &format!("gateway uninstall: {e}")),
+        },
+        "restart" => match service::restart(&name) {
+            Ok(()) => println!("✓ {name} restarted"),
+            Err(e) => fail(EXIT_ERR, &format!("gateway restart: {e}")),
+        },
+        "status" => {
+            let ok = print_status(&name, flags.contains_key("show-token")).await;
+            if !ok {
+                std::process::exit(EXIT_NOT_FOUND);
+            }
+        }
+        "logs" => {
+            let (cmd, args) = service::logs_command(&name, flags.contains_key("f") || flags.contains_key("follow"));
+            let status = std::process::Command::new(&cmd).args(&args).status();
+            if !matches!(status, Ok(s) if s.success()) {
+                fail(EXIT_ERR, &format!("gateway logs: {cmd} {} failed", args.join(" ")));
+            }
+        }
+        other => fail(EXIT_USAGE, &format!("gateway {other}: start | install | uninstall | status | restart | logs")),
+    }
+}
+
+/// The service state and the local probe's verdict; true when OUR gateway answers.
+async fn print_status(name: &str, show_token: bool) -> bool {
+    use tmux_mobile::gateway::{probe, service};
+    let cfg = tmux_mobile::config::Config::load_service();
+    let (installed, pid) = service::state(name);
+    let svc = match (&installed, pid) {
+        (Ok(true), Some(p)) => format!("installed, running (pid {p})"),
+        (Ok(true), None) => "installed, not running".into(),
+        (Ok(false), _) => "not installed".into(),
+        (Err(e), _) => e.clone(),
+    };
+    let verdict = probe::probe(&cfg).await;
+    let answer = match &verdict {
+        probe::Verdict::Ours { url, .. } => format!("answering at {url} (this machine)"),
+        probe::Verdict::Occupied(why) => format!("occupied — {why}"),
+        probe::Verdict::None => "not running (nothing listens on the port)".into(),
+    };
+    println!("service   {name}: {svc}");
+    println!("gateway   {answer}");
+    println!("listen    {}:{}{}", cfg.host, cfg.port, if cfg.tls_cert.is_some() { " (TLS)" } else { "" });
+    println!("config    {}", tmux_mobile::config::config_dir().display());
+    println!("connect   from the app: the address of this machine, port {}, and the token{}", cfg.port,
+        if show_token { format!(" {}", cfg.token) } else { " (tmm gateway status --show-token)".into() });
+    matches!(verdict, probe::Verdict::Ours { .. })
 }
 
 fn need_project(ctx: &Ctx) -> String {
