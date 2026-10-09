@@ -1,10 +1,22 @@
-// The ONE record of this session's downloads (board #308). Every attempt
+// The ONE record of ONE server's downloads (board #308). Every attempt
 // registers a row here and its progress updates it; the Files feedback slot
 // and the Downloads view both READ it, so the toast and the list can never
-// tell two stories. Module-level: both Files instances (the page and the Hub
-// drawer) and every attempt share it. In memory: the disk keeps what must
-// outlive the app (finished files, resumable parts), and the view reads that
-// from the shell.
+// tell two stories. In memory: the disk keeps what must outlive the app
+// (finished files, resumable parts), and the view reads that from the shell.
+//
+// A FACTORY plus one default instance (board #335 ②a-4). The rows name paths
+// on one server, so two servers need two records: a row's `path` means nothing
+// without the machine it is on, and `forgetAll` exists precisely because a
+// switch invalidates the whole list. `createDownloads()` is that record as an
+// object; the exports below are ONE instance of it, shared by both Files
+// instances (the page and the Hub drawer) and every attempt, exactly as the
+// module-level store was.
+//
+// Not wired into production: ②b gives each runtime its own instance and
+// retires the module-level one, at which point "reset the store on a switch"
+// becomes "drop the server's instance" and `forgetAll` loses its reason to
+// exist. Converting it now is what makes that a wiring change rather than a
+// rewrite of the rules below.
 
 import type { FeedbackValue } from '../ui/feedback-lifetime.ts';
 
@@ -32,77 +44,95 @@ export interface DownloadRow {
   requested: boolean;
 }
 
-const rows = $state<DownloadRow[]>([]);
-
-export const downloads = {
-  get rows(): readonly DownloadRow[] { return rows; },
+export interface DownloadStore {
+  readonly rows: readonly DownloadRow[];
   /** Rows a transfer is running for. */
-  get active(): number { return rows.filter((r) => r.state === 'downloading' || r.state === 'saving').length; },
-};
-
-export function rowOf(id: string): DownloadRow | undefined {
-  return rows.find((r) => r.id === id);
+  readonly active: number;
+  rowOf(id: string): DownloadRow | undefined;
+  /** A new attempt. A row for the same id (a resume, a retry) is reused, so
+   * one file is one row, moved back to the top. */
+  begin(id: string, name: string, path: string, now?: number): DownloadRow;
+  progress(id: string, received: number, total: number, now?: number): void;
+  restarted(id: string): void;
+  saving(id: string): void;
+  done(id: string, savedPath: string | null, now?: number, requested?: boolean): void;
+  /** The transfer stopped and its part stays on disk to be resumed. */
+  paused(id: string, error: string | null, now?: number): void;
+  failed(id: string, error: string, now?: number): void;
+  /** Cancelled or deleted: nothing of it is left to show. */
+  forget(id: string): void;
+  /** Everything this server's record holds. Before #335 a switch called it
+   * because the rows named paths on the server being left; with one record
+   * per server, dropping the instance does the same thing. */
+  forgetAll(): void;
 }
 
-/** A new attempt. A row for the same id (a resume, a retry) is reused, so one
- * file is one row, moved back to the top. */
-export function begin(id: string, name: string, path: string, now = Date.now()): DownloadRow {
-  const old = rows.findIndex((r) => r.id === id);
-  if (old >= 0) rows.splice(old, 1);
-  rows.unshift({
-    id, name, path, state: 'downloading', received: 0, total: 0, startedAt: now,
-    base: null, finishedAt: null, savedPath: null, error: null,
-    restarted: false, requested: false,
-  });
-  return rows[0]!;
+/** One server's download record. Nothing is shared between two of them — the
+ * rows are closure state, so a row of A's can neither be read nor forgotten
+ * through B's. */
+export function createDownloads(): DownloadStore {
+  const rows = $state<DownloadRow[]>([]);
+
+  function rowOf(id: string): DownloadRow | undefined {
+    return rows.find((r) => r.id === id);
+  }
+
+  return {
+    get rows(): readonly DownloadRow[] { return rows; },
+    get active(): number { return rows.filter((r) => r.state === 'downloading' || r.state === 'saving').length; },
+    rowOf,
+    begin(id, name, path, now = Date.now()) {
+      const old = rows.findIndex((r) => r.id === id);
+      if (old >= 0) rows.splice(old, 1);
+      rows.unshift({
+        id, name, path, state: 'downloading', received: 0, total: 0, startedAt: now,
+        base: null, finishedAt: null, savedPath: null, error: null,
+        restarted: false, requested: false,
+      });
+      return rows[0]!;
+    },
+    progress(id, received, total, now = Date.now()) {
+      const row = rowOf(id);
+      if (!row) return;
+      if (!row.base) row.base = { at: now, received };
+      row.received = received;
+      row.total = total;
+    },
+    restarted(id) {
+      const row = rowOf(id);
+      if (!row) return;
+      row.restarted = true;
+      row.received = 0;
+      row.base = null;
+    },
+    saving(id) {
+      const row = rowOf(id);
+      if (row) row.state = 'saving';
+    },
+    done(id, savedPath, now = Date.now(), requested = false) {
+      const row = rowOf(id);
+      if (!row) return;
+      Object.assign(row, { state: 'done', savedPath, finishedAt: now, requested, error: null });
+      if (row.total) row.received = row.total;
+    },
+    paused(id, error, now = Date.now()) {
+      const row = rowOf(id);
+      if (row) Object.assign(row, { state: 'paused', error, finishedAt: now });
+    },
+    failed(id, error, now = Date.now()) {
+      const row = rowOf(id);
+      if (row) Object.assign(row, { state: 'failed', error, finishedAt: now });
+    },
+    forget(id) {
+      const at = rows.findIndex((r) => r.id === id);
+      if (at >= 0) rows.splice(at, 1);
+    },
+    forgetAll() { rows.splice(0, rows.length); },
+  };
 }
 
-export function progress(id: string, received: number, total: number, now = Date.now()) {
-  const row = rowOf(id);
-  if (!row) return;
-  if (!row.base) row.base = { at: now, received };
-  row.received = received;
-  row.total = total;
-}
-
-export function restarted(id: string) {
-  const row = rowOf(id);
-  if (!row) return;
-  row.restarted = true;
-  row.received = 0;
-  row.base = null;
-}
-
-export function saving(id: string) {
-  const row = rowOf(id);
-  if (row) row.state = 'saving';
-}
-
-export function done(id: string, savedPath: string | null, now = Date.now(), requested = false) {
-  const row = rowOf(id);
-  if (!row) return;
-  Object.assign(row, { state: 'done', savedPath, finishedAt: now, requested, error: null });
-  if (row.total) row.received = row.total;
-}
-
-/** The transfer stopped and its part stays on disk to be resumed. */
-export function paused(id: string, error: string | null, now = Date.now()) {
-  const row = rowOf(id);
-  if (row) Object.assign(row, { state: 'paused', error, finishedAt: now });
-}
-
-export function failed(id: string, error: string, now = Date.now()) {
-  const row = rowOf(id);
-  if (row) Object.assign(row, { state: 'failed', error, finishedAt: now });
-}
-
-/** Cancelled or deleted: nothing of it is left to show. */
-export function forget(id: string) {
-  const at = rows.findIndex((r) => r.id === id);
-  if (at >= 0) rows.splice(at, 1);
-}
-
-/** Bytes per second of the current attempt, or null before one second. */
+/** Bytes per second of the current attempt, or null before one second. Pure:
+ * it reads a row, so it belongs to no instance. */
 export function speed(row: DownloadRow, now = Date.now()): number | null {
   if (!row.base) return null;
   const seconds = (now - row.base.at) / 1000;
@@ -113,7 +143,7 @@ export function speed(row: DownloadRow, now = Date.now()): number | null {
 export interface FeedbackStrings { downloading: string; changed: string; saving: string }
 
 /** The feedback slot's progress value for a row: the slot shows the store,
- * it keeps no copy of its own. */
+ * it keeps no copy of its own. Pure, like `speed`. */
 export function feedbackOf(row: DownloadRow, s: FeedbackStrings): FeedbackValue {
   return {
     kind: 'progress', glyph: 'download',
@@ -123,8 +153,24 @@ export function feedbackOf(row: DownloadRow, s: FeedbackStrings): FeedbackValue 
   };
 }
 
-/** Test seam: the store is module state. */
+/** The app's one record, for as long as the app looks at one server. The
+ * named exports below are its methods, so every existing caller and every
+ * existing test is unchanged — and the function identities are stable,
+ * because these ARE the instance's closures rather than wrappers around them
+ * (the same reason `ws.ts` destructures its facade). */
+export const downloadStore = createDownloads();
+
+export const downloads = {
+  get rows(): readonly DownloadRow[] { return downloadStore.rows; },
+  get active(): number { return downloadStore.active; },
+};
+
+export const {
+  rowOf, begin, progress, restarted, saving, done, paused, failed, forget,
+} = downloadStore;
+
 /** A server switch (board 315): this session's rows name paths on the
  * leaving server. Parts on disk carry their server and stay listed. */
-export function forgetAll() { rows.splice(0, rows.length); }
+export const forgetAll = downloadStore.forgetAll;
+/** Test seam: the store is module state until ②b makes it per runtime. */
 export function resetForTests() { forgetAll(); }

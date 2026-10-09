@@ -20,7 +20,11 @@ const PER_SERVER: Record<string, Record<string, RegExp>> = {
     inFlight: /suspendDownloads/u,
     webSeq: /./u,                            // a counter for browser row ids, not data
   },
-  'files/downloads.svelte.ts': { rows: /forgetDownloadRows\(\)/u },
+  // Since #335 ②a-4 the rows are an INSTANCE of createDownloads(), so what
+  // the scan sees at module level is the instance. Same obligation while the
+  // app holds one of them: ②b replaces "reset it on a switch" with "drop that
+  // server's instance".
+  'files/downloads.svelte.ts': { downloadStore: /forgetDownloadRows\(\)/u },
   'core/agents.ts': { served: /setServedBackends\(null\)/u, servedListeners: /setServedBackends\(null\)/u },
   'ui/hover.svelte.ts': { shown: /hoverCard\.hide\(\)/u, hiddenAt: /hoverCard\.hide\(\)/u },
   // Re-read from the parked keys after pointTo (comeUp), not reset here.
@@ -57,7 +61,12 @@ test('every module-level store is reset on a switch or named global (board 315)'
     let text = await readFile(file, 'utf8');
     if (rel.endsWith('.svelte')) text = (/<script module>([\s\S]*?)<\/script>/u.exec(text)?.[1] ?? '').replace(/^  /gmu, '');
     // Column 0 only: a module's own top level (a module script is dedented).
-    const decl = /^(?:export )?(?:let|const) (\w+)\b[^=\n]*= (?:\$state\b|new (?:Map|Set|WeakMap|LruCache)\b|null;|0;)/gmu;
+    // `= create<Something>()` is in the list because board #335 ②a turns
+    // module stores into factories: a per-server store's state moves inside
+    // its factory, where a column-0 scan cannot see it, so the INSTANCE has to
+    // pick a side instead. Without this a conversion would quietly empty the
+    // inventory this file exists to keep.
+    const decl = /^(?:export )?(?:let|const) (\w+)\b[^=\n]*= (?:\$state\b|new (?:Map|Set|WeakMap|LruCache)\b|create[A-Z]\w*\(|null;|0;)/gmu;
     for (const m of text.matchAll(decl)) {
       const name = m[1]!;
       if (/^[A-Z_0-9]+$/u.test(name)) continue; // constants
@@ -79,6 +88,7 @@ test('every module-level store is reset on a switch or named global (board 315)'
     }
   }
   assert.ok(found.includes('files/Files.svelte:browsed'), 'the scan sees module scripts');
+  assert.ok(found.includes('files/downloads.svelte.ts:downloadStore'), 'and it sees a factory instance');
   assert.match(app, /resetMemory: resetServerMemory,/u, 'the switch runs the reset');
   assert.match(app, /comeUp: \(target\) => \{\s*hubPrefs\.reloadServerState\(\);\s*centre\.reload\(\);/u, 'hub prefs and the centre re-read the target’s parked keys');
 });
