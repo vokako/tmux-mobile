@@ -32,6 +32,10 @@
 //!   `session:window.pane` target the Terminal subscribes stays valid.
 
 use crate::tmux;
+// ONE refusal type, from the write that refuses to the socket that answers
+// (board #337 review): a stale precondition and a failure stay apart without
+// any caller translating between two copies of the same distinction.
+use super::projects::Refused;
 
 pub const SCRATCH_SESSION: &str = "tmm-scratch";
 const MARK: &str = "@tmm-scratch";
@@ -238,32 +242,6 @@ fn keep_alive(pane: &str) -> Result<(), String> {
     tmux::set_hook(&name(), "pane-died", RESPAWN_HOOK)
 }
 
-/// Why a release refused — the ONE distinction a client acts on (board #337).
-///
-/// `Stale` means the snapshot the reader confirmed no longer describes the
-/// name: nothing was touched, so a sentence about a project that has since
-/// moved on is not what they need. Asking `ensure` again is, because that is
-/// the one path that says who holds the name NOW — and if nobody does, the
-/// panel simply opens. Every other refusal is a failure the reader reads.
-///
-/// The distinction is drawn HERE, where the comparison already lives, so no
-/// caller re-derives it from the sentence or asks the store a second time.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Refused {
-    Stale(String),
-    Failed(String),
-}
-
-#[cfg(test)]
-impl Refused {
-    /// The sentence, for a test that pins the words as well as the variant.
-    fn text(&self) -> &str {
-        match self {
-            Refused::Stale(m) | Refused::Failed(m) => m,
-        }
-    }
-}
-
 /// Release the reserved name from the project that holds it, on an explicit
 /// request from the reader (board #337, orchestrator's revised ruling).
 ///
@@ -305,7 +283,12 @@ pub fn release(project_id: &str, session: &str) -> Result<serde_json::Value, Ref
     // reserved name in between — another client renamed it, a release ran
     // twice — the rename refuses and the project the user has since named is
     // left wearing its own name.
-    let written = super::projects::rename_if_session(&row.id, Some(&n), &recovered).map_err(Refused::Failed)?;
+    // Its refusal is CLASSIFIED, so this propagates it rather than renaming
+    // it: an expectation that expired inside the write lock is the same
+    // expired confirmation as the check above, and the panel recovers from
+    // both (review, 19:23). One type end to end, so nothing is lost in a
+    // translation step.
+    let written = super::projects::rename_if_session(&row.id, Some(&n), &recovered)?;
     let holder = declaring_project().map_err(Refused::Failed)?.map(|p| p.name);
     let renamed_to = freed(&n, written["session"].as_str(), holder.as_deref()).map_err(Refused::Failed)?;
     eprintln!("scratch: project '{}' released the reserved session name '{n}' (board #337)", row.name);

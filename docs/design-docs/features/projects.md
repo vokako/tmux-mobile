@@ -121,11 +121,19 @@ make a workspace. Two consequences fall out of that:
     allowed to go stale in the other direction: `rename` refuses a name
     another project holds, so a lost race there is an error and an unchanged
     store, never a release onto an occupied name.
-    **A stale confirmation is RECOVERED from, not reported.** Those two
-    snapshot refusals — nobody holds the name, or somebody else does — are
-    `scratch::Refused::Stale`, which the server sends as its own code
-    (`-32011`): nothing was touched, so a sentence about a project that has
-    since moved on leaves the reader exactly where the incident left them.
+    **A stale confirmation is RECOVERED from, not reported.** Every refusal
+    that means "the state you decided from has moved on, and nothing was
+    written" is `projects::Refused::Stale`, which the server sends as its own
+    code (`-32011`): nothing was touched, so a sentence about a project that
+    has since moved on leaves the reader exactly where the incident left
+    them. That is release's two snapshot refusals — nobody holds the name,
+    somebody else does — AND the in-lock expectation that
+    `rename_if_session` refuses, which is the very race the single critical
+    section exists to catch (review, 19:23: it used to arrive as a plain
+    internal error, so the panel kept the expired confirmation and an error
+    beside it). One type carries the distinction from the write that refuses
+    to the socket that answers, so `release` propagates the rename's
+    classification with `?` and no translation step can lose it.
     The panel drops the stale snapshot and asks `scratch_session` ONCE, the
     one path that says who holds the name now — free, and it opens; still
     held, and that refusal names the CURRENT holder and offers the action
@@ -133,8 +141,8 @@ make a workspace. Two consequences fall out of that:
     project must not carry over to a project they have not looked at, which
     is the same rule that made the snapshot exist. Everything else the release
     can answer is a failure with the server's sentence, and the panel keeps it
-    on screen — which is why the distinction is drawn inside `release`, where
-    the comparison already lives, instead of being sniffed from the message.
+    on screen — which is why each refusal is classified where its comparison
+    lives, instead of being sniffed from the message.
     The recovered name is `<reserved>-recovered`, or — when that is
     taken — the name the ONE suffixing rule picks (`free_session_name`'s
     digest on a shortened `-rec` base); every candidate is bounded to `slug`'s

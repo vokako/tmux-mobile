@@ -310,7 +310,38 @@ pub fn down(id: &str) -> Result<Value, String> {
 /// conversation and leave a live session no project claims; the name is the
 /// part a user actually reads, and it is the part that moves.
 pub fn rename(id: &str, name: &str) -> Result<Value, String> {
-    rename_if_session(id, None, name)
+    // No expectation travels in, so `Stale` cannot come back: one
+    // implementation, and only a caller that carries an expectation can have
+    // it expire.
+    rename_if_session(id, None, name).map_err(|e| e.text().to_string())
+}
+
+/// Why a write refused, when one of the answers is not a failure at all
+/// (board #337 and its review).
+///
+/// `Stale` means the caller's PRECONDITION no longer holds and nothing was
+/// written: the state it decided from has moved on. That is a different thing
+/// from an operation that tried and could not finish, because the way out of
+/// it is to look again rather than to read a sentence — the scratch panel
+/// drops its snapshot and re-asks, and the server gives it its own wire code
+/// so no client has to parse the message to tell the two apart.
+///
+/// One type from the write that refuses to the socket that answers: the
+/// classification cannot be lost in a translation step, because there is
+/// none.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Refused {
+    Stale(String),
+    Failed(String),
+}
+
+impl Refused {
+    /// The sentence, for a caller that only shows it.
+    pub(crate) fn text(&self) -> &str {
+        match self {
+            Refused::Stale(m) | Refused::Failed(m) => m,
+        }
+    }
 }
 
 /// `rename`, plus the caller's precondition about WHICH session the row must
@@ -325,22 +356,38 @@ pub fn rename(id: &str, name: &str) -> Result<Value, String> {
 /// renamed, that project could be wearing a name the user had just chosen).
 /// Re-reading the row here is not enough on its own: `id` still exists, so
 /// the only thing that can refuse is the expectation the caller carried in.
-pub(crate) fn rename_if_session(id: &str, expect_session: Option<&str>, name: &str) -> Result<Value, String> {
+///
+/// An expectation that no longer holds is `Refused::Stale` with NOTHING
+/// written — the same answer as the caller's own earlier check, and the panel
+/// recovers from it rather than showing it (review, 19:23: classifying it as
+/// a failure left the reader with the stale confirmation and an error).
+pub(crate) fn rename_if_session(id: &str, expect_session: Option<&str>, name: &str) -> Result<Value, Refused> {
     let name = name.trim();
     if name.is_empty() {
-        return Err("project name must not be empty".into());
+        return Err(Refused::Failed("project name must not be empty".into()));
     }
     let ts = now();
+    // The expired precondition leaves the closure as a VALUE, not as an
+    // error: `with_store`'s own errors are store failures, and folding the
+    // two into one string is exactly what would make the wire code guesswork.
     with_store(|store| {
         let Some(project) = store.project(id)? else {
-            return Err(format!("no project with id '{id}'"));
+            // Gone under a caller that carried an expectation is that
+            // expectation expiring too — the row was deleted between the
+            // decision and here, and nothing was written. With no
+            // expectation it is a plain failure.
+            let gone = format!("no project with id '{id}'");
+            return Ok(Err(match expect_session {
+                Some(_) => Refused::Stale(gone),
+                None => Refused::Failed(gone),
+            }));
         };
         if let Some(expect) = expect_session {
             if project.session != expect {
-                return Err(format!(
+                return Ok(Err(Refused::Stale(format!(
                     "project '{}' no longer declares session '{expect}' — nothing was renamed",
                     project.name
-                ));
+                ))));
             }
         }
         // The tmux SESSION follows the name, because it is the name the Terminal
@@ -405,13 +452,14 @@ pub(crate) fn rename_if_session(id: &str, expect_session: Option<&str>, name: &s
             }
         }
         store.mark_seen(id, ts)?;
-        Ok(json!({
+        Ok(Ok(json!({
             "id": id,
             "name": name,
             "session": session,
             "session_renamed": renamed_session,
-        }))
+        })))
     })
+    .map_err(Refused::Failed)?
 }
 
 pub fn set_archived(id: &str, archived: bool) -> Result<Value, String> {
@@ -641,10 +689,23 @@ mod tests {
         // scratch release could rename a project the reader had just named.
         let stale = rename_if_session(&id, Some(&born_session), "Decided Elsewhere")
             .expect_err("the row no longer declares the session the caller decided about");
-        assert!(stale.contains(&born_session), "the message names the session: {stale}");
+        // STALE, not a failure: nothing was written, and the caller's
+        // confirmation has simply expired — which is what earns the panel's
+        // re-ask and its own wire code instead of an error sentence (review,
+        // 19:23: this refusal used to arrive as a plain internal error).
+        assert!(matches!(stale, Refused::Stale(_)), "{stale:?}");
+        assert!(stale.text().contains(&born_session), "the message names the session: {stale:?}");
         let intact = with_store(|s| s.project(&id)).unwrap().unwrap();
         assert_eq!(intact.name, "New Name", "nothing was renamed");
         assert_eq!(intact.session, "new-name");
+        // A row that VANISHED under an expectation is the same expired
+        // confirmation (deleted between the decision and the write); with no
+        // expectation carried in, a missing id is a plain failure.
+        let deleted = rename_if_session("no-such-row", Some("whatever"), "Name").expect_err("no row");
+        assert!(matches!(deleted, Refused::Stale(_)), "{deleted:?}");
+        let plain = rename_if_session("no-such-row", None, "Name").expect_err("no row");
+        assert!(matches!(plain, Refused::Failed(_)), "{plain:?}");
+        assert_eq!(rename("no-such-row", "Name").unwrap_err(), plain.text(), "and `rename` shows the same sentence");
         // The same expectation, met, renames exactly as `rename` does.
         let kept = rename_if_session(&id, Some("new-name"), "New Name").expect("the expectation holds");
         assert_eq!(kept["session"].as_str(), Some("new-name"));

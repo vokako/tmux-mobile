@@ -327,8 +327,8 @@ fn dispatch(req: &Request, token: &str) -> Result<serde_json::Value, RpcError> {
             // (board #337): a stale snapshot is the one the panel recovers
             // from, so it travels as its own code.
             crate::projects::scratch::release(project, session).map_err(|e| match e {
-                crate::projects::scratch::Refused::Stale(m) => RpcError::ScratchStale(m),
-                crate::projects::scratch::Refused::Failed(m) => RpcError::Internal(m),
+                crate::projects::Refused::Stale(m) => RpcError::ScratchStale(m),
+                crate::projects::Refused::Failed(m) => RpcError::Internal(m),
             })
         }
 
