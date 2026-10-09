@@ -35,12 +35,18 @@ use crate::tmux;
 
 pub const SCRATCH_SESSION: &str = "tmm-scratch";
 const MARK: &str = "@tmm-scratch";
-/// The keep-alive hook's body. Plain `respawn-pane -k`: tmux runs a
-/// `pane-died` hook with the pane that died as its target (measured on tmux
-/// 3.6a with two panes — only the dead pane was respawned, the live pane kept
-/// its shell pid). The explicit `respawn-pane -k -t "#{pane_id}"` form stores
-/// fine and never fires on 3.6a, which is why the target is left implicit.
-const RESPAWN_HOOK: &str = "respawn-pane -k";
+/// The keep-alive hook's body. Plain `respawn-pane`, with no target and no
+/// `-k`:
+///
+/// - no TARGET, because tmux runs a `pane-died` hook with the pane that died
+///   as its target (measured on tmux 3.6a with two panes — only the dead pane
+///   was respawned, the live pane kept its shell pid). The explicit
+///   `respawn-pane -t "#{pane_id}"` form stores fine and never fires on 3.6a;
+/// - no `-k`, so the hook cannot kill a shell either: if `ensure` repaired the
+///   pane between the death and the hook, tmux refuses the hook's respawn
+///   instead of killing the shell the reader is already typing into
+///   (`tmux::respawn_pane`).
+const RESPAWN_HOOK: &str = "respawn-pane";
 
 /// The session name every path below uses. Production: `SCRATCH_SESSION`.
 /// A test points it at a name its `tmux::Scratch` guard owns, so a test run
@@ -135,12 +141,20 @@ fn keep_alive(pane: &str) -> Result<(), String> {
 /// Ensure the scratch session exists and answer `{session, target}`: the
 /// concrete `session:window.pane` of its first window's first pane (base
 /// index honoured), the target the Terminal subscribes, types and resizes
-/// against. The pane handed back is always LIVE: a pane that died before the
-/// keep-alive existed (an older session, a hook that was removed, an exit
-/// between create and hook) is respawned here — and only if it is dead, so a
-/// repeated ensure never kills a running shell or command. A concurrent
-/// ensure that created it first is the only create failure accepted, and only
-/// once `owned` says it is ours.
+/// against. A concurrent ensure that created it first is the only create
+/// failure accepted, and only once `owned` says it is ours.
+///
+/// The pane handed back is always LIVE: a pane that died before the keep-alive
+/// existed (an older session, a hook that was removed, an exit between create
+/// and hook) is repaired here. "Only a dead pane" is TMUX's decision, not a
+/// check-then-act of ours (#326 review P1): `respawn_pane` carries no `-k`, so
+/// tmux refuses it while a shell or a command is still running. That is what
+/// makes a repeated ensure safe — our own `pane_live` reading is only a fast
+/// path, and it is stale by the time the next line runs, because the
+/// `pane-died` hook or another ensure may revive the pane in between. The END
+/// STATE is therefore what decides: a refusal whose pane is now live is
+/// success (someone else won the race), and only a pane that is still not live
+/// is an error.
 pub fn ensure() -> Result<serde_json::Value, String> {
     match owned()? {
         Ownership::Taken(why) => return Err(why),
@@ -163,10 +177,14 @@ pub fn ensure() -> Result<serde_json::Value, String> {
     }
     let target = first_pane()?;
     keep_alive(&target)?;
-    if tmux::pane_dead(&target) {
-        tmux::respawn_pane(&target)?;
-        if tmux::pane_dead(&target) {
-            return Err(format!("the scratch terminal's shell will not start in {target}"));
+    // Unless the pane is PROVEN live, offer it a shell: an unreadable answer
+    // falls on the repair side, which costs nothing now that the repair cannot
+    // kill anything.
+    if tmux::pane_live(&target) != Some(true) {
+        let attempt = tmux::respawn_pane(&target);
+        if tmux::pane_live(&target) != Some(true) {
+            return Err(attempt.err().unwrap_or_else(||
+                format!("the scratch terminal's shell will not start in {target}")));
         }
     }
     Ok(serde_json::json!({ "session": name(), "target": target }))
@@ -251,7 +269,12 @@ mod tests {
         let target = first["target"].as_str().unwrap().to_string();
         // The keep-alive is tmux's own, scoped to this window and session.
         assert_eq!(tmux::window_option(&target, "remain-on-exit").as_deref(), Some("on"));
-        assert_eq!(tmux::session_hook(&n, "pane-died").as_deref(), Some(RESPAWN_HOOK));
+        // The body is asserted LITERALLY, not against RESPAWN_HOOK: comparing
+        // the constant to itself would pass however it changed, and the two
+        // things that must not come back — a `-k` and an explicit target —
+        // are exactly a change to this string (#326 review P1).
+        assert_eq!(tmux::session_hook(&n, "pane-died").as_deref(), Some("respawn-pane"));
+        assert_eq!(RESPAWN_HOOK, "respawn-pane");
         // A repeated ensure re-applies it and never kills a running shell.
         let pid = pane_pid(&target);
         assert!(!pid.is_empty());
@@ -259,12 +282,12 @@ mod tests {
             assert_eq!(ensure().unwrap()["target"], target.as_str());
         }
         assert_eq!(pane_pid(&target), pid, "a healthy ensure leaves the shell alone");
-        assert!(!tmux::pane_dead(&target));
+        assert_eq!(tmux::pane_live(&target), Some(true));
 
         // Ctrl-D / `exit`: the pane comes back IN PLACE — same target, so the
         // Terminal's subscription stays valid — and the session survives.
         tmux::send_command(&target, "exit").expect("typed exit");
-        assert!(settles(|| pane_pid(&target) != pid && !tmux::pane_dead(&target)),
+        assert!(settles(|| pane_pid(&target) != pid && tmux::pane_live(&target) == Some(true)),
             "the pane-died hook respawns the shell in place");
         assert!(tmux::session_exists(&n), "the hidden session does not end with its shell");
         assert_eq!(first_pane().unwrap(), target, "and keeps the same session:window.pane");
@@ -275,12 +298,31 @@ mod tests {
         tmux::run_tmux(&["set-hook", "-u", "-t", &n, "pane-died"]).expect("hook removed");
         assert_eq!(tmux::session_hook(&n, "pane-died"), None);
         tmux::send_command(&target, "exit").expect("typed exit");
-        assert!(settles(|| tmux::pane_dead(&target)), "with no hook the pane stays dead");
+        assert!(settles(|| tmux::pane_live(&target) == Some(false)), "with no hook the pane stays dead");
         let repaired = ensure().expect("ensure repairs a dead pane");
         assert_eq!(repaired["target"], target.as_str());
-        assert!(!tmux::pane_dead(&target), "the target handed back is a LIVE pane");
+        assert_eq!(tmux::pane_live(&target), Some(true), "the target handed back is a LIVE pane");
         assert_ne!(pane_pid(&target), revived, "a new shell, in the same pane");
-        assert_eq!(tmux::session_hook(&n, "pane-died").as_deref(), Some(RESPAWN_HOOK), "and the hook is back");
+        assert_eq!(tmux::session_hook(&n, "pane-died").as_deref(), Some("respawn-pane"), "and the hook is back");
+
+        // #326 review P1: the repair is TMUX's decision, not our
+        // check-then-act. A respawn aimed at a pane whose shell is running —
+        // which is what a stale `pane_live` reading, the pane-died hook or a
+        // concurrent ensure would produce — is REFUSED, and the shell (and
+        // anything it started) survives. Without this, the `-k` form would
+        // have killed whatever won the race.
+        let running = pane_pid(&target);
+        tmux::send_command(&target, "sleep 120").expect("typed a command");
+        assert!(settles(|| tmux::pane_format(&target, "#{pane_current_command}").as_deref() == Some("sleep")));
+        let refused = tmux::respawn_pane(&target);
+        assert!(refused.is_err(), "tmux refuses to respawn a pane that is still active: {refused:?}");
+        assert_eq!(pane_pid(&target), running, "the shell is untouched");
+        assert_eq!(tmux::pane_format(&target, "#{pane_current_command}").as_deref(), Some("sleep"),
+            "and so is the command it was running");
+        // Which is also why a repeated ensure through this path is a no-op.
+        assert_eq!(ensure().unwrap()["target"], target.as_str());
+        assert_eq!(pane_pid(&target), running, "ensure did not restart a live shell");
+        tmux::send_keys(&target, "C-c", false).ok();
 
         // Explicit Kill is still the one way to end it: the hook is a session
         // option, so it dies with the session instead of rebuilding the pane.

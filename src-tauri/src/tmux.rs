@@ -1263,18 +1263,31 @@ pub fn window_option(target: &str, option: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Whether a pane is in tmux's DEAD state: its command exited while
-/// `remain-on-exit` was on, so the pane is still there with nothing running.
-pub fn pane_dead(target: &str) -> bool {
-    pane_format(target, "#{pane_dead}").as_deref() == Some("1")
+/// A pane's liveness as tmux reports it: `Some(true)` while its command runs,
+/// `Some(false)` for tmux's DEAD state (the command exited while
+/// `remain-on-exit` was on, so the pane is still there with nothing running),
+/// and `None` when the answer cannot be read at all. ONE reading of the fact,
+/// so no caller has to decide what an unreadable answer means by itself.
+pub fn pane_live(target: &str) -> Option<bool> {
+    pane_format(target, "#{pane_dead}").map(|dead| dead != "1")
 }
 
-/// Restart a pane's command IN PLACE, keeping the pane (and therefore its
+/// Restart a DEAD pane's command IN PLACE, keeping the pane (and therefore its
 /// `session:window.pane` target and `%id`) and its original start directory.
-/// `-k` is required for a pane that is still running; callers that must not
-/// kill a live shell check `pane_dead` first.
+///
+/// Deliberately WITHOUT `-k`: tmux refuses ("pane … still active") when the
+/// pane's command is still running, which makes "only a dead pane" ONE atomic
+/// tmux decision instead of a check-then-kill in our code. A caller that read
+/// `pane_live` first cannot rely on that reading — a `pane-died` hook or a
+/// concurrent caller may have revived the pane in between, and `-k` would then
+/// have killed a live shell and whatever it had started. So a refusal is not a
+/// failure to handle: it means someone else won the race and the pane is
+/// running, which was the point. Verified on tmux 3.6a, including two
+/// concurrent respawns of one dead pane (one wins, the other is refused, the
+/// surviving shell keeps its pid) and a repair attempt against a pane running
+/// `sleep 120` (refused, pid unchanged).
 pub fn respawn_pane(target: &str) -> Result<(), String> {
-    run_tmux(&["respawn-pane", "-k", "-t", target]).map(|_| ())
+    run_tmux(&["respawn-pane", "-t", target]).map(|_| ())
 }
 
 /// 检查 tmux server 是否运行

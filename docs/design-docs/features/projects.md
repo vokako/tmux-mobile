@@ -91,25 +91,41 @@ make a workspace. Two consequences fall out of that:
     only to its own window and session: `remain-on-exit on` (a WINDOW option,
     so it is set through the pane target — a session target would only reach
     that session's current window) and the session hook
-    `pane-died: respawn-pane -k`. Measured on **tmux 3.6a**: before this,
+    `pane-died: respawn-pane`. Measured on **tmux 3.6a**: before this,
     `exit` in the pane closed the only window and the SESSION disappeared
     ("can't find session"); with the keep-alive the pane comes back with the
     SAME `%id` and the same `session:window.pane` target, which is why the
-    Terminal's subscription survives it. The hook body leaves its target
-    implicit because tmux runs a `pane-died` hook against the pane that died —
-    verified with two panes: only the dead one was respawned, the live pane
-    kept its shell pid; the explicit `respawn-pane -k -t "#{pane_id}"` form
-    stores fine and never fires on 3.6a. The respawned shell starts in the
+    Terminal's subscription survives it. The hook body is bare
+    `respawn-pane`: no target, because tmux runs a `pane-died` hook against the
+    pane that died — verified with two panes, only the dead one was respawned
+    and the live pane kept its shell pid (the explicit
+    `respawn-pane -t "#{pane_id}"` form stores fine and never fires on 3.6a) —
+    and no `-k`, for the reason below. The respawned shell starts in the
     pane's creation directory, which for this session is `$HOME`
     (`new_session(_, None, None)` passes `-c $HOME`) — measured with a pane
     created in `/tmp/probe-cwd` that had `cd /usr`'d: it came back in
     `/tmp/probe-cwd`, never `/`. No global option or hook is touched.
-  - **`ensure` hands back a LIVE pane.** A pane that died before the keep-alive
-    existed (an older session, a hook someone removed, an exit between create
-    and hook) is respawned here — `respawn-pane -k` only when `pane_dead` is
-    1, so a repeated ensure never kills a running shell or command (the test
-    pins the shell pid across three ensures). If the shell will not start, the
-    RPC fails with the target instead of handing out a dead pane.
+  - **`ensure` hands back a LIVE pane, and "only a dead pane" is TMUX's
+    decision.** A pane that died before the keep-alive existed (an older
+    session, a hook someone removed, an exit between create and hook) is
+    repaired here. The first implementation read `pane_dead` and then ran
+    `respawn-pane -k`, which review (#326 P1) correctly called a
+    check-then-kill: between the read and the call the `pane-died` hook or a
+    concurrent `ensure` can revive the pane, and the `-k` would then have
+    killed a live shell and whatever it had started. So **nothing in this path
+    carries `-k`** — neither `tmux::respawn_pane` nor the hook. tmux refuses to
+    respawn a pane whose command is still running ("pane … still active"),
+    which makes the whole thing ONE atomic tmux decision; our `pane_live`
+    reading is only a fast path. Measured on tmux 3.6a: a repair aimed at a
+    pane running `sleep 120` is refused with the shell's pid and its command
+    untouched, and two concurrent repairs of one dead pane end with one winner,
+    one refusal and a surviving shell. The END STATE is what `ensure` answers
+    on — a refusal whose pane is now live is success (someone else won the
+    race), and anything still not live is an error naming the target — and an
+    UNREADABLE liveness answer (`pane_live` → `None`) falls on the repair side,
+    which costs nothing now that a repair cannot kill anything. A repeated
+    ensure is pinned to keep the shell pid across three calls and across a
+    running command.
   - **Explicit Kill is still the only way to end it.** `pane-died` is a session
     option, so it goes with the session: measured, `kill-session` on a session
     carrying the hook leaves no session behind rather than a respawned pane.
