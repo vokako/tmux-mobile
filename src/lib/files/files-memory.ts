@@ -10,10 +10,25 @@
 //     transfer from one machine. A switch stops them and KEEPS the part,
 //     because the bytes are the leaving server's file.
 //
-// Extracted into a factory so ②b can hold two of them. Not wired into
-// production: Files.svelte keeps ONE instance, every rule below is the one it
-// had, and `suspendDownloads`/`resetFilesMemory` still exist for App's switch.
-// ②b replaces "reset it on a switch" with "drop that server's instance".
+// Extracted into a factory so ②b can hold two of them. NOT YET WIRED PER
+// RUNTIME, which is not the same as uncalled: Files.svelte keeps ONE instance
+// and production goes through it today, every rule below is the one it had,
+// and `suspendDownloads`/`resetFilesMemory` still exist for App's switch.
+//
+// Two things ②b owes this record (reviewer, 2026-10-09):
+//
+//   - DROPPING AN INSTANCE IS NOT STOPPING A DOWNLOAD. A runtime must hold
+//     this record together with that server's download rows, shared by the
+//     page and the drawer, and removing the runtime has to forbid new
+//     attempts, then `suspend` and AWAIT, then release. `suspend` snapshots
+//     the attempts tracked WHEN IT IS CALLED; it does not seal off a later
+//     `track`, and it is deliberately not given an auto-dispose of its own —
+//     that belongs to the lifecycle wiring, in one place.
+//   - A WEB ROW ID IS UNIQUE ONLY IN ONE RECORD. `web-1` of two servers is
+//     two different rows, so a union list or a cancel dispatched across
+//     servers must carry the owner; bare row ids from two records must never
+//     meet in one map. A native `partId` already has a machine dimension in
+//     it — the two kinds of id are not the same guarantee.
 
 /** The one writer of a part folder, across every Files instance (board
  * #305): the page and the drawer write the same folder, so the one-writer

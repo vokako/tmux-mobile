@@ -6,8 +6,12 @@
   // Hub's drawer — share this record and outlive any one of them, which is
   // why it is here and not in the instance.
   //
-  // ONE instance for as long as the app looks at one server; ②b gives each
-  // runtime its own, and "reset it on a switch" becomes "drop its instance".
+  // ONE instance for as long as the app looks at one server, and production
+  // goes through it today — the extraction changed where this state lives, not
+  // who reads it. ②b gives each runtime its own, and must hold it together
+  // with that server's download rows: the page and the drawer share one
+  // record, and removing a runtime forbids new attempts, then suspends and
+  // AWAITS, then releases. Dropping the reference is not stopping a download.
   import { createFilesMemory } from './files-memory.ts';
   const memory = createFilesMemory();
   // A fresh page has no writer yet: drop claims a previous page (a webview

@@ -12,11 +12,18 @@
 // instances (the page and the Hub drawer) and every attempt, exactly as the
 // module-level store was.
 //
-// Not wired into production: ②b gives each runtime its own instance and
-// retires the module-level one, at which point "reset the store on a switch"
-// becomes "drop the server's instance" and `forgetAll` loses its reason to
-// exist. Converting it now is what makes that a wiring change rather than a
-// rewrite of the rules below.
+// NOT YET WIRED PER RUNTIME — which is not the same as uncalled. Production
+// runs through `downloadStore` today, exactly as it ran through the module
+// state before: the conversion changed where the rows live, not who reads
+// them. ②b gives each runtime its own instance and retires the module-level
+// one, at which point "reset the store on a switch" becomes "drop the
+// server's instance" and `forgetAll` loses its reason to exist.
+//
+// ②b's contract, because dropping an instance is NOT stopping a download
+// (reviewer, 2026-10-09): a runtime's rows and its FilesMemory must be held
+// together by that runtime, shared by the page and the drawer, and removing
+// it has to forbid new attempts, then suspend and AWAIT the running ones,
+// then release — never just drop the reference.
 
 import type { FeedbackValue } from '../ui/feedback-lifetime.ts';
 

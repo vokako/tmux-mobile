@@ -96,13 +96,11 @@ test('a suspend on one server does not touch the other s attempts', () => {
   });
 });
 
-test('a finished attempt is no longer waited for', () => {
-  // `untrack` runs in each attempt's `finally`. Forgetting the SETTLE is the
-  // half that bites: a switch would then wait forever on a promise belonging
-  // to a transfer that has already ended. (Forgetting the abort handle is
-  // unobservable housekeeping — aborting an aborted controller fires nothing,
-  // and re-tracking a row id overwrites the entry — so this test does not
-  // claim to cover it.)
+test('a finished attempt is neither awaited nor aborted', () => {
+  // `untrack` has to forget BOTH halves, and this fixture catches either one:
+  // keep the settle and a switch waits forever on a transfer that has already
+  // ended; keep the abort handle and the switch aborts a row that finished,
+  // because this attempt's controller was never aborted.
   const a = createFilesMemory();
   const aborted: string[] = [];
   const control = new AbortController();
@@ -116,9 +114,14 @@ test('a finished attempt is no longer waited for', () => {
 });
 
 test('an attempt that untracks itself on abort is still awaited', () => {
-  // What the component does: the `finally` untracks the row, so by the time
-  // the abort has propagated the live map is already shorter. `suspend` must
-  // therefore snapshot the settles BEFORE aborting, or it waits for nothing.
+  // A CONSTRUCTED ordering, not a transcript of the component: the real
+  // `finally` (Files.svelte) untracks and settles in the same synchronous
+  // block, so there the snapshot is not what saves it. This fixture splits
+  // those two steps — untrack synchronously on abort, settle later — because
+  // that is the shape in which the rule is falsifiable at all: `suspend` must
+  // snapshot the settles BEFORE aborting, or an abort that shortens the live
+  // map leaves it waiting for nothing. The rule is cheap and the ordering it
+  // protects against is one `await` away in any future download path.
   const a = createFilesMemory();
   let settle: () => void = () => {};
   const control = new AbortController();

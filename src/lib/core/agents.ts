@@ -78,10 +78,10 @@ export interface BackendInfo {
  * fallback lists and the avatar switch. Those describe this build, not any
  * server, so they belong to no instance.
  *
- * Not wired into production: the module keeps ONE catalog and re-exports its
- * methods under the names every caller already uses. ②b gives each runtime
- * its own, at which point "reset it on a switch" becomes "drop that server's
- * instance".
+ * NOT YET WIRED PER RUNTIME, which is not the same as uncalled: production
+ * reads this catalog today through the named exports below, exactly as it read
+ * the module variables before. ②b gives each runtime its own, at which point
+ * "reset it on a switch" becomes "drop that server's instance".
  */
 export interface BackendCatalog {
   /** The server answered. An empty list counts as "not answered": a present
