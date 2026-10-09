@@ -139,6 +139,14 @@ divider passes `--hub-drawer-w`, 320–900, 520 — a second consumer instead of
 second implementation. The page that owns the variable restores it from
 localStorage on mount; SideHandle is the only other writer.
 
+`edge="top"` (board #324, the scratch terminal from the bottom) is the same
+atom on the Y axis: dragging UP grows the panel, Up/Down nudge, the separator is
+`aria-orientation="horizontal"`, the cursor `row-resize`. Every edge now clamps
+to what the viewport can hold (zoom-corrected, 80px kept), so a size stored on a
+larger window cannot overflow a smaller one. `always` keeps the handle on
+narrow layouts for a panel that exists there; without it the ≤760px rule hides
+it as before, so the left/right consumers are unchanged.
+
 The handle is the only writer of `--sidebar-w` besides the App init read.
 
 ### 3. Shared primitives move to `app.css`
