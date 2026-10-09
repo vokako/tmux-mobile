@@ -166,8 +166,35 @@ Decisions worth keeping:
   replaces the socket inside one object, and the Terminals that registered
   those listeners are still mounted in hidden page layers (that is the
   `resubscribeActive()` contract in Lessons Learned). Had `disconnect()`
-  cleared them, every reconnect would have silently frozen the panes. `dispose()`
-  is idempotent and touches no other object.
+  cleared them, every reconnect would have silently frozen the panes.
+- **`dispose()` is TERMINAL, and a dial in flight belongs to the lifetime it
+  ends** (review + validator, 2026-10-09; both were P1s on the first draft of
+  this phase). Two gaps made it a reset rather than a release:
+  1. An attempt still waiting for the server's nonce, or holding the proof
+     while auth completes, kept a promise nobody would answer and a connect
+     timeout nobody would clear. `disconnect()` nulls the socket's handlers, so
+     even the `onclose` that would have rejected could not run — the caller sat
+     there until the 5 s timer fired, past the point the registry had declared
+     the connection gone. Every unsettled dial is now a record the connection
+     owns: `connect()` (which supersedes one), `disconnect()` and therefore
+     `dispose()` settle it at once with the existing `DISCONNECTED` error and
+     clear its timeout. A handshake that completes afterwards restores no
+     listener, starts no idle probe and sends no frame.
+  2. Nothing said a disposed object was finished, so a retry closure or an
+     unmounted view still holding the handle could dial again AFTER
+     `registry.remove(key)`. The next `ensure(key)` would then hand out a fresh
+     object while the forgotten one owned a live socket: two connections behind
+     one key, one of them invisible to the registry that is supposed to own
+     every lifetime. A disposed handle's `connect` and `call` now reject with
+     `connection disposed` — a distinct message, because a RELEASED connection
+     is not an offline one — and registering a listener or a subscription on it
+     is dropped instead of accumulating on a dead object. A replacement comes
+     only from `registry.ensure`. `disconnect()` is unchanged and still
+     reconnectable.
+
+  `dispose()` is idempotent and touches no other object. The test fixture
+  tracks `setTimeout` as well as `setInterval`: counting only intervals is what
+  let the dial timeout hide.
 - **The facade's slot key is a Symbol, in memory only.** Not persisted, not
   derived from a URL and not a stand-in for `ServerEntry.id`. A facade that
   picked its object by address or by the machine id a candidate CLAIMS would
@@ -190,16 +217,19 @@ Decisions worth keeping:
   what lets `connection.ts` stay free of `window` (pinned by
   `connection.source.test.ts`). A viable address is not authentication and not
   machine identity.
-- **The download origin comes from the connection, not from a module.**
+- **The download origin is bound to its source, read before the round trip.**
   `fsDownloadHttp` read the module's `wsUrl` after its `fs_download_url` round
-  trip; it now reads its own connection's `url()` before it. A signature is
+  trip; it now snapshots its own connection's `url()` before it. A signature is
   issued by one server, so the base it is appended to must be that server's.
-  On one connection the two readings cannot disagree — `connect()` rejects
-  every pending RPC, so a reply from the socket being replaced never arrives —
-  which is why this is a structural change, not a behaviour change. Across two
-  connections it is the whole difference: the module reading would have given
-  A's signature whichever origin dialled last, and
-  `connection.test.ts` fails under exactly that mutation.
+  Across two connections this is the whole difference — the module reading
+  would have given A's signature whichever origin dialled last, and
+  `connection.test.ts` fails under exactly that mutation. On ONE connection it
+  is a race tightening, not a provable equivalence: `rejectAllPending` only
+  rejects promises still in the map, so a reply that already resolved while its
+  `.then` was queued is not recalled, and other queued microtasks can run a
+  `connect()` first. The snapshot removes that window by construction; do not
+  restore the late read on the grounds that the 11 unchanged tests pass, which
+  say nothing about it either way.
 - **Zero behaviour change, and the proof is the tests nobody edited.**
   `ws.test.ts` (plain-token lifecycle, stale close, async send after
   replacement, request order, the v1/v2 handshake vectors, decrypt-failure
@@ -212,6 +242,14 @@ Decisions worth keeping:
   signed-download origin, and a negative control for each),
   `connection-registry.test.ts` pins lifetime, and `connection-facade.test.ts`
   drives the real facade through A→B→A.
+
+Known limit carried over from before the split: the `.catch` on `call()`'s
+`sendOnSocket` calls `notifyDisconnect` without checking which socket the send
+belonged to, so a slow encryption whose socket was replaced can ask THIS
+connection to recover while its new socket is healthy. It is the baseline's
+boundary, not this phase's, and the "late ciphertext reaches neither socket"
+test says nothing about it; a dedicated check is still owed (reviewer P2,
+2026-10-09).
 
 What phase ① does NOT do: there is no connection mode, no second live socket
 in production, no serverId on any runtime reference, no change to parking
@@ -450,7 +488,13 @@ policy and device reachability are the app layer's, and
 `connection.source.test.ts` fails the build if that leaks back.
 `disconnect()` KEEPS listeners and refcounts (a connection outlives its
 socket; the Terminals are still mounted) and only `dispose()` releases them —
-confusing the two silently freezes panes after a reconnect. `ws.ts` holds one
+confusing the two silently freezes panes after a reconnect. `dispose()` is
+TERMINAL: it settles any dial still in flight (promise and connect timeout,
+not just the socket) and a disposed handle's `connect`/`call` reject with
+`connection disposed` while registration on it is dropped, because an old
+handle that can dial again produces a live connection the registry does not
+know about. Every mutating entry point therefore carries a `disposed` guard,
+pinned by `connection.source.test.ts`. `ws.ts` holds one
 memory-only Symbol slot, never persisted and never chosen by URL or machine
 id, which retires in phase ② when every server gets an explicit runtime keyed
 by its entry id; adding a second door onto the facade re-creates the implicit

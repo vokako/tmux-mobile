@@ -10,37 +10,41 @@
 //
 // Real Web Crypto, a real server half of the handshake per connection
 // (`connection.fixture.ts`), no stubbing of our own transport.
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   FakeE2eServer, MockWebSocket, handshake, handshakePlain,
-  installDoubles, settle, until, withWebCrypto,
+  installDoubles, settle, trackTimers, until, withWebCrypto,
 } from './connection.fixture.ts';
 
 installDoubles();
 const { createConnection } = await import('./connection.ts');
 const { createWsApi } = await import('./ws-api.ts');
+const { createConnectionRegistry } = await import('./connection-registry.ts');
 
 const A_URL = 'ws://a.test/ws';
 const B_URL = 'ws://b.test/ws';
 
-/** Two authenticated connections to two different servers. */
-async function pair() {
+/** Two authenticated connections to two different servers. Teardown is
+ * registered on the test context, so a FAILING assertion still releases both
+ * idle probes — otherwise a failed run hangs the file instead of reporting
+ * (validator, 2026-10-09). */
+async function pair(t: TestContext) {
   const serverA = new FakeE2eServer('tok-a', 2, 'machine-a', 'alpha');
   const serverB = new FakeE2eServer('tok-b', 2, 'machine-b', 'bravo');
   const a = createConnection();
   const b = createConnection();
   const socketA = await handshake(a, serverA, A_URL, 'tok-a');
   const socketB = await handshake(b, serverB, B_URL, 'tok-b');
+  t.after(() => { a.dispose(); b.dispose(); });
   return {
     a, b, serverA, serverB, socketA, socketB,
     apiA: createWsApi(a), apiB: createWsApi(b),
-    done: () => { a.dispose(); b.dispose(); },
   };
 }
 
-test('two connections authenticate at the same time and keep their own identity', () => withWebCrypto(async () => {
-  const w = await pair();
+test('two connections authenticate at the same time and keep their own identity', (t) => withWebCrypto(async () => {
+  const w = await pair(t);
   assert.equal(w.a.isConnected(), true);
   assert.equal(w.b.isConnected(), true);
   assert.equal(w.a.getMachineId(), 'machine-a');
@@ -49,11 +53,10 @@ test('two connections authenticate at the same time and keep their own identity'
   assert.equal(w.b.getHostname(), 'bravo');
   assert.equal(w.a.url(), A_URL);
   assert.equal(w.b.url(), B_URL);
-  w.done();
 }));
 
-test('the same request id on both connections resolves on the connection that sent it', () => withWebCrypto(async () => {
-  const w = await pair();
+test('the same request id on both connections resolves on the connection that sent it', (t) => withWebCrypto(async () => {
+  const w = await pair(t);
   const fromA = w.apiA.listSessions();
   const reqA = await w.serverA.next(w.socketA);
   // Each connection counts its own ids from 1, so the collision below is the
@@ -77,11 +80,60 @@ test('the same request id on both connections resolves on the connection that se
   w.socketA.binary(await w.serverA.seal(JSON.stringify({ id: reqA.id, result: [{ name: 'on-a' }] })));
   assert.deepEqual((await fromA).map((s: any) => s.name), ['on-a']);
   assert.deepEqual((await fromB).map((s: any) => s.name), ['on-b']);
-  w.done();
 }));
 
-test('a same-named pane and a same-named room reach only their own connection', () => withWebCrypto(async () => {
-  const w = await pair();
+test('two handshakes interleaved frame by frame derive their own keys', () => withWebCrypto(async () => {
+  // `pair()` finishes A's handshake before starting B's, which proves two
+  // authenticated links coexist but not that the handshakes themselves can
+  // overlap. Here every step alternates (reviewer P2, 2026-10-09).
+  const serverA = new FakeE2eServer('tok-a', 2, 'machine-a', 'alpha');
+  const serverB = new FakeE2eServer('tok-b', 1, 'machine-b', 'bravo'); // and a v1 server
+  const a = createConnection();
+  const b = createConnection();
+  try {
+    const dialA = a.connect(A_URL, 'tok-a');
+    const socketA = MockWebSocket.instances.at(-1)!;
+    const dialB = b.connect(B_URL, 'tok-b');
+    const socketB = MockWebSocket.instances.at(-1)!;
+    socketA.readyState = MockWebSocket.OPEN;
+    socketB.readyState = MockWebSocket.OPEN;
+
+    // Nonces cross: B's first, then A's.
+    socketB.message(serverB.nonceFrame());
+    socketA.message(serverA.nonceFrame());
+    await until(() => socketA.sent.length >= 1 && socketB.sent.length >= 1);
+    const authA = JSON.parse(socketA.sent[0] as string);
+    const authB = JSON.parse(socketB.sent[0] as string);
+    assert.equal(authA.params.e2e, 2, 'each connection negotiates with ITS server');
+    assert.equal(authB.params.e2e, 1);
+    assert.notEqual(authA.params.client_nonce, authB.params.client_nonce, 'separate nonces');
+    assert.equal(await serverA.accept(authA), true, 'A s proof verifies under A s token');
+    assert.equal(await serverB.accept(authB), true);
+    assert.equal(await serverA.accept(authB), false, 'and not under the other s');
+
+    // Auth answers cross back the other way.
+    socketA.binary(await serverA.seal(JSON.stringify({ result: { authenticated: true, machine_id: 'machine-a', hostname: 'alpha', e2e: 2 } })));
+    socketB.binary(await serverB.seal(JSON.stringify({ result: { authenticated: true, machine_id: 'machine-b', hostname: 'bravo', e2e: 1 } })));
+    assert.equal(await dialA, 'machine-a');
+    assert.equal(await dialB, 'machine-b');
+
+    // Each cipher still decrypts only its own traffic.
+    const fromA = createWsApi(a).listSessions();
+    const fromB = createWsApi(b).listSessions();
+    const reqA = await serverA.next(socketA);
+    const reqB = await serverB.next(socketB);
+    socketA.binary(await serverA.seal(JSON.stringify({ id: reqA.id, result: [{ name: 'a' }] })));
+    socketB.binary(await serverB.seal(JSON.stringify({ id: reqB.id, result: [{ name: 'b' }] })));
+    assert.deepEqual((await fromA).map((s: any) => s.name), ['a']);
+    assert.deepEqual((await fromB).map((s: any) => s.name), ['b']);
+  } finally {
+    a.dispose();
+    b.dispose();
+  }
+}));
+
+test('a same-named pane and a same-named room reach only their own connection', (t) => withWebCrypto(async () => {
+  const w = await pair(t);
   const seenA: string[] = [], seenB: string[] = [];
   const closedA: string[] = [], closedB: string[] = [];
   const roomA: any[] = [], roomB: any[] = [];
@@ -110,21 +162,19 @@ test('a same-named pane and a same-named room reach only their own connection', 
   assert.deepEqual(closedB, ['app:0.0']);
   assert.deepEqual(roomA.map(m => m.body), ['hello from a'], 'the same room name on two servers is two rooms');
   assert.deepEqual(roomB.map(m => m.body), ['hello from b']);
-  w.done();
 }));
 
-test('a pane push for a target only the other connection watches reaches nobody', () => withWebCrypto(async () => {
-  const w = await pair();
+test('a pane push for a target only the other connection watches reaches nobody', (t) => withWebCrypto(async () => {
+  const w = await pair(t);
   const seenA: string[] = [];
   w.a.addPaneOutputListener('only-on-a:0.0', (_t, c) => seenA.push(c!));
   w.socketB.binary(await w.serverB.seal(JSON.stringify({ method: 'pane_output', params: { target: 'only-on-a:0.0', content: 'leak' } })));
   await settle();
   assert.deepEqual(seenA, [], 'B has no route to a listener registered on A');
-  w.done();
 }));
 
-test('subscription refcounts are per connection, and a reconnect restores only its own targets', () => withWebCrypto(async () => {
-  const w = await pair();
+test('subscription refcounts are per connection, and a reconnect restores only its own targets', (t) => withWebCrypto(async () => {
+  const w = await pair(t);
   const wire = async (server: FakeE2eServer, socket: MockWebSocket) =>
     (await server.drain(socket)).map(m => `${m.method} ${m.params.target}`);
 
@@ -167,11 +217,10 @@ test('subscription refcounts are per connection, and a reconnect restores only i
   await until(() => socketA2.sent.length >= 5);
   await settle();
   assert.deepEqual((await wire(serverA2, socketA2)).sort(), ['unsubscribe app:0.0', 'unsubscribe app:0.1']);
-  w.done();
 }));
 
-test('an RPC timeout on one connection leaves the other pending call alone', () => withWebCrypto(async () => {
-  const w = await pair();
+test('an RPC timeout on one connection leaves the other pending call alone', (t) => withWebCrypto(async () => {
+  const w = await pair(t);
   const slowB = w.apiB.listSessions();
   const reqB = await w.serverB.next(w.socketB);
   const timingOut = w.a.call('list_sessions', {}, 20);
@@ -180,11 +229,10 @@ test('an RPC timeout on one connection leaves the other pending call alone', () 
 
   w.socketB.binary(await w.serverB.seal(JSON.stringify({ id: reqB.id, result: [{ name: 'still-here' }] })));
   assert.deepEqual((await slowB).map((s: any) => s.name), ['still-here']);
-  w.done();
 }));
 
-test('a lost socket notifies only its own recovery callback, and the survivor still calls', () => withWebCrypto(async () => {
-  const w = await pair();
+test('a lost socket notifies only its own recovery callback, and the survivor still calls', (t) => withWebCrypto(async () => {
+  const w = await pair(t);
   let recoverA = 0, recoverB = 0;
   w.a.setOnDisconnect(() => recoverA++);
   w.b.setOnDisconnect(() => recoverB++);
@@ -204,11 +252,10 @@ test('a lost socket notifies only its own recovery callback, and the survivor st
   w.socketB.binary(await w.serverB.seal(JSON.stringify({ id: reqB.id, result: [] })));
   assert.deepEqual(await fromB, [], 'B keeps working through A s outage');
   assert.equal(recoverB, 0);
-  w.done();
 }));
 
-test('a failed authentication on a third connection disturbs neither live one', () => withWebCrypto(async () => {
-  const w = await pair();
+test('a failed authentication on a third connection disturbs neither live one', (t) => withWebCrypto(async () => {
+  const w = await pair(t);
   let recoverA = 0, recoverB = 0;
   w.a.setOnDisconnect(() => recoverA++);
   w.b.setOnDisconnect(() => recoverB++);
@@ -228,11 +275,10 @@ test('a failed authentication on a third connection disturbs neither live one', 
   assert.equal(w.b.isConnected(), true);
   assert.equal(recoverA + recoverB, 0, 'a never-authenticated connection asks nobody to recover');
   c.dispose();
-  w.done();
 }));
 
-test('dispose releases its own connection and nothing else', () => withWebCrypto(async () => {
-  const w = await pair();
+test('dispose releases its own connection and nothing else', (t) => withWebCrypto(async () => {
+  const w = await pair(t);
   const strandedA = w.apiA.listSessions();
   await w.serverA.next(w.socketA);
   const seenB: string[] = [];
@@ -258,8 +304,8 @@ test('dispose releases its own connection and nothing else', () => withWebCrypto
   w.b.dispose();
 }));
 
-test('encryption that finishes after a reconnect reaches neither socket', () => withWebCrypto(async () => {
-  const w = await pair();
+test('encryption that finishes after a reconnect reaches neither socket', (t) => withWebCrypto(async () => {
+  const w = await pair(t);
   // ≥256 bytes goes through CompressionStream, so the encrypt resolves several
   // microtasks after the call — long enough for a reconnect to land first.
   const big = 'x'.repeat(4000);
@@ -280,8 +326,8 @@ test('encryption that finishes after a reconnect reaches neither socket', () => 
   w.b.dispose();
 }));
 
-test('a signed download URL is resolved against the origin of the connection that asked', () => withWebCrypto(async () => {
-  const w = await pair();
+test('a signed download URL is resolved against the origin of the connection that asked', (t) => withWebCrypto(async () => {
+  const w = await pair(t);
   const fromA = w.apiA.fsDownloadHttp('/p/same-name.png');
   const fromB = w.apiB.fsDownloadHttp('/p/same-name.png');
   const reqA = await w.serverA.next(w.socketA);
@@ -300,7 +346,6 @@ test('a signed download URL is resolved against the origin of the connection tha
   assert.equal(b.url, 'http://b.test/dl?sig=b');
   // The control: one shared "current URL" would have given both the same base.
   assert.notEqual(new URL(a.url).host, new URL(b.url).host);
-  w.done();
 }));
 
 // ─── Lifetime: disconnect keeps the room, dispose empties it ─────────────
@@ -334,16 +379,178 @@ test('disconnect keeps listeners and refcounts; dispose is what releases them', 
   await settle(2);
   assert.deepEqual(seen, ['back'], 'the listener survived too');
 
-  // dispose: the registries are emptied, so nothing is left to restore.
+  // dispose: terminal. Every door is shut, and it says so distinctly — a
+  // RELEASED connection is not an offline one, which phase ② has to tell
+  // apart in a log.
+  const sockets = MockWebSocket.instances.length;
   conn.dispose();
-  const third = await handshakePlain(conn, A_URL, 'tok', 'machine-a');
+  await assert.rejects(conn.connect(A_URL, 'tok'), { code: 'DISCONNECTED', message: 'connection disposed' });
+  await assert.rejects(api.listSessions(), { code: 'DISCONNECTED', message: 'connection disposed' });
+  conn.addPaneOutputListener('app:0.0', listener);
+  conn.subscribe('app:0.0');
   conn.resubscribeActive();
+  conn.disconnect();
   await settle(2);
-  assert.deepEqual(third.texts().filter(m => m.method === 'subscribe'), [], 'dispose dropped the refcounts');
-  third.onmessage!({ data: JSON.stringify({ method: 'pane_output', params: { target: 'app:0.0', content: 'gone' } }) });
+  assert.equal(MockWebSocket.instances.length, sockets, 'a disposed handle opens no socket, by any door');
+  // The socket it used to hold is deaf: disconnect() nulled its handlers, so
+  // the push below reaches no dispatcher at all. (That the listener map is
+  // also empty is a leak claim with no runtime probe; connection.source.test.ts
+  // pins the guards instead.)
+  second.onmessage?.({ data: JSON.stringify({ method: 'pane_output', params: { target: 'app:0.0', content: 'gone' } }) });
   await settle(2);
-  assert.deepEqual(seen, ['back'], 'dispose dropped the listener');
+  assert.deepEqual(seen, ['back']);
   conn.dispose();
+});
+
+test('a disposed handle cannot come back; a replacement comes only from the registry', async () => {
+  const registry = createConnectionRegistry();
+  const a = registry.ensure('a');
+  const b = registry.ensure('b');
+  const socketA = await handshakePlain(a.connection, A_URL, 'tok', 'machine-a');
+  const socketB = await handshakePlain(b.connection, B_URL, 'tok', 'machine-b');
+
+  registry.remove('a');
+  const sockets = MockWebSocket.instances.length;
+  // The retry closure / unmounted view that still holds the old handle.
+  await assert.rejects(a.connection.connect(A_URL, 'tok'), { code: 'DISCONNECTED', message: 'connection disposed' },
+    'the removed handle must not dial behind the registry s back');
+  await assert.rejects(a.api.listSessions(), { code: 'DISCONNECTED', message: 'connection disposed' });
+  a.connection.subscribe('app:0.0');
+  a.connection.setOnDisconnect(() => assert.fail('a disposed connection cannot ask for recovery'));
+  a.connection.resubscribeActive();
+  await settle(2);
+  assert.equal(MockWebSocket.instances.length, sockets, 'no socket exists outside the registry');
+  assert.equal(a.connection.isConnected(), false);
+  assert.equal(socketA.readyState, MockWebSocket.CLOSED);
+
+  // A fresh ensure is a NEW object, and it is the only live one for that key.
+  const again = registry.ensure('a');
+  assert.notEqual(again.connection, a.connection);
+  const socketA2 = await handshakePlain(again.connection, A_URL, 'tok', 'machine-a');
+  assert.equal(again.connection.isConnected(), true);
+  assert.notEqual(socketA2, socketA);
+
+  assert.equal(b.connection.isConnected(), true, 'B never noticed');
+  assert.equal(socketB.readyState, MockWebSocket.OPEN);
+  registry.disposeAll();
+});
+
+// ─── Releasing a connection that is still dialling ──────────────────────
+// Two halves of one handshake can be in flight when the registry drops a
+// server: before the nonce arrives, and after it, while auth or the key
+// derivation is still running. Each leaves a promise nobody will answer and a
+// connect timeout nobody will clear unless dispose() ends them (review P1-a).
+
+test('removing a connection that is waiting for a nonce settles its dial at once', async () => {
+  const timers = trackTimers();
+  try {
+    const registry = createConnectionRegistry();
+    const a = registry.ensure('a');
+    const b = registry.ensure('b');
+    const socketB = await handshakePlain(b.connection, B_URL, 'tok', 'machine-b');
+
+    const dialing = a.connection.connect(A_URL, 'tok');
+    const socketA = MockWebSocket.instances.at(-1)!;
+    socketA.readyState = MockWebSocket.OPEN;
+    assert.equal(timers.timeouts(), 1, 'the dial is holding its connect timeout');
+
+    registry.remove('a');
+    // Immediately, not after CONNECT_TIMEOUT_MS.
+    await assert.rejects(dialing, { code: 'DISCONNECTED' });
+    assert.equal(timers.timeouts(), 0, 'the connect timeout was cleared with it');
+    assert.equal(socketA.readyState, MockWebSocket.CLOSED);
+
+    // The server answering late changes nothing: no listener, no timer, no frame.
+    const sentBefore = socketA.sent.length;
+    socketA.onmessage?.({ data: JSON.stringify({ server_nonce: '00'.repeat(16) }) });
+    socketA.onmessage?.({ data: JSON.stringify({ result: { authenticated: true, machine_id: 'machine-a' } }) });
+    await settle(3);
+    assert.equal(socketA.sent.length, sentBefore, 'a released dial sends nothing');
+    assert.equal(a.connection.isConnected(), false);
+    assert.equal(timers.live(), 1, 'only B s idle probe remains');
+
+    assert.equal(b.connection.isConnected(), true);
+    const fromB = b.api.listSessions();
+    await settle(2);
+    const reqB = socketB.texts().find(m => m.method === 'list_sessions');
+    socketB.message({ id: reqB.id, result: [] });
+    assert.deepEqual(await fromB, [], 'B is untouched');
+    registry.disposeAll();
+    assert.equal(timers.live(), 0);
+  } finally {
+    timers.restore();
+  }
+});
+
+test('disposeAll settles a dial that is mid-authentication', (t) => withWebCrypto(async () => {
+  const timers = trackTimers();
+  try {
+    const registry = createConnectionRegistry();
+    const a = registry.ensure('a');
+    const serverA = new FakeE2eServer('tok-a', 2, 'machine-a', 'alpha');
+
+    const dialing = a.connection.connect(A_URL, 'tok-a');
+    const socketA = MockWebSocket.instances.at(-1)!;
+    socketA.readyState = MockWebSocket.OPEN;
+    socketA.message(serverA.nonceFrame());
+    await until(() => socketA.sent.length >= 1); // the proof is on the wire
+    const auth = JSON.parse(socketA.sent[0] as string);
+    assert.equal(timers.timeouts(), 1);
+
+    registry.disposeAll();
+    await assert.rejects(dialing, { code: 'DISCONNECTED' });
+    assert.equal(timers.timeouts(), 0);
+
+    // The auth answer the server was about to send arrives anyway.
+    assert.equal(await serverA.accept(auth), true);
+    socketA.onmessage?.({ data: await serverA.seal(JSON.stringify({ result: { authenticated: true, machine_id: 'machine-a', hostname: 'alpha', e2e: 2 } })) });
+    await settle(5);
+    assert.equal(a.connection.isConnected(), false, 'a completed handshake cannot revive a released connection');
+    assert.equal(timers.live(), 0, 'and it starts no idle probe');
+    assert.equal(registry.get('a'), undefined);
+  } finally {
+    timers.restore();
+  }
+}));
+
+test('a dial superseded by the next connect is settled instead of left hanging', async () => {
+  const timers = trackTimers();
+  try {
+    const conn = createConnection();
+    const abandoned = conn.connect(A_URL, 'tok');
+    MockWebSocket.instances.at(-1)!.readyState = MockWebSocket.OPEN;
+    assert.equal(timers.timeouts(), 1);
+
+    const second = await handshakePlain(conn, B_URL, 'tok', 'machine-b');
+    await assert.rejects(abandoned, { code: 'DISCONNECTED' });
+    assert.equal(timers.timeouts(), 0, 'the abandoned attempt took its timeout with it');
+    assert.equal(conn.isConnected(), true, 'the attempt that won is unaffected');
+    assert.equal(conn.getMachineId(), 'machine-b');
+    assert.equal(second.readyState, MockWebSocket.OPEN);
+    conn.dispose();
+    assert.equal(timers.live(), 0);
+  } finally {
+    timers.restore();
+  }
+});
+
+test('a deliberate disconnect during a dial settles it too', async () => {
+  const timers = trackTimers();
+  try {
+    const conn = createConnection();
+    const dialing = conn.connect(A_URL, 'tok');
+    MockWebSocket.instances.at(-1)!.readyState = MockWebSocket.OPEN;
+    conn.disconnect();
+    await assert.rejects(dialing, { code: 'DISCONNECTED' });
+    assert.equal(timers.live(), 0, 'nothing is left running after a disconnect mid-dial');
+    // disconnect is NOT terminal: the same object dials again.
+    const socket = await handshakePlain(conn, A_URL, 'tok', 'machine-a');
+    assert.equal(conn.isConnected(), true);
+    assert.equal(socket.readyState, MockWebSocket.OPEN);
+    conn.dispose();
+  } finally {
+    timers.restore();
+  }
 });
 
 test('dispose is idempotent and a disposed connection still refuses RPCs cleanly', async () => {
@@ -355,6 +562,6 @@ test('dispose is idempotent and a disposed connection still refuses RPCs cleanly
   conn.dispose();
   conn.dispose();
   conn.dispose();
-  await assert.rejects(api.listSessions(), { code: 'DISCONNECTED' });
+  await assert.rejects(api.listSessions(), { code: 'DISCONNECTED', message: 'connection disposed' });
   assert.equal(recover, 0, 'a deliberate teardown never asks for recovery');
 });

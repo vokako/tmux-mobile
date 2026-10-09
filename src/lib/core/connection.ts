@@ -260,9 +260,10 @@ export interface Connection {
    * requested, and listeners / subscription refcounts are KEPT (the pages
    * that registered them are still mounted). */
   disconnect(): void;
-  /** Final teardown of this object: disconnect, then release listeners,
-   * refcounts, the disconnect callback and every timer. Idempotent, and it
-   * touches no other connection. */
+  /** Final teardown of this object, and TERMINAL: after it, `connect` and
+   * `call` reject, registering a listener or a subscription is dropped, and a
+   * replacement comes only from the registry. Idempotent, and it touches no
+   * other connection. */
   dispose(): void;
   call<T = any>(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T>;
   isConnected(): boolean;
@@ -312,6 +313,15 @@ export function createConnection(): Connection {
   let lastInboundAt = 0;
   let idleProbeTimer: ReturnType<typeof setInterval> | null = null;
   let idleProbeInFlight = false;
+  // Terminal once dispose() has run: see the note on dispose() below. Nothing
+  // sets it back.
+  let disposed = false;
+
+  function rejectDisposed<T>(): Promise<T> {
+    const err: RpcClientError = new Error('connection disposed');
+    err.code = 'DISCONNECTED';
+    return Promise.reject(err);
+  }
 
   // Subscription refcount per target. The server keeps ONE subscription entry
   // per target, so two split cells on the same window must NOT let the first
@@ -324,13 +334,17 @@ export function createConnection(): Connection {
   // These take the cb so the caller can register/unregister its own listener
   // without disturbing other cells on the same target. Callers MUST pass the
   // same function reference to remove that they passed to add.
-  function addPaneOutputListener(target: string, cb: PaneOutputCb) { addListener(paneOutputListeners, target, cb); }
+  //
+  // Adding anything to a DISPOSED connection is dropped: a late registration
+  // from an unmounted view must not leave state on an object the registry has
+  // already forgotten. Removal always runs — it only ever deletes.
+  function addPaneOutputListener(target: string, cb: PaneOutputCb) { if (!disposed) addListener(paneOutputListeners, target, cb); }
   function removePaneOutputListener(target: string, cb: PaneOutputCb) { removeListener(paneOutputListeners, target, cb); }
-  function addPaneClosedListener(target: string, cb: PaneClosedCb) { addListener(paneClosedListeners, target, cb); }
+  function addPaneClosedListener(target: string, cb: PaneClosedCb) { if (!disposed) addListener(paneClosedListeners, target, cb); }
   function removePaneClosedListener(target: string, cb: PaneClosedCb) { removeListener(paneClosedListeners, target, cb); }
-  function addTeamMessageListener(cb: (message: TeamMessage) => void) { teamMessageListeners.add(cb); }
+  function addTeamMessageListener(cb: (message: TeamMessage) => void) { if (!disposed) teamMessageListeners.add(cb); }
   function removeTeamMessageListener(cb: (message: TeamMessage) => void) { teamMessageListeners.delete(cb); }
-  function setOnDisconnect(cb: (() => void) | null) { onDisconnect = cb; }
+  function setOnDisconnect(cb: (() => void) | null) { if (!disposed) onDisconnect = cb; }
 
   function notifyDisconnect(reason: string) {
     if (!recoveryEnabled || disconnectNotified) return;
@@ -397,7 +411,38 @@ export function createConnection(): Connection {
     pending.clear();
   }
 
+  // A dial that has not settled yet. Until it does, two things are alive that
+  // nothing else can reach: the promise the caller is awaiting and the connect
+  // timeout. Both belong to this connection's lifetime — a superseded dial, a
+  // deliberate disconnect and a dispose each have to end them, or the object is
+  // "released" while a timer and an unanswered promise outlive it (review
+  // P1-a, 2026-10-09).
+  type Dial = { settle: () => void; fail: (err: RpcClientError) => void; timeout: ReturnType<typeof setTimeout> | null };
+  const dialing = new Set<Dial>();
+
+  function endDial(dial: Dial) {
+    if (dial.timeout !== null) clearTimeout(dial.timeout);
+    dial.timeout = null;
+    dialing.delete(dial);
+  }
+
+  /** Settle every unfinished dial with `reason` and clear its timeout. The
+   * socket itself is closed by whoever called this (connect's own teardown,
+   * disconnect) — this is only about the attempt. */
+  function cancelDialing(reason: string) {
+    for (const dial of [...dialing]) {
+      endDial(dial);
+      const err: RpcClientError = new Error(reason);
+      err.code = 'DISCONNECTED';
+      dial.fail(err);
+    }
+  }
+
   function connect(url: string, token: string, timeoutMs = CONNECT_TIMEOUT_MS): Promise<string | null> {
+    if (disposed) return rejectDisposed();
+    // An earlier attempt still waiting for a nonce or an auth answer is over:
+    // its socket is about to be replaced, so nothing can ever answer it.
+    cancelDialing('superseded by new connect');
     // Close any existing connection before creating a new one.
     // IMPORTANT: null ALL handlers (including onmessage) so any in-flight events on
     // the old socket don't fire handlers that still close over module-level `ws` and
@@ -419,7 +464,15 @@ export function createConnection(): Connection {
     rpcTimeouts = 0;
     wsUrl = url;
 
-    return new Promise<string | null>((resolve, reject) => {
+    return new Promise<string | null>((resolveRaw, rejectRaw) => {
+      // One record per attempt, so a cancellation can reach THIS promise and
+      // THIS timer. Every settle path below goes through these two.
+      const dial: Dial = { settle: () => {}, fail: rejectRaw, timeout: null };
+      const resolve = (value: string | null) => { endDial(dial); resolveRaw(value); };
+      const reject = (error: unknown) => { endDial(dial); rejectRaw(error); };
+      dial.fail = reject;
+      dialing.add(dial);
+
       let socket!: AppSocket;
       try {
         ws = new WebSocket(url) as AppSocket;
@@ -442,6 +495,7 @@ export function createConnection(): Connection {
         try { socket?.close(); } catch {}
         reject(new Error('connection timeout'));
       }, timeoutMs);
+      dial.timeout = timeout;
 
       let authed = false;
       let cipher: Cipher | null = null;
@@ -633,12 +687,14 @@ export function createConnection(): Connection {
   }
 
   function disconnect() {
+    if (disposed) return;
     const socket = ws;
     ws = null;
     recoveryEnabled = false;
     disconnectNotified = false;
     stopIdleProbe();
     rejectAllPending('disconnected');
+    cancelDialing('disconnected');
     if (!socket) return;
     socket.onclose = null;
     socket.onerror = null;
@@ -676,6 +732,7 @@ export function createConnection(): Connection {
   }
 
   function call<T = any>(method: string, params: Record<string, unknown> = {}, timeoutMs = RPC_TIMEOUT_MS): Promise<T> {
+    if (disposed) return rejectDisposed<T>();
     return new Promise<T>((resolve, reject) => {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         notifyDisconnect('RPC attempted without an open socket');
@@ -737,12 +794,14 @@ export function createConnection(): Connection {
   }
 
   function subscribe(target: string) {
+    if (disposed) return;
     const n = (subRefcount.get(target) || 0) + 1;
     subRefcount.set(target, n);
     if (n === 1) sendSubscribe(target); // first subscriber → tell the server
   }
 
   function unsubscribe(target: string) {
+    if (disposed) return;
     const n = (subRefcount.get(target) || 0) - 1;
     if (n <= 0) {
       subRefcount.delete(target);
@@ -756,6 +815,7 @@ export function createConnection(): Connection {
   // reconnect, where the server forgot all subscriptions. Does NOT change
   // refcounts (the cells are still mounted; only the wire state was lost).
   function resubscribeActive() {
+    if (disposed) return;
     for (const target of subRefcount.keys()) sendSubscribe(target);
   }
 
@@ -763,12 +823,21 @@ export function createConnection(): Connection {
     return wsUrl;
   }
 
-  // Release everything this object holds. disconnect() keeps the listener
-  // registries and refcounts on purpose (a reconnect to the same server must
-  // not silently lose a mounted Terminal's feed); dispose() is the step that
-  // says this connection will not come back.
+  // dispose() is the END of this object, not a reset (review P1-b,
+  // 2026-10-09). Without a terminal flag an old handle held by a retry
+  // closure or an unmounted view could dial again AFTER the registry removed
+  // it: `ensure(key)` would then hand out a fresh object while the forgotten
+  // one still owned a live socket — two connections behind one key, one of
+  // them invisible to the registry that is supposed to own every lifetime.
+  // A new connection comes only from the registry.
+  //
+  // disconnect() is the other verb and is unchanged: it keeps the listener
+  // registries and the subscription refcounts, because a reconnect to the same
+  // server must not lose a still-mounted Terminal's feed.
   function dispose() {
-    disconnect();
+    if (disposed) return;
+    disconnect(); // ends the socket, the pending RPCs and any unfinished dial
+    disposed = true;
     onDisconnect = null;
     paneOutputListeners.clear();
     paneClosedListeners.clear();

@@ -62,6 +62,35 @@ test('the registry owns lifetime only: it never dials and never guesses identity
   assert.doesNotMatch(src, /current|active/iu, 'the registry has no notion of a focused server');
 });
 
+test('every entry point that would mutate a disposed connection is guarded', async () => {
+  const src = code(await read('connection.ts'));
+  // dispose() is terminal (review P1-b). "It opens no socket" has a runtime
+  // probe (connection.test.ts); "it accumulates no state on a dead object"
+  // does not — nothing can observe a listener that can never fire. So the
+  // guard itself is the contract, pinned here.
+  assert.match(src, /^  let disposed = false;$/mu);
+  assert.equal((src.match(/disposed = true/gu) ?? []).length, 1, 'nothing clears the flag');
+  const guarded = [
+    /function connect\([^)]*\): Promise<string \| null> \{\n    if \(disposed\) return rejectDisposed\(\);/u,
+    /function call<.*>\(.*\): Promise<T> \{\n    if \(disposed\) return rejectDisposed<T>\(\);/u,
+    /function disconnect\(\) \{\n    if \(disposed\) return;/u,
+    /function dispose\(\) \{\n    if \(disposed\) return;/u,
+    /function subscribe\(target: string\) \{\n    if \(disposed\) return;/u,
+    /function unsubscribe\(target: string\) \{\n    if \(disposed\) return;/u,
+    /function resubscribeActive\(\) \{\n    if \(disposed\) return;/u,
+    /function addPaneOutputListener\([^)]*\) \{ if \(!disposed\) /u,
+    /function addPaneClosedListener\([^)]*\) \{ if \(!disposed\) /u,
+    /function addTeamMessageListener\(.*\) \{ if \(!disposed\) /u,
+    /function setOnDisconnect\(.*\) \{ if \(!disposed\) /u,
+  ];
+  for (const re of guarded) assert.match(src, re, `missing disposed guard: ${re.source}`);
+  // A dial in flight is part of the lifetime, not a detached timer (P1-a):
+  // connect, disconnect and therefore dispose all end the unsettled ones.
+  assert.match(src, /cancelDialing\('superseded by new connect'\);/u);
+  assert.match(src, /cancelDialing\('disconnected'\);/u);
+  assert.match(src, /dial\.timeout !== null\) clearTimeout\(dial\.timeout\)/u);
+});
+
 test('the facade holds ONE memory-only slot and no second door', async () => {
   const src = code(await read('ws.ts'));
   assert.match(src, /const SINGLE_CURRENT = Symbol\('single-current'\);/u);

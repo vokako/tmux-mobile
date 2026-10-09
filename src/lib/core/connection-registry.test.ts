@@ -74,13 +74,15 @@ test('disposeAll empties this registry and leaves no socket or timer behind', as
       await handshakePlain(b.connection, 'ws://b.test/ws', 'tok', 'machine-b'),
     ];
     const outsiderSocket = await handshakePlain(outsider.connection, 'ws://c.test/ws', 'tok', 'machine-c');
-    assert.equal(timers.live(), 3, 'each authenticated connection runs one idle probe');
+    assert.equal(timers.intervals(), 3, 'each authenticated connection runs one idle probe');
+    assert.equal(timers.timeouts(), 0, 'no dial is left unfinished');
 
     registry.disposeAll();
     assert.equal(registry.get('a'), undefined);
     assert.equal(registry.get('b'), undefined);
     for (const socket of sockets) assert.equal(socket.readyState, MockWebSocket.CLOSED);
     assert.equal(timers.live(), 1, 'only the other registry s probe is still running');
+    assert.equal(timers.timeouts(), 0);
     assert.equal(outsiderSocket.readyState, MockWebSocket.OPEN, 'another registry is not ours to tear down');
     assert.equal(other.get('a'), outsider);
 

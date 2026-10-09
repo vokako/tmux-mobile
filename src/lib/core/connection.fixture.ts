@@ -77,27 +77,52 @@ export async function withWebCrypto<T>(fn: () => Promise<T>): Promise<T> {
   finally { Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { subtle: null } }); }
 }
 
-/** Count the intervals a connection leaves behind. */
+/** Count the timers a connection leaves behind. Both kinds matter: the idle
+ * probe is an interval, and an unfinished dial's connect timeout is a timeout
+ * (review P1-a — only counting intervals is what hid it). */
 export function trackTimers() {
-  const realSet = globalThis.setInterval;
-  const realClear = globalThis.clearInterval;
-  const live = new Set<unknown>();
+  const realSetInterval = globalThis.setInterval;
+  const realClearInterval = globalThis.clearInterval;
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  const intervals = new Set<unknown>();
+  const timeouts = new Set<unknown>();
   (globalThis as any).setInterval = (...args: any[]) => {
-    const id = (realSet as any)(...args);
-    live.add(id);
+    const id = (realSetInterval as any)(...args);
+    intervals.add(id);
     return id;
   };
   (globalThis as any).clearInterval = (id: any) => {
-    live.delete(id);
-    return (realClear as any)(id);
+    intervals.delete(id);
+    return (realClearInterval as any)(id);
+  };
+  (globalThis as any).setTimeout = (fn: any, ms?: number, ...rest: any[]) => {
+    if (typeof fn !== 'function') return (realSetTimeout as any)(fn, ms, ...rest);
+    // A timeout that FIRES is finished whether or not anyone cleared it.
+    let id: any;
+    id = (realSetTimeout as any)((...a: any[]) => { timeouts.delete(id); fn(...a); }, ms, ...rest);
+    timeouts.add(id);
+    return id;
+  };
+  (globalThis as any).clearTimeout = (id: any) => {
+    timeouts.delete(id);
+    return (realClearTimeout as any)(id);
   };
   return {
-    live: () => live.size,
+    /** Intervals still running. */
+    intervals: () => intervals.size,
+    /** Timeouts neither cleared nor fired. */
+    timeouts: () => timeouts.size,
+    live: () => intervals.size + timeouts.size,
     restore() {
-      for (const id of live) (realClear as any)(id);
-      live.clear();
-      globalThis.setInterval = realSet;
-      globalThis.clearInterval = realClear;
+      for (const id of intervals) (realClearInterval as any)(id);
+      for (const id of timeouts) (realClearTimeout as any)(id);
+      intervals.clear();
+      timeouts.clear();
+      globalThis.setInterval = realSetInterval;
+      globalThis.clearInterval = realClearInterval;
+      globalThis.setTimeout = realSetTimeout;
+      globalThis.clearTimeout = realClearTimeout;
     },
   };
 }
