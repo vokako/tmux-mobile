@@ -149,10 +149,17 @@ Terminal 只是临时用的，并且跟你的项目没有关系". Desktop only (
   ended · Open again"; nothing recreates it in the background. A name held by a
   plain session or a project shows the server's refusal with the same re-try —
   and when a PROJECT holds it (board #337), the refusal also offers **Release
-  the name**, behind a confirmation that spells out what it renames. The
-  action is keyed on the server's error CODE (`-32010`), never on the text of
-  its message: the sentence is the server's one composition for the human, and
-  reading it in the client would be a second copy of it.
+  the name**, behind a confirmation that NAMES the project and the session it
+  renames. The action is keyed on the server's error CODE (`-32010`), never on
+  the text of its message: the sentence is the server's one composition for the
+  human, and reading it in the client would be a second copy of it. The code's
+  `data` (`{projectId, projectName, session}`) is kept as a snapshot and sent
+  back with the release, so the project the reader saw is the only one that can
+  be renamed; a refusal we cannot identify a holder for offers the retry alone.
+  The code lives in `core/rpc-codes.ts`, NOT in `ws.ts`: every mount fixture
+  mocks `ws.ts`, so a constant defined there reads as `undefined` in a test and
+  a feature keyed on it looks disabled — which is exactly how this action first
+  failed its own test.
 - **Server boundary (#315).** App keeps the frame's state (open, edge, sizes)
   outside the server key; the panel and its Terminal mount INSIDE
   `{#key serverEpoch}`, so a switch destroys them with the subscription. The

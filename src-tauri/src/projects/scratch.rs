@@ -48,13 +48,43 @@ const MARK: &str = "@tmm-scratch";
 ///   (`tmux::respawn_pane`).
 const RESPAWN_HOOK: &str = "respawn-pane";
 /// Where a project that held the reserved name is renamed to when the reader
-/// releases it. Deterministic, and derived from the reserved name so a TEST
-/// run never writes a production session name onto the shared tmux server
-/// (testing.md). `tmm-scratch-recovered` is 21 characters, inside
-/// `projects::slug`'s 24-character bound, so the recovered name in production
-/// is exactly the one the log line promises.
-fn recovered_name() -> String {
-    format!("{}-recovered", name())
+/// releases it: `<reserved>-recovered`, or — when something already holds
+/// that — the same name `create` would pick, through the ONE suffixing rule
+/// (`free_session_name`, board #337 review).
+///
+/// The base is shortened to `-rec` for the suffixed case on purpose:
+/// `projects::rename` derives the session from this label through `slug`,
+/// which bounds it at 24 characters, and `tmm-scratch-recovered-<digest>` is
+/// 28 — it would be truncated to something neither this function nor
+/// `free_session_name` chose. `tmm-scratch-rec-<digest>` is 22. Derived from
+/// the reserved name, so a TEST run never writes a production session name
+/// onto the shared tmux server (testing.md).
+fn recovered_name(project_id: &str) -> Result<String, String> {
+    let pretty = bounded(&name(), "-recovered", 0);
+    crate::projects::with_store(|store| {
+        let free = super::projects::free_session_name(store, &pretty, project_id)?;
+        if free == pretty {
+            return Ok(free);
+        }
+        // Taken: the shortened base leaves room for the ONE suffixing rule's
+        // `-<digest>` inside the same bound.
+        super::projects::free_session_name(store, &bounded(&name(), "-rec", SUFFIX_ROOM), project_id)
+    })
+}
+
+/// `free_session_name`'s suffix: `-` plus a six-character digest.
+const SUFFIX_ROOM: usize = 7;
+
+/// A candidate that survives `projects::slug` UNCHANGED, so the name chosen
+/// here is the name `rename` writes. slug truncates at 24 characters, and a
+/// truncated candidate is a name neither this policy nor `free_session_name`
+/// picked — measured: with a long reserved name, `-recovered` and `-rec`
+/// collapsed onto the SAME 24-character string and the rename refused itself.
+/// `reserve` is room left for a suffix appended after.
+fn bounded(reserved: &str, tag: &str, reserve: usize) -> String {
+    const MAX: usize = 24;
+    let head: String = reserved.chars().take(MAX.saturating_sub(tag.len() + reserve)).collect();
+    format!("{head}{tag}")
 }
 
 /// The session name every path below uses. Production: `SCRATCH_SESSION`.
@@ -116,11 +146,22 @@ fn declared_by() -> Result<Option<String>, String> {
 
 /// The project holding the reserved name, for a caller that must know WHICH
 /// refusal it got without parsing the sentence (the `scratch_session` RPC
-/// turns this into its own error code, board #337). A failed read is `None`:
-/// the panel then shows the refusal without an action, which is the safe way
-/// round.
-pub fn held_by() -> Option<String> {
-    declared_by().ok().flatten()
+/// turns this into its own error code and sends this beside it, board #337).
+/// A failed read is `None`: the panel then shows the refusal without an
+/// action, which is the safe way round.
+///
+/// The three facts are what a release has to be ABOUT: the row's id and the
+/// session it declares identify exactly what the reader approved, and the
+/// name is what the confirmation shows them. Without them the action would
+/// mean "rename whoever holds this name when I run", which is not what the
+/// reader agreed to and can be a different project by then.
+pub fn holder() -> Option<serde_json::Value> {
+    let row = declaring_project().ok().flatten()?;
+    Some(serde_json::json!({
+        "projectId": row.id,
+        "projectName": row.name,
+        "session": row.session,
+    }))
 }
 
 /// THE predicate.
@@ -208,12 +249,23 @@ fn keep_alive(pane: &str) -> Result<(), String> {
 /// session on the next open. Archiving would not have worked — an archived
 /// project still holds its session name on purpose, since it can be restored
 /// and brought up.
-pub fn release() -> Result<serde_json::Value, String> {
+pub fn release(project_id: &str, session: &str) -> Result<serde_json::Value, String> {
     let n = name();
     let Some(row) = declaring_project()? else {
         return Err(format!("no project holds the name '{n}'"));
     };
-    let recovered = recovered_name();
+    // The reader approved releasing ONE identified project (board #337
+    // review). If the holder has changed since the refusal they saw — another
+    // client renamed it, released it, or a different project took the name —
+    // nothing is touched and the answer says so, rather than renaming a
+    // project nobody agreed to.
+    if row.id != project_id || row.session != session {
+        return Err(format!(
+            "'{n}' is no longer held by that project — it is held by '{}' now, so nothing was renamed",
+            row.name
+        ));
+    }
+    let recovered = recovered_name(&row.id)?;
     super::rename(&row.id, &recovered)?;
     // Verified, not assumed: a rename that refused would otherwise report a
     // release while the name stayed held.
@@ -425,7 +477,7 @@ mod tests {
     /// name. Written through the store because no public path will do it any
     /// more — which is the fix, and the reason the repair needs testing.
     fn hijacked_row(session: &str, path: &str, adopted: bool, ts: u64) -> String {
-        let id = format!("{session}-row");
+        let id = format!("{session}-row-{ts}");
         crate::projects::with_store(|store| {
             store.insert_project(&crate::projects::store::Project {
                 id: id.clone(),
@@ -642,6 +694,27 @@ mod tests {
         assert_eq!(tmux::pane_live(&target), Some(true), "the position reads as a live stranger");
     }
 
+    /// Every recovered-name candidate stays inside `slug`'s 24 characters, so
+    /// the name this policy picks is the name `rename` writes (board #337
+    /// review: appending to a long reserved name truncated two different
+    /// candidates onto the same string, and the rename refused itself).
+    #[test]
+    fn recovered_candidates_survive_the_slug_bound_unchanged() {
+        assert_eq!(bounded("tmm-scratch", "-recovered", 0), "tmm-scratch-recovered");
+        assert_eq!(bounded("tmm-scratch", "-rec", SUFFIX_ROOM), "tmm-scratch-rec");
+        // A guarded test name is this long: bounded, distinct, with room left
+        // for the suffixing rule's digest.
+        let long = "tmm-test-rel-2242716-l";
+        let pretty = bounded(long, "-recovered", 0);
+        let base = bounded(long, "-rec", SUFFIX_ROOM);
+        assert_eq!(pretty.chars().count(), 24);
+        assert_eq!(base.chars().count() + SUFFIX_ROOM, 24, "a digest still fits");
+        assert_ne!(pretty, base);
+        for candidate in [&pretty, &base] {
+            assert_eq!(&crate::projects::slug(candidate), candidate, "slug leaves it alone: {candidate}");
+        }
+    }
+
     /// The #337 incident, reproduced and then refused: an UNMARKED session
     /// with the scratch name used to be auto-adopted after the settle, and
     /// the row it created made `owned()` answer `Taken` forever — the panel
@@ -709,7 +782,8 @@ mod tests {
         let dir = guard.path();
         // Nothing to release yet: the refusal names that, rather than
         // pretending to have done something.
-        assert!(release().unwrap_err().contains("no project holds"));
+        assert!(release("whatever", &n).unwrap_err().contains("no project holds"));
+        assert!(holder().is_none());
         // The state the incident left, written at the STORE level because no
         // public path can declare that name any more — which is the fix.
         tmux::new_session(&n, None, None).unwrap();
@@ -717,13 +791,31 @@ mod tests {
         assert!(matches!(owned().unwrap(), Ownership::Taken(_)), "the panel's dead end");
         assert!(ensure().is_err());
 
-        let out = release().expect("released on request");
+        // The refusal's snapshot is what the reader approves.
+        let held = holder().expect("the holder travels with the refusal");
+        assert_eq!(held["projectId"], row_id.as_str());
+        assert_eq!(held["projectName"], n.as_str());
+        assert_eq!(held["session"], n.as_str());
+        // A release aimed at a DIFFERENT project touches nothing — the reader
+        // approved one project, not "whoever holds the name when I run".
+        let stale = release("some-other-row", &n).unwrap_err();
+        assert!(stale.contains("no longer held by that project"), "{stale}");
+        assert!(declaring_project().unwrap().is_some(), "and the holder is untouched");
+        let wrong_session = release(&row_id, "not-the-session").unwrap_err();
+        assert!(wrong_session.contains("no longer held"), "{wrong_session}");
+
+        let out = release(&row_id, &n).expect("released on request");
         assert_eq!(out["released"], true);
-        let recovered = recovered_name();
-        assert_eq!(out["renamed_to"], recovered.as_str());
+        // Not the exact string: `bounded` truncates a long guarded name, so
+        // two test processes can want the same recovered name and a leftover
+        // session from either decides which form is picked. The POLICY is
+        // what matters, and the arithmetic is pinned by the pure test above.
+        let first = out["renamed_to"].as_str().unwrap().to_string();
+        assert_ne!(first, n, "never the reserved name itself");
+        assert_eq!(crate::projects::slug(&first), first, "and it survives slug unchanged");
         assert!(declaring_project().unwrap().is_none(), "the name is free");
         let moved = crate::projects::with_store(|store| store.project(&row_id)).unwrap().expect("the row still exists");
-        assert_eq!(moved.session, crate::projects::slug(&recovered), "renamed, not deleted and not archived");
+        assert_eq!(moved.session, first, "renamed, not deleted and not archived");
         assert!(!moved.archived);
         assert!(tmux::session_exists(&moved.session), "and the live shell came with it");
         assert!(!tmux::session_exists(&n), "so the reserved name is unoccupied");
@@ -734,8 +826,24 @@ mod tests {
         assert_eq!(fresh["session"], n.as_str());
         assert_eq!(owned().unwrap(), Ownership::Ours);
         // A second release has nothing to do and says so; ours is untouched.
-        assert!(release().unwrap_err().contains("no project holds"));
+        assert!(release(&row_id, &n).unwrap_err().contains("no project holds"));
         assert_eq!(owned().unwrap(), Ownership::Ours);
+        // And when the readable name is already taken, the recovered name is
+        // the one the ONE suffixing rule picks, inside slug's bound.
+        let second = hijacked_row(&n, &dir, true, 10_001);
+        let out2 = release(&second, &n).expect("released again, with the pretty name taken");
+        let picked = out2["renamed_to"].as_str().unwrap();
+        assert_ne!(picked, first, "the first row still has that name");
+        assert_eq!(crate::projects::slug(picked), picked, "survives slug unchanged: {picked}");
+        assert_eq!(crate::projects::with_store(|s| s.project(&second)).unwrap().unwrap().session,
+            crate::projects::slug(picked), "and the row really wears it");
+        crate::projects::delete(&second).ok();
+        // The recovered names are OUTSIDE the guard's ownership (it owns `n`),
+        // so this test kills what it created — a leftover one changes which
+        // form the next run picks, which is how this test first went flaky.
+        for leftover in [first.as_str(), picked] {
+            tmux::kill_session(leftover).ok();
+        }
         kill().unwrap();
         tmux::kill_session(&moved.session).ok();
         crate::projects::delete(&row_id).ok();

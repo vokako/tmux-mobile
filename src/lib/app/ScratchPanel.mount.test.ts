@@ -246,3 +246,66 @@ test('a `ready` panel trusts its pane until the subscription says otherwise — 
     assert.deepEqual(r.calls, ['ensure', 'ensure'], 'the close notice is what makes the next open re-ask');
   } finally { await app.close(); }
 });
+
+test('a held name offers a release the reader confirms, about the project the refusal named (#337)', { timeout: 60000 }, async (context) => {
+  // The refusal is a dead end without this: "Open again" re-asks and gets the
+  // same answer (the owner: "完全用不了"). The action is offered on the error
+  // CODE, and what it sends back is the refusal's own snapshot — so the
+  // project the reader saw in the confirmation is the only one that can be
+  // renamed, even if the holder changed in between (the server re-checks).
+  const held = Object.assign(new Error("the name 'tmm-scratch' belongs to project 'tmm-scratch'"), {
+    code: -32010,
+    data: { projectId: 'tmm-scratch-871f72', projectName: 'tmm-scratch', session: 'tmm-scratch' },
+  });
+  let refuse = true;
+  const sent: unknown[] = [];
+  const r = rpc({
+    scratchSession: async () => { r.calls.push('ensure'); if (refuse) throw held; return { session: 'tmm-scratch', target: 'tmm-scratch:1.1' }; },
+    scratchRelease: async (projectId: string, session: string) => {
+      r.calls.push('release'); sent.push({ projectId, session }); refuse = false;
+      return { released: true, project: 'tmm-scratch', renamed_to: 'tmm-scratch-recovered' };
+    },
+  });
+  const app = await mount(context, r.mod);
+  try {
+    app.window.__scratch.open = true;
+    await until(app, () => !!app.document.querySelector('.scratch-err'));
+    assert.match(app.document.querySelector('.scratch-err')!.textContent!, /belongs to project/u, 'the server’s one sentence');
+    const actions = [...app.document.querySelectorAll<HTMLButtonElement>('.scratch-state button')];
+    assert.deepEqual(actions.map((b) => b.textContent?.trim()), ['Release the name', 'Open again'],
+      'the way out sits beside the retry, in that order');
+    // Nothing happens until the confirmation is answered.
+    actions[0]!.click();
+    await until(app, () => !!app.document.querySelector('[role=alertdialog]'));
+    assert.deepEqual(r.calls, ['ensure'], 'the dialog has not released anything yet');
+    const dialog = app.document.querySelector<HTMLElement>('[role=alertdialog]')!;
+    assert.match(dialog.textContent!, /tmm-scratch/u, 'and it names the project and session being renamed');
+    const confirm = dialog.querySelector<HTMLButtonElement>('.dlg-actions button:last-child')!;
+    confirm.click();
+    await until(app, () => r.calls.includes('release'));
+    assert.deepEqual(sent, [{ projectId: 'tmm-scratch-871f72', session: 'tmm-scratch' }],
+      'the release is about the refusal’s own project, not “whoever holds it now”');
+    // And it opens straight onto the freed session, without a second ask.
+    await until(app, () => !!app.document.querySelector('.scratch .xterm-wrap'));
+    assert.deepEqual(r.calls, ['ensure', 'release', 'ensure']);
+    assert.equal(app.document.querySelector('[role=alertdialog]'), null, 'the confirmation closed');
+  } finally { await app.close(); }
+});
+
+test('a refusal with no holder data offers only the retry (#337)', { timeout: 60000 }, async (context) => {
+  // A plain tmux session of that name, or a failed read of who holds it: the
+  // panel must not offer to release something it cannot identify.
+  const r = rpc({
+    scratchSession: async () => {
+      r.calls.push('ensure');
+      throw Object.assign(new Error("a tmux session named 'tmm-scratch' already exists and is not the scratch terminal"), { code: -32603 });
+    },
+  });
+  const app = await mount(context, r.mod);
+  try {
+    app.window.__scratch.open = true;
+    await until(app, () => !!app.document.querySelector('.scratch-err'));
+    const actions = [...app.document.querySelectorAll<HTMLButtonElement>('.scratch-state button')];
+    assert.deepEqual(actions.map((b) => b.textContent?.trim()), ['Open again'], 'no release for an unidentified holder');
+  } finally { await app.close(); }
+});

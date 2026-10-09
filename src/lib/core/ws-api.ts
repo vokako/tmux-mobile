@@ -210,8 +210,11 @@ export function createWsApi(connection: Connection) {
   const scratchSession = () => call<{ session: string; target: string }>('scratch_session', {});
   const scratchKill = () => call<{ killed: boolean }>('scratch_kill', {});
   /** Board #337: free the reserved session name from the project holding it,
-   * on the reader's confirmation — it renames that project's session. */
-  const scratchRelease = () => call<{ released: boolean; project: string; renamed_to: string }>('scratch_release', {});
+   * on the reader's confirmation. The project is the one the REFUSAL named
+   * (its error data) — the server renames only if it still declares that
+   * session, so what the reader approved is what happens. */
+  const scratchRelease = (projectId: string, session: string) =>
+    call<{ released: boolean; project: string; renamed_to: string }>('scratch_release', { projectId, session });
   const newSession = (name: string, path?: string, command?: string) => call('new_session', { name, path, command });
   const killSession = (name: string) => call('kill_session', { name });
   const newWindow = (session: string) => call('new_window', { session });

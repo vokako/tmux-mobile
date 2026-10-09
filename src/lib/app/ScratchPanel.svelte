@@ -28,7 +28,10 @@
   import CommandButton from '../ui/CommandButton.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import { t } from '../core/i18n.svelte.ts';
-  import { scratchSession, scratchKill, scratchRelease, ERR_SCRATCH_HELD } from '../core/ws.ts';
+  import { scratchSession, scratchKill, scratchRelease } from '../core/ws.ts';
+  // From rpc-codes, not ws.ts: the mount fixtures mock ws.ts, and a constant
+  // read as `undefined` there would silently disable the action (#337).
+  import { ERR_SCRATCH_HELD } from '../core/rpc-codes.ts';
 
   let {
     open = false, live = true, edge = 'bottom', fontSize = 14,
@@ -46,9 +49,13 @@
   // carries a way out instead of being a dead end. Keyed on the server's
   // error CODE, never on its sentence: the message is the server's one
   // composition for the human, and parsing it here would be a second copy.
-  // Releasing renames that project's session, so it asks first and never
-  // happens on its own.
-  let held = $state(false);
+  //
+  // The refusal's DATA is kept as a snapshot — which project, which session —
+  // and sent back with the release: the reader confirms THAT project, and the
+  // server renames only if it still holds the name. Without the snapshot the
+  // action would mean "rename whoever holds it when I run", which is not what
+  // was on screen when they said yes (#337 review).
+  let held = $state(null);
   let releaseAsk = $state(false);
   let releasing = $state(false);
   let releaseError = $state('');
@@ -70,18 +77,21 @@
     } catch (e) {
       if (!mine(n)) return;
       phase = 'error'; error = e?.message ?? String(e);
-      held = e?.code === ERR_SCRATCH_HELD;
+      const by = e?.code === ERR_SCRATCH_HELD ? e?.data : null;
+      held = by?.projectId && by?.session ? by : null;
     }
   }
 
   async function release() {
     const n = intent;
+    const who = held;
+    if (!who) return;
     releasing = true; releaseError = '';
     try {
-      await scratchRelease();
+      await scratchRelease(who.projectId, who.session);
       if (!mine(n)) return;
       releaseAsk = false;
-      held = false;
+      held = null;
       await ensure();              // the name is free: open on a live shell
     } catch (e) {
       if (mine(n)) releaseError = e?.message ?? String(e);
@@ -194,7 +204,7 @@
      the consequence spelled out, not a button that just does it. Neutral, not
      danger: nothing is deleted and the project keeps everything but the name. -->
 <ConfirmDialog open={releaseAsk} busy={releasing} error={releaseError} danger={false} confirmIcon="swap-h"
-  title={t('scratchReleaseTitle')} note={t('scratchReleaseNote')} confirmLabel={t('scratchRelease')}
+  title={t('scratchReleaseTitle')} note={t('scratchReleaseNote').replace('{p}', held?.projectName ?? '').replace('{s}', held?.session ?? '')} confirmLabel={t('scratchRelease')}
   onconfirm={release} oncancel={() => { if (!releasing) releaseAsk = false; }} />
 
 <style>

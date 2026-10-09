@@ -34,7 +34,7 @@ export type PaneClosedCb = (target: string) => void;
 // Errors surfaced by this module carry an optional `code`: a JSON-RPC error
 // code (number) for definitive server answers, or 'DISCONNECTED' (string)
 // for transport-level failures.
-export type RpcClientError = Error & { code?: number | string };
+export type RpcClientError = Error & { code?: number | string; data?: unknown };
 
 // One key per direction. Under the v1 handshake both fields hold the same key
 // (kept for old servers); under v2 they are distinct HKDF outputs, so the two
@@ -650,6 +650,11 @@ export function createConnection(): Connection {
             // JSON-RPC error code, so callers can tell a definitive server answer
             // (e.g. -32601 method-not-found → no team bus) from transport errors.
             err.code = data.error.code;
+            // And its optional `data`: facts a caller needs to ACT on the
+            // failure rather than only show it (board #337 — which project
+            // holds the scratch name, so the confirmation names it and the
+            // release can only touch that one).
+            if (data.error.data !== undefined) err.data = data.error.data;
             rej(err);
           } else res(data.result);
         }

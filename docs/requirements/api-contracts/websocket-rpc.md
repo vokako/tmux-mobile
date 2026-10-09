@@ -56,7 +56,7 @@ JSON-RPC over WebSocket (`ws://` or `wss://`).
 | `new_session` | `name?`, `path?`, `command?` | OK |
 | `kill_session` | `name` | OK |
 | `scratch_session` | — | `{session, target}` — ensures the scratch terminal's session (board #324: `tmm-scratch`, in `$HOME`, marked `@tmm-scratch=1`, never a project) and answers its first window's first pane as `session:window.pane`, always a LIVE one: #326 applies the keep-alive (`remain-on-exit` + a `pane-died: respawn-pane` hook) and repairs a pane that is already dead — `respawn-pane` without `-k`, so tmux itself refuses to restart a pane whose shell or command is still running; refuses with the reason when the name belongs to a plain session or a project |
-| `scratch_release` | — | `{released, project, renamed_to}` — frees the scratch terminal's reserved session name from the project that holds it by renaming that project's session to `tmm-scratch-recovered` (board #337). Only ever called on the reader's confirmation from the panel's refusal; refuses when no project holds the name. The refusal it answers carries its own error code `-32010`, so the client offers the action without parsing the message |
+| `scratch_release` | `projectId`, `session` | `{released, project, renamed_to}` — frees the scratch terminal's reserved session name by renaming the holder's session (board #337). The params are the snapshot the REFUSAL carried, and the server renames only if that project still declares that session right now; otherwise nothing is touched and the error names the current holder. So what the reader confirmed is what happens, even if the holder changed in between. The recovered name is `<reserved>-recovered`, or the same name `create` would pick (`free_session_name`'s digest suffix on a shortened base) when that is taken — always inside `slug`'s 24 characters, so the name chosen is the name written |
 | `scratch_kill` | — | `{killed}` — kills the scratch session only when it is ours; `false` when absent; refuses when the name belongs to something else |
 | `new_window` | `session` | OK |
 | `kill_window` | `target` | OK |
@@ -232,7 +232,9 @@ Content is omitted when only cursor position changed.
 
 The `message` is the server's ONE sentence for the human and may be
 translated or reworded; a client that needs to act on a particular failure
-keys on the CODE, never on the text (board #337).
+keys on the CODE, never on the text (board #337). An error may also carry
+`data`, the facts needed to ACT on it rather than only show it — today only
+`-32010` does.
 
 | Code | Name | Meaning |
 |---|---|---|
@@ -241,4 +243,4 @@ keys on the CODE, never on the text (board #337).
 | `-32602` | invalid params | a required parameter is missing or the wrong type |
 | `-32603` | internal error | the operation failed; `message` carries the reason |
 | `-32000` | auth required | the connection has not authenticated, or the token was refused |
-| `-32010` | scratch name held | `scratch_session` refused because a PROJECT holds the scratch terminal's reserved session name. The one refusal a client can act on: the panel offers "Release the name" (`scratch_release`) on this code alone, so its copy and its action cannot drift apart (board #337) |
+| `-32010` | scratch name held | `scratch_session` refused because a PROJECT holds the scratch terminal's reserved session name. The one refusal a client can act on, and the only one with `data`: `{projectId, projectName, session}` identifies the holder, so the confirmation names it and `scratch_release` can only touch that project. The panel keys on this code alone, so its copy and its action cannot drift apart (board #337) |

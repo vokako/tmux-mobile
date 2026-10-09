@@ -49,11 +49,10 @@ export const {
   subscribe, unsubscribe, resubscribeActive,
 } = connection;
 
-/** `scratch_session`'s one actionable refusal: a PROJECT holds the scratch
- * terminal's reserved session name (board #337). A code, not a sentence, so
- * the panel can offer "Release the name" without parsing the message the
- * server composed for the human. Mirrors server/rpc.rs ERR_SCRATCH_HELD. */
-export const ERR_SCRATCH_HELD = -32010;
+// The wire error codes a client acts on live in rpc-codes.ts, outside this
+// mocked-in-tests module (board #337); re-exported so the public surface is
+// one import.
+export { ERR_SCRATCH_HELD } from './rpc-codes.ts';
 
 // Every RPC, bound to the connection above.
 export const {

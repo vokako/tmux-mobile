@@ -37,6 +37,12 @@ pub(super) struct Response {
 pub(super) struct ErrorInfo {
     pub(super) code: i32,
     pub(super) message: String,
+    /// Facts a client needs to ACT on this failure, beside the sentence it
+    /// shows the human (board #337): the scratch refusal carries which
+    /// project holds the name, so the confirmation the reader approves names
+    /// that project and the action can only touch it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) data: Option<serde_json::Value>,
 }
 
 // Error codes
@@ -63,7 +69,7 @@ impl Response {
         Self {
             id,
             result: None,
-            error: Some(ErrorInfo { code, message }),
+            error: Some(ErrorInfo { code, message, data: None }),
         }
     }
     /// The one place an `RpcError` becomes wire bytes (board #146): the code
@@ -73,7 +79,11 @@ impl Response {
             RpcError::InvalidParams(m) => Self::err(id, ERR_INVALID_PARAMS, m),
             RpcError::Internal(m) => Self::err(id, ERR_INTERNAL, m),
             RpcError::MethodNotFound(m) => Self::err(id, ERR_METHOD_NOT_FOUND, m),
-            RpcError::ScratchHeld(m) => Self::err(id, ERR_SCRATCH_HELD, m),
+            RpcError::ScratchHeld(m, held) => Response {
+                id,
+                result: None,
+                error: Some(ErrorInfo { code: ERR_SCRATCH_HELD, message: m, data: Some(held) }),
+            },
         }
     }
     /// Fold a dispatcher's `Result` into a response.
@@ -100,8 +110,11 @@ pub(super) enum RpcError {
     Internal(String),
     MethodNotFound(String),
     /// `scratch_session` refused because a PROJECT holds the reserved name —
-    /// the one refusal the client can act on (board #337).
-    ScratchHeld(String),
+    /// the one refusal the client can act on (board #337). Carries the
+    /// holder as DATA, so the confirmation the reader sees and the release
+    /// they approve are about one identified project, not about whoever
+    /// happens to hold the name when the action runs.
+    ScratchHeld(String, serde_json::Value),
 }
 
 /// The scratch terminal's session is hidden from every listing (board #326,
@@ -278,11 +291,11 @@ fn dispatch(req: &Request, token: &str) -> Result<serde_json::Value, RpcError> {
         "scratch_session" => crate::projects::scratch::ensure().map_err(|why| {
             // One refusal the panel can DO something about: a project holds
             // the name. Classified by asking the same predicate the refusal
-            // came from, never by reading its sentence (board #337).
-            if crate::projects::scratch::held_by().is_some() {
-                RpcError::ScratchHeld(why)
-            } else {
-                RpcError::Internal(why)
+            // came from, never by reading its sentence, and the holder travels
+            // with it so the reader confirms a named project (board #337).
+            match crate::projects::scratch::holder() {
+                Some(held) => RpcError::ScratchHeld(why, held),
+                None => RpcError::Internal(why),
             }
         }),
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -291,7 +304,14 @@ fn dispatch(req: &Request, token: &str) -> Result<serde_json::Value, RpcError> {
         // refused — this is the reader's confirmed way out. Never automatic:
         // it renames someone's project row, so only they can ask for it.
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        "scratch_release" => crate::projects::scratch::release().map_err(RpcError::Internal),
+        "scratch_release" => {
+            // The project the reader approved, not whoever holds the name when
+            // this arrives (board #337 review): the server renames only if
+            // that project still declares that session right now.
+            let project = param(p, "projectId")?;
+            let session = param(p, "session")?;
+            crate::projects::scratch::release(project, session).map_err(RpcError::Internal)
+        }
 
         "kill_session" => {
             let name = param(p, "name")?;

@@ -359,6 +359,12 @@ test('the documented error codes are the server\'s, and the client keys on one o
   }
   // And the one the client acts on is the same number on both sides.
   assert.equal(codes.get('ERR_SCRATCH_HELD'), '-32010');
-  const client = await readFile(new URL('./ws.ts', import.meta.url), 'utf8');
-  assert.match(client, /export const ERR_SCRATCH_HELD = -32010;/u, 'ws.ts mirrors it for the panel');
+  const client = await readFile(new URL('./rpc-codes.ts', import.meta.url), 'utf8');
+  assert.match(client, /export const ERR_SCRATCH_HELD = -32010;/u, 'rpc-codes.ts mirrors it for the panel');
+  // And it is NOT in ws.ts itself: every mount fixture mocks that module, so
+  // a code defined there reads as undefined in a test and the feature keyed
+  // on it looks disabled (#337 — this is how the release action first failed).
+  const ws = await readFile(new URL('./ws.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(ws, /export const ERR_[A-Z_]+ =/u, 'codes live outside the mocked surface');
+  assert.match(ws, /export \{ ERR_SCRATCH_HELD \} from '\.\/rpc-codes\.ts';/u, 're-exported, so callers have one import');
 });

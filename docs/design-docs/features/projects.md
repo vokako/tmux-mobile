@@ -102,11 +102,23 @@ make a workspace. Two consequences fall out of that:
     track as well as for one the capturer found, so it cannot tell our own
     hijacked row from somebody's workspace — and renaming a person's project
     under them while they are not looking is not a repair. So
-    `scratch::release()` runs only on an explicit, confirmed request from the
-    panel (`scratch_release`), renames the holder's session to
-    `tmm-scratch-recovered` (deterministic, and short enough to survive
-    `slug`'s 24-character bound unchanged), verifies the name is actually free
-    afterwards, and logs one line. Nothing is deleted and nothing is archived:
+    `scratch::release(projectId, session)` runs only on an explicit, confirmed
+    request from the panel (`scratch_release`), and it is about ONE identified
+    project: the refusal carries `{projectId, projectName, session}` as its
+    error data, the confirmation names that project, and the release renames
+    only if it still declares that session right now — otherwise nothing is
+    touched and the answer names the current holder. Review caught the first
+    cut re-resolving the holder at execution time: the reader would have
+    approved releasing one project and a different one could have been renamed
+    if the name changed hands in between, which a confirmation button cannot
+    prevent. The recovered name is `<reserved>-recovered`, or — when that is
+    taken — the name the ONE suffixing rule picks (`free_session_name`'s
+    digest on a shortened `-rec` base); every candidate is bounded to `slug`'s
+    24 characters BEFORE it is offered, because a truncated label is a name
+    neither this policy nor `free_session_name` chose (measured: with a long
+    reserved name two candidates collapsed onto the same string and the rename
+    refused itself). It verifies the name is actually free afterwards, and logs
+    one line. Nothing is deleted and nothing is archived:
     the row keeps its id, path, room and history, and `projects::rename`
     carries a live session with it, so a shell inside survives. Archiving
     would not have worked — an archived project still holds its session name
