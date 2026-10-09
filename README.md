@@ -86,6 +86,8 @@ npm install
 npm run dev:all    # then open http://<your-machine>:5173
 ```
 
+To install the app and the background gateway rather than build from source, see [docs/reference/install.md](docs/reference/install.md).
+
 The first launch writes a token to `~/.config/tmux-mobile/config.toml`.
 Prerequisites, the desktop and Android builds and remote access are in
 [docs/conventions/development.md](docs/conventions/development.md); every
