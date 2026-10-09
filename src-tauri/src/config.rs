@@ -69,8 +69,21 @@ pub fn normalize_engine(raw: &str) -> String {
 /// Parse `text` as config.toml with the ONE schema `Config::load` reads
 /// (board #323: `tmm setup` writes through this, never a second schema).
 /// Unknown keys are allowed, as they always were.
+///
+/// The error NEVER quotes the file: toml's own message prints the offending
+/// line, and that line may hold the token (board #323 review). Only the
+/// kind of problem and where it is.
 pub fn validate_file(text: &str) -> Result<(), String> {
-    toml::from_str::<FileConfig>(text).map(|_| ()).map_err(|e| e.to_string())
+    toml::from_str::<FileConfig>(text).map(|_| ()).map_err(|e| {
+        let at = e.span().map(|r| {
+            let before = &text[..r.start.min(text.len())];
+            let line = before.matches('\n').count() + 1;
+            let col = before.rsplit('\n').next().map(|l| l.chars().count()).unwrap_or(0) + 1;
+            format!(" at line {line}, column {col}")
+        }).unwrap_or_default();
+        let kind = if text.parse::<toml::Table>().is_err() { "not valid TOML" } else { "a value of the wrong type or out of range" };
+        format!("{kind}{at}")
+    })
 }
 
 /// Where config.toml lives.

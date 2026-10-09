@@ -38,19 +38,39 @@ pub struct Start {
     pub tls: Option<(String, String)>,
     /// The socket of a running tmux server, offered as a hint.
     pub detected_socket: Option<String>,
+    /// What a relative path answer is resolved against (the caller's cwd)
+    /// and what `~` means: paths are SAVED absolute, because the service
+    /// runs from another directory.
+    pub cwd: std::path::PathBuf,
+    pub home: Option<std::path::PathBuf>,
+}
+
+/// `v` as an absolute path: `~` / `~/…` expanded, a relative path joined to
+/// `cwd`. Lexical only — the file need not exist (a socket may not yet).
+pub fn absolute(v: &str, cwd: &Path, home: Option<&Path>) -> Result<String, String> {
+    let p = if v == "~" {
+        home.ok_or("~ needs HOME")?.to_path_buf()
+    } else if let Some(rest) = v.strip_prefix("~/") {
+        home.ok_or("~ needs HOME")?.join(rest)
+    } else if v.starts_with('~') {
+        return Err(format!("{v}: only ~ and ~/… are expanded"));
+    } else {
+        cwd.join(v)
+    };
+    Ok(p.to_string_lossy().into_owned())
 }
 
 impl Start {
-    pub fn from_file(text: &str, detected_socket: Option<String>) -> Result<Self, String> {
+    pub fn from_file(text: &str, detected_socket: Option<String>, cwd: std::path::PathBuf, home: Option<std::path::PathBuf>) -> Result<Self, String> {
         crate::config::validate_file(text)?;
-        let doc: toml_edit::DocumentMut = text.parse().map_err(|e: toml_edit::TomlError| e.to_string())?;
+        let doc: toml_edit::DocumentMut = text.parse().map_err(|_| "not valid TOML".to_string())?;
         let s = |k: &str| doc.get(k).and_then(|v| v.as_str()).map(str::to_string).filter(|v| !v.is_empty());
         let port = doc.get("port").and_then(|v| v.as_integer()).and_then(|p| u16::try_from(p).ok()).unwrap_or(9899);
         let tls = match (s("tls_cert"), s("tls_key")) {
             (Some(c), Some(k)) => Some((c, k)),
             _ => None,
         };
-        Ok(Start { port, host: s("host").unwrap_or_else(|| "0.0.0.0".into()), tmux_socket: s("tmux_socket"), token: s("token"), tls, detected_socket })
+        Ok(Start { port, host: s("host").unwrap_or_else(|| "0.0.0.0".into()), tmux_socket: s("tmux_socket"), token: s("token"), tls, detected_socket, cwd, home })
     }
 }
 
@@ -100,8 +120,9 @@ pub fn wizard(input: &mut dyn BufRead, out: &mut dyn Write, start: &Start, new_t
         writeln!(out, "  a running tmux server uses {d}; leave empty for tmux's default socket.").map_err(|e| e.to_string())?;
     }
     let sock_default = start.tmux_socket.clone().unwrap_or_default();
+    let abs = |v: &str| absolute(v, &start.cwd, start.home.as_deref());
     let tmux_socket = get!("tmux socket (-S path, empty = default)", &sock_default, |v: &str| {
-        Ok::<_, String>(if v.is_empty() || v == "-" { None } else { Some(v.to_string()) })
+        if v.is_empty() || v == "-" { Ok(None) } else { abs(v).map(Some) }
     });
     let token = match &start.token {
         Some(t) => {
@@ -116,14 +137,17 @@ pub fn wizard(input: &mut dyn BufRead, out: &mut dyn Write, start: &Start, new_t
     };
     let tls_default = start.tls.as_ref().map(|(c, _)| c.clone()).unwrap_or_default();
     let cert = get!("TLS certificate (PEM path, empty = no TLS)", &tls_default, |v: &str| {
-        if v.is_empty() || v == "-" { Ok(None) } else if Path::new(v).is_file() { Ok(Some(v.to_string())) } else { Err(format!("no file at {v}")) }
+        if v.is_empty() || v == "-" { return Ok(None) }
+        let a = abs(v)?;
+        if Path::new(&a).is_file() { Ok(Some(a)) } else { Err(format!("no file at {a}")) }
     });
     let tls = match cert {
         None => None,
         Some(c) => {
             let key_default = start.tls.as_ref().map(|(_, k)| k.clone()).unwrap_or_default();
             let key = get!("TLS private key (PEM path)", &key_default, |v: &str| {
-                if Path::new(v).is_file() { Ok(v.to_string()) } else { Err(format!("a key file is required with a certificate (no file at {v:?})")) }
+                let a = abs(v)?;
+                if Path::new(&a).is_file() { Ok(a) } else { Err(format!("a key file is required with a certificate (no file at {a:?})")) }
             });
             Some((c, key))
         }
@@ -135,7 +159,7 @@ pub fn wizard(input: &mut dyn BufRead, out: &mut dyn Write, start: &Start, new_t
 /// checked against the one schema.
 pub fn apply(existing: &str, a: &Answers) -> Result<String, String> {
     crate::config::validate_file(existing).map_err(|e| format!("config.toml does not parse ({e}); fix or move it — nothing was written"))?;
-    let mut doc: toml_edit::DocumentMut = existing.parse().map_err(|e: toml_edit::TomlError| e.to_string())?;
+    let mut doc: toml_edit::DocumentMut = existing.parse().map_err(|_| "config.toml is not valid TOML — nothing was written".to_string())?;
     doc["port"] = toml_edit::value(i64::from(a.port));
     doc["host"] = toml_edit::value(a.host.as_str());
     doc["token"] = toml_edit::value(a.token.as_str());
@@ -189,43 +213,95 @@ fn detect_socket() -> Option<String> {
     (out.status.success() && !p.is_empty()).then_some(p)
 }
 
-/// `tmm setup` (and the first-run step of `tmm gateway`). Returns whether
-/// config.toml was written.
-pub fn run_interactive() -> Result<bool, String> {
-    use std::io::IsTerminal;
-    let path = crate::config::config_file();
-    if !std::io::stdin().is_terminal() {
-        let _ = crate::config::Config::load(); // a token and a machine id, as on any first start
-        eprintln!("setup: not a terminal — nothing asked; defaults apply ({} has a token and nothing else). Run tmm setup in a terminal to choose.", path.display());
-        return Ok(false);
+/// config.toml as it is: `None` only when it does not EXIST. Any other
+/// read failure, non-UTF-8 bytes or a file the schema rejects is an error —
+/// and nothing is written or initialised after one (fail closed).
+pub fn read_existing(path: &Path) -> Result<Option<String>, String> {
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("{} cannot be read ({}) — nothing was written", path.display(), e.kind())),
+    };
+    let text = String::from_utf8(bytes).map_err(|_| format!("{} is not UTF-8 text — nothing was written", path.display()))?;
+    crate::config::validate_file(&text).map_err(|e| format!("{} does not parse ({e}); fix or move it — nothing was written", path.display()))?;
+    Ok(Some(text))
+}
+
+/// What the setup step decided.
+#[derive(Debug, PartialEq, Eq)]
+pub enum FirstRun {
+    /// config.toml already existed and parses: nothing asked.
+    Existing,
+    /// The reader answered and config.toml was written.
+    Proceed,
+    /// The reader cancelled (EOF, three bad answers): nothing was written,
+    /// and the command that asked MUST stop — no unit, no start.
+    Cancelled,
+    /// No terminal and no config.toml: the defaults a first start makes (a
+    /// token and a machine id) were created, and the caller says so.
+    NonInteractiveDefaults,
+}
+
+/// The one setup step, over any input/output. `interactive` = a terminal
+/// is attached; `force` = `tmm setup` (ask even when the file exists).
+pub fn setup_step(path: &Path, interactive: bool, force: bool, input: &mut dyn BufRead, out: &mut dyn Write, detected: Option<String>, cwd: std::path::PathBuf, home: Option<std::path::PathBuf>, new_token: &dyn Fn() -> String, init_defaults: &dyn Fn()) -> Result<FirstRun, String> {
+    // The same read/validate boundary in every mode, BEFORE anything else.
+    let existing = read_existing(path)?;
+    if existing.is_some() && !force {
+        return Ok(FirstRun::Existing);
     }
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    let start = Start::from_file(&existing, detect_socket())
-        .map_err(|e| format!("config.toml does not parse ({e}); fix or move it — nothing was written"))?;
-    let stdin = std::io::stdin();
-    let mut input = stdin.lock();
-    let mut out = std::io::stdout();
-    match wizard(&mut input, &mut out, &start, &|| uuid::Uuid::new_v4().to_string())? {
-        Outcome::Cancelled => {
-            println!("\nsetup cancelled — nothing was written");
-            Ok(false)
+    if !interactive {
+        if existing.is_some() {
+            return Ok(FirstRun::Existing);
         }
+        init_defaults();
+        return Ok(FirstRun::NonInteractiveDefaults);
+    }
+    let text = existing.unwrap_or_default();
+    let start = Start::from_file(&text, detected, cwd, home)?;
+    match wizard(input, out, &start, new_token)? {
+        Outcome::Cancelled => Ok(FirstRun::Cancelled),
         Outcome::Done(a) => {
-            let text = apply(&existing, &a)?;
-            write_0600(&path, &text)?;
-            println!("✓ wrote {}", path.display());
-            println!("  next: tmm gateway   (installs and starts the background service)");
-            Ok(true)
+            let next = apply(&text, &a)?;
+            write_0600(path, &next)?;
+            Ok(FirstRun::Proceed)
         }
     }
 }
 
-/// The first-run step: setup only when there is no config.toml yet.
-pub fn first_run() -> Result<(), String> {
-    if crate::config::config_file().exists() {
-        return Ok(());
+fn step_here(force: bool) -> Result<FirstRun, String> {
+    use std::io::IsTerminal;
+    let path = crate::config::config_file();
+    let stdin = std::io::stdin();
+    let interactive = stdin.is_terminal();
+    let mut input = stdin.lock();
+    let mut out = std::io::stdout();
+    let cwd = std::env::current_dir().map_err(|e| format!("cwd: {e}"))?;
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let r = setup_step(&path, interactive, force, &mut input, &mut out, detect_socket(), cwd, home,
+        &|| uuid::Uuid::new_v4().to_string(), &|| { let _ = crate::config::Config::load(); })?;
+    match r {
+        FirstRun::Proceed => {
+            println!("✓ wrote {}", path.display());
+            println!("  next: tmm gateway   (installs and starts the background service)");
+        }
+        FirstRun::Cancelled => println!("\nsetup cancelled — nothing was written"),
+        FirstRun::NonInteractiveDefaults => eprintln!("setup: not a terminal — nothing asked; defaults apply ({} has a token and nothing else). Run tmm setup in a terminal to choose.", path.display()),
+        FirstRun::Existing if force => eprintln!("setup: not a terminal — nothing asked; {} is unchanged", path.display()),
+        FirstRun::Existing => {}
     }
-    run_interactive().map(|_| ())
+    Ok(r)
+}
+
+/// `tmm setup`.
+pub fn run_interactive() -> Result<FirstRun, String> {
+    step_here(true)
+}
+
+/// The first-run step of `tmm gateway`: asks only when there is no
+/// config.toml yet; refuses (Err) when the existing file cannot be read.
+pub fn first_run() -> Result<FirstRun, String> {
+    step_here(false)
 }
 
 #[cfg(test)]
@@ -233,7 +309,7 @@ mod tests {
     use super::*;
 
     fn start(text: &str) -> Start {
-        Start::from_file(text, Some("/tmp/tmux-1000/default".into())).unwrap()
+        Start::from_file(text, Some("/tmp/tmux-1000/default".into()), "/work/here".into(), Some("/home/u".into())).unwrap()
     }
     fn run(text: &str, script: &str) -> (Outcome, String) {
         let mut out = Vec::new();
@@ -303,5 +379,96 @@ mod tests {
         assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no temp file left behind");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("setup-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+    /// One step with scripted answers; `inits` counts default initialisation.
+    fn step(path: &Path, interactive: bool, force: bool, script: &str, cwd: &Path) -> (Result<FirstRun, String>, usize) {
+        let n = std::cell::Cell::new(0);
+        let mut out = Vec::new();
+        let r = setup_step(path, interactive, force, &mut script.as_bytes(), &mut out, None, cwd.to_path_buf(), Some("/home/u".into()), &|| "fresh".into(), &|| n.set(n.get() + 1));
+        (r, n.get())
+    }
+
+    #[test]
+    fn a_cancel_writes_nothing_and_says_cancelled() {
+        let d = scratch("cancel");
+        let p = d.join("config.toml");
+        assert_eq!(step(&p, true, false, "8080\n", &d).0, Ok(FirstRun::Cancelled), "EOF");
+        assert_eq!(step(&p, true, false, "x\nx\nx\n", &d).0, Ok(FirstRun::Cancelled), "three strikes");
+        assert!(!p.exists(), "nothing written");
+        assert_eq!(step(&p, true, false, "\n\n\n\n", &d).0, Ok(FirstRun::Proceed));
+        assert!(p.exists());
+        assert_eq!(step(&p, true, false, "", &d).0, Ok(FirstRun::Existing), "an existing file is not asked again");
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    /// Only NotFound is a first run. Unreadable, non-UTF-8 or invalid →
+    /// Err in BOTH modes, bytes unchanged, no defaults initialised.
+    #[test]
+    fn a_file_that_cannot_be_read_fails_closed_in_both_modes() {
+        let d = scratch("closed");
+        let p = d.join("config.toml");
+        let cases: Vec<(&str, Vec<u8>)> = vec![
+            ("invalid toml", b"token = \"DUMMY-SECRET-0123\"x\n".to_vec()),
+            ("wrong type", b"token = \"DUMMY-SECRET-0123\"\nport = \"DUMMY-SECRET-0123\"\n".to_vec()),
+            ("not utf-8", vec![0x74, 0x6f, 0xff, 0xfe, 0x0a]),
+        ];
+        for (what, bytes) in &cases {
+            std::fs::write(&p, bytes).unwrap();
+            for interactive in [true, false] {
+                for force in [true, false] {
+                    let (r, inits) = step(&p, interactive, force, "\n\n\n\n\n", &d);
+                    let e = r.expect_err(what);
+                    assert!(!e.contains("DUMMY-SECRET"), "{what}: the error quotes the file: {e}");
+                    assert_eq!(inits, 0, "{what}: no token/machine id created");
+                    assert_eq!(&std::fs::read(&p).unwrap(), bytes, "{what}: bytes unchanged");
+                }
+            }
+        }
+        // A directory where the file should be: a read error, not "absent".
+        std::fs::remove_file(&p).unwrap();
+        std::fs::create_dir(&p).unwrap();
+        let (r, inits) = step(&p, false, false, "", &d);
+        assert!(r.is_err() && inits == 0, "{r:?}");
+        std::fs::remove_dir(&p).unwrap();
+        // Missing + no terminal: the defaults a first start makes.
+        assert_eq!(step(&p, false, false, "", &d), (Ok(FirstRun::NonInteractiveDefaults), 1));
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn a_parse_error_names_kind_and_place_never_the_line() {
+        let e = crate::config::validate_file("port = 1\ntoken = \"DUMMY-SECRET-0123\"x\n").unwrap_err();
+        assert!(!e.contains("DUMMY") && e.contains("not valid TOML") && e.contains("line 2"), "{e}");
+        let e = crate::config::validate_file("port = \"DUMMY-SECRET-0123\"\n").unwrap_err();
+        assert!(!e.contains("DUMMY") && e.contains("wrong type") && e.contains("line 1"), "{e}");
+    }
+
+    /// Paths are saved absolute (the service runs elsewhere): a relative
+    /// answer resolves against the caller's cwd, `~` against HOME; a socket
+    /// need not exist yet.
+    #[test]
+    fn paths_are_saved_absolute() {
+        let d = scratch("abs");
+        std::fs::write(d.join("c.pem"), "x").unwrap();
+        std::fs::write(d.join("k.pem"), "x").unwrap();
+        let p = d.join("config.toml");
+        assert_eq!(step(&p, true, false, "\n\nrun/tmux.sock\nc.pem\nk.pem\n", &d).0, Ok(FirstRun::Proceed));
+        let text = std::fs::read_to_string(&p).unwrap();
+        let get = |k: &str| text.lines().find_map(|l| l.strip_prefix(&format!("{k} = \""))).map(|v| v.trim_end_matches('"').to_string()).unwrap();
+        assert_eq!(get("tls_cert"), d.join("c.pem").to_string_lossy());
+        assert_eq!(get("tls_key"), d.join("k.pem").to_string_lossy());
+        assert_eq!(get("tmux_socket"), d.join("run/tmux.sock").to_string_lossy(), "a socket not created yet is still absolute");
+        // Read from anywhere else, the same files are named.
+        for k in ["tls_cert", "tls_key"] { assert!(Path::new(&get(k)).is_absolute() && Path::new(&get(k)).is_file()); }
+        assert_eq!(absolute("~/s", Path::new("/x"), Some(Path::new("/home/u"))).unwrap(), "/home/u/s");
+        assert!(absolute("~bob/s", Path::new("/x"), Some(Path::new("/home/u"))).is_err());
+        std::fs::remove_dir_all(&d).ok();
     }
 }

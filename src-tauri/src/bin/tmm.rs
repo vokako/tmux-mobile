@@ -245,8 +245,10 @@ async fn main() {
     // `tmm setup` (board #323): before Config::load, which would create
     // config.toml with a token and so make every run look like a second one.
     if pos[0] == "setup" {
-        if let Err(e) = tmux_mobile::gateway::setup::run_interactive() {
-            fail(EXIT_ERR, &format!("setup: {e}"));
+        match tmux_mobile::gateway::setup::run_interactive() {
+            Ok(tmux_mobile::gateway::setup::FirstRun::Cancelled) => std::process::exit(EXIT_ERR),
+            Ok(_) => {}
+            Err(e) => fail(EXIT_ERR, &format!("setup: {e}")),
         }
         return;
     }
@@ -1402,8 +1404,10 @@ async fn cmd_gateway(rest: &[String], flags: &Flags) {
     // No config.toml yet: the first-run setup, in this (foreground) caller.
     // The installed service (`--service`) never prompts: it has no terminal.
     if matches!(sub, "" | "install" | "start") && !flags.contains_key("service") {
-        if let Err(e) = tmux_mobile::gateway::setup::first_run() {
-            fail(EXIT_ERR, &format!("setup: {e}"));
+        match tmux_mobile::gateway::setup::first_run() {
+            Ok(tmux_mobile::gateway::setup::FirstRun::Cancelled) => fail(EXIT_ERR, "setup cancelled — nothing was installed or started"),
+            Ok(_) => {}
+            Err(e) => fail(EXIT_ERR, &format!("setup: {e}")),
         }
     }
     if sub == "start" {
