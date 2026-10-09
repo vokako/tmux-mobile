@@ -279,17 +279,46 @@ pub fn release(project_id: &str, session: &str) -> Result<serde_json::Value, Str
     // reserved name in between — another client renamed it, a release ran
     // twice — the rename refuses and the project the user has since named is
     // left wearing its own name.
-    super::projects::rename_if_session(&row.id, Some(&n), &recovered)?;
-    // Verified, not assumed: a rename that refused would otherwise report a
-    // release while the name stayed held.
-    if let Some(still) = declaring_project()? {
-        return Err(format!(
-            "'{n}' is still held by project '{}' after the rename",
-            still.name
-        ));
-    }
+    let written = super::projects::rename_if_session(&row.id, Some(&n), &recovered)?;
+    let holder = declaring_project()?.map(|p| p.name);
+    let renamed_to = freed(&n, written["session"].as_str(), holder.as_deref())?;
     eprintln!("scratch: project '{}' released the reserved session name '{n}' (board #337)", row.name);
-    Ok(serde_json::json!({ "released": true, "project": row.name, "renamed_to": recovered }))
+    Ok(serde_json::json!({ "released": true, "project": row.name, "renamed_to": renamed_to }))
+}
+
+/// Was the name actually freed? DERIVED from what the rename wrote and from
+/// who holds the name afterwards — never assumed from the rename returning
+/// `Ok` (board #337 review: "verified, not assumed").
+///
+/// A rename can succeed WITHOUT moving the session. `projects::rename` moves
+/// the tmux session and re-keys the row as one act, and when tmux refuses its
+/// half — the reserved session was killed between the liveness check and the
+/// rename, which is one tap away in the same panel — it leaves the
+/// declaration where it is and still answers `Ok`. Reporting `released: true`
+/// for that would send the reader back to a panel that refuses exactly as
+/// before, with nothing left to confirm.
+///
+/// So the answer carries the session the rename WROTE, not the one we asked
+/// for: `renamed_to` is then what the row really wears, and a write that
+/// landed somewhere else cannot be reported as the name we chose. An
+/// unreadable answer is its own refusal, because it is not evidence either.
+///
+/// Both facts are checked here rather than one: the row we renamed is the
+/// only possible holder today (`session` is UNIQUE and every claiming path
+/// declines the reserved name), but what the reader needs to know is the END
+/// STATE of the name — the same reason `ensure` decides on the end state of
+/// its pane instead of on its own earlier reading.
+fn freed(reserved: &str, written: Option<&str>, holder: Option<&str>) -> Result<String, String> {
+    let Some(written) = written.filter(|s| !s.is_empty()) else {
+        return Err(format!("the rename did not say which session the project declares, so '{reserved}' is not released"));
+    };
+    if written == reserved {
+        return Err(format!("the rename could not move '{reserved}', so the project still declares it"));
+    }
+    if let Some(name) = holder {
+        return Err(format!("'{reserved}' is still held by project '{name}' after the rename"));
+    }
+    Ok(written.to_string())
 }
 
 /// Ensure the scratch session exists and answer `{session, target}`: the
@@ -525,27 +554,30 @@ mod tests {
     fn pane_pid(target: &str) -> String {
         tmux::pane_format(target, "#{pane_pid}").unwrap_or_default()
     }
-    /// Type `exit` into a shell that is READY to act on it, and wait for the
-    /// result. A zsh that has not printed its prompt yet DISCARDS typed keys
-    /// (#325's lesson, measured again here: this test went flaky only inside
-    /// the full suite, where the host is loaded and a fresh shell takes
-    /// longer to come up — never in isolation). So the prompt is waited for,
-    /// and a lost `exit` is retried rather than read as a broken keep-alive.
-    fn exit_shell(target: &str, before: &str) {
+    /// Type into a shell that is READY to act on what is typed, and wait for
+    /// the result. Bytes that reach a fresh pane before its line editor is up
+    /// are echoed and then discarded (#325), so this goes through
+    /// `tmux::wait_for_shell` — the SAME readiness mechanism production uses
+    /// before typing into a pane it just made, not a second one — and retries
+    /// a lost keystroke rather than reading it as a broken mechanism.
+    ///
+    /// EVERY site that types into the pane goes through here. This test went
+    /// flaky only inside the full suite, where the host is loaded and a fresh
+    /// shell takes longer to come up: `sleep 120` was typed straight at a pane
+    /// `ensure` had just respawned, one line after the respawn, with no wait.
+    fn typed(target: &str, line: &str, mut done: impl FnMut() -> bool) {
         for _ in 0..3 {
-            assert!(
-                // The WHOLE pane, not its last lines: a fresh shell's prompt
-                // sits at the TOP and the rows under it are blank, so a
-                // tail-shaped capture reads as "nothing here yet" forever.
-                settles(|| tmux::capture_pane(target, None).map(|s| !s.trim().is_empty()).unwrap_or(false)),
-                "the shell printed a prompt before anything was typed into it"
-            );
-            tmux::send_command(target, "exit").expect("typed exit");
-            if settles(|| pane_pid(target) != before || tmux::pane_live(target) == Some(false)) {
+            tmux::wait_for_shell(target, tmux::SHELL_READY);
+            tmux::send_command(target, line).expect("typed");
+            if settles(&mut done) {
                 return;
             }
         }
-        panic!("the shell in {target} never acted on `exit`");
+        panic!("the shell in {target} never acted on `{line}`");
+    }
+    /// `exit`, and the pane it was typed into stops being that shell.
+    fn exit_shell(target: &str, before: &str) {
+        typed(target, "exit", || pane_pid(target) != before || tmux::pane_live(target) == Some(false));
     }
 
     fn global_hook() -> Option<String> {
@@ -634,8 +666,7 @@ mod tests {
         // anything it started) survives. Without this, the `-k` form would
         // have killed whatever won the race.
         let running = pane_pid(&target);
-        tmux::send_command(&target, "sleep 120").expect("typed a command");
-        assert!(settles(|| tmux::pane_format(&target, "#{pane_current_command}").as_deref() == Some("sleep")));
+        typed(&target, "sleep 120", || tmux::pane_format(&target, "#{pane_current_command}").as_deref() == Some("sleep"));
         let refused = tmux::respawn_pane(&target);
         assert!(refused.is_err(), "tmux refuses to respawn a pane that is still active: {refused:?}");
         assert_eq!(pane_pid(&target), running, "the shell is untouched");
@@ -780,6 +811,40 @@ mod tests {
         }
     }
 
+    /// `released: true` is EARNED, not assumed from a rename that returned
+    /// `Ok` (board #337 review; validator: the end-state check had no failing
+    /// control). Pure, so every refusal is pinned without racing a live call
+    /// — and so the one state the live path cannot be driven into is still
+    /// covered: `session` is UNIQUE and every claiming path declines the
+    /// reserved name, so no second holder can be inserted, and
+    /// `rename_if_session` keeps the declaration where it is only when TMUX
+    /// refuses the session rename, which no test can inject between its
+    /// liveness check and the call. What CAN be stated exactly is the
+    /// decision, so it lives in one function and is stated here.
+    #[test]
+    fn a_release_is_only_released_when_the_name_really_moved() {
+        // The release: the row declares something else now, and nobody holds
+        // the reserved name. The answer carries what the rename WROTE.
+        assert_eq!(freed("tmm-scratch", Some("tmm-scratch-recovered"), None).unwrap(), "tmm-scratch-recovered");
+        // The rename answered Ok but could not move the session (tmux refused
+        // its half): the panel would refuse exactly as before.
+        let stuck = freed("tmm-scratch", Some("tmm-scratch"), Some("pad")).unwrap_err();
+        assert!(stuck.contains("could not move 'tmm-scratch'"), "{stuck}");
+        // Same, and nothing holds the name per the second read: the written
+        // name alone already refuses, because it is about the row we renamed.
+        assert!(freed("tmm-scratch", Some("tmm-scratch"), None).unwrap_err().contains("still declares it"));
+        // It moved, but the name is held — by a row no path can create today,
+        // which is why the END STATE is what decides rather than our own
+        // earlier reading.
+        let held = freed("tmm-scratch", Some("tmm-scratch-recovered"), Some("someone else")).unwrap_err();
+        assert!(held.contains("still held by project 'someone else'"), "{held}");
+        // An answer we cannot read is not evidence of a release either.
+        for unreadable in [None, Some("")] {
+            let e = freed("tmm-scratch", unreadable, None).unwrap_err();
+            assert!(e.contains("did not say which session"), "{unreadable:?} -> {e}");
+        }
+    }
+
     /// The reader's way out of the dead end the incident left (board #337).
     /// Nothing automatic: this runs only because someone confirmed it.
     #[test]
@@ -828,7 +893,7 @@ mod tests {
         assert_eq!(crate::projects::slug(&first), first, "and it survives slug unchanged");
         assert!(declaring_project().unwrap().is_none(), "the name is free");
         let moved = crate::projects::with_store(|store| store.project(&row_id)).unwrap().expect("the row still exists");
-        assert_eq!(moved.session, first, "renamed, not deleted and not archived");
+        assert_eq!(moved.session, first, "renamed, not deleted and not archived — and `renamed_to` is the session the rename WROTE, so the answer and the row cannot disagree");
         assert!(!moved.archived);
         assert!(tmux::session_exists(&moved.session), "and the live shell came with it");
         assert!(!tmux::session_exists(&n), "so the reserved name is unoccupied");

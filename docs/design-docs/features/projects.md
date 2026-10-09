@@ -127,8 +127,21 @@ make a workspace. Two consequences fall out of that:
     24 characters BEFORE it is offered, because a truncated label is a name
     neither this policy nor `free_session_name` chose (measured: with a long
     reserved name two candidates collapsed onto the same string and the rename
-    refused itself). It verifies the name is actually free afterwards, and logs
-    one line. Nothing is deleted and nothing is archived:
+    refused itself). **`released: true` is earned, not assumed**: a rename can
+    answer `Ok` without moving anything — it moves the tmux session and re-keys
+    the row as one act, and when tmux refuses its half (the reserved session
+    was killed between the liveness check and the rename, which is one tap away
+    in the same panel) it leaves the declaration where it is. So `scratch::freed`
+    decides on the END STATE from two facts — the session the rename says the
+    row now declares, and who holds the reserved name afterwards — and the
+    answer's `renamed_to` is the session that was WRITTEN, never the one we
+    asked for, so the answer and the row cannot disagree. That decision is one
+    pure function with every refusal pinned, because the live path cannot be
+    driven into those states: `session` is UNIQUE and every claiming path
+    declines the reserved name (so no second holder can exist), and only tmux
+    refusing the session rename leaves it held — which no test can inject
+    between the liveness check and the call. Nothing is deleted and nothing is
+    archived:
     the row keeps its id, path, room and history, and `projects::rename`
     carries a live session with it, so a shell inside survives. Archiving
     would not have worked — an archived project still holds its session name
@@ -556,6 +569,15 @@ sleep, which is a race and is gone. `tmux.rs`'s
 `a_line_typed_into_a_fresh_pane_lands_only_after_the_prompt` runs a real shell
 behind a 1 s init that flushes the tty input queue: typed at once the line is
 lost; through the wait it runs.
+
+TESTS that type into a pane go through the same wait, behind one helper per
+test module (`scratch.rs`'s `typed`), never a bespoke readiness poll — a second
+readiness mechanism is weaker than this one and drifts from it. Found by the
+#337 validator: `the_shell_can_exit_without_ending_the_session_and_a_dead_pane_is_repaired`
+typed `sleep 120` straight at a pane `ensure` had just respawned, and measured
+at that instant the pane's cursor still sat at column 0 in 5 of 5 runs — #325's
+precondition for a lost line, with no wait in front of it. It flaked only in the
+full suite, where the host is loaded.
 
 ### Confirmed process and project actions settle before closing (2026-09-12, #167 batch 1)
 
