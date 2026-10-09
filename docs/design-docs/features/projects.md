@@ -69,7 +69,50 @@ make a workspace. Two consequences fall out of that:
   phone build). Its tests never touch the real `tmm-scratch`: `scratch::name()`
   is pointed at a `tmux::Scratch`-guarded name per test (testing.md: every cargo
   run shares one tmux server); verified with a live `tmm-scratch` canary that
-  survives `npm run test:rust`.
+  survives `npm run test:rust` — since #326 the canary covers its hooks too.
+- **It is HIDDEN, and its shell can exit** (board #326, owner 2026-10-09:
+  "不需要作为一个真实的 project 显示出来，就是一个隐藏的会话就好…退出这个隐藏
+  会话时，也不要关掉"). This REPLACES the earlier rule that Sessions and
+  Terminal listed it like any tmux session.
+  - **Hidden from every listing, by ownership.** `scratch::hidden_session()` is
+    derived from the same `owned` predicate — `Some(name)` only while the
+    verdict is `Ours`, `None` for `Absent`, for `Taken` and for a FAILED read,
+    so the name alone never drops a row. `server/rpc.rs` filters the two
+    listing doors through one definition (`without_hidden`, applied to the
+    sessions AND to their panes, because a listing that kept the panes would
+    still leak it): `list_sessions` and `list_sessions_with_panes` — the
+    Sessions page, Terminal's pane picker, the Hub drawer and App's first pick
+    all read those. Targeted calls are untouched, so the panel still
+    subscribes, captures, types into and resizes its own pane. A plain
+    same-name session the user made, and a name a project declares, stay
+    visible exactly as before.
+  - **Exiting the shell does not end it**, and that is tmux's own mechanism,
+    not a process manager of ours (tenet 2). `ensure` applies, idempotently and
+    only to its own window and session: `remain-on-exit on` (a WINDOW option,
+    so it is set through the pane target — a session target would only reach
+    that session's current window) and the session hook
+    `pane-died: respawn-pane -k`. Measured on **tmux 3.6a**: before this,
+    `exit` in the pane closed the only window and the SESSION disappeared
+    ("can't find session"); with the keep-alive the pane comes back with the
+    SAME `%id` and the same `session:window.pane` target, which is why the
+    Terminal's subscription survives it. The hook body leaves its target
+    implicit because tmux runs a `pane-died` hook against the pane that died —
+    verified with two panes: only the dead one was respawned, the live pane
+    kept its shell pid; the explicit `respawn-pane -k -t "#{pane_id}"` form
+    stores fine and never fires on 3.6a. The respawned shell starts in the
+    pane's creation directory, which for this session is `$HOME`
+    (`new_session(_, None, None)` passes `-c $HOME`) — measured with a pane
+    created in `/tmp/probe-cwd` that had `cd /usr`'d: it came back in
+    `/tmp/probe-cwd`, never `/`. No global option or hook is touched.
+  - **`ensure` hands back a LIVE pane.** A pane that died before the keep-alive
+    existed (an older session, a hook someone removed, an exit between create
+    and hook) is respawned here — `respawn-pane -k` only when `pane_dead` is
+    1, so a repeated ensure never kills a running shell or command (the test
+    pins the shell pid across three ensures). If the shell will not start, the
+    RPC fails with the target instead of handing out a dead pane.
+  - **Explicit Kill is still the only way to end it.** `pane-died` is a session
+    option, so it goes with the session: measured, `kill-session` on a session
+    carrying the hook leaves no session behind rather than a respawned pane.
 - **One create path.** The old "new session" form now creates a *project* and
   brings it up (`project_create` + `project_up`), so the second `+` in the
   Projects header is gone. A bare `new_session` would have been pointless anyway:

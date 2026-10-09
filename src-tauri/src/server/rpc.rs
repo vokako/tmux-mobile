@@ -95,6 +95,35 @@ pub(super) enum RpcError {
     MethodNotFound(String),
 }
 
+/// The scratch terminal's session is hidden from every listing (board #326,
+/// owner: "不需要作为一个真实的 project 显示出来，就是一个隐藏的会话就好").
+/// ONE predicate decides it — `projects::scratch::hidden_session`, derived
+/// from `scratch::owned` — and these two methods are the only listing doors
+/// (the Sessions page, Terminal's pane picker, the Hub drawer and App's
+/// first pick all read them). Targeted calls are untouched: the panel still
+/// subscribes, captures, types into and resizes its own pane.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn hidden_session() -> Option<String> {
+    crate::projects::scratch::hidden_session()
+}
+/// A phone is a client of a desktop server and has no projects module, so
+/// there is no scratch session of its own to hide.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn hidden_session() -> Option<String> {
+    None
+}
+
+fn hide_scratch(sessions: Vec<tmux::TmuxSession>) -> Vec<tmux::TmuxSession> {
+    without_hidden(sessions, hidden_session().as_deref(), |s| &s.name)
+}
+
+/// Drop the hidden session's rows from a listing — the ONE filter both
+/// listing doors use, for sessions and for their panes. `None` hides nothing.
+fn without_hidden<T>(rows: Vec<T>, hidden: Option<&str>, session_of: impl Fn(&T) -> &str) -> Vec<T> {
+    let Some(hidden) = hidden else { return rows };
+    rows.into_iter().filter(|r| session_of(r) != hidden).collect()
+}
+
 /// `require_str` as a `?`-able INVALID_PARAMS — the missing-param message is
 /// byte-identical to what every `match require_str` site returned.
 pub(super) fn param<'a>(params: &'a serde_json::Value, key: &str) -> Result<&'a str, RpcError> {
@@ -161,7 +190,7 @@ fn dispatch(req: &Request, token: &str) -> Result<serde_json::Value, RpcError> {
         }
 
         "list_sessions" => {
-            let sessions = tmux::list_sessions().map_err(RpcError::Internal)?;
+            let sessions = hide_scratch(tmux::list_sessions().map_err(RpcError::Internal)?);
             Ok(serde_json::to_value(&sessions).unwrap())
         },
 
@@ -185,9 +214,10 @@ fn dispatch(req: &Request, token: &str) -> Result<serde_json::Value, RpcError> {
                 Ok(v) => v,
                 Err(e) => return Err(RpcError::Internal(e)),
             };
+            let hidden = hidden_session();
             Ok(serde_json::json!({
-                "sessions": sessions,
-                "panes": panes,
+                "sessions": without_hidden(sessions, hidden.as_deref(), |s| &s.name),
+                "panes": without_hidden(panes, hidden.as_deref(), |p| &p.session),
             }))
         }
 
@@ -608,6 +638,23 @@ pub(super) fn handle_unsubscribe(params: &serde_json::Value, subs: &mut HashMap<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The one listing filter (board #326): both doors drop the hidden
+    /// session's rows — the session AND its panes — and nothing else, while a
+    /// `None` verdict (not ours, or a failed read) hides nothing. The owner's
+    /// quick terminal is reached through its panel, not through a list.
+    #[test]
+    fn the_hidden_session_leaves_both_listings_but_nothing_else_does() {
+        let sessions = ["tmm-scratch", "work", "tmm-scratchpad"];
+        let kept = without_hidden(sessions.to_vec(), Some("tmm-scratch"), |s| s);
+        assert_eq!(kept, ["work", "tmm-scratchpad"], "exact name only — a prefix is a different session");
+        assert_eq!(without_hidden(sessions.to_vec(), None, |s| s), sessions, "no verdict hides nothing");
+        // Panes are filtered by the session they belong to, through the same
+        // definition — a listing that kept the panes would still leak it.
+        let panes = [("tmm-scratch", 1usize), ("work", 0)];
+        let kept = without_hidden(panes.to_vec(), Some("tmm-scratch"), |p| p.0);
+        assert_eq!(kept, [("work", 0usize)]);
+    }
 
     /// The typed error reproduces the exact wire shape of the hand-written
     /// sites it replaces (board #146).

@@ -17,14 +17,30 @@
 //! A name held by anything else — a plain session the user made, or a
 //! project — is `Taken`: we refuse with the reason and never kill, rename or
 //! undeclare it. The session starts in `$HOME` with the default shell, runs
-//! no agent and installs no hooks; it is never relaunched by `project up`
-//! because it is not a project. Sessions and Terminal list it like any tmux
-//! session — we do not hide tmux.
+//! no agent and installs no hooks beyond its own keep-alive.
+//!
+//! Two things make it the owner's "hidden quick terminal" rather than just
+//! another session (board #326, owner 2026-10-09: "不需要作为一个真实的
+//! project 显示出来，就是一个隐藏的会话就好…退出这个隐藏会话时，也不要关掉"):
+//!
+//! - **Hidden from every listing.** `hidden_session()` — derived from the one
+//!   `owned` predicate, never from the name — is the session the session/pane
+//!   listings drop (`server/rpc.rs`). The panel is its only door.
+//! - **Exiting the shell does not end it.** tmux's own mechanism, not a
+//!   process manager of ours: `remain-on-exit` keeps the pane when its shell
+//!   exits, and the session's `pane-died` hook respawns it IN PLACE, so the
+//!   `session:window.pane` target the Terminal subscribes stays valid.
 
 use crate::tmux;
 
 pub const SCRATCH_SESSION: &str = "tmm-scratch";
 const MARK: &str = "@tmm-scratch";
+/// The keep-alive hook's body. Plain `respawn-pane -k`: tmux runs a
+/// `pane-died` hook with the pane that died as its target (measured on tmux
+/// 3.6a with two panes — only the dead pane was respawned, the live pane kept
+/// its shell pid). The explicit `respawn-pane -k -t "#{pane_id}"` form stores
+/// fine and never fires on 3.6a, which is why the target is left implicit.
+const RESPAWN_HOOK: &str = "respawn-pane -k";
 
 /// The session name every path below uses. Production: `SCRATCH_SESSION`.
 /// A test points it at a name its `tmux::Scratch` guard owns, so a test run
@@ -84,11 +100,47 @@ pub fn is_scratch(session: &str) -> bool {
     session == name() && matches!(owned(), Ok(Ownership::Ours))
 }
 
+/// The session every listing HIDES (board #326) — `Some` only while it is
+/// ours. A plain same-name session the user made, or a name a project holds,
+/// is listed like anything else, and a failed read hides nothing: the name
+/// alone is never enough to drop a row.
+pub fn hidden_session() -> Option<String> {
+    match owned() {
+        Ok(Ownership::Ours) => Some(name()),
+        _ => None,
+    }
+}
+
+/// Exiting the shell must not end the session (owner: "退出这个隐藏会话时，
+/// 也不要关掉"). Two native tmux facts, applied to the pane we are about to
+/// hand out and re-applied by every `ensure` (declaration is truth: a session
+/// created before this existed, or one whose hook was removed, self-heals):
+///
+/// - `remain-on-exit` (a WINDOW option, hence the pane target) keeps the pane
+///   when its shell exits instead of closing the window — and the window is
+///   the session's only one, so the session cannot end that way either;
+/// - the session's `pane-died` hook respawns that pane in place, keeping its
+///   `%id`, its `session:window.pane` target and its start directory
+///   (measured, tmux 3.6a: a pane created with `-c /tmp/probe-cwd`, `cd /usr`,
+///   then `exit`, came back in `/tmp/probe-cwd` — never `/`; our session is
+///   created with `-c $HOME`).
+///
+/// Both are scoped to this window and this session; no global option or hook
+/// is touched.
+fn keep_alive(pane: &str) -> Result<(), String> {
+    tmux::set_window_option(pane, "remain-on-exit", "on")?;
+    tmux::set_hook(&name(), "pane-died", RESPAWN_HOOK)
+}
+
 /// Ensure the scratch session exists and answer `{session, target}`: the
 /// concrete `session:window.pane` of its first window's first pane (base
 /// index honoured), the target the Terminal subscribes, types and resizes
-/// against. A concurrent ensure that created it first is the only create
-/// failure accepted, and only once `owned` says it is ours.
+/// against. The pane handed back is always LIVE: a pane that died before the
+/// keep-alive existed (an older session, a hook that was removed, an exit
+/// between create and hook) is respawned here — and only if it is dead, so a
+/// repeated ensure never kills a running shell or command. A concurrent
+/// ensure that created it first is the only create failure accepted, and only
+/// once `owned` says it is ours.
 pub fn ensure() -> Result<serde_json::Value, String> {
     match owned()? {
         Ownership::Taken(why) => return Err(why),
@@ -109,7 +161,15 @@ pub fn ensure() -> Result<serde_json::Value, String> {
             }
         }
     }
-    Ok(serde_json::json!({ "session": name(), "target": first_pane()? }))
+    let target = first_pane()?;
+    keep_alive(&target)?;
+    if tmux::pane_dead(&target) {
+        tmux::respawn_pane(&target)?;
+        if tmux::pane_dead(&target) {
+            return Err(format!("the scratch terminal's shell will not start in {target}"));
+        }
+    }
+    Ok(serde_json::json!({ "session": name(), "target": target }))
 }
 
 fn first_pane() -> Result<String, String> {
@@ -122,7 +182,11 @@ fn first_pane() -> Result<String, String> {
     Ok(format!("{}:{}.{}", n, first.window, first.pane))
 }
 
-/// Kill the scratch session — only when it is ours.
+/// Kill the scratch session — only when it is ours. The keep-alive cannot
+/// fight this: `pane-died` is a SESSION option, so it goes with the session
+/// (measured on tmux 3.6a: `kill-session` on a session carrying the hook
+/// leaves no session behind, not a respawned one). Explicit Kill stays the
+/// one way to end it.
 pub fn kill() -> Result<serde_json::Value, String> {
     match owned()? {
         Ownership::Ours => {
@@ -146,6 +210,115 @@ mod tests {
         // A project that declares the name holds it even while it is down.
         assert!(matches!(verdict(false, false, Some("scratchpad")), Ownership::Taken(_)));
         assert!(matches!(verdict(true, true, Some("scratchpad")), Ownership::Taken(_)), "a declaration wins over a stale mark");
+    }
+
+    /// Poll a tmux fact that an asynchronous hook changes. The hook fires in
+    /// milliseconds; the budget is for a loaded host, not for the mechanism.
+    fn settles(mut done: impl FnMut() -> bool) -> bool {
+        for _ in 0..60 {
+            if done() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        false
+    }
+    fn pane_pid(target: &str) -> String {
+        tmux::pane_format(target, "#{pane_pid}").unwrap_or_default()
+    }
+    fn global_hook() -> Option<String> {
+        tmux::run_tmux(&["show-options", "-g", "-v", "pane-died"]).ok().map(|s| s.trim().to_string())
+    }
+
+    /// The hidden session stays alive across an exit, and `ensure` repairs a
+    /// pane that died before the keep-alive existed (board #326, review P1-b).
+    /// Under a guard-owned name: the production `tmm-scratch` and the global
+    /// tmux options/hooks are never touched.
+    #[test]
+    fn the_shell_can_exit_without_ending_the_session_and_a_dead_pane_is_repaired() {
+        crate::projects::tests::use_test_store();
+        let real_before = tmux::session_exists(SCRATCH_SESSION);
+        let real_hook_before = tmux::session_hook(SCRATCH_SESSION, "pane-died");
+        let global_hook_before = global_hook();
+        let mut guard = tmux::Scratch::new("ka");
+        let n = guard.session("k");
+        use_test_name(&n);
+        if tmux::new_session(&guard.session("probe"), None, None).is_err() {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        let first = ensure().expect("created");
+        let target = first["target"].as_str().unwrap().to_string();
+        // The keep-alive is tmux's own, scoped to this window and session.
+        assert_eq!(tmux::window_option(&target, "remain-on-exit").as_deref(), Some("on"));
+        assert_eq!(tmux::session_hook(&n, "pane-died").as_deref(), Some(RESPAWN_HOOK));
+        // A repeated ensure re-applies it and never kills a running shell.
+        let pid = pane_pid(&target);
+        assert!(!pid.is_empty());
+        for _ in 0..3 {
+            assert_eq!(ensure().unwrap()["target"], target.as_str());
+        }
+        assert_eq!(pane_pid(&target), pid, "a healthy ensure leaves the shell alone");
+        assert!(!tmux::pane_dead(&target));
+
+        // Ctrl-D / `exit`: the pane comes back IN PLACE — same target, so the
+        // Terminal's subscription stays valid — and the session survives.
+        tmux::send_command(&target, "exit").expect("typed exit");
+        assert!(settles(|| pane_pid(&target) != pid && !tmux::pane_dead(&target)),
+            "the pane-died hook respawns the shell in place");
+        assert!(tmux::session_exists(&n), "the hidden session does not end with its shell");
+        assert_eq!(first_pane().unwrap(), target, "and keeps the same session:window.pane");
+        let revived = pane_pid(&target);
+
+        // A pane that died BEFORE the keep-alive existed (an old session, a
+        // removed hook): ensure repairs it instead of handing out a dead pane.
+        tmux::run_tmux(&["set-hook", "-u", "-t", &n, "pane-died"]).expect("hook removed");
+        assert_eq!(tmux::session_hook(&n, "pane-died"), None);
+        tmux::send_command(&target, "exit").expect("typed exit");
+        assert!(settles(|| tmux::pane_dead(&target)), "with no hook the pane stays dead");
+        let repaired = ensure().expect("ensure repairs a dead pane");
+        assert_eq!(repaired["target"], target.as_str());
+        assert!(!tmux::pane_dead(&target), "the target handed back is a LIVE pane");
+        assert_ne!(pane_pid(&target), revived, "a new shell, in the same pane");
+        assert_eq!(tmux::session_hook(&n, "pane-died").as_deref(), Some(RESPAWN_HOOK), "and the hook is back");
+
+        // Explicit Kill is still the one way to end it: the hook is a session
+        // option, so it dies with the session instead of rebuilding the pane.
+        assert_eq!(kill().unwrap()["killed"], true);
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        assert!(!tmux::session_exists(&n), "killed, not respawned by its own hook");
+        assert_eq!(owned().unwrap(), Ownership::Absent);
+
+        assert_eq!(tmux::session_exists(SCRATCH_SESSION), real_before, "the real scratch session was never touched");
+        assert_eq!(tmux::session_hook(SCRATCH_SESSION, "pane-died"), real_hook_before, "nor its hooks");
+        assert_eq!(global_hook(), global_hook_before, "and no global hook was set");
+    }
+
+    /// Hidden from the listings only while it is OURS (board #326).
+    #[test]
+    fn only_an_owned_scratch_session_is_hidden_from_the_listings() {
+        crate::projects::tests::use_test_store();
+        let mut guard = tmux::Scratch::new("hid");
+        let n = guard.session("h");
+        use_test_name(&n);
+        if tmux::new_session(&guard.session("probe"), None, None).is_err() {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        assert_eq!(hidden_session(), None, "nothing to hide while it does not exist");
+        ensure().expect("created");
+        assert_eq!(hidden_session().as_deref(), Some(n.as_str()));
+        kill().unwrap();
+        // A plain session the user made with that name is listed like any
+        // other: the NAME alone never hides a row.
+        tmux::new_session(&n, None, None).unwrap();
+        assert!(matches!(owned().unwrap(), Ownership::Taken(_)));
+        assert_eq!(hidden_session(), None, "a session that is not ours stays visible");
+        tmux::kill_session(&n).unwrap();
+        // And a name a project declares stays visible too.
+        let p = crate::projects::create(&guard.path(), Some("held"), Some(&n), None).unwrap();
+        assert_eq!(hidden_session(), None, "a project's session is a project, listed as one");
+        crate::projects::delete(p["id"].as_str().unwrap()).ok();
     }
 
     /// Real tmux (test:rust runs with one), under a guard-owned name — the

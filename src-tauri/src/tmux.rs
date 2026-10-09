@@ -1217,8 +1217,64 @@ pub fn set_resize_hook(session: &str) -> Result<(), String> {
         "resize-window -A ; set-hook -u -t {} client-session-changed",
         tmux_quote(session)
     );
-    run_tmux(&["set-hook", "-t", session, "client-session-changed", &hook_cmd])?;
+    set_hook(session, "client-session-changed", &hook_cmd)?;
     Ok(())
+}
+
+/// Set a tmux hook on a session. The body is a tmux COMMAND LINE that tmux
+/// re-parses when the hook fires, so a caller embedding data in it must
+/// `tmux_quote` that data; the `-t` target is argv and does not accept an
+/// `=` prefix (see `exact_session`).
+pub fn set_hook(session: &str, hook: &str, command: &str) -> Result<(), String> {
+    run_tmux(&["set-hook", "-t", session, hook, command]).map(|_| ())
+}
+
+/// Read a hook back (hooks are options in tmux 3.x — `show-options -v` is the
+/// one reader). `None` when unset. Bare name, like `set-hook`.
+pub fn session_hook(session: &str, hook: &str) -> Option<String> {
+    run_tmux(&["show-options", "-t", session, "-v", hook])
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Set a WINDOW option through any target in that window (a pane target is
+/// accepted). `remain-on-exit` is a window option, so a session target would
+/// only ever reach that session's CURRENT window.
+pub fn set_window_option(target: &str, option: &str, value: &str) -> Result<(), String> {
+    run_tmux(&["set-option", "-w", "-t", target, option, value]).map(|_| ())
+}
+
+/// One tmux FORMAT read against a pane/window target (`#{pane_pid}`,
+/// `#{pane_dead}`, …). A pane target is passed through as given: the `=name:`
+/// exact form names a SESSION and would break `sess:win.pane`.
+pub fn pane_format(target: &str, fmt: &str) -> Option<String> {
+    run_tmux(&["display-message", "-t", target, "-p", fmt])
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Read a WINDOW option back through any target in that window.
+pub fn window_option(target: &str, option: &str) -> Option<String> {
+    run_tmux(&["show-options", "-w", "-t", target, "-v", option])
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Whether a pane is in tmux's DEAD state: its command exited while
+/// `remain-on-exit` was on, so the pane is still there with nothing running.
+pub fn pane_dead(target: &str) -> bool {
+    pane_format(target, "#{pane_dead}").as_deref() == Some("1")
+}
+
+/// Restart a pane's command IN PLACE, keeping the pane (and therefore its
+/// `session:window.pane` target and `%id`) and its original start directory.
+/// `-k` is required for a pane that is still running; callers that must not
+/// kill a live shell check `pane_dead` first.
+pub fn respawn_pane(target: &str) -> Result<(), String> {
+    run_tmux(&["respawn-pane", "-k", "-t", target]).map(|_| ())
 }
 
 /// 检查 tmux server 是否运行
