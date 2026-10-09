@@ -366,6 +366,53 @@ runtime's probe needs none — the answer came over that runtime's own
 connection, so it cannot be about another server. Only the "was this runtime
 dropped" guard remains.
 
+### One slot per server, and the fold that gets there
+
+A per-server key had two homes: the unprefixed one, holding whichever server
+is current, and `<key>::<id>`, where the switch files the server you are
+leaving. That cannot work for two servers at once — there is no "the" live
+value, and B's first write would overwrite A's — so `<key>::<id>` becomes the
+only home and the unprefixed key stops being a location.
+
+`app/server-store.ts` is one server's view of storage, and deliberately a
+`Storage` view rather than a new accessor vocabulary: the per-project
+semantics (what a `SeenMark` is, that an empty draft removes its row, how
+`stepsRows` clamps) stay in `hub-prefs.svelte.ts` and
+`notify-centre.svelte.ts`, and ②b points their storage at this view without
+touching their logic. A second copy of those rules here would be the "one
+mechanism per job" regression, and a source test fails if one appears.
+
+What is scoped and what is not is the load-bearing half. A RESIDENT key is
+rewritten, and `RESIDENT_KEYS` IS `servers.ts`'s `PARKED_KEYS` — "parked per
+server" and "resident per server" are the same set seen from two sides, so
+there is one list and a key cannot be added to one and forgotten in the other.
+Everything else passes through: theme, fonts, zoom, language, shortcuts,
+notification switches, the feed level and the sidebar collapse are properties
+of the PERSON and the WINDOW, and scoping them would give the same human a
+different app depending on which machine they are looking at. The registry's
+own keys and the active mirror pass through too — their home is the
+`ServerEntry`, which is already per server. A store built with an empty
+serverId throws instead of falling back to the unprefixed keys, because that
+fallback would write one server's drafts where every server reads them, and
+only on the path where CURRENT has not resolved yet.
+
+`migrateServerState(storage)` is the one-time fold: idempotent without a
+"migrated" flag (it recognises a slot that already holds the live value), the
+ACTIVE value wins over the current server's own older park, every other
+server's park is left alone because it is already in its final home, and with
+no resolved CURRENT it is a no-op that says so rather than guessing a slot. It
+does not clear the unprefixed keys, so a client rolled back to a build from
+before #335 finds the state it left.
+
+The fold is NOT enabled in ②a, and that sequencing is a rule rather than
+caution: `parkFrom` writes `<key>::<id>` — the very string a resident slot
+uses — from the LIVE key, so while any module still writes the live key a
+switch overwrites the resident slot, and while any module already reads the
+resident slot a live write is lost to it. Enabling the fold before the readers
+and writers move is not a partial improvement, it is a way to lose a draft.
+②b flips the fold, the stores, park/point and the reset entry points in ONE
+commit; `server-state.test.ts` carries that coupling as an executable fact.
+
 ## Multi-Server (board #55)
 
 `src/lib/app/servers.ts` is the named-server registry over the same keys this
@@ -644,6 +691,27 @@ facade or `localStorage` appears in either module. Capabilities are the asked
 server's answer and `null` means "not answered yet" — a timeout must not flip
 `hub` off, because false unmounts the always-mounted Hub and destroys the state
 it exists to preserve.
+
+### A server's state is resident in its own slot (#335 ②)
+
+A per-server key lives at `<key>::<serverId>` and nowhere else;
+`residentKey()` is the only function that spells that layout, and
+`RESIDENT_KEYS` is `servers.ts`'s `PARKED_KEYS` rather than a second list,
+because a key added to one and forgotten in the other loses a draft on a
+switch. `createServerStore(storage, serverId)` is a `Storage` view, never a
+second copy of the per-project semantics — those stay in `hub-prefs` and
+`notify-centre`, whose storage ②b repoints at this view. Only one server's
+STATE is scoped: the person's and the window's preferences (theme, fonts,
+zoom, language, shortcuts, notification switches, feed level, sidebar) pass
+through, and so do the registry keys and the active mirror, whose home is the
+`ServerEntry`. An empty serverId throws rather than falling back to the
+unprefixed keys. `migrateServerState` is idempotent with no flag, lets the
+ACTIVE value win over the current server's older park, keeps every other
+server's park, and no-ops when CURRENT is unresolved. It must be enabled in
+the SAME commit that moves every live read and write: `parkFrom` writes the
+very string a resident slot uses, so a half-migrated client either overwrites
+a resident slot on the next switch or loses a live write to a reader that has
+already moved.
 
 ### Connection-link copy feedback belongs to its attempt (#167, 2026-09-12)
 
