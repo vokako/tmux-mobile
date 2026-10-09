@@ -138,6 +138,11 @@ pub fn adopt(session: &str, name: Option<&str>) -> Result<Value, String> {
     if !tmux::session_exists(session) {
         return Err(format!("no such tmux session: {session}"));
     }
+    // The scratch terminal's session is not a project (board #324), by the
+    // same ownership predicate auto-adopt asks.
+    if super::scratch::is_scratch(session) {
+        return Err(format!("'{session}' is the scratch terminal's session, not a project"));
+    }
     let ts = now();
     let facts = adopt_facts(session)?;
     with_store(|store| adopt_in(store, session, name, ts, &facts))

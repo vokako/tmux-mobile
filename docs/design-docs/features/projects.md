@@ -64,6 +64,12 @@ make a workspace. Two consequences fall out of that:
   refuse with the reason and never take it over, kill, rename or undeclare it,
   and auto-adopt treats it like any other session. Project create suffixes and
   rename refuses a live session name as before, so the two cannot share one.
+  A direct `adopt` (Sessions page, `tmm project adopt`) refuses an owned scratch
+  session too. The RPCs are desktop-gated like the module (`MethodNotFound` on a
+  phone build). Its tests never touch the real `tmm-scratch`: `scratch::name()`
+  is pointed at a `tmux::Scratch`-guarded name per test (testing.md: every cargo
+  run shares one tmux server); verified with a live `tmm-scratch` canary that
+  survives `npm run test:rust`.
 - **One create path.** The old "new session" form now creates a *project* and
   brings it up (`project_create` + `project_up`), so the second `+` in the
   Projects header is gone. A bare `new_session` would have been pointless anyway:

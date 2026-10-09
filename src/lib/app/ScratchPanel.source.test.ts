@@ -32,3 +32,10 @@ test('App: desktop only, inside the server key, closed when a switch starts; the
   const shortcuts = await readFile(new URL('./shortcuts.ts', import.meta.url), 'utf8');
   assert.match(shortcuts, /\{ id: 'toggleScratch', label: 'shortcutToggleScratch', group: 'panels', default: 'Mod2\+Backquote'/u);
 });
+
+test('the scratch RPCs are desktop-gated like projects (#324 review): a phone build never names the module', async () => {
+  const rpc = await readFile(new URL('../../../src-tauri/src/server/rpc.rs', import.meta.url), 'utf8');
+  for (const m of ['scratch_session', 'scratch_kill']) {
+    assert.match(rpc, new RegExp(`#\\[cfg\\(not\\(any\\(target_os = "android", target_os = "ios"\\)\\)\\)\\]\\n\\s*"${m}" =>`, 'u'), `${m} carries the projects gate`);
+  }
+});

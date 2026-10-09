@@ -221,7 +221,11 @@ fn dispatch(req: &Request, token: &str) -> Result<serde_json::Value, RpcError> {
 
         // The scratch terminal's session (board #324): ensure answers
         // {session, target}; kill only ever kills OUR session.
+        // Desktop-gated like `projects` (lib.rs): a phone is a client of a
+        // desktop server, so on Android/iOS these are MethodNotFound.
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         "scratch_session" => crate::projects::scratch::ensure().map_err(RpcError::Internal),
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         "scratch_kill" => crate::projects::scratch::kill().map_err(RpcError::Internal),
 
         "kill_session" => {
