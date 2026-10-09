@@ -1423,7 +1423,7 @@ async fn cmd_gateway(rest: &[String], flags: &Flags) {
             let n = name.clone();
             let r = tokio::task::spawn_blocking(move || {
                 let sys = service::Sys::real()?;
-                let done = service::install(&sys, &n, replace).map(|d| format!("{d:?}"))?;
+                let done = service::install(&sys, &n, replace)?;
                 println!("✓ {n}: {}", done_words(&done));
                 Ok::<bool, String>(print_status(&sys, &n, false))
             }).await.unwrap_or_else(|e| Err(e.to_string()));
@@ -1473,14 +1473,15 @@ async fn cmd_gateway(rest: &[String], flags: &Flags) {
     }
 }
 
-fn done_words(debug: &str) -> String {
-    let pid = debug.split(|c: char| !c.is_ascii_digit()).find(|s| !s.is_empty()).unwrap_or("?");
-    if debug.starts_with("Installed") { format!("installed and answering (pid {pid})") }
-    else if debug.starts_with("AlreadyRunning") { format!("already installed and answering (pid {pid})") }
-    else if debug.starts_with("Started") { format!("installed; started and answering (pid {pid})") }
-    else if debug.starts_with("Updated") { format!("updated, restarted and answering (pid {pid})") }
-    else if debug.starts_with("Replaced") { format!("replaced and answering (pid {pid}); the previous file is kept — {debug}") }
-    else { debug.to_string() }
+fn done_words(done: &tmux_mobile::gateway::service::Done) -> String {
+    use tmux_mobile::gateway::service::Done;
+    match done {
+        Done::Installed(pid) => format!("installed and answering (pid {pid})"),
+        Done::AlreadyRunning(pid) => format!("already installed and answering (pid {pid})"),
+        Done::Started(pid) => format!("installed; started and answering (pid {pid})"),
+        Done::Updated(pid) => format!("updated, restarted and answering (pid {pid})"),
+        Done::Replaced { pid, backup } => format!("replaced and answering (pid {pid}); the previous file is kept at {}", backup.display()),
+    }
 }
 
 /// The service state and the local probe's verdict — read-only (nothing is

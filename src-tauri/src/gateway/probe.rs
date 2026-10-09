@@ -389,18 +389,24 @@ mod tests {
         }
     }
 
-    /// A self-signed cert for `san` (openssl; None when the host has none).
-    /// `extra` adds openssl args (validity window, CA flag).
-    fn self_signed(dir: &std::path::Path, san: &str, extra: &[&str]) -> Option<(String, String)> {
+    /// A self-signed cert for `san`. `Err(None)` = this host has no openssl
+    /// at all (the only skip); `Err(Some(why))` = openssl refused these
+    /// arguments (e.g. an openssl without -not_before) — a failure, never a
+    /// silent skip. `extra` adds openssl args (validity window, CA flag).
+    fn self_signed(dir: &std::path::Path, san: &str, extra: &[&str]) -> Result<(String, String), Option<String>> {
         let (c, k) = (dir.join("c.pem"), dir.join("k.pem"));
-        let ok = std::process::Command::new("openssl")
+        let out = std::process::Command::new("openssl")
             .args(["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-days", "2", "-subj", "/CN=gw",
                 "-addext", &format!("subjectAltName={san}")])
             .args(extra)
             .arg("-keyout").arg(&k).arg("-out").arg(&c)
-            .stderr(std::process::Stdio::null()).stdout(std::process::Stdio::null())
-            .status().map(|s| s.success()).unwrap_or(false);
-        ok.then(|| (c.to_string_lossy().into(), k.to_string_lossy().into()))
+            .output();
+        match out {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(None),
+            Err(e) => Err(Some(e.to_string())),
+            Ok(o) if o.status.success() => Ok((c.to_string_lossy().into(), k.to_string_lossy().into())),
+            Ok(o) => Err(Some(String::from_utf8_lossy(&o.stderr).trim().to_string())),
+        }
     }
 
     /// A real TLS gateway (the server's own TLS path). Ours only for a LEAF
@@ -422,7 +428,11 @@ mod tests {
             let san = if san.is_empty() { "IP:127.0.0.1" } else { san };
             let dir = std::path::Path::new(&guard.path()).join(tag);
             std::fs::create_dir_all(&dir).unwrap();
-            let Some((cert, key)) = self_signed(&dir, san, extra) else { eprintln!("no openssl — skipping"); return };
+            let (cert, key) = match self_signed(&dir, san, extra) {
+                Ok(ck) => ck,
+                Err(None) => { eprintln!("SKIPPED: no openssl on this host — the TLS probe cases did not run"); return }
+                Err(Some(why)) => panic!("{tag}: openssl could not make the fixture ({why}) — this case would otherwise be skipped silently"),
+            };
             let (l, port) = listener().await;
             drop(l);
             let (c2, k2) = (cert.clone(), key.clone());

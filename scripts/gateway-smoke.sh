@@ -4,23 +4,27 @@
 # and a free port — never the production unit, never ~/.config.
 #
 # Safety:
-# - preflight refuses when the test unit already exists (someone else's run)
-#   or the port is taken;
+# - the TEST name is unique per run (tmux-mobile-gateway-test-<pid>.service),
+#   so two runs never address each other's unit; preflight still refuses
+#   when it exists or the port is taken;
 # - every tmm call goes through T(): `env -i` with only HOME, PATH, the
 #   user-manager bus (XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS),
 #   XDG_CONFIG_HOME and TMM_GATEWAY_SERVICE, so no override (HOST, PORT,
 #   TOKEN, TLS_*, TMUX_SOCKET, …) reaches it;
-# - an EXIT trap removes exactly what THIS run created (the unit file it
-#   wrote, the scratch root) and stops that unit; on failure the journal
-#   tail and the unit are kept in $S/evidence before cleanup and the script
-#   exits non-zero;
+# - the EXIT trap stops the foreground gateway this run started, then
+#   removes the unit ONLY through `tmm gateway uninstall` — the same
+#   identity check (this exe, this scratch root) as every verb, so a unit
+#   that is not this run's is refused and never stopped. A cleanup that
+#   fails makes the run fail, and the scratch root (the exe and config a
+#   still-running instance uses) is kept with the evidence;
+# - on failure the journal tail and the unit are copied to an evidence dir;
 # - every check is an assertion: a failed one fails the run.
 #
 # Usage: scripts/gateway-smoke.sh <path to a built tmm> [port]
 set -euo pipefail
 TMM_SRC=${1:?usage: gateway-smoke.sh <tmm> [port]}
 PORT=${2:-19899}
-NAME=tmux-mobile-gateway-test.service
+NAME=tmux-mobile-gateway-test-$$.service
 UNIT=~/.config/systemd/user/$NAME
 fail() { echo "SMOKE FAIL: $*" >&2; exit 1; }
 ok() { echo "  ok: $*"; }
@@ -31,24 +35,36 @@ systemctl --user cat "$NAME" >/dev/null 2>&1 && fail "$NAME is known to the user
 ss -ltn "sport = :$PORT" | grep -q LISTEN && fail "port $PORT is in use"
 
 S=$(mktemp -d /tmp/gw323-smoke.XXXX)
-CREATED_UNIT=0
+INSTALLING=0
+FG=
 cleanup() {
   rc=$?
-  if [ "$CREATED_UNIT" = 1 ]; then
+  trap - EXIT
+  if [ -n "$FG" ]; then kill "$FG" 2>/dev/null || true; wait "$FG" 2>/dev/null || true; fi
+  if [ "$INSTALLING" = 1 ]; then
     if [ $rc -ne 0 ]; then
       mkdir -p "$S/evidence"
       journalctl --user -u "$NAME" -n 50 --no-pager > "$S/evidence/journal.txt" 2>&1 || true
       cp "$UNIT" "$S/evidence/" 2>/dev/null || true
-      cp -r "$S/evidence" "/tmp/gw323-smoke-evidence-$$" && echo "evidence kept in /tmp/gw323-smoke-evidence-$$" >&2
     fi
-    systemctl --user disable --now "$NAME" >/dev/null 2>&1 || true
-    # Only the file this run wrote: it must still be ours (our scratch root).
-    if [ -e "$UNIT" ] && grep -q "XDG_CONFIG_HOME=$S\"" "$UNIT"; then rm -f "$UNIT"; fi
-    systemctl --user daemon-reload || true
+    # Only through tmm's identity check: a unit that is not this run's is
+    # refused there and left running.
+    if [ -e "$UNIT" ] && ! T gateway uninstall > "$S/uninstall.log" 2>&1; then
+      echo "SMOKE CLEANUP FAILED: $(tail -1 "$S/uninstall.log")" >&2
+      [ $rc -eq 0 ] && rc=1
+    fi
     systemctl --user reset-failed "$NAME" >/dev/null 2>&1 || true
   fi
-  rm -rf "$S"
-  [ $rc -eq 0 ] && echo "SMOKE OK" || echo "SMOKE FAILED (rc=$rc)" >&2
+  if [ $rc -ne 0 ] && [ -d "$S/evidence" ]; then
+    cp -r "$S/evidence" "/tmp/gw323-smoke-evidence-$$" && echo "evidence kept in /tmp/gw323-smoke-evidence-$$" >&2
+  fi
+  if [ -e "$UNIT" ]; then
+    echo "$UNIT is still installed — keeping $S (its exe and config)" >&2
+    [ $rc -eq 0 ] && rc=1
+  else
+    rm -rf "$S"
+  fi
+  if [ $rc -eq 0 ]; then echo "SMOKE OK"; else echo "SMOKE FAILED (rc=$rc)" >&2; fi
   exit $rc
 }
 trap cleanup EXIT
@@ -64,12 +80,12 @@ echo "--- a managed start ignores the environment (--service reads config.toml a
 env -i "${BASE[@]}" XDG_CONFIG_HOME="$S" PORT=1 HOST=9.9.9.9 "$S/tmm" gateway start --service > "$S/fg.log" 2>&1 &
 FG=$!
 for _ in $(seq 40); do grep -q "listening on" "$S/fg.log" && break; sleep 0.25; done
-grep -q "listening on ws://127.0.0.1:$PORT" "$S/fg.log" || { cat "$S/fg.log" >&2; kill $FG 2>/dev/null; fail "--service did not use config.toml's port"; }
-kill $FG; wait $FG 2>/dev/null || true
+grep -q "listening on ws://127.0.0.1:$PORT" "$S/fg.log" || { cat "$S/fg.log" >&2; fail "--service did not use config.toml's port"; }
+kill "$FG"; wait "$FG" 2>/dev/null || true; FG=
 ok "PORT=1 HOST=9.9.9.9 ignored; listened on 127.0.0.1:$PORT"
 
 echo "--- install"
-CREATED_UNIT=1
+INSTALLING=1
 T gateway install
 grep -q "XDG_CONFIG_HOME=$S\"" "$UNIT" || fail "the unit does not carry the scratch root"
 grep -q " gateway start --service$" "$UNIT" || fail "the unit does not run gateway start --service"
@@ -114,5 +130,4 @@ echo "--- uninstall ours"
 T gateway uninstall
 [ -e "$UNIT" ] && fail "the unit is still there"
 systemctl --user is-active --quiet "$NAME" && fail "the service still runs"
-CREATED_UNIT=0
 ok "removed, stopped"

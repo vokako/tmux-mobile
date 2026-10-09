@@ -170,31 +170,74 @@ pub fn render_systemd(spec: &Spec) -> Result<String, String> {
     ))
 }
 
-/// The identity a unit names, by the strict grammar we write: exactly one
-/// `ExecStart=` of `"<exe>" gateway start --service`, `Environment=` lines
-/// in our quoted form (the last value of a key wins), and nothing that
-/// would change what runs (`ExecStartPre`, `EnvironmentFile`, a second
-/// `ExecStart`, a drop-in-style `[Service]` override is not in the file).
+/// The keys tmm writes, per section. Anything else — another key, a second
+/// section of the same name, leading or trailing whitespace, a continuation
+/// line, a duplicate key — is syntax we do not interpret, so the unit is
+/// not ours (a stricter reader can only refuse more, never adopt more).
+const UNIT_KEYS: &[(&str, &[&str])] = &[
+    ("Unit", &["Description", "After"]),
+    ("Service", &["Type", "ExecStart", "Environment", "Restart", "RestartSec"]),
+    ("Install", &["WantedBy"]),
+];
+/// The environment tmm gives the service; any other variable (LD_PRELOAD,
+/// …) could change what runs, so it is not ours.
+const ENV_KEYS: &[&str] = &["XDG_CONFIG_HOME", "HOME", "PATH"];
+
+/// The identity a unit names, by the strict grammar we write: only the
+/// `[Service]` section's `ExecStart=` (exactly one, `"<exe>" gateway start
+/// --service`) and `Environment=` (one per key, in our quoted form) are
+/// identity; `[Install]`/`[Unit]` never are.
 pub fn unit_identity(text: &str) -> Result<Identity, String> {
-    let mut exec = Vec::new();
-    let mut root: Option<String> = None;
-    for line in text.lines() {
-        let line = line.trim_end();
-        if let Some(v) = line.strip_prefix("ExecStart=") {
-            exec.push(v.to_string());
-        } else if let Some(v) = line.strip_prefix("Environment=") {
-            let (k, val) = unquote_env(v).ok_or_else(|| format!("an Environment= line tmm did not write: {line}"))?;
-            if k == "XDG_CONFIG_HOME" {
-                root = Some(val);
+    let mut section: Option<&str> = None;
+    let mut seen_sections: Vec<&str> = Vec::new();
+    let mut seen_keys: Vec<(String, String)> = Vec::new();
+    let mut exec: Option<String> = None;
+    let mut env: Vec<(String, String)> = Vec::new();
+    for line in text.split('\n') {
+        if line.is_empty() || (line.starts_with('#') && !line.ends_with('\\')) {
+            continue;
+        }
+        if line != line.trim() || line.ends_with('\\') || line.contains('\r') {
+            return Err(format!("a line in a form tmm does not write: {line:?}"));
+        }
+        if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            let Some((known, _)) = UNIT_KEYS.iter().find(|(n, _)| *n == name) else { return Err(format!("a section tmm does not write: {line}")) };
+            if seen_sections.contains(known) {
+                return Err(format!("a second {line} section"));
             }
-        } else if ["ExecStartPre=", "ExecStartPost=", "EnvironmentFile=", "UnsetEnvironment=", "ExecStop="].iter().any(|p| line.starts_with(p)) {
-            return Err(format!("a line tmm does not write: {line}"));
+            seen_sections.push(known);
+            section = Some(known);
+            continue;
+        }
+        let sec = section.ok_or_else(|| format!("a line before any section: {line}"))?;
+        let (key, value) = line.split_once('=').ok_or_else(|| format!("not a key=value line: {line}"))?;
+        let allowed = UNIT_KEYS.iter().find(|(n, _)| *n == sec).map(|(_, k)| *k).unwrap_or(&[]);
+        if !allowed.contains(&key) {
+            return Err(format!("[{sec}] {key}= is not a key tmm writes"));
+        }
+        if sec == "Service" && key == "Environment" {
+            let (k, v) = unquote_env(value).ok_or_else(|| format!("an Environment= line tmm did not write: {line}"))?;
+            if !ENV_KEYS.contains(&k.as_str()) {
+                return Err(format!("Environment {k} is not one tmm sets"));
+            }
+            if env.iter().any(|(e, _)| *e == k) {
+                return Err(format!("Environment {k} is set twice"));
+            }
+            env.push((k, v));
+            continue;
+        }
+        if seen_keys.iter().any(|(s, k)| s == sec && k == key) {
+            return Err(format!("[{sec}] {key}= appears twice"));
+        }
+        seen_keys.push((sec.to_string(), key.to_string()));
+        if sec == "Service" && key == "ExecStart" {
+            exec = Some(value.to_string());
         }
     }
-    let [exec] = exec.as_slice() else { return Err(format!("{} ExecStart= lines (expected one)", exec.len())) };
+    let exec = exec.ok_or("no ExecStart= in [Service]")?;
     let quoted = exec.strip_suffix(" gateway start --service").ok_or("ExecStart is not `<tmm> gateway start --service`")?;
     let exe = unquote_arg(quoted).ok_or("ExecStart's executable is not in tmm's quoting")?;
-    let config_home = root.ok_or("no XDG_CONFIG_HOME in the unit")?;
+    let config_home = env.into_iter().find(|(k, _)| k == "XDG_CONFIG_HOME").map(|(_, v)| v).ok_or("no XDG_CONFIG_HOME in [Service]")?;
     Ok(Identity { exe, config_home })
 }
 
@@ -235,6 +278,12 @@ pub fn render_plist(spec: &Spec) -> Result<String, String> {
 pub fn plist_identity(bytes: &[u8], name: &str) -> Result<Identity, String> {
     let v = plist::Value::from_reader(std::io::Cursor::new(bytes)).map_err(|e| format!("not a readable plist: {e}"))?;
     let d = v.as_dictionary().ok_or("the plist is not a dictionary")?;
+    // Only the keys tmm writes: `Program`, `WorkingDirectory`, `UserName`,
+    // `inetdCompatibility`, … would change what runs or how.
+    const KEYS: &[&str] = &["Label", "ProgramArguments", "EnvironmentVariables", "RunAtLoad", "KeepAlive", "StandardOutPath", "StandardErrorPath"];
+    if let Some(k) = d.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(format!("{k} is not a key tmm writes"));
+    }
     let label = d.get("Label").and_then(|l| l.as_string()).ok_or("no Label")?;
     if label != name {
         return Err(format!("its Label is {label:?}, not {name:?}"));
@@ -244,8 +293,11 @@ pub fn plist_identity(bytes: &[u8], name: &str) -> Result<Identity, String> {
     let [exe, "gateway", "start", "--service"] = args.as_slice() else {
         return Err(format!("it runs {args:?}, not `<tmm> gateway start --service`"));
     };
-    let root = d.get("EnvironmentVariables").and_then(|e| e.as_dictionary())
-        .and_then(|e| e.get("XDG_CONFIG_HOME")).and_then(|r| r.as_string()).ok_or("no XDG_CONFIG_HOME")?;
+    let env = d.get("EnvironmentVariables").and_then(|e| e.as_dictionary()).ok_or("no EnvironmentVariables")?;
+    if let Some(k) = env.keys().find(|k| !ENV_KEYS.contains(&k.as_str())) {
+        return Err(format!("EnvironmentVariables {k} is not one tmm sets"));
+    }
+    let root = env.get("XDG_CONFIG_HOME").and_then(|r| r.as_string()).ok_or("no XDG_CONFIG_HOME")?;
     Ok(Identity { exe: (*exe).to_string(), config_home: root.to_string() })
 }
 
@@ -374,20 +426,24 @@ impl Sys {
         }
     }
 
-    /// Is the service loaded at all (so an unload is needed)?
-    fn loaded(&self, name: &str) -> bool {
+    /// Is the service loaded at all (so an unload is needed)? Only an
+    /// explicit "not loaded" answer is false; a query that fails for any
+    /// other reason is an error, never "stopped".
+    fn loaded(&self, name: &str) -> Result<bool, String> {
         if self.mac {
-            (self.run)("launchctl", &["print", &self.target(name)]).is_ok()
-        } else {
-            match (self.run)("systemctl", &["--user", "show", name, "--property=LoadState,ActiveState,UnitFileState"]) {
-                Ok(out) => {
-                    let not_found = out.lines().any(|l| l.trim() == "LoadState=not-found");
-                    let inactive = out.lines().any(|l| l.trim() == "ActiveState=inactive");
-                    let disabled = out.lines().any(|l| matches!(l.trim(), "UnitFileState=disabled" | "UnitFileState="));
-                    !(not_found || (inactive && disabled))
-                }
-                Err(_) => true, // cannot tell: treat as loaded, so a failed unload aborts
+            match (self.run)("launchctl", &["print", &self.target(name)]) {
+                Ok(_) => Ok(true),
+                // launchctl's own answer for a label that is not loaded.
+                Err(e) if e.contains("Could not find service") => Ok(false),
+                Err(e) => Err(format!("cannot tell whether {name} is loaded: {e}")),
             }
+        } else {
+            let out = (self.run)("systemctl", &["--user", "show", name, "--property=LoadState,ActiveState,UnitFileState"])
+                .map_err(|e| format!("cannot tell whether {name} is loaded: {e}"))?;
+            let not_found = out.lines().any(|l| l.trim() == "LoadState=not-found");
+            let inactive = out.lines().any(|l| l.trim() == "ActiveState=inactive");
+            let disabled = out.lines().any(|l| matches!(l.trim(), "UnitFileState=disabled" | "UnitFileState="));
+            Ok(!(not_found || (inactive && disabled)))
         }
     }
 
@@ -409,8 +465,11 @@ impl Sys {
         };
         match r {
             Ok(()) => Ok(()),
-            Err(e) if !self.loaded(name) => { let _ = e; Ok(()) }
-            Err(e) => Err(format!("could not stop {name}: {e}")),
+            Err(e) => match self.loaded(name) {
+                Ok(false) => Ok(()),
+                Ok(true) => Err(format!("could not stop {name}: {e}")),
+                Err(q) => Err(format!("could not stop {name}: {e}; {q}")),
+            },
         }
     }
 
@@ -418,9 +477,16 @@ impl Sys {
     /// says Ours.
     fn ready(&self, name: &str) -> Result<u32, String> {
         let step = Duration::from_millis(250);
-        let mut waited = Duration::ZERO;
+        // The deadline counts the sleeps AND the time spent probing and
+        // querying, so the wait is READY in total, not READY of sleeping.
+        let start = std::time::Instant::now();
+        let mut slept = Duration::ZERO;
         let mut last = String::from("it did not start");
-        while waited <= READY {
+        loop {
+            let busy = start.elapsed().saturating_sub(slept.min(start.elapsed()));
+            if slept + busy > READY {
+                break;
+            }
             if let Some(pid) = self.running(name) {
                 match (self.probe)() {
                     Verdict::Ours { .. } if self.running(name) == Some(pid) => return Ok(pid),
@@ -432,7 +498,7 @@ impl Sys {
                 last = format!("{name} is not running");
             }
             (self.sleep)(step);
-            waited += step;
+            slept += step;
         }
         Err(format!("{name} is not answering after {} s: {last}", READY.as_secs()))
     }
@@ -487,16 +553,7 @@ pub fn install(sys: &Sys, name: &str, replace: bool) -> Result<Done, String> {
     let rendered = if sys.mac { render_plist(&spec)? } else { render_systemd(&spec)? };
     let file = sys.file(name);
     let on_disk = read_on_disk(&file, name, &sys.me, sys.mac);
-    // Nothing of ours runs: the port must be free, or a new instance could
-    // only fail — and another gateway answering would mask that.
     let ours_running = matches!(on_disk, OnDisk::Ours { .. }) && sys.running(name).is_some();
-    if !ours_running {
-        match (sys.probe)() {
-            Verdict::None => {}
-            Verdict::Ours { url, .. } => return Err(format!("this machine's gateway already answers at {url}, outside this service (a foreground `tmm gateway start`, or another service); stop it first")),
-            Verdict::Occupied(who) => return Err(format!("the port is held: {who}")),
-        }
-    }
     if sys.mac {
         std::fs::create_dir_all(Path::new(&spec.log).parent().unwrap_or(Path::new("."))).map_err(|e| e.to_string())?;
     }
@@ -506,41 +563,66 @@ pub fn install(sys: &Sys, name: &str, replace: bool) -> Result<Done, String> {
             Ok(Done::AlreadyRunning(pid))
         }
         Plan::Keep => {
+            port_free(sys)?;
             sys.unload(name)?;
             sys.load(name, &file)?;
             Ok(Done::Started(sys.ready(name)?))
         }
         Plan::Create => {
+            port_free(sys)?;
             sys.write(&file, &rendered)?;
             sys.load(name, &file)?;
             Ok(Done::Installed(sys.ready(name)?))
         }
         Plan::Update => {
+            if !ours_running {
+                port_free(sys)?;
+            }
             sys.unload(name)?;
             sys.write(&file, &rendered)?;
             sys.load(name, &file)?;
             Ok(Done::Updated(sys.ready(name)?))
         }
         Plan::Refuse(why) if !replace => Err(why),
+        // The migration: the old service of THIS name may be the one
+        // answering on the port (the #313 hand plist). It is backed up and
+        // stopped FIRST; only then must the port be free — so an unrelated
+        // occupant still refuses, and the old service is put back.
         Plan::Refuse(_) => {
             let backup = backup_for(&file)?;
             std::fs::copy(&file, &backup).map_err(|e| format!("back up {}: {e}", file.display()))?;
+            let was_running = sys.running(name);
             sys.unload(name).map_err(|e| format!("{e}; nothing changed, the old file is still in place (copy at {})", backup.display()))?;
-            let up = sys.write(&file, &rendered).and_then(|_| sys.load(name, &file)).and_then(|_| sys.ready(name));
+            let up = port_free(sys)
+                .map_err(|e| format!("{e} (after stopping the old {name})"))
+                .and_then(|_| sys.write(&file, &rendered))
+                .and_then(|_| sys.load(name, &file))
+                .and_then(|_| sys.ready(name));
             match up {
                 Ok(pid) => Ok(Done::Replaced { pid, backup }),
                 Err(e) => {
                     let restored = sys.unload(name)
                         .and_then(|_| std::fs::copy(&backup, &file).map(|_| ()).map_err(|e| format!("copy back: {e}")))
                         .and_then(|_| sys.load(name, &file))
-                        .and_then(|_| if sys.running(name).is_some() { Ok(()) } else { Err("the restored service did not start".into()) });
+                        .and_then(|_| if was_running.is_none() || sys.running(name).is_some() { Ok(()) } else { Err("the restored service did not start".into()) });
                     match restored {
-                        Ok(()) => Err(format!("{e}; the previous service was restored from {} and runs again", backup.display())),
+                        Ok(()) if was_running.is_some() => Err(format!("{e}; the previous service was restored from {} and runs again", backup.display())),
+                        Ok(()) => Err(format!("{e}; the previous file was restored from {}", backup.display())),
                         Err(r) => Err(format!("{e}; restoring the previous service ALSO failed ({r}) — the old file is kept at {}", backup.display())),
                     }
                 }
             }
         }
+    }
+}
+
+/// Nothing of ours runs: the port must be free, or a new instance could
+/// only fail — and another gateway answering would mask that.
+fn port_free(sys: &Sys) -> Result<(), String> {
+    match (sys.probe)() {
+        Verdict::None => Ok(()),
+        Verdict::Ours { url, .. } => Err(format!("this machine's gateway already answers at {url}, outside this service (a foreground `tmm gateway start`, or another service); stop it first")),
+        Verdict::Occupied(who) => Err(format!("the port is held: {who}")),
     }
 }
 
@@ -639,9 +721,26 @@ mod tests {
     fn identity_is_structural_and_strict() {
         let s = spec_with("/opt/tmm", "/home/u/.config");
         let unit = render_systemd(&s).unwrap();
-        // The last Environment= of a key wins, as systemd reads it.
-        let later = format!("{unit}Environment=\"XDG_CONFIG_HOME=/elsewhere\"\n");
-        assert_eq!(unit_identity(&later).unwrap().config_home, "/elsewhere");
+        // Only [Service] is identity: our root in [Install] cannot make a
+        // unit whose real [Service] root is elsewhere look like ours.
+        let elsewhere = unit.replace("XDG_CONFIG_HOME=/home/u/.config", "XDG_CONFIG_HOME=/elsewhere");
+        let in_install = format!("{elsewhere}Environment=\"XDG_CONFIG_HOME=/home/u/.config\"\n");
+        assert!(unit_identity(&in_install).is_err(), "[Install] Environment= is not identity");
+        assert_eq!(unit_identity(&elsewhere).unwrap().config_home, "/elsewhere", "the [Service] value is the one read");
+        // Syntax we do not interpret is never ours.
+        let svc = "[Service]\n";
+        for (what, bad) in [
+            ("a duplicate key", unit.replace(svc, &format!("{svc}Environment=\"XDG_CONFIG_HOME=/elsewhere\"\n"))),
+            ("leading whitespace", unit.replace(svc, &format!("{svc}  Environment=\"XDG_CONFIG_HOME=/elsewhere\"\n"))),
+            ("a continuation", unit.replace(" gateway start --service", " gateway start --service \\\n  --evil")),
+            ("a second [Service]", format!("{unit}[Service]\nExecStartPre=/bin/true\n")),
+            ("an unknown key", unit.replace(svc, &format!("{svc}User=root\n"))),
+            ("an injected variable", unit.replace(svc, &format!("{svc}Environment=\"LD_PRELOAD=/x.so\"\n"))),
+            ("an ExecStart prefix", unit.replace("ExecStart=\"", "ExecStart=-\"")),
+            ("a CR", unit.replace("[Service]\n", "[Service]\r\n")),
+        ] {
+            assert!(unit_identity(&bad).is_err(), "{what}: {bad}");
+        }
         assert!(unit_identity(&format!("{unit}ExecStartPre=/bin/true\n")).is_err(), "an extra pre-step is not ours");
         assert!(unit_identity(&format!("{unit}EnvironmentFile=/x\n")).is_err());
         assert!(unit_identity(&unit.replace("ExecStart=", "ExecStart=\"/x\" gateway start --service\nExecStart=")).is_err(), "two ExecStart");
@@ -653,6 +752,13 @@ mod tests {
         assert!(plist_identity(wrong_argv.as_bytes(), &s.name).is_err());
         let extra_argv = plist.replace("<string>--service</string>", "<string>--service</string>\n\t\t<string>x</string>");
         assert!(plist_identity(extra_argv.as_bytes(), &s.name).is_err());
+        // Program decides what launchd runs; any key tmm does not write is not ours.
+        let program = plist.replace("<key>ProgramArguments</key>", "<key>Program</key>\n\t<string>/other/exe</string>\n\t<key>ProgramArguments</key>");
+        assert!(plist_identity(program.as_bytes(), &s.name).unwrap_err().contains("Program"), "Program=/other");
+        let workdir = plist.replace("<key>RunAtLoad</key>", "<key>WorkingDirectory</key>\n\t<string>/x</string>\n\t<key>RunAtLoad</key>");
+        assert!(plist_identity(workdir.as_bytes(), &s.name).is_err());
+        let preload = plist.replace("<key>HOME</key>", "<key>DYLD_INSERT_LIBRARIES</key>\n\t\t<string>/x.dylib</string>\n\t\t<key>HOME</key>");
+        assert!(plist_identity(preload.as_bytes(), &s.name).is_err(), "an injected variable");
         // A binary plist is parsed, not mistaken for absent.
         let mut bin = Vec::new();
         plist::Value::from_reader(std::io::Cursor::new(plist.as_bytes())).unwrap().to_writer_binary(&mut bin).unwrap();
@@ -687,13 +793,16 @@ mod tests {
         pid: Rc<RefCell<Option<u32>>>,
         verdict: Rc<RefCell<Verdict>>,
         loaded: Rc<RefCell<bool>>,
+        /// Something unrelated on the port: the probe answers this no matter what runs.
+        occupant: Rc<RefCell<Option<Verdict>>>,
     }
 
     fn fake(home: &Path, mac: bool) -> (Sys, Fake) {
         let f = Fake {
             calls: Rc::default(), fail: Rc::default(), pid: Rc::new(RefCell::new(None)),
-            verdict: Rc::new(RefCell::new(Verdict::None)), loaded: Rc::new(RefCell::new(false)),
+            verdict: Rc::new(RefCell::new(Verdict::None)), loaded: Rc::new(RefCell::new(false)), occupant: Rc::default(),
         };
+        let occupant = f.occupant.clone();
         let (calls, fail, pid, verdict, loaded) = (f.calls.clone(), f.fail.clone(), f.pid.clone(), f.verdict.clone(), f.loaded.clone());
         let (pid2, verdict2) = (f.pid.clone(), f.verdict.clone());
         let sys = Sys {
@@ -731,14 +840,14 @@ mod tests {
                             if l { "loaded" } else { "not-found" }, if l { "enabled" } else { "" }))
                     }
                     "print" => match (*loaded.borrow(), *pid.borrow()) {
-                        (false, _) => Err("not loaded".into()),
+                        (false, _) => Err("Could not find service \"x\" in domain for port".into()),
                         (true, Some(p)) => Ok(format!("state = running\npid = {p}\n")),
                         (true, None) => Ok("state = waiting\n".into()),
                     },
                     _ => Ok(String::new()),
                 }
             }),
-            probe: Box::new(move || verdict2.borrow().clone()),
+            probe: Box::new(move || occupant.borrow().clone().unwrap_or_else(|| verdict2.borrow().clone())),
             sleep: Box::new(move |_| { let _ = &pid2; }),
         };
         (sys, f)
@@ -839,7 +948,8 @@ mod tests {
         *f.pid.borrow_mut() = None; *f.loaded.borrow_mut() = false; *f.verdict.borrow_mut() = Verdict::None;
         let never = Sys { probe: Box::new(|| Verdict::None), ..fake(&home, true).0 };
         let e = install(&never, LABEL, true).unwrap_err();
-        assert!(e.contains("restored") && e.contains("runs again"), "{e}");
+        // The old one was not running, so only its file is put back.
+        assert!(e.contains("previous file was restored"), "{e}");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), old, "the old file is back");
         // Failure, and the restore fails too: both errors, the backup kept.
         let (bad, bf) = fake(&home, true);
@@ -848,6 +958,69 @@ mod tests {
         bf.fail.borrow_mut().push("bootstrap");
         let e = install(&bad, LABEL, true).unwrap_err();
         assert!(e.contains("ALSO failed") && e.contains("kept at"), "{e}");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    const OLD_PLIST: &str = "<plist><dict><key>Label</key><string>cc.voka.tmux-mobile</string><key>ProgramArguments</key><array><string>/old/server</string></array></dict></plist>";
+    fn ours_answering() -> Verdict { Verdict::Ours { machine_id: "m".into(), url: "ws://x".into() } }
+
+    /// clawdbjs's case: the #313 hand plist RUNS and is the gateway on the
+    /// port. --replace backs it up and stops it before the port check.
+    #[test]
+    fn replace_migrates_a_running_legacy_service() {
+        let home = scratch("legacy");
+        let (sys, f) = fake(&home, true);
+        let file = sys.file(LABEL);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, OLD_PLIST).unwrap();
+        *f.loaded.borrow_mut() = true; *f.pid.borrow_mut() = Some(50); *f.verdict.borrow_mut() = ours_answering();
+        assert!(install(&sys, LABEL, false).unwrap_err().contains("--replace"), "without --replace: refused, untouched");
+        assert_eq!(*f.pid.borrow(), Some(50), "the legacy service still runs");
+        let Done::Replaced { pid, backup } = install(&sys, LABEL, true).unwrap() else { panic!() };
+        assert_eq!(pid, 100, "ours runs (a fresh start after the old one stopped)");
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), OLD_PLIST);
+        let calls = f.calls.borrow();
+        let stop = calls.iter().position(|c| c.contains("bootout")).unwrap();
+        let start = calls.iter().position(|c| c.contains("bootstrap")).unwrap();
+        assert!(stop < start, "stopped before ours is loaded: {calls:?}");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// An unrelated occupant is not the legacy service: after stopping the
+    /// old one the port is still held, so nothing is written and the old
+    /// service is put back and runs again.
+    #[test]
+    fn replace_with_an_unrelated_occupant_restores_the_legacy_service() {
+        let home = scratch("occupant");
+        let (sys, f) = fake(&home, true);
+        let file = sys.file(LABEL);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, OLD_PLIST).unwrap();
+        *f.loaded.borrow_mut() = true; *f.pid.borrow_mut() = Some(50);
+        *f.occupant.borrow_mut() = Some(Verdict::Occupied("another program".into()));
+        let e = install(&sys, LABEL, true).unwrap_err();
+        assert!(e.contains("port is held") && e.contains("after stopping") && e.contains("runs again"), "{e}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), OLD_PLIST, "the old file is back");
+        assert!(f.pid.borrow().is_some(), "the old service runs again");
+        // A held port with nothing of this name: refused before anything is written.
+        let (sys2, f2) = fake(&scratch("occupant2"), true);
+        *f2.occupant.borrow_mut() = Some(Verdict::Occupied("another program".into()));
+        assert!(install(&sys2, LABEL, false).unwrap_err().contains("held") && !sys2.file(LABEL).exists());
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// macOS: bootout fails and launchctl print cannot answer either →
+    /// unknown is NOT "stopped": the files stay as they were.
+    #[test]
+    fn mac_an_unqueryable_stop_fails_closed() {
+        let home = scratch("macprint");
+        let (sys, f) = fake(&home, true);
+        install(&sys, LABEL, false).unwrap();
+        let before = std::fs::read(sys.file(LABEL)).unwrap();
+        f.fail.borrow_mut().extend(["bootout", "print"]);
+        let e = uninstall(&sys, LABEL).unwrap_err();
+        assert!(e.contains("could not stop") && e.contains("cannot tell"), "{e}");
+        assert_eq!(std::fs::read(sys.file(LABEL)).unwrap(), before, "uninstall left the file");
         std::fs::remove_dir_all(&home).ok();
     }
 
