@@ -19,8 +19,9 @@
     onenter = () => {},
   }: {
     address?: string; token?: string; socket?: string; history?: HistoryEntry[];
-    /** A history entry was chosen: its address and token are the person's choice. */
-    onpick?: () => void;
+    /** A history entry is about to be applied (its address is passed):
+     * the parent clears what must not follow it, BEFORE the fields change. */
+    onpick?: (address: string) => void;
     autofocus?: boolean; onenter?: () => void;
   } = $props();
 
@@ -61,7 +62,7 @@
       <div class="hist-list appear-rise">
         {#each history as h (h.address)}
           <div class="hist-row" animate:flip={{ duration: moveMs() }}>
-            <button class="hist-item" onclick={() => { onpick?.(); address = h.address; token = h.token; showHistory = false; }}>{h.address}</button>
+            <button class="hist-item" onclick={() => { onpick?.(h.address); address = h.address; token = h.token; showHistory = false; }}>{h.address}</button>
             <button class="hist-del" onclick={(e) => { e.stopPropagation(); forget(h.address); }}><Icon name="x" size={11} /></button>
           </div>
         {/each}

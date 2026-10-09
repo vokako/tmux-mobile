@@ -45,6 +45,14 @@ async function mount(context: TestContext, saved: Record<string, string>, userAg
       field(sel).dispatchEvent(new app.window.Event('input', { bubbles: true }));
       await app.flush();
     },
+    async pick(address: string) {
+      app.document.querySelector<HTMLButtonElement>('.hist-btn')!.click();
+      await app.flush();
+      const row = [...app.document.querySelectorAll<HTMLButtonElement>('.hist-item')].find(b => b.textContent === address);
+      assert.ok(row, `history has ${address}`);
+      row!.click();
+      await app.flush();
+    },
     async answer() {
       release(LOCAL);
       for (let i = 0; i < 6; i++) await app.flush();
@@ -94,4 +102,31 @@ test('the Android app never fills a phone with its own loopback config', async c
   await app.answer();
   assert.deepEqual(app.calls, [], 'get_local_config is not even asked');
   assert.equal(app.value(TOKEN), '');
+});
+
+test('a history pick keeps its own token, and the auto-filled local socket does not follow it', async context => {
+  const app = await mount(context, { tmux_address_history: JSON.stringify([
+    { address: 'ws://remote.example:9899', token: 'REMOTE-TOKEN' },
+    { address: 'ws://other.example:9899', token: '' },
+  ]) });
+  await app.answer();
+  assert.equal(app.value(SOCKET), LOCAL.tmux_socket, 'filled for the local gateway');
+  await app.pick('ws://remote.example:9899');
+  assert.equal(app.value(ADDR), 'ws://remote.example:9899');
+  assert.equal(app.value(TOKEN), 'REMOTE-TOKEN', "the entry's own token stays");
+  assert.equal(app.value(SOCKET), '', 'the local socket does not ride along to the remote');
+});
+
+test('picking the local gateway from history keeps its socket', async context => {
+  const app = await mount(context, { tmux_address_history: JSON.stringify([
+    { address: 'ws://remote.example:9899', token: 'REMOTE-TOKEN' },
+    { address: LOCAL.url, token: 'OLD-LOCAL-TOKEN' },
+  ]) });
+  await app.answer();
+  await app.pick(LOCAL.url);
+  assert.equal(app.value(TOKEN), 'OLD-LOCAL-TOKEN', "the entry's token is the person's choice");
+  assert.equal(app.value(SOCKET), LOCAL.tmux_socket, 'still the local gateway: its socket stays');
+  await app.pick('ws://remote.example:9899');
+  assert.equal(app.value(TOKEN), 'REMOTE-TOKEN');
+  assert.equal(app.value(SOCKET), '', 'then a remote pick: the local socket still does not follow');
 });

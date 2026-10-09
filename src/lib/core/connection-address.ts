@@ -56,7 +56,8 @@ export type Autofilled = { address: string; token?: string; socket?: string };
 
 /** The person moved the address away from the local gateway the autofill
  * was for: the auto-filled credentials that are still untouched go (they
- * belong to that gateway), anything the person typed or picked stays. */
+ * belong to that gateway), anything the person typed or picked stays. A
+ * field whose record is gone (`undefined`) is never touched. */
 export function dropAutofilled(auto: Autofilled | null, current: ConnectFieldsState): { clear: Partial<ConnectFieldsState>; keep: Autofilled | null } {
   if (!auto || isLocalTarget(current.address, auto.address)) return { clear: {}, keep: auto };
   const clear: Partial<ConnectFieldsState> = {};

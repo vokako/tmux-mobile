@@ -62,9 +62,19 @@
   }
 
   // Local credentials the autofill put in, and the local address they are
-  // for: they never follow the address to another server (a history pick
-  // forgets them first — its own token is the person's choice).
+  // for: they never follow the address to another server.
   let autofilled = $state<Autofilled | null>(null);
+  /** A history pick: drop the still-untouched auto values that would not
+   * belong to the picked target (the socket included — history entries
+   * carry none) and forget their record, then the entry's address and
+   * token apply. Picking the local gateway keeps its socket, still tracked. */
+  function pickHistory(next: string) {
+    const { clear, keep } = dropAutofilled(autofilled, { address: next, token, socket });
+    if (clear.socket !== undefined) socket = clear.socket;
+    // Still the local gateway: the socket stays auto-filled (so it leaves if
+    // the address later moves away); the entry's token is the person's.
+    autofilled = keep ? { ...keep, token: undefined } : null;
+  }
   $effect(() => {
     const { clear, keep } = dropAutofilled(autofilled, { address, token, socket });
     if (clear.token !== undefined) token = clear.token;
@@ -180,7 +190,7 @@
       <p class="subtitle">{t('connectTitle')}</p>
     </div>
 
-    <ConnectFields bind:address bind:token bind:socket bind:history onpick={() => { autofilled = null; }} onenter={() => { if (address && !connecting) doConnect(); }} />
+    <ConnectFields bind:address bind:token bind:socket bind:history onpick={pickHistory} onenter={() => { if (address && !connecting) doConnect(); }} />
 
     {#if error}
       <div class="error appear">{error}</div>
