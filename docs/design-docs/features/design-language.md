@@ -472,6 +472,7 @@ existing thumb/track. No blanket pill conversion of cards, rows or fields.
 | `Slider` | Native range keyboard/input semantics, visible value and a named reset command. Provisional native values reset until the caller commits. Set min/max/step before value: Chromium otherwise rounds a fractional initial value against its default integer step. |
 | `Select` | One fixed measured popover, native 28/44px trigger with 24/28px field paint; unique combobox/list relationships, active-descendant cursor and focus return. IME keys do not select/commit; disabling closes its menu and blocks queued choices. Uses its full border-box height, 6px trigger gap and 8px viewport inset. `dense` only retains the legacy text-size role, never another height. |
 | `Segmented` | One quiet neutral track, equal option targets and one travelling selection surface (`.slide-pill.control`), all on `--control-paint-radius` (a rounded rectangle since #218, not a capsule); selected text also has weight 600. No independently framed option buttons or unused tail inside the group. |
+| `Dialog` | The ONE modal shell (#317): scrim, card, phone sheet, `aria-modal` with the caller's role and label, IME-safe Escape, Tab wrapping over the dialog's fields and buttons, focus in on open and back to the opener on close, and the one motion. Only the top modal answers keys; a busy dialog neither cancels nor resubmits. Callers pass WORDS and actions as children — there is no `class` prop, and the confirmation's circular corners are keyed off `[role="alertdialog"]`. Back stays with the host's layer chain. |
 | `ConfirmDialog` | Same confirmation mechanism, shared command buttons; caller supplies the verb, icon and failure text. Danger is severity, not a trash-icon classifier. Starts on Cancel, traps Tab inside, restores connected trigger focus, and does not cancel or resubmit while busy. Only the active modal handles keys. |
 
 ### Confirmation outcomes (#167, 2026-09-12)
@@ -868,9 +869,13 @@ by the contract above, not extended by new page-local overrides.
   (motion.md §1.14), the buttons keep only their ink (`.state-ctl` cross-fade)
   and the chosen one drops its own border so the pill's ring shows.
   `ui/segmented.source.test.ts` pins it.
-- Dialogs — `ui/ConfirmDialog` for every confirm; phone = bottom sheet with
-  44px buttons that rises on `sheet-up` under a fading scrim, desktop = a
-  centred card that fades. Solid red confirm per above.
+- Dialogs — `ui/Dialog` is the shell of EVERY modal (#317: four copies had
+  drifted into three shapes, two of them with no Escape, Tab trap or focus
+  restore), and `ui/ConfirmDialog` is the one confirm inside it; phone =
+  bottom sheet with 44px buttons that rises on `sheet-up` under a fading
+  scrim, desktop = a centred card that fades. The content dialect (`.dlg h2`,
+  `.dlg-note`, `.dlg-error`, `.dlg-actions`) lives in app.css because the
+  children belong to the caller. Solid red confirm per above.
 - The `Select` trigger's chevron is a `.flip` that turns 180° while the list
   is open (both the button and the combobox mode — the combobox puts the
   rotation on an inner wrapper so its own centring transform stays put); the

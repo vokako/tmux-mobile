@@ -79,7 +79,7 @@ test('compact control shapes have one explicit round policy, not flattened capsu
     'the legacy default cannot borrow a three-class selector weight and defeat a round variant');
   const round = css.match(/:is\(([^)]*\.control-field[^)]*)\) \{\s*corner-shape: round;/u)?.[1] ?? '';
   // #165 moves the Select-only menu policy to shared menu surface/item roles.
-  for (const selector of ['.command-button', '.config-input', '.segmented', '.slide-pill.control', '.menu-surface', '.menu-item', '.dlg.confirm']) {
+  for (const selector of ['.command-button', '.config-input', '.segmented', '.slide-pill.control', '.menu-surface', '.menu-item', '.dlg[role="alertdialog"]']) {
     assert.ok(round.includes(selector), `${selector}: same approved round treatment`);
   }
 });

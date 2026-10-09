@@ -26,6 +26,7 @@
   import { feedbackPosition } from '../ui/feedback-position.ts';
   import Lightbox from '../ui/Lightbox.svelte';
   import CommandButton from '../ui/CommandButton.svelte';
+  import Dialog from '../ui/Dialog.svelte';
   import './hub-atoms.css';
   import Icon from '../ui/Icon.svelte';
   import { onDestroy, untrack, tick as settled } from 'svelte';
@@ -2187,13 +2188,12 @@
 
   {#if pickerOpen}
     <!-- ── Start a team: several agents at once ── -->
-    <div class="dlg-backdrop" onclick={() => pickerOpen = false} role="presentation"></div>
-    <div class="dlg" class:sheet={compact}>
+    <Dialog {compact} label={t('hubStartTeam')} oncancel={() => pickerOpen = false}>
       <h2>{t('hubStartTeam')}</h2>
       {#if teams.length}
         <!-- Configured teams first (board #74): a tap starts the whole team
              with the brief below; the ad-hoc pick stays underneath. -->
-        <div class="dlg-agents">
+        <div class="dlg-agents" class:touch={compact}>
           {#each teams as tm (tm.name)}
             <button class="agent-pick team" disabled={starting} onclick={() => startTeam(tm.name, startBrief.trim())}>
               <span class="ava tava"><Icon name="collab" size={12} /></span>
@@ -2203,7 +2203,7 @@
           {/each}
         </div>
       {/if}
-      <div class="dlg-agents">
+      <div class="dlg-agents" class:touch={compact}>
         {#each registry as r (r.name)}
           <button class="agent-pick" class:sel={startPick.includes(r.name)} aria-pressed={startPick.includes(r.name)}
             onclick={() => { startPick = startPick.includes(r.name) ? startPick.filter((n) => n !== r.name) : [...startPick, r.name]; }}>
@@ -2213,13 +2213,13 @@
           </button>
         {/each}
       </div>
-      <input placeholder={t('hubBrief')} bind:value={startBrief} />
+      <input class="pick-brief" placeholder={t('hubBrief')} bind:value={startBrief} />
       <div class="dlg-actions">
         <CommandButton label={t('cancel')} onclick={() => pickerOpen = false} />
         <CommandButton variant="primary" icon="zap" label={t('hubStartGo').replace('{n}', String(startPick.length))}
           disabled={!startPick.length} pending={starting} onclick={() => addAgents(startPick, startBrief.trim())} />
       </div>
-    </div>
+    </Dialog>
   {/if}
 
   {#if createOpen}
@@ -2383,30 +2383,16 @@
   .sr-name { font-family: var(--font-mono); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sr-backend { font-family: var(--font-mono); font-size: var(--fs-sub); color: var(--text3); margin-left: auto; }
 
-  .dlg-backdrop { position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,0.45); animation: fade-in var(--t-move) ease-out; }
-  .dlg {
-    position: fixed; z-index: 31; left: 50%; top: 50%; transform: translate(-50%, -50%);
-    width: min(440px, calc(100vw / var(--ui-zoom, 1) - 32px)); max-height: calc(100vh / var(--ui-zoom, 1) - 48px); overflow-y: auto;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 18px;
-    box-shadow: 0 18px 60px rgba(0,0,0,0.5); padding: 18px; display: flex; flex-direction: column; gap: 10px;
-  }
-  .dlg h2 { margin: 0 0 4px; font-size: var(--fs-title); }  /* Phone: dialogs become bottom sheets — reachable with a thumb, and they
-     never fight the on-screen keyboard for the middle of the screen. */
-  .dlg.sheet {
-    left: 0; top: auto; bottom: 0; transform: none;
-    width: 100%; max-width: none; max-height: calc(82vh / var(--ui-zoom, 1));
-    border-radius: 18px 18px 0 0; border-left: none; border-right: none; border-bottom: none;
-    padding: 16px 14px calc(16px + var(--sab, 0px)); /* var(--sab): env() is 0 in the APK */
-    /* Sheets rise with a scrim (design-language §1; motion.md): the resting
-       transform is none, so the intro can own it. Exit is a cut. */
-    animation: sheet-up var(--t-move) ease-out;
-  }
-  @media (prefers-reduced-motion: reduce) { .dlg-backdrop, .dlg.sheet { animation: none; } .cols:global(.moving) { transition: none; } }
-  .dlg.sheet .dlg-agents { max-height: calc(46vh / var(--ui-zoom, 1)); overflow-y: auto; }
-  .dlg.sheet .agent-pick, .dlg.sheet input, .dlg.sheet .dlg-actions button { min-height: 44px; }
-  .dlg input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: var(--ui-radius-control); color: var(--text); padding: 8px 12px; font-size: var(--fs-ui); outline: none; }
-  .dlg input:focus { border-color: var(--accent); }
+  /* The dialog's shape, scrim, sheet and keyboard are ui/Dialog's (#317);
+     what is left here is the picker's own content. */
+  .pick-brief { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: var(--ui-radius-control); color: var(--text); padding: 8px 12px; font-size: var(--fs-ui); outline: none; }
+  .pick-brief:focus { border-color: var(--accent); }
+  @media (prefers-reduced-motion: reduce) { .cols:global(.moving) { transition: none; } }
   .dlg-agents { display: flex; flex-direction: column; gap: 5px; }
+  /* Phone sheet: the roster scrolls inside the sheet instead of pushing the
+     actions off the bottom edge, and each row takes a 44px touch target. */
+  .dlg-agents.touch { max-height: calc(46vh / var(--ui-zoom, 1)); overflow-y: auto; }
+  .dlg-agents.touch .agent-pick { min-height: 44px; }
   .agent-pick { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--ui-radius-control); color: var(--text2); padding: 8px 11px; font-size: var(--fs-ui); cursor: pointer; text-align: left; }
   .agent-pick.sel { border-color: var(--accent); color: var(--text); background: var(--accent-bg); }
   .agent-pick :global(svg) { margin-left: auto; color: var(--accent); }

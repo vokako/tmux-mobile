@@ -232,8 +232,12 @@ test('the sheet keeps its compositor layer WITHOUT becoming a fixed containing b
   assert.match(sessions, /<ConfirmDialog /u, 'Sessions renders the confirm dialog in its tree');
   for (const rel of ['../projects/CreateProjectDialog.svelte', '../ui/ConfirmDialog.svelte']) {
     const dlg = await readFile(new URL(rel, import.meta.url), 'utf8');
-    assert.match(dlg, /position: fixed/u, `${rel} is a fixed overlay — it must anchor to the viewport`);
+    assert.match(dlg, /<Dialog\b/u, `${rel} renders the ONE dialog shell (#317)`);
   }
+  // Since #317 the overlay itself is ui/Dialog, so the constraint has one
+  // owner — and stays live evidence rather than two copies of a `position`.
+  const shell = await readFile(new URL('../ui/Dialog.svelte', import.meta.url), 'utf8');
+  assert.match(shell, /position: fixed/u, 'the dialog shell is a fixed overlay — it must anchor to the viewport');
 })
 
 test('a feed jump opens its issue in its OWN session (board #13 follow-up)', () => {

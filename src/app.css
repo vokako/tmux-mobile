@@ -970,6 +970,21 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 .menu-check { display: inline-grid; place-items: center; margin-left: auto; flex: none; color: var(--accent-ink); }
 .menu-hint + .menu-check { margin-left: 0; }
 @media (prefers-reduced-motion: reduce) { .menu-item { transition: none; } }
+/* ── The ONE dialog's CONTENT dialect (board #317) ──────────────────────────
+   `ui/Dialog` paints the scrim and the card; its children belong to the
+   CALLER's component, so the classes the caller writes live here as global
+   atoms — a rule scoped inside Dialog.svelte would never match them. Only
+   the title, the note, the error and the action row are shared: a dialog's
+   own fields stay in the component that owns them. */
+.dlg h2 { margin: 0; font-size: var(--fs-title); }
+.dlg h2, .dlg-note, .dlg-error { overflow-wrap: anywhere; }
+.dlg-note { margin: 0; color: var(--text2); font-size: var(--fs-ui); line-height: 1.55; }
+.dlg-error { margin: 0; }
+.dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+/* The phone sheet's 44px touch floor (design-language §1), for whatever the
+   caller put in it. */
+.dlg.sheet :is(input, .dlg-actions button, .dlg-actions .command-button) { min-height: 44px; }
+.dlg.sheet .dlg-actions :is(button, .command-button) { flex: 1; justify-content: center; }
 .slide-pill {
   position: absolute; left: 0; top: 0; pointer-events: none;
   width: var(--ind-w, 0px); height: var(--ind-h, 0px); border-radius: var(--ui-radius-control);
@@ -1083,9 +1098,12 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 .hub-root .win-pill { corner-shape: round; }
 .hub-root .acard::before, .hub-root .acard::after { corner-shape: inherit; }
 /* #161: compact controls use circular arcs; squircle would flatten their caps.
-   The legacy list is zero-specificity so context selectors cannot defeat it. */
+   The legacy list is zero-specificity so context selectors cannot defeat it.
+   A dialog keeps the circular arc when it is a CONFIRMATION, named by its
+   `alertdialog` role: since #317 one shell renders every dialog and it has no
+   paint class for a caller to mark a second species with. */
 :is(.command-button, .control-field, .config-input, .segmented, .segmented button,
-  .slide-pill.control, .menu-surface, .menu-item, .dlg.confirm) {
+  .slide-pill.control, .menu-surface, .menu-item, .dlg[role="alertdialog"]) {
   corner-shape: round;
 }
 

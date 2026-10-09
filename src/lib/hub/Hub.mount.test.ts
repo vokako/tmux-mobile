@@ -584,9 +584,9 @@ test('Hub Sidebar keeps row identity, free restore, confirmed purge and the comp
     assert.equal(app.document.querySelector('.ctx-who')?.textContent, 'Other');
     assert.equal(app.document.querySelector('.h1-text')?.textContent, 'Fixture');
     await menuAction('Close');
-    const closeTitle = app.document.querySelector('.dlg.confirm h2')?.textContent;
-    await click('.dlg.confirm .primary');
-    await waitFor(() => app.document.querySelector('.dlg.confirm') === null);
+    const closeTitle = app.document.querySelector('.dlg[role=alertdialog] h2')?.textContent;
+    await click('.dlg[role=alertdialog] .primary');
+    await waitFor(() => app.document.querySelector('.dlg[role=alertdialog]') === null);
     assert.deepEqual(operations, [{ method: 'down', id: 'p-other' }],
       'the non-selected row action must not target the selected project');
     assert.ok(closeTitle?.includes('Other'));
@@ -595,17 +595,17 @@ test('Hub Sidebar keeps row identity, free restore, confirmed purge and the comp
     await click('.trash-bar');
     await click('.trash-row .t-act:not(.danger)');
     await waitFor(() => app.document.querySelector('[aria-label="Archived"]') !== null);
-    assert.equal(app.document.querySelector('.dlg.confirm'), null, 'restore is not a destructive confirmation');
+    assert.equal(app.document.querySelector('.dlg[role=alertdialog]'), null, 'restore is not a destructive confirmation');
     assert.deepEqual(operations.at(-1), { method: 'archive', id: 'p-archived', archived: false });
     await click('[aria-label="Archived"] .row-menu');
     await menuAction('Delete');
-    await click('.dlg.confirm .primary');
+    await click('.dlg[role=alertdialog] .primary');
     await waitFor(() => app.document.querySelector('.trash-row') !== null);
     assert.deepEqual(operations.at(-1), { method: 'archive', id: 'p-archived', archived: true });
     await click('.trash-row .t-act.danger');
     assert.equal(operations.some((op) => op.method === 'purge'), false);
-    assert.ok(app.document.querySelector('.dlg.confirm h2')?.textContent?.includes('Archived'));
-    await click('.dlg.confirm .primary');
+    assert.ok(app.document.querySelector('.dlg[role=alertdialog] h2')?.textContent?.includes('Archived'));
+    await click('.dlg[role=alertdialog] .primary');
     await waitFor(() => app.document.querySelector('.trash-row') === null);
     assert.deepEqual(operations.at(-1), { method: 'purge', id: 'p-archived' });
   } finally {
@@ -2420,16 +2420,16 @@ test('Restart team aligns the team with its current definition in one server ste
     const team = app.document.querySelector<HTMLButtonElement>('.roster-cluster[data-team="squad"] .team-label')!;
     await app.contextmenu(team);
     await app.pick('Restart team (2)');
-    assert.ok(app.document.querySelector('.dlg.confirm'), 'lead is running: the restart asks');
-    app.document.querySelector<HTMLButtonElement>('.dlg.confirm .primary')!.click();
+    assert.ok(app.document.querySelector('.dlg[role=alertdialog]'), 'lead is running: the restart asks');
+    app.document.querySelector<HTMLButtonElement>('.dlg[role=alertdialog] .primary')!.click();
     for (let i = 0; i < 10 && !app.document.querySelector('.dlg-error'); i++) await app.flush();
     assert.deepEqual(teamCalls, [['fixture', 'squad']], 'one alignment for the whole team');
     assert.deepEqual(perAgent, [], 'no per-member recipe replay');
     assert.match(app.document.querySelector('.dlg-error')?.textContent ?? '', /reviewer/u, 'a member that failed is named');
-    app.document.querySelector<HTMLButtonElement>('.dlg.confirm .primary')!.click();
-    for (let i = 0; i < 10 && app.document.querySelector('.dlg.confirm'); i++) await app.flush();
+    app.document.querySelector<HTMLButtonElement>('.dlg[role=alertdialog] .primary')!.click();
+    for (let i = 0; i < 10 && app.document.querySelector('.dlg[role=alertdialog]'); i++) await app.flush();
     assert.equal(JSON.stringify(teamCalls), JSON.stringify([['fixture', 'squad'], ['fixture', 'squad', ['reviewer']]]), `a retry runs only the member that failed; lead and dev are not restarted again: ${JSON.stringify(teamCalls)}`);
-    assert.equal(app.document.querySelector('.dlg.confirm'), null);
+    assert.equal(app.document.querySelector('.dlg[role=alertdialog]'), null);
   } finally { await app.close(); }
 });
 
@@ -2447,15 +2447,15 @@ test('Stop all confirms, runs every member once, and a retry runs only the ones 
     await app.contextmenu((await allButton(app)).closest('.all-choice')!);
     await app.pick('Stop all (3)');
     assert.equal(calls.length, 0, 'a stop asks first');
-    assert.match(app.document.querySelector('.dlg.confirm h2')?.textContent ?? '', /Stop 3 agents \(everyone\)/u);
-    app.document.querySelector<HTMLButtonElement>('.dlg.confirm .primary')!.click();
+    assert.match(app.document.querySelector('.dlg[role=alertdialog] h2')?.textContent ?? '', /Stop 3 agents \(everyone\)/u);
+    app.document.querySelector<HTMLButtonElement>('.dlg[role=alertdialog] .primary')!.click();
     for (let i = 0; i < 10 && !app.document.querySelector('.dlg-error'); i++) await app.flush();
     assert.deepEqual([...calls].sort(), ['dev', 'lead', 'solo']);
     assert.match(app.document.querySelector('.dlg-error')?.textContent ?? '', /dev/u, 'the failure names who failed');
-    app.document.querySelector<HTMLButtonElement>('.dlg.confirm .primary')!.click();
-    for (let i = 0; i < 10 && app.document.querySelector('.dlg.confirm'); i++) await app.flush();
+    app.document.querySelector<HTMLButtonElement>('.dlg[role=alertdialog] .primary')!.click();
+    for (let i = 0; i < 10 && app.document.querySelector('.dlg[role=alertdialog]'); i++) await app.flush();
     assert.deepEqual(calls.slice(3), ['dev'], 'the retry runs only the failed member');
-    assert.equal(app.document.querySelector('.dlg.confirm'), null);
+    assert.equal(app.document.querySelector('.dlg[role=alertdialog]'), null);
   } finally { await app.close(); }
 });
 
@@ -2476,16 +2476,16 @@ test('Restart all confirms only when it would cut a turn; an idle group restarts
     const all = () => allButton(app).then((b) => b.closest('.all-choice')!);
     await app.contextmenu(await all());
     await app.pick('Restart all (2)');
-    assert.ok(app.document.querySelector('.dlg.confirm'), 'lead is running: the restart asks');
+    assert.ok(app.document.querySelector('.dlg[role=alertdialog]'), 'lead is running: the restart asks');
     assert.equal(restarts.length, 0);
-    [...app.document.querySelectorAll<HTMLButtonElement>('.dlg.confirm button')].find((b) => !b.classList.contains('primary'))!.click();
+    [...app.document.querySelectorAll<HTMLButtonElement>('.dlg[role=alertdialog] button')].find((b) => !b.classList.contains('primary'))!.click();
     await app.flush();
 
     busy = false;
     await app.advance(5000);
     await app.contextmenu(await all());
     await app.pick('Restart all (2)');
-    assert.equal(app.document.querySelector('.dlg.confirm'), null, 'nobody is working: no confirm');
+    assert.equal(app.document.querySelector('.dlg[role=alertdialog]'), null, 'nobody is working: no confirm');
     for (let i = 0; i < 10 && !app.document.querySelector('.operation-feedback'); i++) await app.flush();
     assert.deepEqual([...restarts].sort(), ['lead', 'solo'], 'every live member once');
     assert.match(app.document.querySelector('.operation-feedback')?.textContent ?? '', /Restart failed for: solo/u,

@@ -68,6 +68,63 @@ can never disagree.
 
 ### 2. One resize affordance
 
+## One dialog shell (board #317, 2026-10-09)
+
+`src/lib/ui/Dialog.svelte` is THE modal shell. The scrim, the card, the one
+motion, `aria-modal` with the caller's role and label, Escape, the Tab trap
+and the focus restore live there once; a caller passes its WORDS and its
+actions as children and nothing else.
+
+**What it replaced, and how it drifted.** `ConfirmDialog` owned the whole
+contract. `AddServerDialog` (#315) re-typed it with a slightly different Tab
+selector. `CreateProjectDialog` and the Hub's team picker had copied only the
+PAINT — so by 2026-10 the app had three dialog shapes (`--bg2` vs `--bg`,
+440 vs 420px, radius 18 vs `--control-dialog-radius`, z-index 30/31 vs 60/61,
+one with no fade at all) and two of them had **no Escape, no Tab trap and no
+focus restore at all**: a phone user could open the team picker and tab
+straight out of it into the page behind the scrim. The #315 review (P2) asked
+for the extraction and it was split out as #317 because moving
+`ConfirmDialog`'s source contracts with it is more than a rename.
+
+**One shape, so three readings had to converge** (2026-10-09): `--bg`,
+420px, `--control-dialog-radius`, the fade on `--t-fast`, 12px content gap,
+`max-height: calc(100vh / var(--ui-zoom, 1) - 48px)` and the sheet's
+`padding-bottom: calc(16px + var(--sab))`. Every `vh/vw` stays divided by
+`--ui-zoom` — the lesson of the unreachable DirPicker confirm button (owner,
+2026-08-25: "创建project选择路径，没看到确认按钮").
+
+**The content classes are global atoms in app.css**, not scoped CSS inside
+the shell: children belong to the CALLER's component, so a rule scoped in
+`Dialog.svelte` would never match them. Shared: `.dlg h2`, `.dlg-note`,
+`.dlg-error`, `.dlg-actions`, and the sheet's 44px touch floor for inputs and
+action buttons. A dialog's own fields stay with the component that owns them.
+
+**There is no `class` prop** — that is the door the four copies drifted
+through. The one species difference, the confirmation's circular corners
+(#161), is keyed off `[role="alertdialog"]` in app.css, so the role that
+already describes the dialog carries it.
+
+**Back belongs to the HOST, not the shell.** The phone's Back is a layer
+chain (App's `popstate` handler, Hub's `backLayers`); a shell that consumed
+`popstate` itself would race that chain and peel two layers for one gesture.
+So each host registers its dialog: App peels `addServer` as its FIRST layer
+(a dialog is modal — peeling a page layer behind it would act on something
+the reader cannot see), Hub registers `picker`/`create`/`action`/`trash`, and
+Projects/Sessions/Files peel theirs in their own `goBack`.
+
+`ui/dialog.source.test.ts` fails the fifth copy: no component outside the
+shell may declare a `.dlg`/`.dlg-backdrop`/`.dlg.sheet` rule or render a
+`dlg-backdrop` element, all four dialogs must render `<Dialog>`, and the
+shell must keep the modal contract (top-modal-only keys, IME-safe Escape,
+busy-blocked cancel in one place, the focusable set, the focus restore, the
+one motion, no class door, no `popstate`). `ui/Dialog.mount.test.ts` pins the
+behaviour no single consumer exercised: focus in and back to the opener,
+content that autofocuses keeping it, the Tab wrap over fields as well as
+buttons, Escape ignored mid-composition, and a second modal owning the
+keyboard. Negative controls: a re-grown `.dlg-backdrop` rule, the dialog
+peeled after the page layers, and an Escape without `isComposing` each fail
+exactly one test.
+
 ## One "New Project" surface
 
 `CreateProjectDialog.svelte` (src/lib/projects/) is THE way a project is

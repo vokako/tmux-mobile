@@ -1316,6 +1316,12 @@
         navPush();
         return;
       }
+      // The shell's OWN dialog is the first layer (#317): a dialog is modal,
+      // so a Back that peeled a page layer behind it would act on something
+      // the reader cannot even see. Every other dialog in the app is peeled
+      // by the page that owns it (Hub's backLayers, Projects/Sessions/Files'
+      // goBack) — the one mechanism, one registration per host.
+      if (addServer) { addServer = null; navPush(); return; }
       if (page === 'files' && filesGoBack && filesGoBack()) return;
       if (page === 'files' && jumpedFrom) { switchTab(jumpedFrom); return; }
       // Files with nothing to peel has climbed to /: fall through to the

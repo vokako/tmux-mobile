@@ -10,6 +10,7 @@
   // create → up → spawn orchestration (each step an observable RPC), then
   // hands the created project to the caller, whose only job is navigation.
   import Icon from '../ui/Icon.svelte';
+  import Dialog from '../ui/Dialog.svelte';
   import DirPicker from '../files/DirPicker.svelte';
   import { projectCreate, projectUp, hubSpawn, registryList } from '../core/ws.ts';
   import { backendColor } from '../hub/hub.ts';
@@ -58,8 +59,7 @@
   }
 </script>
 
-<div class="dlg-backdrop" onclick={() => oncancel?.()} role="presentation"></div>
-<div class="dlg" class:sheet={compact}>
+<Dialog {compact} label={t('projectNew')} oncancel={() => oncancel?.()}>
   <h2>{t('projectNew')}</h2>
   {#if error}<p class="err">{error}</p>{/if}
   {#if pickerOpen}
@@ -75,7 +75,7 @@
       </button>
     </div>
     <div class="dlg-h">{t('hubCreateAgents')}</div>
-    <div class="dlg-agents">
+    <div class="dlg-agents" class:touch={compact}>
       {#each registry as r (r.name)}
         <button class="agent-pick" class:sel={agents.includes(r.name)} onclick={() => toggle(r.name)}>
           {#if backendIcon(r.backend)}<img class="ava" src={backendIcon(r.backend)} alt={r.backend} />{:else}<span class="ava" style:background={backendColor(r.backend)}>{r.name.slice(0, 1).toUpperCase()}</span>{/if}
@@ -94,41 +94,20 @@
       </button>
     </div>
   {/if}
-</div>
+</Dialog>
 
 <style>
-  .dlg-backdrop { position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,0.45); }
-  .dlg {
-    position: fixed; z-index: 31; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    /* Every vh/vw here is divided by --ui-zoom: the web/Android interface
-       scaling is CSS `zoom` on <html>, which scales rendered pixels but NOT
-       viewport units — at zoom > 1 a raw 80vh dialog is TALLER than the
-       screen, and the DirPicker's confirm footer sat below the bottom edge,
-       unreachable ("创建project选择路径，没看到确认按钮，没法完成选择",
-       owner 2026-08-25). Same convention as ConfirmDialog and main. */
-    width: min(440px, calc(100vw / var(--ui-zoom, 1) - 32px)); max-height: min(calc(80vh / var(--ui-zoom, 1)), 640px); overflow-y: auto;
-    background: var(--bg2); border: 1px solid var(--border); border-radius: 18px;
-    padding: 18px; display: flex; flex-direction: column; gap: 9px;
-    box-shadow: 0 18px 48px rgba(0,0,0,0.35);
-  }
-  .dlg h2 { margin: 0 0 4px; font-size: var(--fs-title); }
-  /* Phone: the dialog becomes a bottom sheet — reachable with a thumb. */
-  .dlg.sheet {
-    top: auto; left: 0; right: 0; bottom: 0; transform: none; width: auto;
-    border-radius: 18px 18px 0 0;
-    /* var(--sab), not raw env(): on the APK the real inset arrives via
-       MainActivity's --sab override and env() reads 0 (owner, 2026-08-25:
-       sheet buttons hidden behind the gesture bar). */
-    padding-bottom: calc(18px + var(--sab, 0px));
-  }
-  .dlg.sheet .dlg-agents { max-height: calc(46vh / var(--ui-zoom, 1)); overflow-y: auto; }
-  .dlg.sheet .agent-pick, .dlg.sheet input, .dlg.sheet .dlg-actions button { min-height: 44px; }
-  .dlg input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: var(--ui-radius-control); color: var(--text); padding: 8px 12px; font-size: var(--fs-ui); outline: none; }
-  .dlg input:focus { border-color: var(--accent); }
+  /* The shape, the scrim, the sheet and the keyboard are ui/Dialog's (#317);
+     what is left here is this form's own content. */
+  .err { margin: 0; color: var(--danger); font-size: var(--fs-ui); }
+  input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: var(--ui-radius-control); color: var(--text); padding: 8px 12px; font-size: var(--fs-ui); outline: none; }
+  input:focus { border-color: var(--accent); }
   .dlg-h { font-family: var(--font-mono); font-size: var(--fs-meta); text-transform: uppercase; letter-spacing: 1.4px; color: var(--text3); margin-top: 4px; }
   .dlg-agents { display: flex; flex-direction: column; gap: 5px; }
-  .dlg-note { margin: 0; color: var(--text3); font-size: var(--fs-ui); }
-  .err { margin: 0; color: var(--danger); font-size: var(--fs-ui); }
+  /* Phone sheet: the list scrolls inside the sheet instead of pushing the
+     actions off the bottom edge, and each row takes a 44px touch target. */
+  .dlg-agents.touch { max-height: calc(46vh / var(--ui-zoom, 1)); overflow-y: auto; }
+  .dlg-agents.touch .agent-pick { min-height: 44px; }
   .path-row { display: flex; gap: 6px; align-items: stretch; }
   .path-row input { flex: 1; min-width: 0; }
   .path-row :global(.chip-btn) { flex: none; }
@@ -136,5 +115,4 @@
   .agent-pick.sel { border-color: var(--accent-line); background: var(--accent-bg); color: var(--text); }
   .agent-pick :global(svg) { margin-left: auto; color: var(--accent); }
   .ava { width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; color: white; font-size: var(--fs-meta); font-weight: 700; flex: none; }
-  .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 </style>
