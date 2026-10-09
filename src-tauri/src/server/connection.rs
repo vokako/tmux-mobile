@@ -18,7 +18,7 @@ use sha2::Sha256;
 
 use crate::tmux;
 
-use super::download::{handle_http_download, looks_like_dl_request};
+use super::download::handle_http_download;
 use super::rpc::{handle_request, handle_subscribe, handle_unsubscribe, Request, Response, Subscriptions, ERR_AUTH, ERR_INTERNAL, ERR_PARSE};
 use super::wire::{bytes_to_hex, decode_wire_payload, derive_key, derive_session_keys, encode_wire_payload, hex_to_bytes, provided_token_matches, HalfCipher, E2E_VERSION};
 use super::{AuthTracker, NotificationHub, Outbound, ResizeTracker,
@@ -207,23 +207,36 @@ pub struct ConnContext {
 }
 
 pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, ctx: ConnContext) {
-    // Peek at the request prelude to distinguish HTTP download from
-    // WebSocket. 256 bytes covers the request line even with a reverse-proxy
-    // path prefix; peek doesn't consume, so the WS handshake still sees the
-    // full request.
-    let mut buf = [0u8; 256];
-    let n = match stream.peek(&mut buf).await {
-        Ok(n) => n,
-        Err(_) => return,
+    dispatch(stream, addr, ctx, false).await
+}
+
+/// The one door for a connection, plain or TLS (board #323, `dispatch.rs`):
+/// read the request head (bounded), route it, and hand the handler a
+/// stream that replays every byte already read.
+pub(super) async fn dispatch<S>(mut stream: S, addr: SocketAddr, ctx: ConnContext, tls: bool)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    use super::dispatch::{classify, read_head, Prefixed, Route};
+    let (bytes, end) = match read_head(&mut stream).await {
+        Ok(h) => h,
+        Err(why) => {
+            eprintln!("❌ {addr}: {why}");
+            return;
+        }
     };
-    if looks_like_dl_request(&buf[..n]) {
-        handle_http_download(stream, addr, ctx.token).await;
-        return;
+    let route = classify(&bytes[..end]);
+    let stream = Prefixed::new(bytes, stream);
+    match route {
+        Route::Download => return handle_http_download(stream, addr, ctx.token).await,
+        Route::Static { head, target, accept } => return super::ui::serve(stream, head, &target, &accept).await,
+        Route::Bad => return super::ui::bad_request(stream).await,
+        Route::WebSocket => {}
     }
 
     let conn_id = CONN_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let conn_started_at = std::time::Instant::now();
-    println!("📱 Client connected: {} (conn_id={})", addr, conn_id);
+    println!("📱 Client connected{}: {} (conn_id={})", if tls { " (TLS)" } else { "" }, addr, conn_id);
 
     // Check if IP is locked out, and opportunistically GC old entries so
     // the tracker doesn't grow unbounded under a distributed scan.
@@ -243,7 +256,7 @@ pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, ctx: ConnCon
     let ws_stream = match accept_async_with_config(stream, Some(ws_config())).await {
         Ok(ws) => ws,
         Err(e) => {
-            eprintln!("❌ WebSocket handshake failed for {}: {}", addr, e);
+            eprintln!("❌ {} handshake failed for {}: {}", if tls { "WSS" } else { "WebSocket" }, addr, e);
             return;
         }
     };

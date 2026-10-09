@@ -97,6 +97,8 @@ USAGE (human or agent — self-management):
   tmm gateway status [--show-token]   service state, the local probe's verdict, address
   tmm gateway restart|uninstall       restart / remove our service (only ours)
   tmm gateway logs [-f]               the service's log
+  tmm ui [--open]                     the web UI this machine's gateway serves: its URL, or
+                                      why there is none (--open: the default browser)
   tmm agent list                      agents in this project and their states
   tmm agent interrupt <name>          cancel the turn it is running (Escape into its pane)
   tmm agent mode <name> queue|steer   switch a kiro agent's queue/steer mode for this session
@@ -240,6 +242,10 @@ async fn main() {
     // machine's server rather than talking to one.
     if pos[0] == "gateway" {
         cmd_gateway(&pos[1..], &flags).await;
+        return;
+    }
+    if pos[0] == "ui" {
+        cmd_ui(flags.contains_key("open")).await;
         return;
     }
     // `tmm setup` (board #323): before Config::load, which would create
@@ -1398,6 +1404,53 @@ async fn resolve_project_id(ctx: &Ctx, name: &str) -> String {
 /// `tmm gateway …` (board #323). `TMM_GATEWAY_SERVICE` names the service
 /// (default: the production label / unit); a smoke run sets its own, which
 /// can never address the real one.
+/// `tmm ui` (board #323): ask THIS machine's gateway, over the probe's own
+/// authenticated session (the token is proven, never sent), whether it
+/// serves the web UI, and print the page's URL or why there is none. Only
+/// a provably-ours gateway that says it serves opens a browser.
+async fn cmd_ui(open: bool) {
+    use tmux_mobile::gateway::probe::{self, Asked, Verdict};
+    let cfg = tmux_mobile::config::Config::peek_service();
+    match probe::probe_and_ask(&cfg, Some("ui_info")).await {
+        (Verdict::None, _) => fail(EXIT_NET, &format!("no gateway is running at {} — start it with: tmm gateway", probe::local_url(&cfg))),
+        (Verdict::Occupied(why), _) => fail(EXIT_NET, &format!("not this machine's gateway: {why}")),
+        (Verdict::Ours { url, .. }, asked) => match asked {
+            Some(Asked::Result(r)) if r.get("served").and_then(|v| v.as_bool()) == Some(true) => {
+                let page = page_url(&url);
+                println!("{page}");
+                println!("  from another device: this machine's address, port {} — the app asks for the token", cfg.port);
+                if open {
+                    open_browser(&page);
+                }
+            }
+            Some(Asked::Result(r)) => {
+                let why = r.get("reason").and_then(|v| v.as_str()).unwrap_or("no web UI");
+                fail(EXIT_NOT_FOUND, &format!("the gateway at {url} serves no web UI: {why}"));
+            }
+            Some(Asked::Unknown) => fail(EXIT_NOT_FOUND, &format!("the gateway at {url} is an older version without a web UI — update tmm, then: tmm gateway restart")),
+            Some(Asked::Failed(why)) => fail(EXIT_ERR, &format!("the gateway at {url}: {why}")),
+            None => fail(EXIT_ERR, &format!("the gateway at {url} did not answer ui_info")),
+        },
+    }
+}
+
+/// The page on the gateway's own port: ws → http, wss → https.
+fn page_url(ws_url: &str) -> String {
+    let rest = ws_url.strip_prefix("wss://").map(|r| format!("https://{r}/"));
+    rest.unwrap_or_else(|| format!("http://{}/", ws_url.strip_prefix("ws://").unwrap_or(ws_url)))
+}
+
+/// The platform opener, with the URL as one argv entry (never a shell).
+fn open_browser(url: &str) {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return;
+    }
+    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    if let Err(e) = std::process::Command::new(opener).arg(url).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn() {
+        eprintln!("could not run {opener}: {e} — open {url} yourself");
+    }
+}
+
 async fn cmd_gateway(rest: &[String], flags: &Flags) {
     use tmux_mobile::gateway::{self, probe, service};
     let sub = rest.first().map(String::as_str).unwrap_or("");

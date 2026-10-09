@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { connect, disconnect } from '../core/ws.ts';
-  import { defaultConnectionAddress, normalizeAddress as normalizeAddressFor } from '../core/connection-address.ts';
+  import { defaultConnectionAddress, hostedByGateway, localAutofill, normalizeAddress as normalizeAddressFor, type LocalConfig } from '../core/connection-address.ts';
+  import { isAndroid, isTauriDesktop, tauriReady } from '../core/platform.ts';
   import { activateConnected } from './servers.ts';
   import Icon from '../ui/Icon.svelte';
   import ConnectFields from './ConnectFields.svelte';
@@ -13,9 +14,16 @@
 
   let { onConnected }: { onConnected: (switched: boolean) => void } = $props();
 
-  let address = $state(localStorage.getItem('tmux_address') || defaultConnectionAddress(location, import.meta.env.DEV));
-  let token = $state(localStorage.getItem('tmux_token') || '');
-  let socket = $state(localStorage.getItem('tmux_socket') || '');
+  // The fields as the page opens: the state starts from them, and the
+  // desktop autofill compares against them to tell a person's edit.
+  const opened = {
+    address: localStorage.getItem('tmux_address') || defaultConnectionAddress(location, import.meta.env.DEV, hostedByGateway(document)),
+    token: localStorage.getItem('tmux_token') || '',
+    socket: localStorage.getItem('tmux_socket') || '',
+  };
+  let address = $state(opened.address);
+  let token = $state(opened.token);
+  let socket = $state(opened.socket);
   let error = $state('');
   let connecting = $state(false);
 
@@ -34,19 +42,23 @@
     localStorage.removeItem('tmux_port');
   }
 
-  // Auto-fill from local config in Tauri desktop app
-  $effect(() => {
-    if (window.__TAURI__) {
-      window.__TAURI__.core.invoke('get_local_config').then((cfg: { host: string; port: number; token: string; tmux_socket?: string }) => {
-        if (!localStorage.getItem('tmux_token')) {
-          const h = cfg.host === '0.0.0.0' ? '127.0.0.1' : cfg.host;
-          address = `ws://${h}:${cfg.port}`;
-          token = cfg.token;
-          if (cfg.tmux_socket) socket = cfg.tmux_socket;
-        }
-      }).catch(() => {});
-    }
-  });
+  // Desktop app only: fill from THIS machine's config what nothing saved
+  // and the person has not touched while the config was being read (board
+  // #323). The address is the same `local_url` the gateway probe dials. A
+  // migrated old host/port above counts as the person's choice, so it stays.
+  if (!isAndroid && isTauriDesktop) {
+    const saved = { address: localStorage.getItem('tmux_address'), token: localStorage.getItem('tmux_token'), socket: localStorage.getItem('tmux_socket') };
+    tauriReady
+      .then(() => window.__TAURI__?.core.invoke('get_local_config'))
+      .then((cfg: LocalConfig | undefined) => {
+        if (!cfg) return;
+        const fill = localAutofill(saved, opened, { address, token, socket }, cfg);
+        if (fill.address !== undefined) address = fill.address;
+        if (fill.token !== undefined) token = fill.token;
+        if (fill.socket !== undefined) socket = fill.socket;
+      })
+      .catch(() => {});
+  }
 
   const normalizeAddress = (addr: string) => normalizeAddressFor(addr, location.protocol);
 

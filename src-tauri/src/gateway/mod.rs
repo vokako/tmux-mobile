@@ -22,6 +22,7 @@ use crate::config::Config;
 /// Run the server for `cfg` in the foreground until it fails.
 pub async fn start(cfg: Config) -> Result<(), String> {
     crate::tmux::set_scrollback(cfg.scrollback);
+    crate::server::ui::configure(cfg.ui_dir.clone());
     crate::server::start_with_socket(
         &cfg.host,
         cfg.port,

@@ -36,16 +36,10 @@ pub enum Verdict {
     None,
 }
 
-/// Where a local client reaches the gateway `cfg` describes.
+/// Where a local client reaches the gateway `cfg` describes (the one rule:
+/// `Config::local_url`, which the desktop app's first address uses too).
 pub fn local_url(cfg: &Config) -> String {
-    let host = match cfg.host.trim() {
-        "" | "0.0.0.0" => "127.0.0.1".to_string(),
-        "::" | "[::]" => "[::1]".to_string(),
-        h if h.contains(':') && !h.starts_with('[') => format!("[{h}]"),
-        h => h.to_string(),
-    };
-    let scheme = if cfg.tls_cert.is_some() && cfg.tls_key.is_some() { "wss" } else { "ws" };
-    format!("{scheme}://{host}:{}", cfg.port)
+    cfg.local_url()
 }
 
 /// The pure verdict over a DECRYPTED login answer (tested without a socket).
@@ -64,32 +58,123 @@ pub(crate) fn judge(answer: &serde_json::Value, our_machine: &str, url: &str) ->
 }
 
 pub async fn probe(cfg: &Config) -> Verdict {
+    probe_and_ask(cfg, None).await.0
+}
+
+/// What an authenticated request on the probe's own session answered.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Asked {
+    Result(serde_json::Value),
+    /// The gateway does not know the method (an older version).
+    Unknown,
+    /// It answered with an error, or not within the deadline — classified.
+    Failed(String),
+}
+
+/// Probe, and — only when the gateway is provably OURS — send ONE request
+/// on the SAME authenticated session (board #323: `tmm ui` asks `ui_info`
+/// this way; never a second connection, never the raw token). Bounded by
+/// the probe deadline as a whole.
+pub async fn probe_and_ask(cfg: &Config, ask: Option<&str>) -> (Verdict, Option<Asked>) {
     let url = local_url(cfg);
-    match tokio::time::timeout(DEADLINE, attempt(cfg, &url)).await {
+    match tokio::time::timeout(DEADLINE, attempt(cfg, &url, ask)).await {
         Ok(v) => v,
-        Err(_) => Verdict::Occupied(format!("{url} did not answer within {} ms", DEADLINE.as_millis())),
+        Err(_) => (Verdict::Occupied(format!("{url} did not answer within {} ms", DEADLINE.as_millis())), None),
     }
 }
 
-async fn attempt(cfg: &Config, url: &str) -> Verdict {
+async fn attempt(cfg: &Config, url: &str, ask: Option<&str>) -> (Verdict, Option<Asked>) {
     let authority = url.split("://").nth(1).unwrap_or_default().to_string();
     let tcp = match TcpStream::connect(&authority.replace(['[', ']'], "")).await {
         Ok(s) => s,
-        Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => return Verdict::None,
-        Err(e) => return Verdict::Occupied(format!("cannot reach {url}: {e}")),
+        Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => return (Verdict::None, None),
+        Err(e) => return (Verdict::Occupied(format!("cannot reach {url}: {e}")), None),
     };
-    let answer = if url.starts_with("wss://") {
-        let tls = match tls_connect(cfg, &authority, tcp).await {
-            Ok(s) => s,
-            Err(e) => return Verdict::Occupied(format!("TLS to {url} failed: {e}")),
-        };
-        login(tls, url, &cfg.token).await
+    if url.starts_with("wss://") {
+        match tls_connect(cfg, &authority, tcp).await {
+            Ok(s) => session(s, url, cfg, ask).await,
+            Err(e) => (Verdict::Occupied(format!("TLS to {url} failed: {e}")), None),
+        }
     } else {
-        login(tcp, url, &cfg.token).await
+        session(tcp, url, cfg, ask).await
+    }
+}
+
+async fn session<S>(stream: S, url: &str, cfg: &Config, ask: Option<&str>) -> (Verdict, Option<Asked>)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let (answer, mut sess) = match login(stream, url, &cfg.token).await {
+        Ok(x) => x,
+        Err(r) => return (Verdict::Occupied(r.say(url)), None),
     };
-    match answer {
-        Ok(v) => judge(&v, &cfg.machine_id, url),
-        Err(r) => Verdict::Occupied(r.say(url)),
+    let verdict = judge(&answer, &cfg.machine_id, url);
+    let asked = match (ask, &verdict) {
+        (Some(method), Verdict::Ours { .. }) => Some(sess.request(method).await),
+        _ => None,
+    };
+    let _ = sess.ws.close(None).await;
+    (verdict, asked)
+}
+
+/// An authenticated session: frames sealed under c2s / opened under s2c,
+/// each direction with its own counter (the server's `HalfCipher` rule:
+/// nonce = 4 zero bytes + the counter, big-endian).
+struct Session<S> {
+    ws: tokio_tungstenite::WebSocketStream<S>,
+    c2s: aes_gcm::Aes256Gcm,
+    s2c: aes_gcm::Aes256Gcm,
+    sent: u64,
+    received: u64,
+}
+
+fn nonce(counter: u64) -> [u8; 12] {
+    let mut n = [0u8; 12];
+    n[4..].copy_from_slice(&counter.to_be_bytes());
+    n
+}
+
+impl<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin> Session<S> {
+    fn open(&mut self, b: &[u8]) -> Result<serde_json::Value, Refusal> {
+        use aes_gcm::aead::Aead;
+        let n = nonce(self.received);
+        self.received += 1;
+        let plain = self.s2c.decrypt(aes_gcm::Nonce::from_slice(&n), b).map_err(|_| Refusal::Undecryptable)?;
+        let json = crate::server::decode_wire_payload(&plain).map_err(|_| Refusal::Undecryptable)?;
+        serde_json::from_str(&json).map_err(|_| Refusal::Undecryptable)
+    }
+
+    /// One request (id 2), then the sealed frames in order until its reply.
+    /// Error text from the peer is never quoted.
+    async fn request(&mut self, method: &str) -> Asked {
+        use aes_gcm::aead::Aead;
+        let req = serde_json::json!({ "id": 2, "method": method, "params": {} }).to_string();
+        let n = nonce(self.sent);
+        self.sent += 1;
+        let Ok(sealed) = self.c2s.encrypt(aes_gcm::Nonce::from_slice(&n), crate::server::encode_wire_payload(&req).as_slice()) else {
+            return Asked::Failed("could not seal the request".into());
+        };
+        if self.ws.send(Message::Binary(sealed.into())).await.is_err() {
+            return Asked::Failed("the gateway closed the session".into());
+        }
+        while let Some(m) = self.ws.next().await {
+            match m {
+                Ok(Message::Binary(b)) => match self.open(&b) {
+                    Ok(v) if v.get("id").and_then(|i| i.as_i64()) == Some(2) => {
+                        if let Some(r) = v.get("result") {
+                            return Asked::Result(r.clone());
+                        }
+                        let code = v.get("error").and_then(|e| e.get("code")).and_then(|c| c.as_i64());
+                        return if code == Some(-32601) { Asked::Unknown } else { Asked::Failed(format!("the gateway refused {method}")) };
+                    }
+                    Ok(_) => continue, // a notification on the session
+                    Err(_) => return Asked::Failed("a reply that did not decrypt".into()),
+                },
+                Ok(Message::Ping(_) | Message::Pong(_)) => continue,
+                _ => break,
+            }
+        }
+        Asked::Failed("the gateway closed the session".into())
     }
 }
 
@@ -99,11 +184,10 @@ async fn attempt(cfg: &Config, url: &str) -> Verdict {
 /// key, and accept only a reply ENCRYPTED under the s2c key — which only a
 /// holder of the same token can produce. A peer that does not greet, or
 /// whose reply does not decrypt, is classified, never quoted.
-async fn login<S>(stream: S, url: &str, token: &str) -> Result<serde_json::Value, Refusal>
+async fn login<S>(stream: S, url: &str, token: &str) -> Result<(serde_json::Value, Session<S>), Refusal>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
-    use aes_gcm::aead::Aead;
     use aes_gcm::KeyInit;
     use hmac::Mac;
     use rand::RngCore;
@@ -136,12 +220,12 @@ where
     while let Some(m) = ws.next().await {
         match m {
             Ok(Message::Binary(b)) => {
-                let cipher = aes_gcm::Aes256Gcm::new_from_slice(&keys.s2c).map_err(|_| Refusal::Undecryptable)?;
-                let nonce = [0u8; 12]; // the first frame of the s2c stream
-                let plain = cipher.decrypt(aes_gcm::Nonce::from_slice(&nonce), b.as_ref()).map_err(|_| Refusal::Undecryptable)?;
-                let json = crate::server::decode_wire_payload(&plain).map_err(|_| Refusal::Undecryptable)?;
-                let _ = ws.close(None).await;
-                return serde_json::from_str(&json).map_err(|_| Refusal::Undecryptable);
+                let c2s = aes_gcm::Aes256Gcm::new_from_slice(&keys.c2s).map_err(|_| Refusal::Undecryptable)?;
+                let s2c = aes_gcm::Aes256Gcm::new_from_slice(&keys.s2c).map_err(|_| Refusal::Undecryptable)?;
+                let mut sess = Session { ws, c2s, s2c, sent: 0, received: 0 };
+                // The first frame of the s2c stream.
+                let answer = sess.open(&b)?;
+                return Ok((answer, sess));
             }
             // A plain answer here is an auth error (or not our gateway).
             Ok(Message::Text(_)) => return Err(Refusal::TokenRefused),
@@ -493,5 +577,63 @@ mod tests {
         assert!(!sent.is_empty(), "the probe did talk to it");
         assert!(!sent.contains(SECRET), "the token never crosses the wire: {sent}");
         assert!(sent.contains("\"proof\"") && sent.contains("\"client_nonce\""), "a challenge proof instead");
+    }
+
+    /// `tmm ui`'s question rides the probe's own sealed session (board
+    /// #323): against the real server it is answered, and only for ours.
+    #[tokio::test]
+    async fn ui_info_is_asked_on_the_authenticated_session_and_only_of_ours() {
+        let (l, port) = listener().await;
+        drop(l);
+        tokio::spawn(async move {
+            let _ = crate::server::start_with_socket("127.0.0.1", port, "tok-ours", "m-ours", None, None, None, 5).await;
+        });
+        let mut got = (Verdict::None, None);
+        for _ in 0..40 {
+            got = probe_and_ask(&cfg(port), Some("ui_info")).await;
+            if got.0 != Verdict::None { break; }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(matches!(got.0, Verdict::Ours { .. }), "{got:?}");
+        match got.1 {
+            Some(Asked::Result(r)) => assert!(r.get("served").and_then(|v| v.as_bool()).is_some(), "{r}"),
+            a => panic!("ui_info on the sealed session: {a:?}"),
+        }
+        // An unknown method is reported as such (an older gateway).
+        assert_eq!(probe_and_ask(&cfg(port), Some("no_such_method_323")).await.1, Some(Asked::Unknown));
+        // Not ours: nothing is asked at all.
+        let mut other = cfg(port);
+        other.machine_id = "m-else".into();
+        let (v, asked) = probe_and_ask(&other, Some("ui_info")).await;
+        assert!(matches!(v, Verdict::Occupied(_)) && asked.is_none(), "{v:?} {asked:?}");
+    }
+
+    /// An echo server pretending to be a gateway hears no token and no
+    /// request: the question is only sent after a sealed, provably-ours login.
+    #[tokio::test]
+    async fn an_echo_server_is_never_asked_ui_info() {
+        const SECRET: &str = "DUMMY-TOKEN-0123456789abcdef";
+        let (l, port) = listener().await;
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen2 = seen.clone();
+        tokio::spawn(async move {
+            let (s, _) = l.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
+            let _ = ws.send(Message::Text(serde_json::json!({ "server_nonce": "00112233445566778899aabbccddeeff", "e2e": 2 }).to_string().into())).await;
+            while let Some(Ok(m)) = ws.next().await {
+                match &m {
+                    Message::Text(t) => seen2.lock().unwrap().push(t.to_string()),
+                    Message::Binary(b) => seen2.lock().unwrap().push(String::from_utf8_lossy(b).to_string()),
+                    _ => {}
+                }
+                let _ = ws.send(m).await;
+            }
+        });
+        let mut c = cfg(port);
+        c.token = SECRET.into();
+        let (v, asked) = probe_and_ask(&c, Some("ui_info")).await;
+        assert!(matches!(v, Verdict::Occupied(_)) && asked.is_none(), "{v:?} {asked:?}");
+        let sent = seen.lock().unwrap().join("\n");
+        assert!(!sent.contains(SECRET) && !sent.contains("ui_info"), "{sent}");
     }
 }

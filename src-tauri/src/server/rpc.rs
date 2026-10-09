@@ -127,6 +127,18 @@ fn dispatch(req: &Request, token: &str) -> Result<serde_json::Value, RpcError> {
     match req.method.as_str() {
         "ping" => Ok(serde_json::json!("pong")),
 
+        // Does this gateway serve the web UI on its own port (board #323)?
+        // The same source rule and check the static requests use, so `tmm ui`
+        // never says ok for a ui_dir that 404s. Authenticated like every
+        // method; no params; nothing about the token.
+        "ui_info" => {
+            let src = super::ui::source();
+            Ok(match super::ui::check(&src) {
+                Ok(kind) => serde_json::json!({ "served": true, "source": kind }),
+                Err(why) => serde_json::json!({ "served": false, "reason": why }),
+            })
+        }
+
         // The backends this server can spawn, with the client's resource
         // names for each (board #130). No params, no session, no gate: the
         // list lives in the ungated `backends` leaf, so a phone-hosted

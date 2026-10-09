@@ -28,6 +28,11 @@ path = "src/bin/tmm.rs"
 
 [features]
 default = ["gui"]
+# `embed-ui` builds the web UI (`dist/`, from `npm run build`) INTO the binary,
+# so `tmm gateway` serves it on its own port with no files beside it (board
+# #323). build.rs fails clearly when dist/index.html is missing. Off by
+# default: the desktop app has its own webview and needs no copy.
+embed-ui = []
 # `gui` carries the Tauri shell: the window, the webview, and the three plugins
 # the webview calls. ON by default, so `tauri dev`, `tauri build`, `build:mac`
 # and `build:android` behave exactly as before.

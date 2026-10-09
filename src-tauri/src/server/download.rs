@@ -174,20 +174,11 @@ fn parse_range(req: &str, size: u64) -> Result<Option<(u64, u64)>, ()> {
     Ok(None)
 }
 
-/// Decide whether a peeked request prelude is an HTTP /dl download rather
-/// than a WebSocket upgrade. Both arrive as HTTP GET; we look for the
-/// "/dl?" path segment in the request LINE only, tolerating a reverse-proxy
-/// path prefix (e.g. "GET /tmux/dl?path=..." when the proxy doesn't strip
-/// its location prefix).
+/// Is this request a /dl download? The ONE classifier (`dispatch::classify`)
+/// decides; this name stays so the download tests read as they always did.
+#[cfg(test)]
 pub(super) fn looks_like_dl_request(prelude: &[u8]) -> bool {
-    if !prelude.starts_with(b"GET ") && !prelude.starts_with(b"OPTIONS ") {
-        return false;
-    }
-    let line_end = prelude
-        .iter()
-        .position(|&b| b == b'\r' || b == b'\n')
-        .unwrap_or(prelude.len());
-    prelude[..line_end].windows(4).any(|w| w == b"/dl?")
+    super::dispatch::classify(prelude) == super::dispatch::Route::Download
 }
 
 pub(super) async fn handle_http_download<S>(mut stream: S, addr: SocketAddr, token: Arc<String>)

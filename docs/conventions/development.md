@@ -60,7 +60,7 @@ npm run build:mac        # macOS .app + .dmg
 npm run build:android    # Android APK (aarch64)
 npm test                 # Frontend + dev-script tests (node --test; see docs/conventions/testing.md)
 npm run check            # svelte-check: type-checks .ts/.svelte.ts/.svelte files
-npm run build:server     # server + tmm, no webview needed (release)
+npm run build:server     # web UI (vite build) + server + tmm with it embedded (embed-ui), no webview needed (release)
 npm run dev:server       # standalone WS server (pair with `npm run dev`)
 npm run test:rust        # Rust tests, sequential (needs tmux running)
 ```
@@ -77,7 +77,7 @@ changing the project default:
 ### Headless build (server + CLI, no webview)
 
 ```bash
-npm run build:server     # server + tmm, release
+npm run build:server     # vite build, then server + tmm (embed-ui), release
 npm run dev:all          # Vite + watched server (recommended browser dev loop)
 npm run dev:server:watch # watched server only; pair with `npm run dev`
 npm run dev:server       # one-shot server only; pair with `npm run dev`
@@ -160,7 +160,9 @@ end up shipping the wrong tree.
 - **Android** — `rustup target add aarch64-linux-android && npm run build:android`.
   Needs the Android SDK, NDK 28+ and Java 17+; signing is below.
 - **Linux server only** — `npm run build:server` needs no WebKitGTK; it is all
-  the browser UI and the phone talk to.
+  the browser UI and the phone talk to. It runs `vite build` first and embeds
+  `dist/` (`embed-ui`), so `tmm gateway` serves the web UI on its own port and
+  `tmm ui` prints its URL (board #323). The dev watcher builds without it.
 - **iOS** — not implemented; tracked in [docs/todo.md](../todo.md).
 
 ## Remote access (Tailscale)

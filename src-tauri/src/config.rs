@@ -21,6 +21,10 @@ struct FileConfig {
     // at spawn and at every refresh; an agent takes it at its next restart
     // (board #207).
     kiro_engine: Option<String>,
+    // A built web UI directory (`dist/`) the gateway serves on its own port
+    // (board #323). Absolute. Unset: the UI embedded in the binary (feature
+    // `embed-ui`), else none. Read from config.toml only.
+    ui_dir: Option<String>,
 }
 
 #[derive(Clone)]
@@ -35,6 +39,7 @@ pub struct Config {
     pub scrollback: usize,
     pub disconnect_grace_secs: u64,
     pub kiro_engine: String,
+    pub ui_dir: Option<String>,
 }
 
 /// The kiro engine door, side-effect free (no token/machine-id seeding — the
@@ -182,6 +187,22 @@ fn optional_env_override(value: Option<String>, fallback: Option<String>) -> Opt
 pub const ENV_OVERRIDES: &[&str] = &["HOST", "PORT", "TOKEN", "TMUX_SOCKET", "TLS_CERT", "TLS_KEY", "SCROLLBACK", "DISCONNECT_GRACE_SECS", "KIRO_ENGINE"];
 
 impl Config {
+    /// Where a client on THIS machine reaches the gateway this config
+    /// describes — the ONE rule (board #323): a wildcard bind (`0.0.0.0`,
+    /// `::`) on the matching loopback, a specific address on itself (IPv6
+    /// in brackets), `wss` when both TLS files are set. The gateway probe,
+    /// `tmm ui` and the desktop app's first address all use it.
+    pub fn local_url(&self) -> String {
+        let host = match self.host.trim() {
+            "" | "0.0.0.0" => "127.0.0.1".to_string(),
+            "::" | "[::]" => "[::1]".to_string(),
+            h if h.contains(':') && !h.starts_with('[') => format!("[{h}]"),
+            h => h.to_string(),
+        };
+        let scheme = if self.tls_cert.is_some() && self.tls_key.is_some() { "wss" } else { "ws" };
+        format!("{scheme}://{host}:{}", self.port)
+    }
+
     /// Load config: file < env vars. Auto-generates token if missing everywhere.
     pub fn load() -> Self {
         Self::load_with(&|k| std::env::var(k).ok())
@@ -255,6 +276,7 @@ impl Config {
             kiro_engine: normalize_engine(
                 &env("KIRO_ENGINE").or(file_cfg.kiro_engine).unwrap_or_default(),
             ),
+            ui_dir: file_cfg.ui_dir.filter(|d| !d.trim().is_empty()),
         }
     }
 }
@@ -485,6 +507,9 @@ pub fn get_config_json() -> serde_json::Value {
         "port": cfg.port,
         "token": cfg.token,
         "tmux_socket": cfg.tmux_socket,
+        // The desktop app's first address (board #323): the same rule the
+        // gateway probe dials, so bind address, IPv6 and TLS agree.
+        "url": cfg.local_url(),
     })
 }
 

@@ -9,12 +9,13 @@ mod wire;
 pub use wire::{encode_wire_payload, decode_wire_payload, derive_session_keys, SessionKeys, E2E_VERSION, WIRE_PLAIN_JSON, WIRE_DEFLATE_JSON, COMPRESS_MIN_BYTES};
 use wire::HalfCipher;
 mod download;
-use download::{looks_like_dl_request, handle_http_download};
 mod hub_rpc;
 mod rpc;
 mod connection;
+mod dispatch;
+pub mod ui;
 pub use connection::{handle_connection, ConnContext};
-use connection::{enable_tcp_keepalive, handle_connection_ws, ws_config};
+use connection::enable_tcp_keepalive;
 
 pub type NotificationHub = Arc<AgentNotificationHub>;
 
@@ -261,36 +262,7 @@ pub async fn start_with_socket(
             let acceptor = acceptor.clone();
             tokio::spawn(async move {
                 match acceptor.accept(stream).await {
-                    Ok(tls_stream) => {
-                        // Peek first bytes after TLS handshake to tell HTTP
-                        // /dl (large-file streaming) from a WebSocket upgrade.
-                        // Plain-TCP uses TcpStream::peek; TlsStream has no
-                        // peek, so we wrap in BufStream and use AsyncBufRead
-                        // which fills an internal buffer and replays it on
-                        // subsequent reads. The buffered stream is fed to
-                        // whichever handler we dispatch to.
-                        use tokio::io::AsyncBufReadExt;
-                        let mut buf_stream = tokio::io::BufStream::new(tls_stream);
-                        let is_http = match buf_stream.fill_buf().await {
-                            Ok(b) => looks_like_dl_request(b),
-                            Err(e) => {
-                                eprintln!("❌ TLS read failed for {}: {}", addr, e);
-                                return;
-                            }
-                        };
-                        if is_http {
-                            handle_http_download(buf_stream, addr, ctx.token).await;
-                            return;
-                        }
-                        let ws_stream = match tokio_tungstenite::accept_async_with_config(buf_stream, Some(ws_config())).await {
-                            Ok(ws) => ws,
-                            Err(e) => { eprintln!("❌ WSS handshake failed for {}: {}", addr, e); return; }
-                        };
-                        let conn_id = CONN_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        let conn_started_at = std::time::Instant::now();
-                        println!("📱 Client connected (TLS): {} (conn_id={})", addr, conn_id);
-                        handle_connection_ws(ws_stream, addr, ctx, conn_id, conn_started_at).await;
-                    }
+                    Ok(tls_stream) => connection::dispatch(tls_stream, addr, ctx, true).await,
                     Err(e) => eprintln!("❌ TLS handshake failed for {}: {}", addr, e),
                 }
             });
