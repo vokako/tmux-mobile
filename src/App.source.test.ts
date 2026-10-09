@@ -546,7 +546,7 @@ test('one system-vitals strip serves desktop sidebar and an open phone drawer (b
     'connected clients share one sampler; layout only decides visibility');
   assert.match(source, /<main[^>]*class:touch-layout=\{shell && layout\.isTouchDevice\}/u,
     'touch mode is explicit on the shell');
-  assert.match(source, /\{#if sysMounted\}[\s\S]{0,1200}<aside class="sys-sidebar"[\s\S]{0,100}<SystemStatus/u,
+  assert.match(source, /\{#if sysMounted\}[\s\S]{0,1600}<aside class="sys-sidebar compact-tools"[\s\S]{0,100}<SystemStatus/u,
     'mount gate wraps the sidebar strip');
   assert.match(source, /<SystemStatus[^/]*visible=\{connected\}/u,
     'a disconnect stops the singleton timer');
@@ -558,7 +558,7 @@ test('one system-vitals strip serves desktop sidebar and an open phone drawer (b
   // 它放到我们的系统状态栏里"), desktop only, sized from the shared control
   // tokens so the bar reserves room instead of clipping it — and so a touch
   // device on the DESKTOP layout still gets a 44px target.
-  assert.match(source, /<aside class="sys-sidebar"[\s\S]{0,400}\{#if !layout\.isTouchDevice\}\s*\n\s*<button\s*\n\s*class="sys-scratch"/u,
+  assert.match(source, /<aside class="sys-sidebar compact-tools"[\s\S]{0,400}\{#if !layout\.isTouchDevice\}\s*\n\s*<button\s*\n\s*class="sys-scratch"/u,
     'the control sits beside the readings, in the one status bar');
   const ctl = source.slice(source.indexOf('class="sys-scratch"'), source.indexOf('><Icon name="terminal" size={14} /></button>'));
   assert.match(ctl, /aria-label=\{t\('scratchTitle'\)\}/u);
@@ -569,6 +569,16 @@ test('one system-vitals strip serves desktop sidebar and an open phone drawer (b
   assert.match(source, /@media \(any-pointer: coarse\) \{\s*\n\s*main\.with-rail \{\s*\n\s*--sys-ctl: var\(--control-height\);\s*\n\s*--sys-sidebar-h: calc\(var\(--control-height\) \+ 4px\);/u,
     'a coarse pointer takes the control to --control-height and the bar grows with it — scoped to the rail layout, so the phone drawer\u2019s row does not move');
   assert.match(source, /\.sys-scratch \{[^}]*width: var\(--sys-ctl\); height: var\(--sys-ctl\)/u, 'one token sizes both');
+  // #337: a 20px square with --control-radius (12) IS a circle, which the
+  // owner stopped in #218/#219. The corner comes from the PAINT token and the
+  // bar wears the existing dense-group setter that scales it to 5px — no raw
+  // px, same family as the Files toolbar's 20px squares.
+  assert.match(source, /<aside class="sys-sidebar compact-tools"/u, 'the bar is a dense tool group');
+  assert.match(source, /\.sys-scratch \{[^}]*border-radius: var\(--control-paint-radius\)/u,
+    'the control takes the dense paint corner, never a field radius');
+  assert.doesNotMatch(source.slice(source.indexOf('.sys-scratch {'), source.indexOf('.sys-scratch:hover')),
+    /border-radius: (?:var\(--control-radius\)|var\(--ui-radius-control\)|\d+px|50%)/u,
+    'and no field corner, literal or circle');
   assert.match(source, /\.with-rail :global\(\.sidebar\),\s*\.with-rail \.term-side,\s*\.with-rail :global\(\.files-left\) \{[^}]*padding-bottom: var\(--sys-sidebar-h\)/u,
     'every desktop primary sidebar reserves the exact strip height');
   // Touch: hidden at rest, shown only with the shared drawer's real OPEN

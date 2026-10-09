@@ -49,10 +49,16 @@ export const {
   subscribe, unsubscribe, resubscribeActive,
 } = connection;
 
+/** `scratch_session`'s one actionable refusal: a PROJECT holds the scratch
+ * terminal's reserved session name (board #337). A code, not a sentence, so
+ * the panel can offer "Release the name" without parsing the message the
+ * server composed for the human. Mirrors server/rpc.rs ERR_SCRATCH_HELD. */
+export const ERR_SCRATCH_HELD = -32010;
+
 // Every RPC, bound to the connection above.
 export const {
   listSessions, listPanes, listSessionsWithPanes, capturePane, sendKeys, pasteText,
-  scratchSession, scratchKill, newSession, killSession, newWindow, killWindow, paneCommand,
+  scratchSession, scratchKill, scratchRelease, newSession, killSession, newWindow, killWindow, paneCommand,
   resizePane, setSocket, getBookmarks, saveBookmarks, getPrefs, setPref, fsCwd, fsList,
   fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadUrl,
   fsDownloadHttp, fsUpload, fsConvert, gitCmd, projectList, projectCreate, projectAdopt,

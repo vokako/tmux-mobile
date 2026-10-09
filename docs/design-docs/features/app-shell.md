@@ -147,7 +147,12 @@ Terminal 只是临时用的，并且跟你的项目没有关系". Desktop only (
   rendering, rule 7); the head's stop icon is Kill, behind a ConfirmDialog
   (close ≠ kill). A session that ends (Ctrl-D, external kill) shows "Session
   ended · Open again"; nothing recreates it in the background. A name held by a
-  plain session or a project shows the server's refusal with the same re-try.
+  plain session or a project shows the server's refusal with the same re-try —
+  and when a PROJECT holds it (board #337), the refusal also offers **Release
+  the name**, behind a confirmation that spells out what it renames. The
+  action is keyed on the server's error CODE (`-32010`), never on the text of
+  its message: the sentence is the server's one composition for the human, and
+  reading it in the client would be a second copy of it.
 - **Server boundary (#315).** App keeps the frame's state (open, edge, sizes)
   outside the server key; the panel and its Terminal mount INSIDE
   `{#key serverEpoch}`, so a switch destroys them with the subscription. The

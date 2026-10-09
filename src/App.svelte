@@ -1880,7 +1880,13 @@
          beside the readings it reads as what it is — a small thing the server
          offers. It retracts with the bar when the sidebar collapses (#200),
          and the `toggleScratch` shortcut is the door that is always open. -->
-    <aside class="sys-sidebar" aria-label="Server system status">
+    <!-- `compact-tools` is the existing dense-group token setter (app.css):
+         its 20px paint square needs the 5px corner, because the 7px command
+         corner reads as a circle there (#219) and `--control-radius` 12 on a
+         20px square IS one — which is the bug #337 reported. It sets only
+         custom properties, and the bar's own geometry is declared on `main`,
+         so nothing else moves. -->
+    <aside class="sys-sidebar compact-tools" aria-label="Server system status">
       <SystemStatus load={systemStatus} visible={connected} />
       {#if !layout.isTouchDevice}
         <button
@@ -2262,7 +2268,7 @@
   .sys-scratch {
     flex: none; margin-left: auto; display: grid; place-items: center;
     width: var(--sys-ctl); height: var(--sys-ctl); padding: 0;
-    border: 0; border-radius: var(--control-radius); background: none;
+    border: 0; border-radius: var(--control-paint-radius); background: none;
     color: var(--text3); cursor: pointer;
     transition: color var(--t-fast), background var(--t-fast);
   }

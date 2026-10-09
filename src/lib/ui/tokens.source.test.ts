@@ -117,6 +117,55 @@ test('no button is a circle or a capsule: full-round shapes are the listed non-b
   assert.deepEqual(offenders, [], `a button is a rounded rectangle (--ui-radius-control); list a non-button here by reason:\n${offenders.join('\n')}`);
 });
 
+// Board #337 (owner 2026-10-09: "为什么背景是一个圆形的呀？这个不符合我们的设计
+// 规范"): the round-shape test above only sees a radius written as a round
+// VALUE (--ui-radius-pill / 999px / 50%). A circle delivered through a TOKEN
+// slips past it — the status bar's scratch control was a 20px square with
+// `border-radius: var(--control-radius)` (12px), i.e. a circle, and every
+// test stayed green. design-language.md already states the rule in words:
+// "on a 24px paint square --ui-radius-control 10 or --control-radius 12 IS a
+// circle", and a dense group scales the corner to --control-paint-radius 5
+// with its 20px paint (#219). This is that rule, executable.
+//
+// The checkable shape of it: a rule that paints a SQUARE (same width and
+// height) whose side resolves to 24px or less must take the PAINT corner, not
+// a field/menu/dialog radius. One level of custom-property indirection is
+// resolved, because that is how the size arrives (`--sys-ctl: 20px`).
+const FIELD_RADII = ['--control-radius', '--ui-radius-control', '--control-menu-radius', '--control-dialog-radius'];
+
+test('a small square control takes the PAINT corner, so a token cannot deliver a circle (#337)', async () => {
+  const offenders: string[] = [];
+  for await (const file of walk(SRC)) {
+    if (/\.test\.(svelte|css)$/u.test(file.pathname)) continue;
+    const rel = decodeURIComponent(file.pathname.slice(SRC.pathname.length));
+    const text = await readFile(file, 'utf8');
+    // Sizes declared in this file, so `width: var(--sys-ctl)` can be resolved.
+    const sizes = new Map<string, number>();
+    for (const [, token, px] of text.matchAll(/(--[\w-]+):\s*(\d+)px\s*;/gu)) sizes.set(token!, Number(px));
+    const side = (value: string): number | null => {
+      const literal = /^(\d+)px$/u.exec(value.trim());
+      if (literal) return Number(literal[1]);
+      const token = /^var\((--[\w-]+)(?:,[^)]*)?\)$/u.exec(value.trim());
+      return token ? sizes.get(token[1]!) ?? null : null;
+    };
+    for (const block of text.split('}')) {
+      const w = /width:\s*([^;]+);/u.exec(block)?.[1];
+      const h = /height:\s*([^;]+);/u.exec(block)?.[1];
+      if (!w || !h || w.trim() !== h.trim()) continue;
+      const px = side(w);
+      if (px === null || px > 24) continue;
+      const radius = /border-radius:\s*([^;]+);/u.exec(block)?.[1]?.trim();
+      if (!radius) continue;
+      const field = FIELD_RADII.find((token) => radius.includes(token));
+      if (!field) continue;
+      const selector = block.split('\n').filter((l) => l.includes('{')).pop()?.trim() ?? block.slice(0, 40);
+      offenders.push(`${rel}  ${selector}  ${px}px square with ${field}`);
+    }
+  }
+  assert.deepEqual(offenders, [],
+    `a square this small takes var(--control-paint-radius) (5 in a dense group, 7 otherwise) — a field radius is a circle here:\n${offenders.join('\n')}`);
+});
+
 // Board #292 (owner 2026-10-01, "名字多个颜色更好看"): agent NAME inks are six
 // theme-aware tokens, defined in both theme blocks and nowhere else, and only
 // `agentHue` (hub.ts) names them: a component painting --agent-3 by hand is

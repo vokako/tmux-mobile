@@ -204,7 +204,9 @@
   .picker-add {
     flex-shrink: 0;
     width: 24px; height: 24px; padding: 0;
-    border: 1px solid var(--border2); border-radius: var(--ui-radius-control);
+    /* 24px square: the command PAINT corner (#337's token test) — 10 on 24
+       reads as a circle, which the radius scale names explicitly. */
+    border: 1px solid var(--border2); border-radius: var(--control-paint-radius);
     background: var(--input-bg); color: var(--text3);
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     -webkit-tap-highlight-color: transparent;

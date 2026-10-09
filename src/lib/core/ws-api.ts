@@ -209,6 +209,9 @@ export function createWsApi(connection: Connection) {
    * else is refused with the reason. */
   const scratchSession = () => call<{ session: string; target: string }>('scratch_session', {});
   const scratchKill = () => call<{ killed: boolean }>('scratch_kill', {});
+  /** Board #337: free the reserved session name from the project holding it,
+   * on the reader's confirmation — it renames that project's session. */
+  const scratchRelease = () => call<{ released: boolean; project: string; renamed_to: string }>('scratch_release', {});
   const newSession = (name: string, path?: string, command?: string) => call('new_session', { name, path, command });
   const killSession = (name: string) => call('kill_session', { name });
   const newWindow = (session: string) => call('new_window', { session });
@@ -454,7 +457,7 @@ export function createWsApi(connection: Connection) {
 
   return {
     listSessions, listPanes, listSessionsWithPanes, capturePane, sendKeys, pasteText,
-    scratchSession, scratchKill, newSession, killSession, newWindow, killWindow, paneCommand,
+    scratchSession, scratchKill, scratchRelease, newSession, killSession, newWindow, killWindow, paneCommand,
     resizePane, setSocket, getBookmarks, saveBookmarks, getPrefs, setPref, fsCwd, fsList,
     fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadUrl,
     fsUpload, fsConvert, gitCmd, projectList, projectCreate, projectAdopt, projectUp,

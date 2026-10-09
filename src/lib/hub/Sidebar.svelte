@@ -167,7 +167,10 @@
   .trash-name { font-weight: 450; }
   .t-act {
     display: grid; place-items: center; width: 24px; height: 24px; flex: none;
-    background: none; border: none; border-radius: var(--ui-radius-control);
+    /* 24px square: the command PAINT corner, not a field radius — 10 on 24
+       reads as a circle (design-language radius scale; found by #337's new
+       token test, same defect the owner reported on the scratch control). */
+    background: none; border: none; border-radius: var(--control-paint-radius);
     color: var(--text3); cursor: pointer;
   }
   .t-act:hover { background: var(--surface2); color: var(--text); }
