@@ -1,0 +1,77 @@
+// Maintenance pin for the connection layer's boundary (board #335 ①,
+// reviewer r1 §1). The behaviour proofs are connection.test.ts,
+// connection-registry.test.ts and connection-facade.test.ts; this file only
+// keeps the LAYERING honest, because every rule below is one import away from
+// quietly coming back and each would undo a different part of the design:
+//
+//   - storage or a Svelte store in connection.ts → the transport starts
+//     deciding identity and focus, which is app/servers.ts's job.
+//   - `window` in connection.ts → device state creeps back into a per-server
+//     object (that is why the reachability cache stayed in ws.ts).
+//   - a dial inside the registry → ensure() stops being free, and something
+//     other than the caller decides when a server is contacted.
+//   - a persisted facade slot key → the compatibility slot becomes a second
+//     opinion on which server is current, the one thing it must never be.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+const read = (name: string) => readFile(new URL(`./${name}`, import.meta.url), 'utf8');
+/** Code only: a rule about imports must not trip over a comment naming one. */
+const code = (text: string) => text
+  .replace(/\/\*[\s\S]*?\*\//gu, '')
+  .split('\n')
+  .filter(line => !/^\s*(\/\/|\*)/u.test(line))
+  .join('\n');
+
+test('connection.ts owns the transport and imports nothing above it', async () => {
+  const src = code(await read('connection.ts'));
+  assert.doesNotMatch(src, /localStorage|sessionStorage/u, 'persistence is the app layer s');
+  assert.doesNotMatch(src, /\bwindow\b/u, 'device state (reachability, online events) stays in ws.ts');
+  assert.doesNotMatch(src, /\$state\b|from 'svelte|\.svelte(\.ts)?'/u, 'no Svelte reactivity in the transport');
+  assert.doesNotMatch(src, /from '\.\.\/app\//u, 'the transport must not import the app layer');
+  assert.doesNotMatch(src, /from '\.\/ws(-api)?\.ts'/u, 'and never back through its own facade');
+  // The whole point: mutable connection state is per object, not per module.
+  const moduleLevel = src.split('\n').filter(l => /^(export )?(let|const) \w+/u.test(l));
+  for (const line of moduleLevel) {
+    assert.doesNotMatch(line, /new (Map|Set|WeakMap)\b/u,
+      `module-level collection in connection.ts: "${line.trim()}" — per-connection state belongs inside createConnection()`);
+    assert.doesNotMatch(line, /^(export )?let /u,
+      `module-level mutable in connection.ts: "${line.trim()}" — per-connection state belongs inside createConnection()`);
+  }
+});
+
+test('ws-api.ts declares each RPC once, against the connection it was handed', async () => {
+  const src = code(await read('ws-api.ts'));
+  // `window` as a WORD is a protocol field (a tmux window index); what must
+  // not appear is the global.
+  assert.doesNotMatch(src, /localStorage|\bwindow\s*\.|from '\.\.\/app\//u);
+  // Every wrapper reaches the wire through the handle's own `call`.
+  assert.match(src, /const \{ call \} = connection;/u);
+  assert.equal((src.match(/new WebSocket\(/gu) ?? []).length, 0, 'the API never opens a socket');
+  const methods = [...src.matchAll(/\bcall<?[^>]*>?\(\s*'(\w+)'/gu)].map(m => m[1]);
+  const duplicates = methods.filter((m, i) => methods.indexOf(m) !== i && m !== 'hub_log');
+  assert.deepEqual(duplicates, [], 'one declaration per RPC (hub_log is read two ways on purpose)');
+});
+
+test('the registry owns lifetime only: it never dials and never guesses identity', async () => {
+  const src = code(await read('connection-registry.ts'));
+  assert.doesNotMatch(src, /localStorage|\bwindow\s*\.|from '\.\.\/app\//u);
+  assert.doesNotMatch(src, /\.connect\(/u, 'ensure() builds an IDLE connection; dialling is the caller s verb');
+  assert.doesNotMatch(src, /machine|URL|address/iu, 'identity lives in app/servers.ts, not here');
+  assert.doesNotMatch(src, /current|active/iu, 'the registry has no notion of a focused server');
+});
+
+test('the facade holds ONE memory-only slot and no second door', async () => {
+  const src = code(await read('ws.ts'));
+  assert.match(src, /const SINGLE_CURRENT = Symbol\('single-current'\);/u);
+  assert.equal((src.match(/registry\.ensure\(/gu) ?? []).length, 1, 'exactly one slot is ever ensured');
+  assert.doesNotMatch(src, /localStorage|sessionStorage|tmux_/u, 'the slot key is never persisted');
+  // No duplicate transport: the facade forwards, it does not re-implement.
+  assert.equal((src.match(/new WebSocket\(/gu) ?? []).length, 1,
+    'the one WebSocket in ws.ts is the reachability probe, not a second client');
+  assert.doesNotMatch(src, /_cipher|pending\.set|requestId/u, 'no parallel socket bookkeeping');
+  // The reachability cache is the documented exception and must stay keyed by
+  // URL — a device fact, not a server's.
+  assert.match(src, /const probeFailedAt = new Map<string, number>\(\);/u);
+});
