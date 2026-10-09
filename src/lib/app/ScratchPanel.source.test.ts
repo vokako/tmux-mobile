@@ -10,7 +10,7 @@ const app = await readFile(new URL('../../App.svelte', import.meta.url), 'utf8')
 
 test('the shared Terminal and SideHandle, one slide tempo, no backdrop', () => {
   assert.match(source, /import Terminal from '\.\.\/terminal\/Terminal\.svelte';/u);
-  assert.match(source, /<Terminal \{target\} session="tmm-scratch" \{fontSize\} embedded chromeless active=\{open\} visible=\{open\} onPaneExit=\{ended\} \/>/u);
+  assert.match(source, /<Terminal \{target\} \{session\} \{fontSize\} embedded chromeless active=\{open\} visible=\{open\} onPaneExit=\{ended\} \/>/u);
   assert.match(source, /<SideHandle varName="--scratch-h"[^>]*edge="top"[^>]*always \/>/u);
   assert.match(source, /<SideHandle varName="--scratch-w"[^>]*edge="right"[^>]*always \/>/u);
   const css = (/<style>[\s\S]*<\/style>/u.exec(source)?.[0] ?? '').replace(/\/\*[\s\S]*?\*\//gu, '');
@@ -38,4 +38,14 @@ test('the scratch RPCs are desktop-gated like projects (#324 review): a phone bu
   for (const m of ['scratch_session', 'scratch_kill']) {
     assert.match(rpc, new RegExp(`#\\[cfg\\(not\\(any\\(target_os = "android", target_os = "ios"\\)\\)\\)\\]\\n\\s*"${m}" =>`, 'u'), `${m} carries the projects gate`);
   }
+});
+
+test('the panel size is clamped by the layout itself, on restore and as the window shrinks (#324 review)', () => {
+  // Measured in Chromium: h=1200 / w=1400 restored into 900x600 and then
+  // 700x420 keeps the head and the handle on screen for both edges
+  // (temp/check/c324clamp.mjs); ResizeObserver refits the terminal, no timer.
+  assert.match(source, /height: min\(var\(--scratch-h, 320px\), calc\(100vh \/ var\(--ui-zoom, 1\) - 80px\)\);/u);
+  assert.match(source, /width: min\(var\(--scratch-w, 560px\), calc\(100vw \/ var\(--ui-zoom, 1\) - var\(--shell-left, 0px\) - 80px\)\);/u);
+  assert.match(source, /<Terminal \{target\} \{session\}/u, 'the server\'s returned session name, never spelled here');
+  assert.doesNotMatch(source, /setTimeout|setInterval/u, 'no timed resize');
 });

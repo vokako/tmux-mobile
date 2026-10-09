@@ -16,7 +16,7 @@
   // mounted and records frames without rendering, rule 7); Kill ends the
   // session. Escape belongs to the shell inside: it closes the panel only from
   // the head's own controls.
-  import { tick } from 'svelte';
+  import { tick, untrack, onDestroy } from 'svelte';
   import Terminal from '../terminal/Terminal.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import Segmented from '../ui/Segmented.svelte';
@@ -32,6 +32,7 @@
 
   let phase = $state('idle');     // idle | opening | ready | ended | error
   let target = $state('');
+  let session = $state('');       // the server's name for it (never spelled here)
   let error = $state('');
   let killAsk = $state(false);
   let killing = $state(false);
@@ -48,6 +49,7 @@
       const r = await scratchSession();
       if (!mine(n)) return;
       target = r.target;
+      session = r.session;
       phase = 'ready';
       if (open) void focusTerminal(n);
     } catch (e) {
@@ -63,22 +65,32 @@
     panelEl.querySelector('.xterm-helper-textarea')?.focus({ preventScroll: true });
   }
 
+  // Only the reader's OPENING (and an explicit Open again) ensures: the
+  // effect tracks `open` and `live` alone, so an answer — success or a
+  // refusal — never triggers the next ensure (#324 review: an error state
+  // re-ensured in a loop).
   $effect(() => {
     if (!live) { intent++; return; }
-    if (open) {
+    if (open) untrack(() => {
       const a = document.activeElement;
       if (a instanceof HTMLElement && !panelEl?.contains(a)) opener = a;
       if (phase === 'idle' || phase === 'error') void ensure();
       else if (phase === 'ready') void focusTerminal(intent);
-    } else if (panelEl?.contains(document.activeElement)) {
-      // Back to where the reader was — only if focus is still ours to give
-      // and that control is still there to take it.
-      const back = opener;
-      opener = null;
-      if (back?.isConnected && back.checkVisibility?.() !== false && !back.closest('[inert]')) back.focus({ preventScroll: true });
-      else (document.activeElement)?.blur?.();
-    }
+    });
+    else untrack(restoreFocus);
   });
+  // A destroyed panel (the server-keyed tree unmounting) drops whatever is
+  // still in flight, whatever order the switch tore things down in.
+  onDestroy(() => { intent++; });
+  function restoreFocus() {
+    if (!panelEl?.contains(document.activeElement)) return;
+    // Back to where the reader was — only if focus is still ours to give
+    // and that control is still there to take it.
+    const back = opener;
+    opener = null;
+    if (back?.isConnected && back.checkVisibility?.() !== false && !back.closest('[inert]')) back.focus({ preventScroll: true });
+    else (document.activeElement)?.blur?.();
+  }
 
   function ended() { target = ''; phase = 'ended'; }
 
@@ -118,7 +130,7 @@
   </header>
   <div class="scratch-body">
     {#if target}
-      <Terminal {target} session="tmm-scratch" {fontSize} embedded chromeless active={open} visible={open} onPaneExit={ended} />
+      <Terminal {target} {session} {fontSize} embedded chromeless active={open} visible={open} onPaneExit={ended} />
     {:else}
       <div class="scratch-state">
         {#if phase === 'opening'}<span>{t('scratchOpening')}</span>
@@ -140,14 +152,18 @@
      inert, so nothing in it is reachable. */
   .scratch {
     position: fixed; z-index: 20; display: flex; flex-direction: column;
-    left: var(--shell-left, 0px); right: 0; bottom: 0; height: var(--scratch-h, 320px);
+    left: var(--shell-left, 0px); right: 0; bottom: 0;
+    /* A stored size never outgrows the window it is restored into or shrinks
+       with: the head and its handle stay on screen (#324 review). */
+    height: min(var(--scratch-h, 320px), calc(100vh / var(--ui-zoom, 1) - 80px));
     background: var(--bg); border-top: 1px solid var(--border);
     box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.18);
     transform: translateY(100%); visibility: hidden;
     transition: transform var(--t-move) ease, visibility 0s linear var(--t-move);
   }
   .scratch.left {
-    right: auto; top: 0; height: auto; width: var(--scratch-w, 560px);
+    right: auto; top: 0; height: auto;
+    width: min(var(--scratch-w, 560px), calc(100vw / var(--ui-zoom, 1) - var(--shell-left, 0px) - 80px));
     border-top: none; border-right: 1px solid var(--border);
     box-shadow: 8px 0 24px rgba(0, 0, 0, 0.18);
     transform: translateX(-100%);

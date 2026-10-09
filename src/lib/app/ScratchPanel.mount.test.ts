@@ -133,3 +133,41 @@ test('a server switch drops a pending ensure and never ensures by itself; the ed
     assert.equal(app.document.querySelector('.scratch .side-handle')!.getAttribute('aria-orientation'), 'vertical', 'the left panel resizes on X');
   } finally { await app.close(); }
 });
+
+test('a refusal is a stable error: no automatic retry, Open again asks once (#324 review)', { timeout: 60000 }, async (context) => {
+  const r = rpc({ scratchSession: async () => { r.calls.push('ensure'); throw new Error("a tmux session named 'tmm-scratch' already exists and is not the scratch terminal"); } });
+  const app = await mount(context, r.mod);
+  try {
+    app.window.__scratch.open = true;
+    await until(app, () => !!app.document.querySelector('.scratch-err'));
+    for (let i = 0; i < 12; i++) await app.flush();
+    assert.deepEqual(r.calls, ['ensure'], 'the error does not re-ensure');
+    assert.match(app.document.querySelector('.scratch-err')!.textContent!, /already exists/u, 'the reason stays on screen');
+    app.document.querySelector<HTMLButtonElement>('.scratch-state button')!.click();
+    for (let i = 0; i < 8; i++) await app.flush();
+    assert.deepEqual(r.calls, ['ensure', 'ensure'], 'one explicit retry, one call');
+  } finally { await app.close(); }
+});
+
+test('the server-keyed tree unmounting first still drops a pending completion (#324 review, real teardown order)', { timeout: 60000 }, async (context) => {
+  let killed: ((v: unknown) => void) | null = null;
+  const r = rpc({ scratchKill: () => { r.calls.push('kill'); return new Promise((res) => { killed = res; }); } });
+  const app = await mount(context, r.mod);
+  try {
+    app.window.__scratch.open = true;
+    await until(app, () => !!app.document.querySelector('.scratch .xterm-wrap'));
+    app.document.querySelector<HTMLButtonElement>('.scratch-head [aria-label="Kill scratch session"]')!.click();
+    await until(app, () => !![...app.document.querySelectorAll('button')].find((b) => b.textContent?.includes('Kill scratch session') && !b.closest('.scratch-head')));
+    [...app.document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Kill scratch session') && !b.closest('.scratch-head'))!.click();
+    await until(app, () => !!killed);
+    // The switch tears the keyed tree down BEFORE `live` ever goes false, and
+    // the reader opens the new server's panel.
+    app.window.__scratch.bump();
+    await app.flush();
+    app.window.__scratch.open = true;
+    await until(app, () => !!app.document.querySelector('.scratch .xterm-wrap'));
+    killed!({ killed: true });
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.equal(app.window.__scratch.open, true, 'the old panel\'s kill completion did not close the new one');
+  } finally { await app.close(); }
+});
