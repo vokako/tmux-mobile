@@ -241,6 +241,95 @@ test('an entry that does not know its machine is merged before it publishes', as
   }
 });
 
+test('two unknown entries racing to one machine leave one runtime, in either order', async () => {
+  // The ordinary way a duplicate appears: two migrated address-history rows
+  // (or a hand-added address) that turn out to be the same machine. Whichever
+  // authenticates FIRST becomes that machine's canonical entry; the other is
+  // absorbed by `recordServer`, and its runtime must be released — not merely
+  // disconnected — because its id no longer exists. A disconnected handle
+  // could dial again, keeps its liveness clock, and anything that captured
+  // the dead id would go on addressing a server that is gone.
+  for (const winnerFirst of [true, false]) {
+    const one = entry({ id: 'one', name: 'n1', address: 'ws://n1:9899', token: 'tok' });
+    const two = entry({ id: 'two', name: 'n2', address: 'ws://n2:9899', token: 'tok' });
+    const storage = mem({ tmux_servers: JSON.stringify([one, two]), tmux_server_current: 'one' });
+    const fleet = createServerFleet({ storage });
+    try {
+      const r1 = fleet.include(one);
+      const r2 = fleet.include(two);
+      assert.deepEqual(fleet.ids(), ['one', 'two'], 'two entries, two runtimes until they authenticate');
+
+      // Both dials are in flight before either answer arrives.
+      const d1 = r1.dial();
+      const s1 = MockWebSocket.instances.at(-1)!;
+      const d2 = r2.dial();
+      const s2 = MockWebSocket.instances.at(-1)!;
+      assert.notEqual(s1, s2, 'one socket each');
+      const auth = (s: MockWebSocket) => {
+        s.readyState = MockWebSocket.OPEN;
+        s.message({ server_nonce: '00'.repeat(16) });
+        s.message({ result: { authenticated: true, machine_id: 'm-same', hostname: 'same-host' } });
+      };
+      // The auth answers come back in the order the test chooses, which is the
+      // part neither runtime controls.
+      if (winnerFirst) { auth(s1); await d1; auth(s2); } else { auth(s2); await d2; auth(s1); }
+      const [first, second] = winnerFirst ? [await d1, await d2] : [await d2, await d1];
+      const [winner, loser] = winnerFirst ? [r1, r2] : [r2, r1];
+      const loserSocket = winnerFirst ? s2 : s1;
+
+      assert.equal(first.ok, true, 'the first to authenticate owns the machine');
+      assert.equal(second.ok, false);
+      assert.equal(!second.ok && second.reason, 'elsewhere');
+      assert.equal(!second.ok && second.reason === 'elsewhere' && second.entry.id, winner.id);
+
+      assert.deepEqual(loadServers(storage).map((s) => s.id), [winner.id], 'one entry survives');
+      assert.deepEqual(fleet.ids(), [winner.id], 'and one runtime');
+      assert.equal(fleet.get(loser.id), undefined, 'the fleet forgot the merged-away id');
+      assert.equal(loserSocket.readyState, MockWebSocket.CLOSED, 'its socket is closed');
+      await assert.rejects(loser.api.listSessions(), /connection disposed/u,
+        'and the handle is terminal, not merely disconnected');
+      await assert.rejects(loser.connection.connect('ws://n2:9899', 'tok'), /connection disposed/u,
+        'so it cannot dial its way back');
+
+      // A reply that was already on the wire when the merge happened resolves
+      // nothing, on either runtime.
+      loserSocket.message({ id: 1, result: [{ name: 'ghost' }] });
+      const live = winner.api.listSessions();
+      await settle();
+      const winnerSocket = winnerFirst ? s1 : s2;
+      winnerSocket.message({ id: winnerSocket.texts().at(-1).id, result: [{ name: 'real' }] });
+      assert.deepEqual((await live).map((s: any) => s.name), ['real']);
+    } finally {
+      fleet.dropAll();
+    }
+  }
+});
+
+test('a runtime releases itself when its entry is absorbed, with no fleet to help', async () => {
+  // The rule belongs to the runtime, not to the fleet: whoever holds a
+  // runtime directly (②b's provider, a test) must not be left with a handle
+  // that can dial its way back to a server that no longer exists.
+  const known = entry({ id: 'known', name: 'n1', address: 'ws://n1:9899', token: 'tok', machineId: 'm-a' });
+  const guess = entry({ id: 'guess', name: 'n1', address: 'ws://n1:9899', token: 'tok' });
+  const storage = mem({ tmux_servers: JSON.stringify([known, guess]), tmux_server_current: 'known' });
+  const registry = createConnectionRegistry();
+  const runtime = createServerRuntime(guess, { storage, slot: registry.ensure('guess') });
+  try {
+    const dialing = runtime.dial();
+    const socket = MockWebSocket.instances.at(-1)!;
+    socket.readyState = MockWebSocket.OPEN;
+    socket.message({ server_nonce: '00'.repeat(16) });
+    socket.message({ result: { authenticated: true, machine_id: 'm-a', hostname: 'n1-host' } });
+    const result = await dialing;
+    assert.equal(!result.ok && result.reason, 'elsewhere');
+    assert.deepEqual(loadServers(storage).map((s) => s.id), ['known'], 'the guess was absorbed');
+    await assert.rejects(runtime.api.listSessions(), /connection disposed/u);
+    await assert.rejects(runtime.connection.connect('ws://n1:9899', 'tok'), /connection disposed/u);
+  } finally {
+    registry.disposeAll();
+  }
+});
+
 test('an entry whose machine is new keeps its own id and gets stamped', async () => {
   const fresh = entry({ id: 'fresh', name: 'ws://n:9899', address: 'ws://n:9899', token: 'tokN' });
   const storage = mem({ tmux_servers: JSON.stringify([fresh]), tmux_server_current: 'fresh' });

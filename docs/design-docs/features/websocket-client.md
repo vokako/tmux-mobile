@@ -258,6 +258,14 @@ in production, no serverId on any runtime reference, no change to parking
 (#315), read marks (#334) or the default page (#333). The union views and the
 Aggregate switch are phases ② and ③.
 
+One correction to how phase ① was described (reviewer P2, 2026-10-09): it was
+not a strictly zero-behaviour change. `dispose()` now settles a dial still in
+flight immediately, where the old module let its connect timeout reject the
+promise later. Nothing in production could observe it — the facade's one slot
+is never disposed — but "zero behaviour change in Single mode" is the wrong
+claim for it; "every existing Single-mode regression still passes, byte for
+byte" is the one the evidence supports.
+
 ## A name stopped being an address (board #335 ②)
 
 Phase ② gives every referenced object a server, so one client can hold two
@@ -327,6 +335,15 @@ Identity, which is the reason a runtime exists rather than a field on
   and authenticated as one that already has an entry (a migrated
   address-history row). The old entry's name, token and address are untouched
   either way.
+- **A merged-away runtime is released, not just disconnected.** Two unknown
+  entries racing to the same machine (two migrated address-history rows) is the
+  ordinary way a duplicate appears, in either auth order: the first to
+  authenticate becomes the canonical entry and `recordServer` absorbs the
+  other. The loser's id no longer exists, so its runtime disposes itself and
+  tells the fleet to forget the key. Disconnecting would leave a handle that can
+  dial again, a liveness clock still ticking and anything that captured the dead
+  id; after dispose a reply already on that wire resolves nothing and `call`
+  rejects.
 - **Recording is never activating.** A dial writes through `recordServer` and
   `adoptHostname` only; CURRENT and the live mirror keys stay the switch
   path's, or a background server could take the screen.
@@ -619,7 +636,10 @@ reach another machine cannot route that machine's panes into this entry's
 views. A dial RECORDS and never ACTIVATES — CURRENT and the live mirror keys
 belong to the switch path, or a background server could take the screen. The
 fleet matches by entry id and machine id only; one machine never gets two
-runtimes, and `server-fleet.source.test.ts` fails if `address`, the ws.ts
+runtimes, and a runtime whose entry is absorbed into another machine's
+disposes itself and has the fleet forget its id — a merely disconnected handle
+can dial again and keeps its liveness clock ticking.
+`server-fleet.source.test.ts` fails if `address`, the ws.ts
 facade or `localStorage` appears in either module. Capabilities are the asked
 server's answer and `null` means "not answered yet" — a timeout must not flip
 `hub` off, because false unmounts the always-mounted Hub and destroys the state

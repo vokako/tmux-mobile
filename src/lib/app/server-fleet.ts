@@ -66,6 +66,10 @@ export function createServerFleet(deps: ServerFleetDeps): ServerFleet {
     const runtime = createServerRuntime(entry, {
       storage,
       slot: registry.ensure(entry.id),
+      // A dial can prove the entry was absorbed into another machine's. The
+      // runtime disposes itself; the fleet forgets the key, so neither map is
+      // left pointing at a server that no longer exists.
+      onIdentityLost: () => { if (runtimes.get(entry.id) === runtime) drop(entry.id); },
       ...(connectTimeoutMs == null ? {} : { connectTimeoutMs }),
     });
     runtimes.set(entry.id, runtime);

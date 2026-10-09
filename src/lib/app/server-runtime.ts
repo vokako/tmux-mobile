@@ -101,11 +101,18 @@ export interface ServerRuntimeDeps {
   storage: Store;
   /** From the connection registry, which owns this object's lifetime. */
   slot: ConnectionSlot;
+  /** Called once when a dial proves this runtime's ENTRY no longer exists:
+   * it authenticated as a machine whose canonical entry is another one, and
+   * `recordServer` absorbed this id into it. The runtime has already disposed
+   * itself by then; this is how the layer that holds the membership (the
+   * fleet) learns to forget the key, so a merged-away server cannot linger as
+   * a live socket, a liveness timer and a store slot under a dead id. */
+  onIdentityLost?: () => void;
   connectTimeoutMs?: number;
 }
 
 export function createServerRuntime(entry: ServerEntry, deps: ServerRuntimeDeps): ServerRuntime {
-  const { storage, slot, connectTimeoutMs } = deps;
+  const { storage, slot, onIdentityLost, connectTimeoutMs } = deps;
   const { connection, api } = slot;
   const id = entry.id;
   let known: ServerEntry = entry;
@@ -171,6 +178,19 @@ export function createServerRuntime(entry: ServerEntry, deps: ServerRuntimeDeps)
       // the same fact: this is not the server this runtime is for.
       connection.disconnect();
       adopt(machine, host);
+      const lost = !loadServers(storage).some((s) => s.id === id);
+      // Two unknown entries racing to the same machine is the ordinary way
+      // this happens, in either auth order: whichever authenticates first
+      // becomes the machine's canonical entry and `recordServer` absorbs the
+      // other. The loser is not merely on the wrong address — its id no longer
+      // exists, so it can never become valid again. Disconnecting would leave
+      // a dialable handle, its liveness clock and anything that captured the
+      // dead id; dispose is terminal, so a late reply on that socket resolves
+      // nothing and `call` rejects.
+      if (lost) {
+        dispose();
+        onIdentityLost?.();
+      }
       return { ok: false, reason: 'elsewhere', entry: canonical, machineId: machine, hostname: host };
     }
     known = canonical;
