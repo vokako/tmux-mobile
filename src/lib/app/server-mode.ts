@@ -13,7 +13,8 @@ export function localServerLine(m: ServerMode | null | undefined, t: (k: string)
   switch (m.mode) {
     case 'gateway': return { label, value: `${t('localServerGateway')} · ${m.url}` };
     case 'embedded': return { label, value: `${t('localServerEmbedded')} · ${m.url}` };
-    case 'starting': return { label, value: `${t('localServerStarting')} · ${m.url}`, tone: 'warn' };
+    // Achromatic: a moment on the way to embedded, not a warning.
+    case 'starting': return { label, value: `${t('localServerStarting')} · ${m.url}` };
     case 'occupied': return { label, value: `${t('localServerOccupied')} · ${m.reason ?? m.url}`, tone: 'warn' };
     case 'failed': return { label, value: `${t('localServerFailed')} · ${m.reason ?? m.url}`, tone: 'danger' };
     default: return null;
