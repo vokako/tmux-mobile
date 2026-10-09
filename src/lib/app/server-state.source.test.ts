@@ -51,10 +51,11 @@ test('nothing in ②a is wired into production', async () => {
   // The revised scope: the capability ships, the switch-over is ②b. If any
   // existing module imported one of these, Single mode would have changed and
   // the review would be looking at the wrong diff.
-  const added = ['refs.ts', 'server-runtime.ts', 'server-fleet.ts', 'server-store.ts', 'server-state-migration.ts'];
+  const added = ['refs.ts', 'server-runtime.ts', 'server-fleet.ts', 'server-store.ts',
+    'server-state-migration.ts', 'server-context.ts'];
   const importers: string[] = [];
   for await (const file of glob('src/**/*.{ts,svelte}')) {
-    if (/\.(test|fixture)\.(ts|svelte)$/u.test(file)) continue;
+    if (/\.(test|fixture)\.(ts|svelte)$/u.test(file) || /\.test\.[a-z]+\.svelte$/u.test(file)) continue;
     if (added.some((a) => file.endsWith(`/app/${a}`))) continue;
     const text = await readFile(file, 'utf8');
     for (const a of added) {

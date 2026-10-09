@@ -39,6 +39,20 @@ const single = registry.ensure(SINGLE_CURRENT);
  * wiring (phase ② replaces the callers, not the object). */
 export const connection = single.connection;
 
+/**
+ * This slot's RPCs as ONE object, for phase ②a's provider-less fallback in
+ * `app/server-context.ts` — and for nothing else.
+ *
+ * It is the second door onto the facade that the rule below warns about, open
+ * on purpose and for one commit range: until ②b mounts real providers, a
+ * component with no owner must take exactly today's path, and `useServerApi`
+ * needs a `WsApi` to hand it. ②b-3 deletes the fallback and this export
+ * together. `server-context.source.test.ts` fails if anything else imports
+ * it, because a page that reaches for it is a page that has quietly gone back
+ * to "whichever server is current".
+ */
+export const compatSlotApi = single.api;
+
 // Lifecycle and transport. Connection's members are closures bound to their
 // object, so these are the same functions, not re-wrapped ones.
 export const {
