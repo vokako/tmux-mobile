@@ -95,11 +95,12 @@ Terminal 只是临时用的，并且跟你的项目没有关系". Desktop only (
   motion: none). Edge `bottom` (default) or `left`, chosen in its own head (one
   place, no Settings row; `tmux_scratch_edge`); its size per edge through the one
   `SideHandle` (`edge="top"` on `--scratch-h`, `edge="right"` on `--scratch-w`,
-  `always`, clamped to the viewport), restored by App like `--sidebar-w`. Closed
+  `always`, clamped to the viewport), restored by App like `--sidebar-w`, and clamped by the layout itself (`min(var, viewport − 80px)`, zoom-corrected) so a size stored on a larger window, or a window shrunk with the panel open, keeps the head and handle on screen (measured: h=1200/w=1400 into 900×600 then 700×420, both edges). Closed
   it is off-screen, `visibility: hidden` after the slide and `inert`, so nothing
   in it takes focus. Opening focuses the terminal once it is mounted and shown;
   closing returns focus to what had it, only if focus is still in the panel and
   that control is still there and visible.
+- **Only the reader ensures.** Opening the panel (and an explicit "Open again") is the only thing that calls `scratch_session`; the effect tracks `open`/`live` only, so a refusal is a stable error with its reason, not a retry loop. The Terminal takes the session name the server returned.
 - **Session.** `scratch_session` ensures the one project-less session the server
   owns (projects.md § the scratch terminal's session) and answers its concrete
   `session:window.pane`; the panel embeds the ONE Terminal on it (`embedded
@@ -113,7 +114,8 @@ Terminal 只是临时用的，并且跟你的项目没有关系". Desktop only (
   outside the server key; the panel and its Terminal mount INSIDE
   `{#key serverEpoch}`, so a switch destroys them with the subscription. The
   panel closes the moment a switch starts (`switching`), its `live` goes false so
-  every pending ensure/kill/focus completion is dropped (one intent counter), and
+  every pending ensure/kill/focus completion is dropped (one intent counter, also
+  bumped on destroy, whatever order the keyed tree is torn down in), and
   nothing ensures on the new server until the reader opens it there.
 - **Independence.** The Terminal page's window switcher, split and the Hub
   drawer never retarget to it; Sessions lists it like any tmux session (we do not
@@ -121,8 +123,10 @@ Terminal 只是临时用的，并且跟你的项目没有关系". Desktop only (
 
 `ScratchPanel.mount.test.ts` pins lazy ensure, focus in and back, inert when
 closed, hide-not-kill, Kill behind its confirmation, "Open again", the edge
-switch, and a switch dropping a pending ensure without re-ensuring (negative
-controls: no intent guard, ensure on every open, no `inert`);
+switch, a switch dropping a pending ensure without re-ensuring, a refusal that
+stays an error until Open again, and a kill completion after the keyed tree was
+destroyed (negative controls: no intent guard, ensure on every open, no `inert`,
+the effect tracking the phase, no destroy bump);
 `ScratchPanel.source.test.ts` pins the shared Terminal/SideHandle, the tempo, the
 head-only Escape and App's mount inside the key.
 
