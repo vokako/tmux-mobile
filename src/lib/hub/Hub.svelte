@@ -555,7 +555,21 @@
   // client's reading, or the server's correction of an impossible cache.
   // A server switch remounts this page; an answer that lands after it, or
   // for another server id, touches nothing.
+  //
+  // A pending mark clears only on THIS room's ACK at or above it: an absent
+  // room (a partial or empty answer) stays pending and is re-sent. Every
+  // ACK of a room bumps its CONFIRM generation, and a `hub_unread` answer
+  // asked before that bump never adopts — its persisted mark predates the
+  // write, and adopting it would roll the room back (equal values do not
+  // prove the answer is newer). Answers are also applied in ask order: an
+  // older answer landing after a newer one is dropped. Pending lives for
+  // this Hub's lifetime only: a mark still pending at close is re-derived
+  // from the server on the next mount (at worst one just-read message shows
+  // unread again until the next read).
   const pendingRead = {};          // session -> the mark not yet ACKed
+  const confirmGen = {};           // session -> ACKs seen
+  const answeredAsk = {};          // session -> newest hub_unread ask applied
+  let unreadAsks = 0;
   function adoptMark(s, m) {
     const cur = hubPrefs.seen(s);
     const seq = Number(m?.seq) || 0, ts = Number(m?.ts) || 0;
@@ -578,9 +592,13 @@
     const res = await hubRead(ask).catch(() => null);
     if (!res || !alive || serverId() !== server) return;   // still pending: the next refresh re-sends
     for (const [key, { s, p }] of Object.entries(sent)) {
+      const ack = res.rooms?.[key];
+      if (!ack) continue;                                    // not confirmed: still pending
+      confirmGen[s] = (confirmGen[s] ?? 0) + 1;              // every unread answer asked before is stale
       if (pendingRead[s] !== p) continue;                    // a newer read is on its way
+      if (p.seq > 0 ? (Number(ack.seq) || 0) < p.seq : !(Number(ack.seq) > 0)) continue;
       delete pendingRead[s];
-      if (res.rooms?.[key]) adoptMark(s, res.rooms[key]);
+      adoptMark(s, ack);
     }
   }
   const unread = $derived(unreadSenders(feed, hubPrefs.seen(selected)));
@@ -740,24 +758,27 @@
       if (!row) continue;
       const mark = hubPrefs.seen(s);
       marks[roomKey(row)] = mark.seq > 0 ? { seq: mark.seq } : { ts: mark.ts };
-      asked[roomKey(row)] = { s, mark };
+      asked[roomKey(row)] = { s, mark, gen: confirmGen[s] ?? 0 };
     }
     if (!Object.keys(marks).length) return;
     const server = serverId();
+    const n = ++unreadAsks;
     const res = await hubUnread(marks).catch(() => null);
     if (!res || !alive || serverId() !== server) return;
     const next = { ...roomUnread };
     const retry = [];
-    for (const [key, { s, mark }] of Object.entries(asked)) {
+    for (const [key, { s, mark, gen }] of Object.entries(asked)) {
       const now = hubPrefs.seen(s);
       if (now.seq !== mark.seq || now.ts !== mark.ts) continue;
+      if ((answeredAsk[s] ?? 0) > n) continue;               // a newer answer already landed
+      answeredAsk[s] = n;
       if (res.rooms?.[key]) next[s] = res.rooms[key];
       else delete next[s];
       // #334: a pending mark is re-sent; otherwise the cache becomes the
       // server's persisted mark (absent = the server has none). A pre-#334
       // server answers no `marks` at all and the cache is left alone.
       if (pendingRead[s]) retry.push(s);
-      else if (res.marks) adoptMark(s, res.marks[key] ?? { seq: 0, ts: 0 });
+      else if (res.marks && (confirmGen[s] ?? 0) === gen) adoptMark(s, res.marks[key] ?? { seq: 0, ts: 0 });
     }
     roomUnread = next;
     if (retry.length) void flushRead(retry);

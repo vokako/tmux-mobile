@@ -247,6 +247,14 @@ impl Store {
             .map_err(|e| format!("read room head: {e}"))
     }
 
+    /// The seq of `room`'s newest message at or before `ts`.
+    pub fn hub_seq_at_or_before(&self, room: &str, ts: i64) -> Result<Option<i64>, String> {
+        self.conn
+            .prepare_cached("SELECT MAX(seq) FROM hub_msgs WHERE room = ?1 AND ts <= ?2")
+            .and_then(|mut st| st.query_row(rusqlite::params![room, ts], |r| r.get(0)))
+            .map_err(|e| format!("resolve ts: {e}"))
+    }
+
     /// Move `room`'s read mark FORWARD (board #334) and return where it now
     /// is. The SERVER resolves the mark: a `seq` is clamped to the room's
     /// newest message (a cache from a wiped database cannot hide the next

@@ -2648,56 +2648,67 @@ test('every project row shows its unread count; reading the room clears it by se
 // moves forward; hub_unread reads from the later of the server's and the
 // client's mark and answers the PERSISTED marks.
 function readServer() {
-  const room = 'proj:other';
-  const msgs = [
-    { seq: 10, id: 'a', ts: 60, room, from: 'alice', to: [], body: 'one' },
-    { seq: 11, id: 'b', ts: 60, room, from: 'bob', to: [], body: 'two' },
-  ];
+  const msg = (room: string, seq: number, from = 'alice') => ({ seq, id: `${room}-${seq}`, ts: 60 + seq, room, from, to: [], body: `m${seq}` });
+  const rooms: Record<string, ReturnType<typeof msg>[]> = {
+    'proj:other': [msg('proj:other', 10), msg('proj:other', 11, 'bob')],
+    'proj:third': [msg('proj:third', 20), msg('proj:third', 21)],
+  };
   const marks: Record<string, { seq: number; ts: number }> = {};
   const reads: Record<string, unknown>[] = [];
   let failReads = 0;
-  const head = msgs.at(-1)!;
+  /** Rooms the fake server confirms; null = all (a room left out wrote nothing and is absent). */
+  let acks: Set<string> | null = null;
   return {
-    marks, reads, msgs,
+    marks, reads, rooms, msg,
     failNextReads(n: number) { failReads = n; },
+    ackOnly(list: string[] | null) { acks = list && new Set(list); },
     rpc: {
-      projectList: async () => ({ projects: ['fixture', 'other'].map((session) => ({
+      projectList: async () => ({ projects: ['fixture', 'other', 'third'].map((session) => ({
         project: { id: session, name: session, session, path: `/${session}` }, live: true, slots: [],
       })) }),
-      hubLog: async (session: string) => ({ has_more: false, messages: session === 'other' ? msgs : [] }),
-      hubUnread: async (rooms: Record<string, { seq?: number; ts?: number }>) => {
+      hubLog: async (session: string) => ({ has_more: false, messages: rooms[`proj:${session}`] ?? [] }),
+      hubUnread: async (asked: Record<string, { seq?: number; ts?: number }>) => {
         const out: Record<string, unknown> = {};
         const persisted: Record<string, unknown> = {};
-        for (const [r, m] of Object.entries(rooms)) {
-          if (r !== room) continue;
-          const client = (m.seq ?? 0) <= head.seq ? (m.seq ?? 0) : 0;
+        for (const [r, m] of Object.entries(asked)) {
+          const list = rooms[r];
+          if (!list) continue;
+          const head = list.at(-1)!.seq;
+          const client = (m.seq ?? 0) <= head ? (m.seq ?? 0) : 0;
           const at = Math.max(client, marks[r]?.seq ?? 0);
-          const above = msgs.filter((x) => x.seq > at);
+          const above = list.filter((x) => x.seq > at);
           if (above.length) out[r] = { count: above.length, first_seq: above[0]!.seq, last_seq: above.at(-1)!.seq };
-          if (marks[r]) persisted[r] = marks[r];
+          if (marks[r]) persisted[r] = { ...marks[r] };
         }
         return { rooms: out, marks: persisted };
       },
-      hubRead: async (rooms: Record<string, { seq?: number; ts?: number }>) => {
-        reads.push(rooms);
+      hubRead: async (asked: Record<string, { seq?: number; ts?: number }>) => {
+        reads.push(asked);
         if (failReads > 0) { failReads--; throw new Error('offline'); }
         const out: Record<string, unknown> = {};
-        for (const [r, m] of Object.entries(rooms)) {
-          if (r !== room || !m.seq) continue;
-          const seq = Math.min(m.seq, head.seq);
-          const ts = msgs.find((x) => x.seq === seq)!.ts;
-          marks[r] = { seq: Math.max(seq, marks[r]?.seq ?? 0), ts: Math.max(ts, marks[r]?.ts ?? 0) };
-          out[r] = marks[r];
+        for (const [r, m] of Object.entries(asked)) {
+          const list = rooms[r];
+          if (!list || !m.seq || (acks && !acks.has(r))) continue;
+          const hit = [...list].reverse().find((x) => x.seq <= m.seq!)!;
+          marks[r] = { seq: Math.max(hit.seq, marks[r]?.seq ?? 0), ts: Math.max(hit.ts, marks[r]?.ts ?? 0) };
+          out[r] = { ...marks[r] };
         }
         return { rooms: out };
       },
     },
   };
 }
+/** A latch: `wait()` parks a call until `open()`. */
+function latch() {
+  let release: () => void = () => {};
+  let armed = false;
+  const parked = new Promise<void>((r) => { release = r; });
+  return { arm() { armed = true; }, get armed() { return armed; }, wait: () => (armed ? parked : Promise.resolve()), open: () => release() };
+}
 async function mountReader(context: TestContext, rpc: Record<string, unknown>, seen?: Record<string, unknown>) {
   const fixture = await compiledHub();
   const { rpc: base } = roomFixture();
-  return fixture.mount(context, {
+  const app = await fixture.mount(context, {
     props: { visible: true },
     setup(window) {
       window.Element.prototype.getAnimations = () => [];
@@ -2708,30 +2719,34 @@ async function mountReader(context: TestContext, rpc: Record<string, unknown>, s
     },
     modules: [{ ...base, ...rpc }],
   });
+  return app;
 }
 const otherRow = (app: { document: Document }) => app.document.querySelector<HTMLElement>('.proj-row[aria-label^="other"]');
 const otherCount = (app: { document: Document }) => otherRow(app)?.querySelector('.side-unread')?.textContent?.trim() ?? '';
-const seenOf = (app: { window: any }) => JSON.parse(app.window.localStorage.getItem('tmux_hub_seen') ?? '{}').other;
+const seenOf = (app: { window: any }, room = 'other') => JSON.parse(app.window.localStorage.getItem('tmux_hub_seen') ?? '{}')[room];
+const rowOf = (app: { document: Document }, room: string) => app.document.querySelector<HTMLElement>(`.proj-row[aria-label^="${room}"]`);
+const countOf = (app: { document: Document }, room: string) => rowOf(app, room)?.querySelector('.side-unread')?.textContent?.trim() ?? '';
+const readKeys = (srv: { reads: Record<string, unknown>[] }) => srv.reads.map((r) => Object.keys(r).sort().join(','));
 
 test('a fresh client inherits the server\'s read mark; its reading reaches the next client (#334)', { timeout: 60000 }, async (context) => {
   const srv = readServer();
-  srv.marks['proj:other'] = { seq: 10, ts: 60 };          // read to `one` on another client
+  srv.marks['proj:other'] = { seq: 10, ts: 70 };          // read to `one` on another client
   const a = await mountReader(context, srv.rpc);
   try {
     for (let i = 0; i < 12 && otherCount(a) !== '1'; i++) await a.flush();
     assert.equal(otherCount(a), '1', 'no local mark: the server\'s mark is the watermark, not the whole room');
-    assert.deepEqual(seenOf(a), { seq: 10, ts: 60 }, 'and the cache adopts the persisted mark');
+    assert.deepEqual(seenOf(a), { seq: 10, ts: 70 }, 'and the cache adopts the persisted mark');
     otherRow(a)!.querySelector<HTMLElement>('.proj-pick')!.click();
     for (let i = 0; i < 20 && (otherCount(a) || !srv.marks['proj:other'] || srv.marks['proj:other'].seq < 11); i++) await a.flush();
     assert.equal(otherCount(a), '');
-    assert.deepEqual(srv.marks['proj:other'], { seq: 11, ts: 60 }, 'the server holds the read');
+    assert.deepEqual(srv.marks['proj:other'], { seq: 11, ts: 71 }, 'the server holds the read');
   } finally { await a.close(); }
   const b = await mountReader(context, srv.rpc);          // another fresh client
   try {
     for (let i = 0; i < 12 && !otherRow(b); i++) await b.flush();
     for (let i = 0; i < 6; i++) await b.flush();
     assert.equal(otherCount(b), '', 'the next client agrees: nothing unread');
-    assert.deepEqual(seenOf(b), { seq: 11, ts: 60 });
+    assert.deepEqual(seenOf(b), { seq: 11, ts: 71 });
   } finally { await b.close(); }
 });
 
@@ -2741,13 +2756,13 @@ test('an idle client converges on its next refresh after another client reads (#
   try {
     for (let i = 0; i < 12 && otherCount(app) !== '2'; i++) await app.flush();
     assert.equal(otherCount(app), '2');
-    srv.marks['proj:other'] = { seq: 11, ts: 60 };        // the phone read the room
+    srv.marks['proj:other'] = { seq: 11, ts: 71 };        // the phone read the room
     for (let i = 0; i < 4; i++) await app.flush();
     assert.equal(otherCount(app), '2', 'no instant push is claimed');
     await app.advance(20000);
     for (let i = 0; i < 12 && otherCount(app); i++) await app.flush();
     assert.equal(otherCount(app), '', 'the 20 s sidebar read adopts it');
-    assert.deepEqual(seenOf(app), { seq: 11, ts: 60 });
+    assert.deepEqual(seenOf(app), { seq: 11, ts: 71 });
   } finally { await app.close(); }
 });
 
@@ -2762,12 +2777,12 @@ test('a read whose hub_read fails stays pending and is re-sent until ACKed (#334
     for (let i = 0; i < 4; i++) await app.flush();
     assert.equal(srv.marks['proj:other'], undefined, 'every hub_read so far failed');
     srv.failNextReads(0);
-    assert.deepEqual(seenOf(app), { seq: 11, ts: 60 }, 'the optimistic cache keeps the room read here');
+    assert.deepEqual(seenOf(app), { seq: 11, ts: 71 }, 'the optimistic cache keeps the room read here');
     assert.equal(otherCount(app), '', 'the count reads from the later of the two marks');
     await app.advance(20000);
     for (let i = 0; i < 12 && !srv.marks['proj:other']; i++) await app.flush();
     assert.ok(srv.reads.length >= 2, 'the pending mark was re-sent by the refresh');
-    assert.deepEqual(srv.marks['proj:other'], { seq: 11, ts: 60 }, 'and ACKed: another client now agrees');
+    assert.deepEqual(srv.marks['proj:other'], { seq: 11, ts: 71 }, 'and ACKed: another client now agrees');
     const sent = srv.reads.length;
     await app.advance(20000);
     for (let i = 0; i < 6; i++) await app.flush();
@@ -2777,7 +2792,7 @@ test('a read whose hub_read fails stays pending and is re-sent until ACKed (#334
 
 test('an impossible cached mark is corrected by the server; a late ACK after a server switch touches nothing (#334)', { timeout: 60000 }, async (context) => {
   const srv = readServer();
-  srv.marks['proj:other'] = { seq: 10, ts: 60 };
+  srv.marks['proj:other'] = { seq: 10, ts: 70 };
   let release: (() => void) | null = null;
   const app = await mountReader(context, {
     ...srv.rpc,
@@ -2785,13 +2800,13 @@ test('an impossible cached mark is corrected by the server; a late ACK after a s
     // resolved the mark lower — a deleted head), so a write would show.
     hubRead: async () => {
       await new Promise<void>((r) => { release = r; });
-      return { rooms: { 'proj:other': { seq: 10, ts: 60 } } };
+      return { rooms: { 'proj:other': { seq: 10, ts: 70 } } };
     },
   }, { other: { seq: 9_000_000, ts: 9_000_000 } });
   try {
     for (let i = 0; i < 12 && otherCount(app) !== '1'; i++) await app.flush();
     assert.equal(otherCount(app), '1', 'the future mark hides nothing');
-    assert.deepEqual(seenOf(app), { seq: 10, ts: 60 }, 'the cache became the server\'s persisted mark');
+    assert.deepEqual(seenOf(app), { seq: 10, ts: 70 }, 'the cache became the server\'s persisted mark');
     otherRow(app)!.querySelector<HTMLElement>('.proj-pick')!.click();
     for (let i = 0; i < 20 && !release; i++) await app.flush();
     assert.ok(release, 'hub_read in flight');
@@ -2800,6 +2815,118 @@ test('an impossible cached mark is corrected by the server; a late ACK after a s
     release!();
     for (let i = 0; i < 6; i++) await app.flush();
     assert.deepEqual(seenOf(app), { seq: 3, ts: 3 }, 'the late ACK did not write into the other server\'s cache');
+  } finally { await app.close(); }
+});
+
+test('a pending mark clears only on its own room\'s ACK: an empty or partial answer is re-sent, an ACKed room is not (#334 review)', { timeout: 60000 }, async (context) => {
+  const srv = readServer();
+  srv.ackOnly([]);                                          // the server answers {rooms: {}}
+  const app = await mountReader(context, srv.rpc);
+  try {
+    for (let i = 0; i < 12 && countOf(app, 'other') !== '2'; i++) await app.flush();
+    rowOf(app, 'other')!.querySelector<HTMLElement>('.proj-pick')!.click();
+    for (let i = 0; i < 20 && !srv.reads.length; i++) await app.flush();
+    for (let i = 0; i < 4; i++) await app.flush();
+    assert.ok(srv.reads.length >= 1 && readKeys(srv).every((k) => k === 'proj:other'), 'sent (and retried by the read\'s own refresh), answered empty');
+    srv.ackOnly(['proj:third']);                            // a partial server from here on
+    rowOf(app, 'third')!.querySelector<HTMLElement>('.proj-pick')!.click();
+    for (let i = 0; i < 20 && !srv.marks['proj:third']; i++) await app.flush();
+    assert.deepEqual(srv.marks['proj:third'], { seq: 21, ts: 81 }, 'third ACKed');
+    for (let i = 0; i < 4; i++) await app.flush();
+    const before = srv.reads.length;
+    await app.advance(20000);
+    for (let i = 0; i < 12 && srv.reads.length <= before; i++) await app.flush();
+    const later = readKeys(srv).slice(before);
+    assert.ok(later.length > 0 && later.every((k) => k === 'proj:other'), `the unconfirmed room is re-sent, the ACKed one is not: ${later}`);
+    srv.ackOnly(null);
+    await app.advance(20000);
+    for (let i = 0; i < 12 && !srv.marks['proj:other']; i++) await app.flush();
+    assert.deepEqual(srv.marks['proj:other'], { seq: 11, ts: 71 }, 'confirmed at last');
+    const sent = srv.reads.length;
+    await app.advance(20000);
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.equal(srv.reads.length, sent, 'nothing left pending');
+  } finally { await app.close(); }
+});
+
+test('an ACK below the pending mark does not clear it (#334 review)', { timeout: 60000 }, async (context) => {
+  const srv = readServer();
+  let lowAcks = 1;
+  const app = await mountReader(context, {
+    ...srv.rpc,
+    // An older confirmation (for a mark below the one now pending) answers first.
+    hubRead: async (asked: Record<string, { seq?: number }>) => {
+      srv.reads.push(asked);
+      if (lowAcks-- > 0) { srv.marks['proj:other'] = { seq: 10, ts: 70 }; return { rooms: { 'proj:other': { seq: 10, ts: 70 } } }; }
+      srv.reads.pop();
+      return srv.rpc.hubRead(asked);
+    },
+  });
+  try {
+    for (let i = 0; i < 12 && countOf(app, 'other') !== '2'; i++) await app.flush();
+    rowOf(app, 'other')!.querySelector<HTMLElement>('.proj-pick')!.click();
+    for (let i = 0; i < 20 && !srv.reads.length; i++) await app.flush();
+    for (let i = 0; i < 4; i++) await app.flush();
+    assert.deepEqual(seenOf(app), { seq: 11, ts: 71 }, 'the low ACK did not lower the cache');
+    await app.advance(20000);
+    for (let i = 0; i < 12 && (srv.marks['proj:other']?.seq ?? 0) < 11; i++) await app.flush();
+    assert.deepEqual(srv.marks['proj:other'], { seq: 11, ts: 71 }, 'still pending, so it was re-sent and confirmed');
+  } finally { await app.close(); }
+});
+
+test('an unread answer asked before an ACK never rolls the room back (#334 review)', { timeout: 60000 }, async (context) => {
+  const srv = readServer();
+  srv.marks['proj:other'] = { seq: 10, ts: 70 };
+  const r = latch(), u = latch();
+  const app = await mountReader(context, {
+    ...srv.rpc,
+    hubRead: async (asked: Record<string, { seq?: number }>) => { await r.wait(); return srv.rpc.hubRead(asked); },
+    // Computed when ASKED (persisted 10), delivered when released.
+    hubUnread: async (asked: Record<string, { seq?: number }>) => { const v = await srv.rpc.hubUnread(asked); await u.wait(); return v; },
+  });
+  try {
+    for (let i = 0; i < 12 && countOf(app, 'other') !== '1'; i++) await app.flush();
+    r.arm(); u.arm();
+    rowOf(app, 'other')!.querySelector<HTMLElement>('.proj-pick')!.click();
+    for (let i = 0; i < 20 && seenOf(app)?.seq !== 11; i++) await app.flush();
+    r.open();                                               // the ACK (11) lands first
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.deepEqual(srv.marks['proj:other'], { seq: 11, ts: 71 });
+    u.open();                                               // then the answer that saw 10
+    for (let i = 0; i < 8; i++) await app.flush();
+    assert.deepEqual(seenOf(app), { seq: 11, ts: 71 }, 'the cache stays at the ACK');
+    assert.equal(countOf(app, 'other'), '', 'the sidebar stays read');
+    assert.equal(app.document.querySelector('.acard[data-agent="bob"] .unread-dot'), null, 'the roster stays read');
+  } finally { await app.close(); }
+});
+
+test('unread answers apply in ask order: an older one landing late does not overwrite a newer one (#334 review)', { timeout: 60000 }, async (context) => {
+  const srv = readServer();
+  const gates: (() => void)[] = [];
+  let hold = false;
+  const app = await mountReader(context, {
+    ...srv.rpc,
+    hubUnread: async (asked: Record<string, { seq?: number }>) => {
+      const v = await srv.rpc.hubUnread(asked);
+      if (hold) await new Promise<void>((r) => { gates.push(r); });
+      return v;
+    },
+  });
+  try {
+    for (let i = 0; i < 12 && countOf(app, 'other') !== '2'; i++) await app.flush();
+    hold = true;
+    await app.advance(20000);                               // U1 sees 2
+    for (let i = 0; i < 12 && gates.length < 1; i++) await app.flush();
+    srv.rooms['proj:other']!.push(srv.msg('proj:other', 12));
+    await app.advance(20000);                               // U2 sees 3
+    for (let i = 0; i < 12 && gates.length < 2; i++) await app.flush();
+    assert.equal(gates.length, 2, 'two answers in flight');
+    gates[1]!();
+    for (let i = 0; i < 6 && countOf(app, 'other') !== '3'; i++) await app.flush();
+    assert.equal(countOf(app, 'other'), '3');
+    gates[0]!();
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.equal(countOf(app, 'other'), '3', 'the older answer is dropped');
   } finally { await app.close(); }
 });
 

@@ -86,7 +86,11 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
                     ts = 0;
                 }
                 if let Some((s, t)) = rooms::read_mark(room) {
-                    seq = Some(seq.map_or(s, |c| c.max(s)));
+                    // A legacy ts-only client mark is first resolved to the
+                    // room's seq (the newest message at or before it), THEN
+                    // compared: a newer legal ts must not lose to the seq.
+                    let client = seq.or_else(|| (ts > 0).then(|| rooms::seq_at_or_before(room, ts)).flatten());
+                    seq = Some(client.map_or(s, |c| c.max(s)));
                     marks.insert(room.clone(), serde_json::json!({ "seq": s, "ts": t }));
                 }
                 if let Some(sum) = rooms::unread(room, seq, ts) {
@@ -1886,6 +1890,16 @@ mod tests {
         let ask = |mark: serde_json::Value| handle_hub_request(&req("hub_unread", serde_json::json!({ "rooms": { &fresh: mark } })), None).result.unwrap();
         assert_eq!(ask(serde_json::json!({ "ts": 9_000_000 }))["rooms"][&fresh]["count"], 1, "a future ts is dropped too");
         assert_eq!(ask(serde_json::json!({ "ts": 1_000 }))["rooms"].get(&fresh), None, "a real ts mark still reads");
+        // A server mark AND a newer legal legacy ts: the ts is resolved to
+        // its seq and wins; an older ts loses to the server mark.
+        let legacy = format!("proj:legacy-{}", uuid::Uuid::new_v4());
+        let l0 = rooms::seed_msg(&legacy, &format!("l0-{legacy}"), 100, "lead", &[], "l0");
+        rooms::seed_msg(&legacy, &format!("l1-{legacy}"), 200, "lead", &[], "l1");
+        let l2 = rooms::seed_msg(&legacy, &format!("l2-{legacy}"), 300, "lead", &[], "l2");
+        rooms::mark_read(&legacy, l0["seq"].as_i64(), 0).unwrap();
+        let lask = |mark: serde_json::Value| handle_hub_request(&req("hub_unread", serde_json::json!({ "rooms": { &legacy: mark } })), None).result.unwrap();
+        assert_eq!(lask(serde_json::json!({ "ts": 250 }))["rooms"][&legacy], serde_json::json!({ "count": 1, "first_seq": l2["seq"], "last_seq": l2["seq"] }), "the newer ts reads as l1's seq");
+        assert_eq!(lask(serde_json::json!({ "ts": 50 }))["rooms"][&legacy]["count"], 2, "an older ts loses to the server mark");
         // The answer's mark is the PERSISTED one, never the effective max.
         assert_eq!(unread(serde_json::json!({ "seq": 9_000_000 }))["marks"][&room], serde_json::json!({ "seq": a["seq"], "ts": 1_000 }));
     }

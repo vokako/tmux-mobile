@@ -279,6 +279,12 @@ pub fn room_head(room: &str) -> Option<(i64, i64)> {
     with_store(|s| s.hub_room_head(room)).ok().flatten()
 }
 
+/// The seq of `room`'s newest message at or before `ts` (a legacy ts mark
+/// resolved to the room's own order, board #334).
+pub fn seq_at_or_before(room: &str, ts: i64) -> Option<i64> {
+    with_store(|s| s.hub_seq_at_or_before(room, ts)).ok().flatten()
+}
+
 fn is_hidden(room: &str, seq: i64, hidden: &[String]) -> bool {
     with_store(|s| s.hub_message_by_seq(room, seq))
         .ok()

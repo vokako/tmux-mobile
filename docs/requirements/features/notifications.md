@@ -14,13 +14,13 @@ This is a **running-client** notification path for browser/PWA/webview. It does 
 
 ## Level
 
-Settings → Notifications carries a level, persisted to `tmux_notify_level`, three nested rungs:
+Settings → Notifications carries a level, persisted to `tmux_notify_level`, three nested rungs over the bell (board #334; the stored values did not change):
 
-- **Finished** (`done`): an agent's board move to review/done, plus historical `[tmm done]` rows.
-- **Replies** (`replies`, default): Finished plus every agent reply.
-- **Everything** (`all`): Replies plus ambient `[tmm status working]` progress notes.
+- **Finished** (`done`): an agent's board move to review/done, plus `[tmm done]` notes.
+- **To me** (`replies`, default): Finished plus every reply addressed to you.
+- **To me + progress** (`all`): To me plus `[tmm status …]` notes addressed to you.
 
-App narration and the human's own messages are never news at any level. An unknown stored value reads as the default.
+Only a finished task, or a reply / status note addressed to you, can ever ring or reach the bell; agents talking to each other count as room unread only. App narration and the human's own messages are never news at any level. An unknown stored value reads as the default.
 
 ## What counts as news
 
@@ -41,8 +41,15 @@ A failed audio play rolls back only its own cooldown claim. A delayed rejection 
 
 ## Notification centre (board #322)
 
-- Every alert-worthy message (the one news rule; all levels, muted or not) is recorded in an in-app list: project, sender, a one-line excerpt, time; newest first; the last 50; per server.
+- Every bell message (a finished task, or a reply / status note addressed to you; all levels, muted or not) is recorded in an in-app list, one entry per message (a turn that finishes a task and answers you leaves two): project, sender, a one-line excerpt, time; newest first; the last 50; per server.
 - Desktop: a bell in the rail above the server switcher with an unviewed count. Phone: a dot on the Hub tab and a bell in the Hub header.
 - Default view All; replies addressed to you are emphasised, with a To me filter. Clear empties the list only.
 - Tapping an entry opens its project at that exact message (loading the page around it when needed, revealing it through a filter or the chat-only level without changing the setting) and marks it seen; if the message cannot be reached, the entry stays with the reason.
 - Every project row shows its unread count in the accent colour; red stays only for a real agent failure.
+
+## Read state (board #334)
+
+- One read mark per room, kept by the server for the human: every client of that server shows the same unread after its next read (the 20 s sidebar read, a push, or a reconnect). A fresh client inherits it.
+- Upgrading marked every existing room read to its newest message; a room created later counts every message until it is read.
+- A read is retried until the server confirms it, for as long as the Hub stays open; a read still unconfirmed when the app closes is lost, and the server's mark is used on the next open.
+- Agents reading the room (`tmm log`) never mark it read.
