@@ -316,7 +316,7 @@ test('history paging: anchored prepend, guarded rooms, parked cursors (board #9)
   // is off (overflow-anchor: none), so without this every older page teleports
   // the reader.
   const walk = /async function loadOlder\(\) \{[\s\S]*?\n  \}/u.exec(source)?.[0] ?? '';
-  assert.match(walk, /if \(selected !== s\) return;/u, 'a room switch drops the in-flight page');
+  assert.match(walk, /if \(selected !== s \|\| readGen !== g\) return;/u, 'a room switch, a jump or a return drops the in-flight page (#322 reading generation)');
   assert.match(walk, /await withReadingAnchor\(\(\) => \{/u,
     'the anchored prepend is AWAITED — releasing loadingOlder before the scroll compensation re-walked the same cursor');
   assert.match(walk, /if \(loadingOlder \|\| !selected \|\| \(!histMore && !actMore\)\) return;/u,
@@ -340,12 +340,13 @@ test('the gap walk keeps captured inputs and validates its added return boundary
   assert.match(poll, /await walkFeedGap\(\{ session: s, floorTs, cursor: res\.oldest_seq \},/u);
   assert.match(poll, /readPage: \(session, cursor\) => hubLog\(session, 0, 100, cursor\)/u,
     'the existing RPC page size and before_seq arguments remain in Hub');
-  assert.match(poll, /stillCurrent: \(session\) => selected === session/u);
-  assert.match(poll, /mergePage: \(newer\) => \{ feed = mergeMessages\(feed, newer\); \}/u,
-    'each page merges into the live feed through the existing id dedupe');
+  assert.match(poll, /stillCurrent: \(session\) => selected === session && ours\(\)/u);
+  assert.match(poll, /mergePage: \(newer\) => \{ if \(ours\(\)\) feed = mergeMessages\(feed, newer\); \}/u,
+    'each page merges into the live feed through the existing id dedupe — while the reading is still ours (#322)');
+  assert.match(poll, /const ours = \(\) => selected === s && readGen === g && !windowed;/u);
   const awaited = poll.indexOf('const walked = await walkFeedGap');
-  const guard = poll.indexOf('if (!walked || selected !== s) return;');
-  const batch = poll.indexOf('if (messages?.length)');
+  const guard = poll.indexOf('if (!walked || !ours()) return;');
+  const batch = poll.indexOf('if (messages?.length) {');
   assert.ok(awaited >= 0 && guard > awaited && batch > guard,
     'a stale walk or room change during the new return await prevents batch adoption');
   assert.doesNotMatch(poll, /gapWalkStep|for \(let i = 0; i < 50/u, 'no second gap loop survives in the coordinator');
@@ -416,7 +417,7 @@ test('a confirmed project verb runs on the row it was asked on, never on `select
   for (const head of pollers) {
     const at = source.indexOf(head);
     assert.ok(at >= 0, `${head} exists`);
-    const body = source.slice(at, at + 900);
+    const body = source.slice(at, at + 1200);
     assert.match(body, /const s = selected;/u, `${head} freezes its project`);
     assert.match(body, /if \(selected !== s\) return;/u, `${head} drops a stale answer`);
   }
