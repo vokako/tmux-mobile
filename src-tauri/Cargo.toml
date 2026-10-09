@@ -67,6 +67,9 @@ serde_yaml_ng = "0.10"
 uuid = { version = "1", features = ["v4"] }
 tauri = { version = "2", features = [], optional = true }
 toml = "1.0.3"
+# `tmm setup` edits config.toml in place, keeping its comments and every key
+# it did not ask about (board #323). Already in the graph (through tauri).
+toml_edit = "0.23"
 base64 = "0.22"
 dirs = "5"
 gethostname = "0.4"

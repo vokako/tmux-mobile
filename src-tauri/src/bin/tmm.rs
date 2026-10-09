@@ -87,6 +87,8 @@ USAGE (background tasks — LOCAL tmux only, no server needed, never exits 2):
 USAGE (human or agent — self-management):
   tmm scratch [--kill]                the desktop's scratch terminal session (no project):
                                       ensure it and print its pane target, or kill it
+  tmm setup                           choose port, listen address, tmux socket, token, TLS
+                                      (config.toml; asked on the first tmm gateway too)
   tmm gateway                         ensure this machine's gateway service is installed and
                                       running (launchd agent / systemd user unit)
   tmm gateway start                   run the gateway in the foreground (what the service runs)
@@ -238,6 +240,14 @@ async fn main() {
     // machine's server rather than talking to one.
     if pos[0] == "gateway" {
         cmd_gateway(&pos[1..], &flags).await;
+        return;
+    }
+    // `tmm setup` (board #323): before Config::load, which would create
+    // config.toml with a token and so make every run look like a second one.
+    if pos[0] == "setup" {
+        if let Err(e) = tmux_mobile::gateway::setup::run_interactive() {
+            fail(EXIT_ERR, &format!("setup: {e}"));
+        }
         return;
     }
 
@@ -1389,6 +1399,13 @@ async fn resolve_project_id(ctx: &Ctx, name: &str) -> String {
 async fn cmd_gateway(rest: &[String], flags: &Flags) {
     use tmux_mobile::gateway::{self, probe, service};
     let sub = rest.first().map(String::as_str).unwrap_or("");
+    // No config.toml yet: the first-run setup, in this (foreground) caller.
+    // The installed service (`--service`) never prompts: it has no terminal.
+    if matches!(sub, "" | "install" | "start") && !flags.contains_key("service") {
+        if let Err(e) = tmux_mobile::gateway::setup::first_run() {
+            fail(EXIT_ERR, &format!("setup: {e}"));
+        }
+    }
     if sub == "start" {
         // `--service` (the installed unit's argv): config.toml ALONE, so the
         // service and `status` read the same thing.

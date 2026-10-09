@@ -2,7 +2,7 @@
 
 Runtime configuration of the WebSocket server and the Team feature. Build and dev-loop settings are in `../conventions/development.md`.
 
-File: `$XDG_CONFIG_HOME/tmux-mobile/config.toml` (fallback `~/.config/tmux-mobile/`) — token, host, port, tmux_socket, tls_cert, tls_key, scrollback, disconnect_grace_secs, kiro_engine.
+`tmm setup` writes the connection keys interactively (board #323; the first `tmm gateway` asks too when the file is absent), keeping every other key and comment. File: `$XDG_CONFIG_HOME/tmux-mobile/config.toml` (fallback `~/.config/tmux-mobile/`) — token, host, port, tmux_socket, tls_cert, tls_key, scrollback, disconnect_grace_secs, kiro_engine.
 
 ```toml
 token = "auto-generated-uuid"  # written on first launch

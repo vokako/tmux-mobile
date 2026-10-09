@@ -66,6 +66,18 @@ pub fn normalize_engine(raw: &str) -> String {
     }
 }
 
+/// Parse `text` as config.toml with the ONE schema `Config::load` reads
+/// (board #323: `tmm setup` writes through this, never a second schema).
+/// Unknown keys are allowed, as they always were.
+pub fn validate_file(text: &str) -> Result<(), String> {
+    toml::from_str::<FileConfig>(text).map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Where config.toml lives.
+pub fn config_file() -> PathBuf {
+    config_path()
+}
+
 fn config_path() -> PathBuf {
     dirs_next().join("config.toml")
 }

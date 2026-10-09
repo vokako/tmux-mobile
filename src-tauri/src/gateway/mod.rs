@@ -14,6 +14,7 @@
 //! Desktop-only, like `projects`: a phone is a client of a desktop server.
 
 pub mod probe;
+pub mod setup;
 pub mod service;
 
 use crate::config::Config;
