@@ -1,37 +1,27 @@
 <script module>
-  // Browse positions parked per SESSION, shared by every Files instance (the
-  // Files page and the Hub's drawer both mount this component) and outliving
-  // any one instance. In-memory on purpose — a temporary reading position,
-  // not a preference; the follow-the-real-cwd rule still outranks it.
-  const browsed = new Map(); // session → { cwd, sourceDir }
-  // Native downloads in flight by part id, shared by every Files instance
-  // (board #305): the page and the drawer write the same part folder, so the
-  // one-writer rule must hold across them, not only inside one.
-  const inFlight = new Map(); // part id → { owner, adopt() }
-  // How to stop each running attempt (the Downloads view's Cancel), by row id.
-  const cancels = new Map(); // row id → AbortController
-  let webSeq = 0;             // browser rows: no part, a session id
+  // Everything the Files pages remember about ONE server now lives in
+  // `files-memory.ts` as a factory (board #335 ②a-4): browse positions keyed
+  // by session name, the one-writer claim per part, and each running
+  // attempt's abort handle and settle. Both instances — this page and the
+  // Hub's drawer — share this record and outlive any one of them, which is
+  // why it is here and not in the instance.
+  //
+  // ONE instance for as long as the app looks at one server; ②b gives each
+  // runtime its own, and "reset it on a switch" becomes "drop its instance".
+  import { createFilesMemory } from './files-memory.ts';
+  const memory = createFilesMemory();
   // A fresh page has no writer yet: drop claims a previous page (a webview
   // reload in a live process) left in Rust, or its parts could never be
-  // resumed. Once per realm, before any download can start.
+  // resumed. Once per realm, before any download can start — a property of
+  // the PROCESS, not of any server, so it stays here.
   if (isTauri) invokeNative('download_release_all').catch(() => {});
-  // Each running attempt's settle, by row id (board 315): a server switch
-  // waits for them before the socket goes to another server.
-  const settles = new Map(); // row id → Promise<void>
 
   /** A server switch (board 315) stops every running download and KEEPS its
-   * part: the bytes are the leaving server's file, and they resume when the
-   * user is back on it (Cancel in the Downloads view deletes the part; a
-   * switch does not). Resolves once every attempt has settled, so no retry,
-   * re-sign or fallback of the old server's chain can go out later. */
-  export async function suspendDownloads() {
-    const running = [...settles.values()];
-    for (const control of cancels.values()) control.abort(SUSPEND);
-    await Promise.allSettled(running);
-  }
+   * part; it resolves once every attempt has settled. App's switch calls it. */
+  export async function suspendDownloads() { await memory.suspend(SUSPEND); }
   /** Per-server memory a switch drops: browse positions are keyed by session
    * NAME, and `app` on one server is not `app` on another. */
-  export function resetFilesMemory() { browsed.clear(); }
+  export function resetFilesMemory() { memory.reset(); }
 </script>
 
 <script>
@@ -261,7 +251,7 @@
     if (n < lastActive && view === 'local') readDownloads().catch(() => {});
     lastActive = n;
   });
-  function cancelDownload(id) { cancels.get(id)?.abort(); }
+  function cancelDownload(id) { memory.abort(id); }
   async function deletePart(id) {
     try { await invokeNative('download_abort', { id }); store.forget(id); await readDownloads(); }
     catch (e) { error = e.message; }
@@ -792,21 +782,21 @@
   // owner, 2026-08-28: "每个 project 自己记录自己的 current路径").
   // svelte-ignore state_referenced_locally — the MOUNT-time session is the one
   // whose parked position a new instance should wake up in.
-  const parked0 = browsed.get(session);
+  const parked0 = memory.position(session);
   let lastSourceDir = parked0?.sourceDir ?? '';
   if (parked0?.cwd) cwd = parked0.cwd;
   // Park on unmount too — the drawer instance dies with the drawer, and a
   // position recorded only at the next session switch would never be written.
-  $effect(() => () => { browsed.set(prevSession, { cwd, sourceDir: lastSourceDir }); });
+  $effect(() => () => { memory.park(prevSession, { cwd, sourceDir: lastSourceDir }); });
   $effect(() => {
     if (!visible) { void session; return; }
     if (session !== prevSession) {
       fileNav.nextFile();
       fileNav.resetFiles();
       // cwd still holds the OLD session's position — nothing else resets it.
-      browsed.set(prevSession, { cwd, sourceDir: lastSourceDir });
+      memory.park(prevSession, { cwd, sourceDir: lastSourceDir });
       prevSession = session;
-      const parked = browsed.get(session);
+      const parked = memory.position(session);
       lastSourceDir = parked?.sourceDir ?? '';
       resetDirectories(); // a session switch is a new entry point, not a step
       if (parked?.cwd) {
@@ -1314,7 +1304,7 @@
     // resume in a later session.
     const server = isTauri ? getMachineId() || `once-${Date.now()}-${Math.random()}` : '';
     const id = isTauri ? partId(server, path) : null;
-    const running = id ? inFlight.get(id) : null;
+    const running = id ? memory.writerOf(id) : null;
     if (running?.owner === instance) { running.adopt(); return; }
     if (running) {
       const notice = downloadLifetime.begin();
@@ -1329,16 +1319,15 @@
     downloadOutput = null;
     // The store's row is this attempt's ONE record (board #308): progress
     // writes it, and the feedback slot shows what it says.
-    const rowId = id ?? `web-${++webSeq}`;
+    const rowId = id ?? memory.nextWebRowId();
     const row = store.begin(rowId, name, path);
     const control = new AbortController();
-    cancels.set(rowId, control);
     let settle;
-    settles.set(rowId, new Promise((resolve) => { settle = resolve; }));
+    memory.track(rowId, control, new Promise((resolve) => { settle = resolve; }));
     const strings = () => ({ downloading: t('downloading'), changed: t('downloadFileChanged'), saving: t('saving') });
     const show = () => { if (operation.current()) downloadLifetime.update(token, store.feedbackOf(row, strings())); };
     const progress = (fraction, received = 0, total = 0) => { store.progress(rowId, received, total); show(); };
-    if (id) inFlight.set(id, { owner: instance, adopt() {
+    if (id) memory.claim(id, { owner: instance, adopt() {
       token = downloadLifetime.begin();
       contextCurrent = feedbackContext();
       downloadOperation = operation;
@@ -1458,7 +1447,7 @@
       const failed = { kind: 'error', message: String(e.message || e), detail: path };
       if (operation.current()) downloadLifetime.update(token, failed); else earlier(failed);
     }
-    } finally { if (id) inFlight.delete(id); cancels.delete(rowId); settles.delete(rowId); settle(); }
+    } finally { if (id) memory.release(id); memory.untrack(rowId); settle(); }
   }
 
   // ONE destination rule and ONE byte→b64 encoder for every upload entry point

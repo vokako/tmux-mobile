@@ -13,13 +13,11 @@ const reset = app.match(/function resetServerMemory\(\) \{[\s\S]*?\n  \}/u)?.[0]
 
 /** file → store name → how a switch handles it. */
 const PER_SERVER: Record<string, Record<string, RegExp>> = {
-  'files/Files.svelte': {
-    browsed: /resetFilesMemory\(\)/u,       // parked cwds keyed by session name
-    settles: /suspendDownloads/u,           // awaited and emptied by the suspend
-    cancels: /suspendDownloads/u,
-    inFlight: /suspendDownloads/u,
-    webSeq: /./u,                            // a counter for browser row ids, not data
-  },
+  // Since #335 ②a-4 all of it — parked cwds keyed by session name, the
+  // one-writer claim per part, each attempt's abort handle and settle, and the
+  // browser row counter — is an INSTANCE of createFilesMemory(). Same
+  // obligation: the switch resets the positions and awaits the attempts.
+  'files/Files.svelte': { memory: /resetFilesMemory\(\)/u },
   // Since #335 ②a-4 the rows are an INSTANCE of createDownloads(), so what
   // the scan sees at module level is the instance. Same obligation while the
   // app holds one of them: ②b replaces "reset it on a switch" with "drop that
@@ -90,8 +88,10 @@ test('every module-level store is reset on a switch or named global (board 315)'
       }
     }
   }
-  assert.ok(found.includes('files/Files.svelte:browsed'), 'the scan sees module scripts');
-  for (const instance of ['files/downloads.svelte.ts:downloadStore', 'core/agents.ts:backendCatalog']) {
+  for (const instance of [
+    'files/downloads.svelte.ts:downloadStore', 'core/agents.ts:backendCatalog',
+    'files/Files.svelte:memory',
+  ]) {
     assert.ok(found.includes(instance), `the scan sees the factory instance ${instance}`);
   }
   assert.match(app, /resetMemory: resetServerMemory,/u, 'the switch runs the reset');

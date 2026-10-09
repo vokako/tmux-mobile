@@ -1,0 +1,100 @@
+// What the Files pages remember about ONE server (board #335 ②a-4).
+//
+// Both Files instances — the page and the Hub's drawer — share this and
+// outlive any one of them, which is why it was a `<script module>` block in
+// Files.svelte. It is a record per SERVER, not per app:
+//
+//   - browse positions are keyed by session NAME, and `app` on one server is
+//     not `app` on another (that is what `resetFilesMemory` existed for).
+//   - a part id, a running attempt and its abort handle all belong to a
+//     transfer from one machine. A switch stops them and KEEPS the part,
+//     because the bytes are the leaving server's file.
+//
+// Extracted into a factory so ②b can hold two of them. Not wired into
+// production: Files.svelte keeps ONE instance, every rule below is the one it
+// had, and `suspendDownloads`/`resetFilesMemory` still exist for App's switch.
+// ②b replaces "reset it on a switch" with "drop that server's instance".
+
+/** The one writer of a part folder, across every Files instance (board
+ * #305): the page and the drawer write the same folder, so the one-writer
+ * rule has to hold between them and not only inside one. */
+export interface PartWriter {
+  /** The instance that started it, so a second ask from the SAME instance
+   * re-adopts the attempt instead of refusing it. */
+  owner: unknown;
+  /** Take the attempt's feedback back over in this instance. */
+  adopt(): void;
+}
+
+/** A browse position: where this session was last read, and the directory a
+ * preview came from. */
+export interface BrowsePosition {
+  cwd: string;
+  sourceDir: string;
+}
+
+export interface FilesMemory {
+  /** Where this session was left, or undefined on a first visit. */
+  position(session: string): BrowsePosition | undefined;
+  /** Record where a session is, including on unmount — the drawer instance
+   * dies with the drawer, and a position written only at the next session
+   * switch would never be written at all. */
+  park(session: string, at: BrowsePosition): void;
+  /** The attempt already writing this part, if any. */
+  writerOf(partId: string): PartWriter | undefined;
+  claim(partId: string, writer: PartWriter): void;
+  release(partId: string): void;
+  /** Track a running attempt: how to stop it, and when it has settled. */
+  track(rowId: string, control: AbortController, settled: Promise<void>): void;
+  untrack(rowId: string): void;
+  /** The Downloads view's Cancel. */
+  abort(rowId: string): void;
+  /** Browser rows have no part id, so they get a sequence of their own.
+   * Unique within this record, which is all a row id has to be. */
+  nextWebRowId(): string;
+  /**
+   * A server switch stops every running download and keeps its part: the
+   * bytes are the leaving server's file and they resume when the user is back
+   * on it (Cancel in the Downloads view deletes the part; a switch does not).
+   *
+   * Resolves once every attempt has SETTLED, so no retry, re-sign or fallback
+   * of the old server's chain can go out afterwards.
+   */
+  suspend(reason: unknown): Promise<void>;
+  /** Per-server memory a switch drops: the browse positions. */
+  reset(): void;
+}
+
+export function createFilesMemory(): FilesMemory {
+  const browsed = new Map<string, BrowsePosition>();
+  const inFlight = new Map<string, PartWriter>();
+  const cancels = new Map<string, AbortController>();
+  const settles = new Map<string, Promise<void>>();
+  let webSeq = 0;
+
+  return {
+    position: (session) => browsed.get(session),
+    park: (session, at) => { browsed.set(session, at); },
+    writerOf: (partId) => inFlight.get(partId),
+    claim: (partId, writer) => { inFlight.set(partId, writer); },
+    release: (partId) => { inFlight.delete(partId); },
+    track(rowId, control, settled) {
+      cancels.set(rowId, control);
+      settles.set(rowId, settled);
+    },
+    untrack(rowId) {
+      cancels.delete(rowId);
+      settles.delete(rowId);
+    },
+    abort: (rowId) => { cancels.get(rowId)?.abort(); },
+    nextWebRowId: () => `web-${++webSeq}`,
+    async suspend(reason) {
+      // Snapshot first: aborting runs each attempt's own cleanup, which
+      // untracks it, so iterating the live map would miss attempts.
+      const running = [...settles.values()];
+      for (const control of cancels.values()) control.abort(reason);
+      await Promise.allSettled(running);
+    },
+    reset() { browsed.clear(); },
+  };
+}
