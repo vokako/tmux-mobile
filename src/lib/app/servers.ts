@@ -383,7 +383,7 @@ export function recordServer(
 export const PARKED_KEYS = [
   'tmux_state', 'tmux_machine_id',
   'tmux_hub_project', 'tmux_hub_drafts', 'tmux_hub_seen', 'tmux_hub_lead',
-  'tmux_hub_drawer', 'tmux_hub_roster_expanded',
+  'tmux_hub_drawer', 'tmux_hub_roster_expanded', 'tmux_hub_alerts',
 ] as const;
 const parked = (key: string, id: string) => `${key}::${id}`;
 

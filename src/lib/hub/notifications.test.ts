@@ -277,12 +277,15 @@ test('Hub notifies from the PUSH first and the poll second, both through isAway 
   // push handler is the primary site; the poll is the fallback; sift dedups.
   const calls = hub.match(/notifyNews\(/gu) ?? [];
   assert.equal(calls.length, 2);
-  assert.match(hub, /notifyNews\(messages, \{ first, away: isAway\(visible\), project: s \}\)/u, 'the poll site');
+  assert.match(hub, /notifyNews\(messages, newsCtx\(room\(s\), s, first\), undefined, newsEffects\)/u, 'the poll site');
   const push = hub.slice(hub.indexOf('const onPush = (m) => {'), hub.indexOf('if (!selected || m?.room !== room(selected)) return;'));
-  assert.match(push, /away: !selected \|\| m\.room !== room\(selected\) \|\| isAway\(visible\)/u,
-    'another room is away by definition; the selected one asks the document');
-  assert.match(push, /project: roomProjectName\(rows, m\.room\)/u, 'the title names the project, not the room');
-  assert.match(push, /first: false/u, 'a push is never history');
+  assert.match(push, /notifyNews\(\[m\], newsCtx\(m\.room, session, false\), undefined, newsEffects\)/u, 'a push is never history');
+  // ONE context builder (#322): another room is away by definition, the
+  // selected one asks the document; the title names the project.
+  const ctx = hub.slice(hub.indexOf('function newsCtx('), hub.indexOf('const newsEffects'));
+  assert.match(ctx, /const away = !here \|\| isAway\(visible\);/u);
+  assert.match(ctx, /project: roomProjectName\(rows, roomName\)/u);
+  assert.match(ctx, /server: serverId\(\), room: roomName, session,/u, 'records and dedupe keys carry the server');
   assert.ok(!/document\.hidden \|\| !document\.hasFocus\(\)/u.test(hub), 'ONE away verdict — the helper, never an inline copy');
 });
 
@@ -291,8 +294,10 @@ const prefs = readFileSync(join(here, '..', 'app', 'Preferences.svelte'), 'utf8'
 test('the permission request and the audio unlock ride the SETTINGS toggle, never the header or the send path (board #72)', () => {
   const sendBody = hub.slice(hub.indexOf('async function send()'), hub.indexOf('async function send()') + 4000);
   assert.ok(!sendBody.includes('ensurePermission'), 'send() asks for nothing');
-  assert.ok(!hub.includes('ensurePermission') && !hub.includes('setNotifyEnabled') && !hub.includes("'bell'"),
+  assert.ok(!hub.includes('ensurePermission') && !hub.includes('setNotifyEnabled'),
     'the Hub header carries no notification switch — a header keeps no spare switches, and on a phone it cost the row a button');
+  // Board #322: the phone's bell there OPENS the centre (a record), it is not a switch.
+  assert.match(hub, /icon="bell" label=\{t\('notifyCentre'\)\} hasPopup="dialog" expanded=\{!!centre\.anchor\}\s*onclick=\{\(e\) => centre\.toggle\(e\.currentTarget\)\}/u);
   // #156 keeps this ordering inside a serialized pending/error operation.
   // Real Settings mount tests also execute the permission and duplicate guards.
   const toggle = prefs.slice(prefs.indexOf('async function setNotify('), prefs.indexOf('async function testNotify('));
@@ -351,4 +356,31 @@ test('levels ring what they rang before #322: a legacy [tmm done] rings at done,
   assert.deepEqual(bodies('done'), [msgs[0]!.body, msgs[1]!.body]);
   assert.deepEqual(bodies('replies'), [msgs[0]!.body, msgs[1]!.body, msgs[2]!.body]);
   assert.deepEqual(bodies('all'), [msgs[0]!.body, msgs[1]!.body, msgs[2]!.body, msgs[3]!.body]);
+});
+
+test('notifyNews records before it rings: muted, level-filtered and watched news is still recorded once (#322)', () => {
+  const recorded: { body?: string; kind: string; viewed?: boolean }[] = [];
+  const record = (m: FeedMsg, c: { kind: string; viewed?: boolean }) => { recorded.push({ body: m.body, kind: c.kind, viewed: c.viewed }); };
+  const st = fresh();
+  const muted = { ...harness(false).effects, level: () => 'done' as const, record };
+  const ctx = { first: false, away: true, project: 'p', server: 's1', room: 'proj:p', viewed: false };
+  const batch: FeedMsg[] = [
+    { id: 1, from: 'dev', body: 'a reply' },
+    { id: 2, from: 'dev', body: '[tmm status running] busy' },
+    { id: 3, from: 'dev', body: '[tmm] spawned x' },
+    { id: 4, from: 'human', body: 'mine' },
+  ];
+  assert.equal(notifyNews(batch, ctx, st, muted), false, 'muted: no cue');
+  assert.deepEqual(recorded.map((r) => r.kind), ['reply', 'status'], 'news of every kind is recorded, not own words or narration');
+  notifyNews(batch, ctx, st, muted);
+  assert.equal(recorded.length, 2, 'a replay is not recorded twice (one sift)');
+  // Another server's message with the same id is its own message.
+  notifyNews([batch[0]!], { ...ctx, server: 's2' }, st, muted);
+  assert.equal(recorded.length, 3, 'dedupe keys carry the server');
+  // A first page is remembered, never recorded.
+  notifyNews([{ id: 9, from: 'dev', body: 'old' }], { ...ctx, first: true }, st, muted);
+  assert.equal(recorded.length, 3);
+  // The caller's at-tail verdict rides into the record.
+  notifyNews([{ id: 10, from: 'dev', body: 'seen live' }], { ...ctx, away: false, viewed: true }, st, { ...harness().effects, record });
+  assert.equal(recorded.at(-1)!.viewed, true);
 });

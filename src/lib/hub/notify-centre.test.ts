@@ -1,0 +1,73 @@
+// Board #322: the centre is a bounded INDEX of alerts — newest first, one per
+// message, capped; reading a room marks its entries viewed; clearing and
+// eviction never touch a room's read mark (there is none in here to touch).
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import type { Alert } from './notify-centre.svelte.ts';
+
+const store = new Map<string, string>();
+(globalThis as any).localStorage = {
+  getItem: (k: string) => store.get(k) ?? null,
+  setItem: (k: string, v: string) => { store.set(k, String(v)); },
+  removeItem: (k: string) => { store.delete(k); },
+};
+(globalThis as any).$state = (v: unknown) => v;
+const { withAlert, readThrough, alertOf, centre, CENTRE_CAP, ALERTS_KEY } = await import('./notify-centre.svelte.ts');
+
+const ctx = { server: 's1', room: 'proj:p', session: 'p', project: 'P', kind: 'reply' as const, viewed: false, excerpt: 'x' };
+const a = (id: number, ts = id, over: Partial<Alert> = {}): Alert => ({ ...alertOf({ id, seq: id, ts, from: 'dev', to: [] }, ctx), ...over });
+
+test('withAlert keeps one entry per message, newest first, capped', () => {
+  let list: Alert[] = [];
+  for (let i = 1; i <= CENTRE_CAP + 5; i++) list = withAlert(list, a(i));
+  assert.equal(list.length, CENTRE_CAP);
+  assert.equal(list[0]!.id, String(CENTRE_CAP + 5), 'newest first');
+  assert.equal(list.at(-1)!.id, '6', 'the oldest entries are evicted');
+  assert.equal(withAlert(list, a(30)), list, 'a re-record of a known message changes nothing');
+  const viewed = withAlert(list, a(30, 30, { viewed: true }));
+  assert.equal(viewed.find((x) => x.id === '30')!.viewed, true, 'a viewed record upgrades the entry');
+  assert.equal(withAlert(viewed, a(30)).find((x) => x.id === '30')!.viewed, true, 'and is never downgraded');
+});
+
+test('readThrough marks a room\'s entries at or below the read seq viewed, nothing else', () => {
+  const other = { ...a(2), key: 'proj:q|2', session: 'q', room: 'proj:q' };
+  const list = [a(3), a(2), a(1), other];
+  const next = readThrough(list, 'p', 2);
+  assert.deepEqual(next.map((x) => x.viewed), [false, true, true, false]);
+  assert.equal(readThrough(next, 'p', 2), next, 'nothing new to mark: same array');
+});
+
+test('alertOf names the source and flags a reply to the human (#289)', () => {
+  const r = alertOf({ id: 'm1', seq: 7, ts: 5, from: 'lead', to: ['human'] }, ctx);
+  assert.equal(r.key, 'proj:p|m1');
+  assert.equal(r.server, 's1');
+  assert.equal(r.toHuman, true);
+  assert.equal(alertOf({ id: 'm2', seq: 8, ts: 5, from: 'lead', to: ['dev'] }, ctx).toHuman, false);
+});
+
+test('the store persists per live key, clears records only, and reloads a switched server\'s list', () => {
+  store.clear();
+  centre.reload();
+  centre.record(a(1));
+  centre.record(a(2));
+  assert.equal(centre.unviewed, 2);
+  centre.markRoomRead('p', 1);
+  assert.equal(centre.unviewed, 1);
+  assert.equal(JSON.parse(store.get(ALERTS_KEY)!).length, 2, 'persisted under tmux_hub_alerts');
+  centre.requestJump(centre.items[0]!);
+  const n = centre.jump!.n;
+  centre.requestJump(centre.items[0]!);
+  assert.equal(centre.isCurrent(n), false, 'a newer jump supersedes');
+  // A server switch points the live key at the other server's list.
+  store.set(ALERTS_KEY, JSON.stringify([a(9)]));
+  centre.reload();
+  assert.deepEqual(centre.items.map((x) => x.id), ['9']);
+  assert.equal(centre.jump, null, 'a pending jump does not cross servers');
+  centre.clear();
+  assert.equal(centre.items.length, 0);
+});
+
+test('tmux_hub_alerts is parked per server (#315)', async () => {
+  const { PARKED_KEYS } = await import('../app/servers.ts');
+  assert.ok((PARKED_KEYS as readonly string[]).includes(ALERTS_KEY));
+});

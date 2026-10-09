@@ -202,6 +202,46 @@ impl Store {
         Ok(rows.filter_map(Result::ok).collect())
     }
 
+    /// The page of `room` AROUND one of its messages (board #322, the jump
+    /// window): up to `limit / 2` rows at or after `seq` and the rest before
+    /// it, oldest first. seq is global across rooms, so `before_seq = seq + N`
+    /// would not mean N rows of THIS room. Returns `(messages, older_exist,
+    /// newer_exist)`.
+    pub fn hub_around(&self, room: &str, seq: i64, limit: i64) -> Result<(Vec<HubMsg>, bool, bool), String> {
+        let limit = limit.clamp(2, 1000);
+        let after = limit / 2;
+        let before = limit - after;
+        let mut newer: Vec<HubMsg> = self
+            .conn
+            .prepare_cached(
+                "SELECT seq, id, ts, room, sender, to_json, kind, body FROM hub_msgs
+                 WHERE room = ?1 AND seq >= ?2 ORDER BY seq ASC LIMIT ?3",
+            )
+            .map_err(|e| format!("prepare hub around: {e}"))?
+            .query_map(rusqlite::params![room, seq, after + 1], hub_msg_row)
+            .map_err(|e| format!("query hub around: {e}"))?
+            .filter_map(Result::ok)
+            .collect();
+        let newer_more = newer.len() as i64 > after;
+        newer.truncate(after as usize);
+        let mut older: Vec<HubMsg> = self
+            .conn
+            .prepare_cached(
+                "SELECT seq, id, ts, room, sender, to_json, kind, body FROM hub_msgs
+                 WHERE room = ?1 AND seq < ?2 ORDER BY seq DESC LIMIT ?3",
+            )
+            .map_err(|e| format!("prepare hub around: {e}"))?
+            .query_map(rusqlite::params![room, seq, before + 1], hub_msg_row)
+            .map_err(|e| format!("query hub around: {e}"))?
+            .filter_map(Result::ok)
+            .collect();
+        let older_more = older.len() as i64 > before;
+        older.truncate(before as usize);
+        older.reverse();
+        older.extend(newer);
+        Ok((older, older_more, newer_more))
+    }
+
     /// ONE message by its id, however old it is.
     pub fn hub_message_by_id(&self, room: &str, id: &str) -> Result<Option<HubMsg>, String> {
         self.conn

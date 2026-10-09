@@ -25,6 +25,9 @@ const PER_SERVER: Record<string, Record<string, RegExp>> = {
   'ui/hover.svelte.ts': { shown: /hoverCard\.hide\(\)/u, hiddenAt: /hoverCard\.hide\(\)/u },
   // Re-read from the parked keys after pointTo (comeUp), not reset here.
   'hub/hub-prefs.svelte.ts': { state: /./u },
+  // The notification centre (board #322): its list is a parked key too,
+  // re-read by centre.reload() beside hubPrefs on comeUp.
+  'hub/notify-centre.svelte.ts': { state: /./u, jumps: /./u },
 };
 const GLOBAL: Record<string, Record<string, string>> = {
   'core/markdown.ts': { cache: 'rendered HTML keyed by the message text itself' },
@@ -62,12 +65,12 @@ test('every module-level store is reset on a switch or named global (board 315)'
       const per = PER_SERVER[rel]?.[name];
       const glob = GLOBAL[rel]?.[name];
       assert.ok(per || glob, `${rel}: module-level "${name}" must be reset by a switch or listed as GLOBAL`);
-      if (per && rel !== 'hub/hub-prefs.svelte.ts' && !per.test(reset) && !/suspendDownloads/u.test(per.source)) {
+      if (per && rel !== 'hub/hub-prefs.svelte.ts' && rel !== 'hub/notify-centre.svelte.ts' && !per.test(reset) && !/suspendDownloads/u.test(per.source)) {
         assert.fail(`${rel}:${name} is per-server but resetServerMemory does not reset it`);
       }
     }
   }
   assert.ok(found.includes('files/Files.svelte:browsed'), 'the scan sees module scripts');
   assert.match(app, /resetMemory: resetServerMemory,/u, 'the switch runs the reset');
-  assert.match(app, /comeUp: \(target\) => \{\s*hubPrefs\.reloadServerState\(\);/u, 'hub prefs re-read the target’s parked keys');
+  assert.match(app, /comeUp: \(target\) => \{\s*hubPrefs\.reloadServerState\(\);\s*centre\.reload\(\);/u, 'hub prefs and the centre re-read the target’s parked keys');
 });

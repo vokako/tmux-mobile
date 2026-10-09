@@ -87,8 +87,8 @@ test('Hub keeps Feed coordination and exposes only the agreed reading boundary (
   assert.match(source, /const scrollFeed = \(force = false\) => feedView\?\.scrollToTail\(force\);/u);
   assert.match(source, /return feedView\.withReadingAnchor\(mutate\);/u);
   assert.match(source, /feedView\?\.resetForRoom\(\);/u);
-  assert.match(source, /following = true;\n\s*if \(feed\.length\) scrollFeed\(true\);/u,
-    'room entry keeps its original tail intent');
+  assert.match(source, /following = !jumpIntent;\n\s*if \(feed\.length && !jumpIntent\) scrollFeed\(true\);/u,
+    'room entry keeps its original tail intent — unless a centre jump owns the landing (#322)');
   assert.match(source, /if \(filterAgent\) \{ filterAgent = ''; return true; \}/u);
   assert.doesNotMatch(source, /onclearfilter/u, 'the filter shows and leaves in the strip, not a feed banner (owner, 2026-09-23)');
   assert.match(source, /--msg-max: min\(84%, 1360px\);/u,
@@ -210,6 +210,7 @@ test('Back keeps the original priority and current live guards in one dispatcher
     picker: 'if (pickerOpen) { pickerOpen = false; return true; }',
     create: 'if (createOpen) { createOpen = false; return true; }',
     rename: 'if (renaming) { renaming = false; return true; }',
+    jumpFilter: 'if (filterBefore) { restoreFilter(); return true; }',
     filter: "if (filterAgent) { filterAgent = ''; return true; }",
     reply: 'if (replyTo) { replyTo = null; return true; }',
     files: "if (termOpen && drawerView === 'files' && drawerFilesBack?.()) return true;",
@@ -222,7 +223,7 @@ test('Back keeps the original priority and current live guards in one dispatcher
     assert.ok(region.includes(`backLayers.register('${layer}', () => { ${guard}${suffix} })`),
       `${layer} keeps its current guard/action inside a live callback`);
   }
-  assert.equal([...region.matchAll(/backLayers\.register\(/g)].length, 12, 'the reply chip (#290) peels after the filter');
+  assert.equal([...region.matchAll(/backLayers\.register\(/g)].length, 13, 'the reply chip (#290) peels after the filter; a jump\'s cleared filter (#322) comes back first');
   assert.match(source, /registerBack=\{onGoBack \? backLayers\.register : null\}/u,
     'Composer registers its remaining palette slot with the same registry');
   assert.match(region, /onGoBack\(backLayers\.back\);/u);

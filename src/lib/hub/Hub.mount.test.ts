@@ -2641,3 +2641,169 @@ test('every project row shows its unread count; reading the room clears it by se
     assert.equal(JSON.stringify(asks.at(-1)!['proj:other']), '{"seq":11}', 'and the server is asked with it');
   } finally { await app.close(); }
 });
+
+// Board #322: the centre's jump. A record names server + room + seq + id;
+// the Hub opens that room, loads ONE page around the message as a history
+// window when it is not loaded, rings it, and only then marks it viewed. The
+// window takes no live rows and moves no read mark; Back to latest swaps the
+// tail page in only once it has answered.
+function jumpFixture(over: Record<string, unknown> = {}) {
+  const { rpc, pushed } = roomFixture();
+  const msg = (seq: number, body = `m${seq}`, from = 'alice') => ({ seq, id: `id${seq}`, ts: 1_000 + seq, room: 'proj:other', from, to: [], body });
+  const tail = Array.from({ length: 10 }, (_, i) => msg(200 + i));
+  const around = [msg(48), msg(49), { ...msg(50), id: 'target', body: 'the reply you heard' }, msg(51), msg(52)];
+  return {
+    pushed, msg, tail, around,
+    rpc: {
+      ...rpc,
+      projectList: async () => ({ projects: ['fixture', 'other'].map((session) => ({
+        project: { id: session, name: session, session, path: `/${session}` }, live: true, slots: [],
+      })) }),
+      hubLog: async (session: string) => ({ has_more: true, oldest_seq: 200, messages: session === 'other' ? tail : [] }),
+      hubLogAround: async () => ({ has_more: true, newer_more: true, oldest_seq: 48, messages: around }),
+      ...over,
+    },
+  };
+}
+const alertFor = (id = 'target', seq = 50, server = 's1') => ({
+  key: `proj:other|${id}`, server, room: 'proj:other', session: 'other', project: 'other',
+  seq, id, ts: 1_050, from: 'alice', toHuman: true, kind: 'reply', excerpt: 'the reply you heard', viewed: false,
+});
+async function mountJump(context: TestContext, rpc: Record<string, unknown>, setup: (w: any) => void = () => {}) {
+  const fixture = await compiledHost();
+  return fixture.mount(context, {
+    props: { visible: true },
+    setup(window) {
+      window.Element.prototype.getAnimations = () => [];
+      window.HTMLCanvasElement.prototype.getContext = () => null;
+      window.localStorage.setItem('tmux_hub_project', 'fixture');
+      window.localStorage.setItem('tmux_server_current', 's1');
+      window.HTMLMediaElement.prototype.play = () => Promise.resolve();
+      setup(window);
+    },
+    modules: [rpc as Record<string, (...args: any[]) => unknown>],
+  });
+}
+const centreOf = (app: { window: any }) => app.window.__centre;
+const until = async (app: { flush: () => Promise<void> }, ok: () => boolean, n = 30) => { for (let i = 0; i < n && !ok(); i++) await app.flush(); };
+
+test('a centre jump opens the room, windows the page around the message, rings it, and only then marks it viewed (#322)', { timeout: 60000 }, async (context) => {
+  const f = jumpFixture();
+  const app = await mountJump(context, f.rpc);
+  try {
+    await until(app, () => !!app.document.querySelector('.proj-row[aria-label^="other"]'));
+    const centre = centreOf(app);
+    centre.record(alertFor());
+    centre.requestJump(centre.items[0]);
+    const hit = () => app.document.querySelector('.msg.jump-hit[data-msg="target"]');
+    await until(app, () => !!hit());
+    assert.ok(hit(), 'the target bubble is on screen and ringed');
+    assert.equal(app.document.querySelector('.h1-text')?.textContent, 'other', 'its room is open');
+    assert.equal(centre.items[0].viewed, true, 'viewed only after it landed');
+    assert.equal(app.document.querySelector('[data-msg="id209"]'), null, 'the window is the page around it, not the tail');
+    assert.equal(JSON.parse(app.window.localStorage.getItem('tmux_hub_seen') ?? '{}').other, undefined, 'a window moves no read mark');
+    // A push for this room while windowed: recorded, not merged; the to-tail dot says news waits.
+    for (const fn of f.pushed) (fn as (m: unknown) => void)(f.msg(300, 'late news'));
+    await app.flush();
+    assert.equal(app.document.querySelector('[data-msg="id300"]'), null, 'no live row joins a history window');
+    const toTail = app.document.querySelector<HTMLButtonElement>('.to-tail')!;
+    assert.ok(toTail.classList.contains('news'));
+    assert.equal(toTail.getAttribute('aria-label'), 'Back to latest');
+    assert.ok(centre.items.some((a: { id: string; viewed: boolean }) => a.id === 'id300' && !a.viewed), 'the push is in the centre, unviewed');
+  } finally { await app.close(); }
+});
+
+test('Back to latest keeps the window until the tail answers; a push meanwhile is not merged; a failure keeps it for a retry (#322)', { timeout: 60000 }, async (context) => {
+  let answer: ((v: unknown) => void) | null = null;
+  let fail = false;
+  const f = jumpFixture();
+  const rpc = { ...f.rpc, hubLog: async (session: string, sinceTs = 0) => {
+    if (session !== 'other' || sinceTs > 0 || !answer && !fail && !(rpc as any).armed) return f.rpc.hubLog(session);
+    if (fail) throw new Error('offline');
+    return new Promise((r) => { answer = r; });
+  } } as Record<string, unknown>;
+  const app = await mountJump(context, rpc);
+  try {
+    await until(app, () => !!app.document.querySelector('.proj-row[aria-label^="other"]'));
+    const centre = centreOf(app);
+    centre.record(alertFor());
+    centre.requestJump(centre.items[0]);
+    await until(app, () => !!app.document.querySelector('.jump-hit'));
+    // 1) the tail request fails: the window and its control stay.
+    fail = true;
+    app.document.querySelector<HTMLButtonElement>('.to-tail')!.click();
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.ok(app.document.querySelector('[data-msg="target"]'), 'a failed return keeps the window');
+    assert.ok(app.document.querySelector('.to-tail'), 'and the way back, for a retry');
+    // 2) a slow tail with a push in between.
+    fail = false; (rpc as any).armed = true;
+    app.document.querySelector<HTMLButtonElement>('.to-tail')!.click();
+    await until(app, () => !!answer);
+    for (const fn of f.pushed) (fn as (m: unknown) => void)(f.msg(301, 'during the return'));
+    await app.flush();
+    assert.equal(app.document.querySelector('[data-msg="id301"]'), null, 'still windowed: the push is not appended to history');
+    assert.ok(app.document.querySelector('[data-msg="target"]'));
+    answer!({ has_more: true, oldest_seq: 200, messages: [...f.tail, f.msg(301, 'during the return')] });
+    await until(app, () => !!app.document.querySelector('[data-msg="id209"]'));
+    assert.ok(app.document.querySelector('[data-msg="id301"]'), 'the tail page carries it');
+    assert.equal(app.document.querySelector('[data-msg="target"]'), null, 'the window is replaced in one step');
+  } finally { await app.close(); }
+});
+
+test('a newer jump supersedes an older one; another server\'s record never jumps; a gone message keeps its record (#322)', { timeout: 60000 }, async (context) => {
+  let first: ((v: unknown) => void) | null = null;
+  const f = jumpFixture();
+  const rpc = { ...f.rpc, hubLogAround: async (_s: string, seq: number) => {
+    if (seq === 50) return new Promise((r) => { first = r; });
+    if (seq === 60) return { has_more: true, newer_more: true, oldest_seq: 58, messages: [f.msg(58), { ...f.msg(60), id: 'second' }] };
+    return { has_more: false, newer_more: true, oldest_seq: 70, messages: [f.msg(70)] };
+  } };
+  const app = await mountJump(context, rpc);
+  try {
+    await until(app, () => !!app.document.querySelector('.proj-row[aria-label^="other"]'));
+    const centre = centreOf(app);
+    centre.record(alertFor());
+    centre.record(alertFor('second', 60));
+    centre.requestJump(centre.items.find((a: { id: string }) => a.id === 'target'));
+    await until(app, () => !!first);
+    centre.requestJump(centre.items.find((a: { id: string }) => a.id === 'second'));
+    await until(app, () => !!app.document.querySelector('.jump-hit[data-msg="second"]'));
+    first!({ has_more: true, newer_more: true, oldest_seq: 48, messages: f.around });
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.ok(app.document.querySelector('[data-msg="second"]'), 'the superseded answer changed nothing');
+    assert.equal(app.document.querySelector('[data-msg="target"]'), null);
+    const by = (id: string) => centre.items.find((a: { id: string }) => a.id === id);
+    assert.equal(by('target').viewed, false, 'a superseded jump never marks viewed');
+    assert.equal(by('second').viewed, true);
+    // Another server's record.
+    centre.record(alertFor('elsewhere', 99, 's2'));
+    centre.requestJump(by('elsewhere'));
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.equal(by('elsewhere').viewed, false);
+    assert.equal(by('elsewhere').failed, 'On another server');
+    // A message no longer in the room: the record stays, with the reason.
+    centre.record(alertFor('gone', 70));
+    centre.requestJump(by('gone'));
+    for (let i = 0; i < 8; i++) await app.flush();
+    assert.equal(by('gone').viewed, false);
+    assert.equal(by('gone').failed, 'Message no longer in the room');
+    assert.ok(app.document.querySelector('[data-msg="second"]'), 'a failed jump leaves the feed where it was');
+  } finally { await app.close(); }
+});
+
+test('a jump reaches a finished-task line at the chat-only level and clears a filter visibly (#322)', { timeout: 60000 }, async (context) => {
+  const f = jumpFixture();
+  const sysTarget = { ...f.msg(50, '[tmm] board #3 doing → review — ship it'), id: 'target' };
+  const rpc = { ...f.rpc, hubLogAround: async () => ({ has_more: true, newer_more: true, oldest_seq: 49, messages: [f.msg(49), sysTarget, f.msg(51)] }) };
+  const app = await mountJump(context, rpc, (w) => { w.localStorage.setItem('tmux_hub_feed_level', 'chat'); });
+  try {
+    await until(app, () => !!app.document.querySelector('.proj-row[aria-label^="other"]'));
+    const centre = centreOf(app);
+    centre.record({ ...alertFor(), kind: 'finished' });
+    centre.requestJump(centre.items[0]);
+    await until(app, () => !!app.document.querySelector('.sys-item.jump-hit[data-msg="target"]'));
+    assert.ok(app.document.querySelector('.sys-item.jump-hit[data-msg="target"]'), 'the level keeps the jump\'s target');
+    assert.equal(app.window.localStorage.getItem('tmux_hub_feed_level'), 'chat', 'the stored level is untouched');
+    assert.equal(centre.items[0].viewed, true);
+  } finally { await app.close(); }
+});

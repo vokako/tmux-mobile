@@ -830,6 +830,14 @@ export const hubLog = (session: string, sinceTs = 0, limit = 100, beforeSeq = 0)
     'hub_log',
     beforeSeq > 0 ? { session, limit, before_seq: beforeSeq } : { session, since_ts: sinceTs, limit },
   );
+/** The page of a room AROUND one of its messages (board #322, the centre's
+ * jump): `limit / 2` rows from `seq` on and the rest before it, plus
+ * `newer_more` — newer rows exist, so this page is a history window, not the
+ * tail. `oldest_seq` and `has_more` continue the backward walk as usual. */
+export const hubLogAround = (session: string, seq: number, limit = 100) =>
+  call<{ messages: TeamMessage[]; has_more?: boolean; newer_more?: boolean; oldest_seq?: number }>(
+    'hub_log', { session, limit, around_seq: seq },
+  );
 /** Deleting a message is two steps. `hubMsgArchive` HIDES it — the message stays in
  * the room's store, so a restore costs nothing — and `hubMsgPurge` is the step that
  * forgets it for good. Only the second one destroys anything. */

@@ -106,11 +106,13 @@ export function roomProjectName(
 }
 
 /** Split a batch into the never-seen part, and REMEMBER the whole batch.
- * Insertion order is the prune order, so the memory stays bounded. */
-export function sift(msgs: readonly FeedMsg[], seen: Set<string>, cap = SEEN_CAP): FeedMsg[] {
+ * Insertion order is the prune order, so the memory stays bounded. `scope`
+ * prefixes every key with its source (board #322: `server|room`), so the
+ * same id on two servers is two messages. */
+export function sift(msgs: readonly FeedMsg[], seen: Set<string>, cap = SEEN_CAP, scope = ''): FeedMsg[] {
   const fresh: FeedMsg[] = [];
   for (const m of msgs) {
-    const k = msgKey(m);
+    const k = scope + msgKey(m);
     if (!seen.has(k)) { fresh.push(m); seen.add(k); }
   }
   if (seen.size > cap) {
@@ -320,16 +322,36 @@ export async function ensurePermission(): Promise<void> {
   }
 }
 
-/** The one call sites use: remember the batch, gate the remainder, fire both
- * channels. Marking ALWAYS happens — first pages, watched batches and muted
- * periods are remembered so nothing backfills later. */
+/** Where a batch came from and how it was seen (board #322): the source
+ * server and room (the record and dedupe identity), the project name for the
+ * title, and `viewed` — the reader is at that room's visible tail, so what
+ * lands is on screen and its record starts out viewed. */
+export interface NewsCtx {
+  first: boolean; away: boolean; project: string;
+  server?: string; room?: string; session?: string; viewed?: boolean;
+}
+export type RecordFn = (m: FeedMsg, ctx: NewsCtx & { kind: NewsKind }) => void;
+
+/** The one call sites use. Order is the contract (board #322):
+ * 1. sift — remember the whole batch (first pages, history, cache restores,
+ *    watched and muted batches) so nothing backfills; keys carry the source.
+ * 2. RECORD every never-seen message `newsKind` calls news (not a first page)
+ *    in the centre, whatever the level, mute or away — every cue has a
+ *    findable record, and a failed sound or permission loses nothing.
+ * 3. Only then do enabled / level / away decide the cue and the tray. */
 export function notifyNews(
   msgs: readonly FeedMsg[],
-  ctx: { first: boolean; away: boolean; project: string },
+  ctx: NewsCtx,
   st: NotifyState = state,
-  effects: { cue: typeof playCue; sys: typeof systemNotify; enabled: () => boolean; level?: () => NotifyLevel } = { cue: playCue, sys: systemNotify, enabled: notifyEnabled, level: notifyLevel },
+  effects: { cue: typeof playCue; sys: typeof systemNotify; enabled: () => boolean; level?: () => NotifyLevel; record?: RecordFn } = { cue: playCue, sys: systemNotify, enabled: notifyEnabled, level: notifyLevel },
 ): boolean {
-  const fresh = sift(msgs, st.seen);
+  const fresh = sift(msgs, st.seen, SEEN_CAP, ctx.server || ctx.room ? `${ctx.server ?? ''}|${ctx.room ?? ''}|` : '');
+  if (!ctx.first && effects.record) {
+    for (const m of fresh) {
+      const kind = newsKind(m);
+      if (kind !== 'none') effects.record(m, { ...ctx, kind });
+    }
+  }
   const news = notifiable(fresh, { ...ctx, level: effects.level?.() ?? DEFAULT_LEVEL });
   if (!news.length || !effects.enabled()) return false;
   effects.cue(Date.now(), st);

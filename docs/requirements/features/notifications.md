@@ -38,3 +38,11 @@ A message may alert only when the reader is away from that conversation: the doc
 ## Safety and races
 
 A failed audio play rolls back only its own cooldown claim. A delayed rejection from an older play must never reopen the cooldown claimed by a newer successful cue. The seen-key set is bounded so a long-running client cannot grow notification memory without limit.
+
+## Notification centre (board #322)
+
+- Every alert-worthy message (the one news rule; all levels, muted or not) is recorded in an in-app list: project, sender, a one-line excerpt, time; newest first; the last 50; per server.
+- Desktop: a bell in the rail above the server switcher with an unviewed count. Phone: a dot on the Hub tab and a bell in the Hub header.
+- Default view All; replies addressed to you are emphasised, with a To me filter. Clear empties the list only.
+- Tapping an entry opens its project at that exact message (loading the page around it when needed, revealing it through a filter or the chat-only level without changing the setting) and marks it seen; if the message cannot be reached, the entry stays with the reason.
+- Every project row shows its unread count in the accent colour; red stays only for a real agent failure.

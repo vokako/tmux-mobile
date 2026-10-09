@@ -18,6 +18,8 @@
   import { hubRooms, systemStatus } from './lib/core/ws.ts';
   import SystemStatus from './lib/system/SystemStatus.svelte';
   import ServerList from './lib/app/ServerList.svelte';
+  import NotifyCentre from './lib/hub/NotifyCentre.svelte';
+  import { centre } from './lib/hub/notify-centre.svelte.ts';
   import AddServerDialog from './lib/app/AddServerDialog.svelte';
   import { hubPrefs } from './lib/hub/hub-prefs.svelte.ts';
   import { moveTrack, pinTrack } from './lib/hub/reveal.ts';
@@ -656,6 +658,7 @@
       serverSwitch.supersede();
       resetServerMemory();
       hubPrefs.reloadServerState();
+      centre.reload();
       serverEpoch++;
       localStorage.removeItem('tmux_disconnected');
       activeAddress = localStorage.getItem('tmux_address') || '';
@@ -842,6 +845,36 @@
     };
   });
 
+  // The notification centre's popover (board #322): the server picker's
+  // placement and dismissal, anchored to whichever control opened it.
+  const centreShown = $derived(hubEligible); // the centre is fed by the Hub bus
+  let centreEl = $state(null);
+  let centreW = $state(0);
+  let centreH = $state(0);
+  const centrePos = $derived.by(() =>
+    centre.anchor && centre.anchor.isConnected
+      ? menuPlacement(anchorOf(centre.anchor), { w: centreW, h: centreH }, viewBox())
+      : { x: 0, y: 0 },
+  );
+  $effect(() => {
+    const origin = centre.anchor;
+    if (!origin || !centreEl) return;
+    const menu = centreEl;
+    menu.focus({ preventScroll: true });
+    const onDown = (e) => { if (!menu.contains(e.target) && !origin.contains(e.target)) centre.close(); };
+    const onKey = (e) => { if (e.key === 'Escape' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); centre.close(); } };
+    const onResize = () => centre.close();
+    window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('resize', onResize);
+      if (origin.isConnected && (document.activeElement === document.body || menu.contains(document.activeElement))) origin.focus({ preventScroll: true });
+    };
+  });
+
   function serverRename(id, name) { serverList = renameServer(localStorage, id, name); }
   function serverRemove(id) { serverList = removeServer(localStorage, id); serverCurId = currentServerId(localStorage); }
   /** A row of the server list was picked. */
@@ -916,6 +949,7 @@
     machineId: () => getMachineId() || '',
     comeUp: (target) => {
       hubPrefs.reloadServerState();
+      centre.reload();
       serverEpoch++;
       activeAddress = target.address;
       loadServerRegistry();
@@ -1697,6 +1731,20 @@
         >
         {#if slot === RAIL_GAP}
           <div class="rail-spacer" data-rail-slot={slot}></div>
+          <!-- The notification centre (board #322): above the server switcher,
+               a CONTROL like it. The badge counts unviewed alerts, static
+               accent ink — the unread language, never red. -->
+          {#if centreShown}
+            <button
+              class="rail-btn rail-bell"
+              class:open={!!centre.anchor}
+              aria-label={centre.unviewed ? `${t('notifyCentre')} · ${t('hubUnreadCount').replace('{n}', String(centre.unviewed))}` : t('notifyCentre')}
+              use:hoverInfo={() => ({ title: t('notifyCentre') })}
+              aria-haspopup="dialog"
+              aria-expanded={!!centre.anchor}
+              onclick={(e) => centre.toggle(e.currentTarget)}
+            ><Icon name="bell" size={17} />{#if centre.unviewed}<span class="bell-badge">{centre.unviewed > 99 ? '99+' : centre.unviewed}</span>{/if}</button>
+          {/if}
           <!-- Server switcher (board #55): "右下角agent上边" — glued to the top
                of the rail's bottom (configure) group, above the agents icon in
                the shipped order. A CONTROL, not a page: never draggable, never
@@ -1780,6 +1828,15 @@
         onpick={(id) => { serverMenuOpen = false; doServerSwitch(id); }}
         onrename={serverRename} onremove={serverRemove}
         onadd={serverAddRow} onclose={() => (serverMenuOpen = false)} />
+    </div>
+  {/if}
+
+  {#if centre.anchor}
+    <div class="centre-menu menu-surface menu-list pop-layer" class:ready={centreH > 0}
+      role="dialog" aria-modal="false" aria-label={t('notifyCentre')} tabindex="-1"
+      style:left="{centrePos.x}px" style:top="{centrePos.y}px"
+      bind:this={centreEl} bind:offsetWidth={centreW} bind:offsetHeight={centreH}>
+      <NotifyCentre onpick={(a) => { centre.close(); centre.requestJump(a); if (page !== 'hub') switchTab('hub'); }} />
     </div>
   {/if}
 
@@ -1980,7 +2037,7 @@
            desktop rail keeps its travelling wash (motion.md §1.14). -->
       {#if hubEligible}
         <button class:active={page === 'hub'} aria-current={page === 'hub' ? 'page' : undefined} onclick={() => switchTab('hub')}>
-          <span class="tab-glyph" class:on={page === 'hub'}><Icon name="chat" size={19} /></span><span>{t('hub')}</span>
+          <span class="tab-glyph" class:on={page === 'hub'}><Icon name="chat" size={19} />{#if centre.unviewed}<span class="unread-dot tab-badge" aria-hidden="true"></span>{/if}</span><span>{t('hub')}</span>
         </button>
         <button class:active={page === 'board'} aria-current={page === 'board' ? 'page' : undefined} onclick={() => switchTab('board')}>
           <span class="tab-glyph" class:on={page === 'board'}><Icon name="layout" size={19} /></span><span>{t('board')}</span>
@@ -2096,6 +2153,18 @@
 
   /* Server picker geometry and two-line rows are local; shared atoms own paint. */
   .rail-server { margin-bottom: 4px; }
+  .rail-bell { position: relative; }
+  .bell-badge {
+    position: absolute; top: 3px; right: 2px; min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box;
+    border-radius: var(--ui-radius-pill); background: var(--accent-ink); color: var(--bg);
+    font-size: var(--fs-micro); font-weight: 700; line-height: 14px; text-align: center; font-variant-numeric: tabular-nums;
+  }
+  .tab-glyph { position: relative; }
+  .tab-badge { position: absolute; top: -1px; right: -4px; border: 2px solid var(--nav-bg); }
+  .centre-menu {
+    position: fixed; z-index: 24; width: min(360px, calc(100vw / var(--ui-zoom, 1) - 16px));
+    max-height: min(520px, calc(100vh / var(--ui-zoom, 1) - 16px)); overflow-y: auto;
+  }
   .server-menu {
     position: fixed; z-index: 24; width: max-content;
     min-width: min(220px, calc(100vw / var(--ui-zoom, 1) - 16px));

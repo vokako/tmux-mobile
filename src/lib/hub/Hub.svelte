@@ -28,20 +28,22 @@
   import CommandButton from '../ui/CommandButton.svelte';
   import './hub-atoms.css';
   import Icon from '../ui/Icon.svelte';
-  import { onDestroy, tick as settled } from 'svelte';
+  import { onDestroy, untrack, tick as settled } from 'svelte';
   import { t } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectDown, projectDelete, projectArchive, projectCreate, projectRename, listSessionsWithPanes,
-    hubPost, hubCommand, modelsList, hubLog, hubRooms, hubUnread, hubAgents, fsMkdir, fsUpload, fsCwd, hubSpawn, hubSpawnTeam, teamsList, hubAgentStop, hubAgentRestart, hubTeamRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, hubAgentInputMode, registryList,
+    hubPost, hubCommand, modelsList, hubLog, hubLogAround, hubRooms, hubUnread, hubAgents, fsMkdir, fsUpload, fsCwd, hubSpawn, hubSpawnTeam, teamsList, hubAgentStop, hubAgentRestart, hubTeamRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, hubAgentInputMode, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
+  import { centre, alertOf } from './notify-centre.svelte.ts';
+  import { currentServerId } from '../app/servers.ts';
   import { HUMAN, quotePreview, stateDotColor, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, pickDrawerAgent, addressed, addressedTeam, mentionedAgents, unreadSenders, stoppedAgents, slashCommand, uploadImagePath, uploadFilePath, imageId, inputModeSwitch } from './hub.ts';
   import { resolvePathRef } from '../core/path-links.ts';
   import { ALL_TARGET, attachmentBody, attachToken, busyTargetsFor, targetMembers, targetTeam, teamTarget } from './hub-composer.ts';
   import { walkFeedGap } from './hub-history.ts';
   import { createHubBackRegistry } from './hub-back.ts';
-  import { notifyNews, isAway, roomProjectName } from './notifications.ts';
+  import { notifyNews, isAway, roomProjectName, playCue, systemNotify, notifyEnabled, notifyLevel, excerpt } from './notifications.ts';
   import { backendIcon, backendTogglesInputMode } from '../core/agents.ts';
   import { anchorOf } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -311,7 +313,10 @@
     // — carrying the text across would put it in front of the wrong agents.
     if (selected) hubPrefs.setDraft(selected, composerText);
     // Park the room too, so switching back is instant.
-    if (selected) roomCache.set(selected, { feed, lastTs, activity, lastActivityTs, agents, histSeq, histMore, actCursor, actMore });
+    // A history window is not the room's state; it is never parked (#322).
+    if (selected && windowed) roomCache.delete(selected);
+    else if (selected) roomCache.set(selected, { feed, lastTs, activity, lastActivityTs, agents, histSeq, histMore, actCursor, actMore });
+    if (selected !== session || !jumpIntent) { windowed = null; revealId = ''; returning = 0; filterBefore = ''; filterNote = ''; }
     selected = session;
     openedAt = Infinity; rosterBase = null; // nothing is fresh until this room has settled
     clearTimeout(justLoadedTimer); justLoaded = false; // an unfold belongs to the room that loaded
@@ -365,8 +370,9 @@
     }
     // Entering a room lands at its tail, cached or not — a parked scrollTop
     // from the LAST room would point at arbitrary content in this one.
-    following = true;
-    if (feed.length) scrollFeed(true);
+    // A jump owns the landing (board #322): no tail, no seen, until it lands.
+    following = !jumpIntent;
+    if (feed.length && !jumpIntent) scrollFeed(true);
     await Promise.all([loadFeed(), loadAgents(), loadActivity()]);
     if (selected === session) {
       // An uncached room's first fill unfolds (the skeleton has been standing
@@ -387,7 +393,7 @@
   }
 
   async function loadFeed(report = false) {
-    if (!selected) return;
+    if (!selected || windowed) return; // a history window takes no live rows (#322)
     // The answer must still be about the question: every poller here freezes
     // the project it asked ABOUT and drops the reply if the user has switched
     // meanwhile — a late resolve was merging the OLD room's messages into the
@@ -431,7 +437,7 @@
         // only runs while this page is visible, so the push handler below is
         // where an off-screen reader is actually reached (board #72); sift's
         // seen keys make the two alert once.
-        notifyNews(messages, { first, away: isAway(visible), project: s });
+        notifyNews(messages, newsCtx(room(s), s, first), undefined, newsEffects);
         if (following) scrollFeed(); else newBelow = true;
       }
     } catch (e) { if (report) throw e; /* hub not available */ }
@@ -514,16 +520,123 @@
    * feed — and when you send, since you are plainly looking then. The mark is
    * the newest message's seq (board #322; two messages can share a ms). */
   function markSeen() {
-    if (!selected || !visible) return;
+    if (!selected || !visible || windowed || jumpIntent) return;
     const newest = feed.reduce((best, m) => ((m.seq ?? 0) > (best?.seq ?? 0) ? m : best), null);
     const mark = hubPrefs.seen(selected);
     if (!newest || (newest.seq ?? 0) <= mark.seq && (newest.ts ?? 0) <= mark.ts) return;
     hubPrefs.setSeen(selected, { seq: newest.seq ?? 0, ts: Math.max(mark.ts, newest.ts ?? 0) });
+    centre.markRoomRead(selected, newest.seq ?? 0);
     // The room is read: its cue goes now, and the server confirms.
     if (roomUnread[selected]) { const { [selected]: _, ...rest } = roomUnread; roomUnread = rest; }
     void refreshUnread([selected]);
   }
   const unread = $derived(unreadSenders(feed, hubPrefs.seen(selected)));
+
+  // ── Notification centre wiring (board #322) ──────────────────────────
+  // Every batch goes through notifyNews; the centre records what it calls
+  // news BEFORE mute/level/away decide the sound, under this server's id. A
+  // message that lands while the reader is at that room's visible tail is
+  // recorded already viewed.
+  const serverId = () => currentServerId(localStorage);
+  function newsCtx(roomName, session, first) {
+    const here = !!selected && roomName === room(selected);
+    const away = !here || isAway(visible);
+    return {
+      first, away, project: roomProjectName(rows, roomName),
+      server: serverId(), room: roomName, session,
+      viewed: !away && following && !windowed,
+    };
+  }
+  const newsEffects = {
+    cue: playCue, sys: systemNotify, enabled: notifyEnabled, level: notifyLevel,
+    record: (m, c) => centre.record(alertOf(m, { server: c.server, room: c.room, session: c.session, project: c.project, kind: c.kind, viewed: !!c.viewed, excerpt: excerpt(m.body ?? '') })),
+  };
+
+  // The jump to a centre entry's message (board #322). One request at a
+  // time: a newer request, a room change or a server switch (which remounts
+  // this page and reloads the centre) supersedes it, and a superseded jump
+  // changes neither the view nor viewed. The room is the target's; when the
+  // message is not in the loaded feed, ONE page around it (`around_seq`)
+  // becomes the feed as a HISTORY WINDOW — not the tail: no live rows merge
+  // into it, seen does not move, it is never parked, older pages still walk
+  // from its top, and "Back to latest" swaps the tail page in only once it
+  // has answered. viewed only when the message is mounted and scrolled to.
+  let jumpIntent = 0;
+  let windowed = $state(null);      // {newestSeq, newestTs} while a window is on screen
+  let revealId = $state('');        // the target a level/filter would hide, kept for this jump
+  let returning = 0;                // the Back-to-latest intent
+  let filterNote = $state('');      // "filter cleared for this jump" — visible, Back restores it
+  let filterBefore = '';
+  $effect(() => {
+    const req = centre.jump;
+    if (!req || !visible || !alive) return;
+    untrack(() => { void openAt(req); });
+  });
+  async function openAt({ alert, n }) {
+    if (alert.server && alert.server !== serverId()) { centre.failed(alert.key, t('hubJumpOtherServer')); return; }
+    const row = rows.find((r) => r.project.session === alert.session || roomKey(r) === alert.room);
+    if (!row) { centre.failed(alert.key, t('hubJumpNoProject')); return; }
+    jumpIntent = n;
+    const current = () => centre.isCurrent(n) && alive;
+    try {
+      if (selected !== row.project.session) await selectProject(row.project.session);
+      if (!current() || selected !== row.project.session) return;
+      // A room-scoped reading filter that would hide the target is cleared
+      // VISIBLY (the chip changes; Back puts it back). The level is a stored
+      // preference and is never touched: the target is revealed instead.
+      if (filterAgent) { filterBefore = filterAgent; filterAgent = ''; filterNote = t('hubJumpFilterCleared'); }
+      revealId = alert.id;
+      if (!feed.some((m) => String(m.id) === alert.id)) {
+        const res = await hubLogAround(row.project.session, alert.seq, 100).catch(() => null);
+        if (!current() || selected !== row.project.session) return;
+        if (!res) { centre.failed(alert.key, t('hubJumpLoadFailed')); return; }
+        const msgs = res.messages ?? [];
+        if (!msgs.some((m) => String(m.id) === alert.id)) { centre.failed(alert.key, t('hubJumpGone')); return; }
+        feed = msgs;
+        histSeq = res.oldest_seq ?? 0;
+        histMore = (res.has_more ?? false) && histSeq > 0;
+        if (res.newer_more) {
+          windowed = { newestSeq: msgs.at(-1)?.seq ?? 0, newestTs: msgs.at(-1)?.ts ?? 0 };
+        } else {
+          // The page reaches the room's newest message: it IS the tail.
+          lastTs = Math.max(0, ...msgs.map((m) => m.ts ?? 0));
+        }
+      }
+      following = false;
+      await settled();
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+      if (!current()) return;
+      if (feedView?.showMsg(alert.id)) centre.viewed(alert.key);
+      else centre.failed(alert.key, t('hubJumpGone'));
+    } finally {
+      if (jumpIntent === n) jumpIntent = 0;
+    }
+  }
+  /** Back to latest from a history window: the window stays (no live rows,
+   * no seen) until the tail page answers for the same room and intent, then
+   * messages, activity bound and cursors are replaced in one step. A failure
+   * keeps the window and its control for a retry. */
+  function restoreFilter() {
+    filterAgent = filterBefore; filterBefore = ''; filterNote = '';
+  }
+  async function returnToLatest() {
+    if (!windowed || !selected) { scrollFeed(true); return; }
+    const s = selected;
+    const me = ++returning;
+    const res = await hubLog(s, 0, 100).catch(() => null);
+    if (!alive || selected !== s || returning !== me || !windowed) return;
+    if (!res) return; // the window and its control stay; tap again to retry
+    const msgs = res.messages ?? [];
+    feed = msgs;
+    lastTs = Math.max(0, ...msgs.map((m) => m.ts ?? 0));
+    histSeq = res.oldest_seq ?? 0;
+    histMore = (res.has_more ?? false) && histSeq > 0;
+    windowed = null;
+    revealId = '';
+    newBelow = false;
+    following = true;
+    scrollFeed(true);
+  }
 
   // Unread per ROOM, for every project (board #322): the server's summary of
   // the news above each room's read mark — `hub_unread`, the same news rule
@@ -1442,14 +1555,13 @@
     // the selected room asks the live document. Messages are never "first"
     // here: a push is by construction newer than any loaded page.
     if (m?.room) {
-      notifyNews([m], {
-        first: false,
-        away: !selected || m.room !== room(selected) || isAway(visible),
-        project: roomProjectName(rows, m.room),
-      });
+      const session = rows.find((r) => roomKey(r) === m.room)?.project.session ?? m.room.replace(/^proj:/u, '');
+      notifyNews([m], newsCtx(m.room, session, false), undefined, newsEffects);
     }
     if (m?.room) unreadSoon(m.room);
     if (!selected || m?.room !== room(selected)) return;
+    // A history window takes no live rows; the to-tail dot says news waits.
+    if (windowed) { newBelow = true; return; }
     feed = mergeMessages(feed, [m]);
     lastTs = Math.max(lastTs, m.ts ?? 0);
     if (following) scrollFeed(); else newBelow = true;
@@ -1618,6 +1730,7 @@
       backLayers.register('picker', () => { if (pickerOpen) { pickerOpen = false; return true; } return false; }),
       backLayers.register('create', () => { if (createOpen) { createOpen = false; return true; } return false; }),
       backLayers.register('rename', () => { if (renaming) { renaming = false; return true; } return false; }),
+      backLayers.register('jumpFilter', () => { if (filterBefore) { restoreFilter(); return true; } return false; }),
       backLayers.register('filter', () => { if (filterAgent) { filterAgent = ''; return true; } return false; }),
       backLayers.register('reply', () => { if (replyTo) { replyTo = null; return true; } return false; }),
       backLayers.register('files', () => { if (termOpen && drawerView === 'files' && drawerFilesBack?.()) return true; return false; }),
@@ -1747,7 +1860,11 @@
   // `windowOf` is what lets a reply close the lane it belongs to, so two agents
   // working at once keep ONE growing group each instead of interleaving.
   const blocks = $derived.by(() => {
-    const all = feedBlocks(feed, activity, hubPrefs.feedLevel, (from) => agents.find((a) => a.name === from)?.name);
+    // A jump's history window shows no activity newer than its last message
+    // (activity is merged by ts and would trail it), and keeps its target
+    // even where the level would drop it (board #322).
+    const acts = windowed ? activity.filter((e) => (e.ts ?? 0) <= windowed.newestTs) : activity;
+    const all = feedBlocks(feed, acts, hubPrefs.feedLevel, (from) => agents.find((a) => a.name === from)?.name, revealId);
     if (!filterAgent) return all;
     // Replies, addressed messages and this agent's telemetry lane:
     // the reading rule lives in filterBlocks.
@@ -1936,6 +2053,12 @@
         <!-- The partition toggles sit at the tool gap, not the row gap: three
              icons read as one group (board #228). -->
         <div class="head-tools">
+        <!-- The phone's door to the notification centre (board #322): the
+             desktop's is the rail bell; the Hub tab carries the badge. -->
+        {#if mobile || compact}
+          <span class="bell-wrap"><CommandButton variant="icon" icon="bell" label={t('notifyCentre')} hasPopup="dialog" expanded={!!centre.anchor}
+            onclick={(e) => centre.toggle(e.currentTarget)} />{#if centre.unviewed}<span class="unread-dot bell-dot" aria-hidden="true"></span>{/if}</span>
+        {/if}
         <CommandButton variant="icon" icon="layout" label={t('board')}
           expanded={mobile || compact ? undefined : termOpen && drawerView === 'board'}
           controls={mobile || compact || !drawerShown ? undefined : drawerId}
@@ -2015,6 +2138,7 @@
         {roomReady} {justLoaded} {openedAt} {loadingOlder} {histMore} {actMore}
         stepsRows={hubPrefs.stepsRows} {stateLabel} {emptyFeed} bind:following bind:newBelow
         onseen={markSeen} onolder={loadOlder} onpath={routePathRef}
+        windowed={!!windowed} onlatest={returnToLatest}
         onimage={(url) => { shotView = url; }}
         onreply={replyToMessage}
         onboard={(id) => {
@@ -2035,6 +2159,12 @@
         onadd={() => openPicker('add')}
         oncontext={(at, name, info) => openCtx(at, name, agentItems(name), info)} />
 
+      {#if filterNote}
+        <!-- A jump cleared the reading filter to reach its message (#322):
+             said, and one tap (or Back) puts it back. -->
+        <div class="jump-note appear"><span>{filterNote}</span>
+          <CommandButton variant="secondary" label={t('hubJumpFilterRestore')} onclick={restoreFilter} /></div>
+      {/if}
       <Composer bind:this={composer} bind:composerText {selected} {compact} {recipient}
         {roomReady}
         {agents} {pending} {attaching} {failed} {sendable} {interruptible} {replyTo}
@@ -2148,6 +2278,9 @@
 </div>
 
 <style>
+  .bell-wrap { position: relative; display: inline-flex; }
+  .bell-dot { position: absolute; top: 4px; right: 4px; pointer-events: none; }
+  .jump-note { display: flex; align-items: center; gap: 8px; padding: 4px 12px; font-size: var(--fs-meta); color: var(--text2); }
   .header-copy-feedback { position: fixed; z-index: 8; }
   .composer-feedback { position: fixed; z-index: 16; }
   .action-read-error { display: flex; align-items: center; gap: var(--tool-gap); padding: calc(2 * var(--ui-gap)) calc(3 * var(--ui-gap)); }

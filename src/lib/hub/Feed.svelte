@@ -28,6 +28,10 @@
     onseen: markSeen = () => {}, onolder: loadOlder = async () => {},
     onpath: routePathRef = () => {}, onboard = () => {}, onimage = () => {}, onreply = null,
     registerActions = null,
+    /** A jump's history window is on screen (board #322): it is not the
+     * tail, so nothing here follows, marks seen or writes the tail — the
+     * to-tail control asks Hub for the latest page instead (`onlatest`). */
+    windowed = false, onlatest = () => {},
   } = $props();
 
   // A resize snapshot belongs to one room. Tool disclosures, copied-label
@@ -116,6 +120,8 @@
    * content only scrolls when `following`; sending forces it, because you plainly
    * want to see what you just sent. */
   export function scrollToTail(force = false) {
+    // A history window (#322) is not the tail: going there is Hub's "Back to latest".
+    if (windowed) { if (force) onlatest(); return; }
     if (!force && !following) return;
     requestAnimationFrame(writeTail);
   }
@@ -158,7 +164,7 @@
     // hidden feed) must not pollute `following` in either direction — and
     // nothing below is worth doing off-screen either; the visible-restore
     // effect re-parks the tail (board #38).
-    following = tailAfterScroll(visible, following, feedEl ? bottomGap(feedEl) : 0);
+    following = !windowed && tailAfterScroll(visible, following, feedEl ? bottomGap(feedEl) : 0);
     if (!visible) return;
     // Everything below reads layout (syncAsk neutralizes the stickies, then
     // reads every [data-ask] box; autoRefold queries each expanded key) and a
@@ -357,6 +363,31 @@
     askDirTravel = 0;
     syncAsk(askDir, true);
   }
+  /** Bring ONE message — a bubble or a lifecycle row, by its id — to its
+   * natural place 8px from the top and ring it once (board #322, the
+   * notification centre's jump). Returns false when it is not mounted, so the
+   * caller never claims a landing it did not make. */
+  let hitId = $state('');
+  let hitTimer = 0;
+  export function showMsg(id) {
+    if (!feedEl || !id) return false;
+    const el = feedEl.querySelector(`[data-msg="${CSS.escape(String(id))}"]`);
+    if (!(el instanceof HTMLElement)) return false;
+    el.style.position = 'static';
+    let at = 0;
+    for (let n = el; n && n !== feedEl; n = n.offsetParent) at += n.offsetTop;
+    el.style.removeProperty('position');
+    following = false;
+    feedEl.scrollTop = Math.max(0, at - 8);
+    askScrollTop = feedEl.scrollTop;
+    askDirTravel = 0;
+    syncAsk(askDir, true);
+    hitId = String(id);
+    clearTimeout(hitTimer);
+    hitTimer = setTimeout(() => { hitId = ''; }, 1600);
+    return true;
+  }
+  onDestroy(() => clearTimeout(hitTimer));
   /** An expanded message the reader scrolled clean away from folds itself back
    * and rejoins the anchor pool (owner, 2026-08-27: "划走看不到以后 自动折叠
    * 并且钉住"). "Away" is the whole box out of the viewport by a margin, so a
@@ -745,7 +776,7 @@
                  the message: done → todo reads as a REOPEN. The row is a
                  BUTTON: tapping it jumps to that issue on the board page
                  (same route the header's layout icon takes). -->
-            <button class="sys-item sys-jump" title={t('board')}
+            <button class="sys-item sys-jump" class:jump-hit={!!hitId && b.ids?.[j] === hitId} title={t('board')} data-msg={b.ids?.[j] || undefined}
               onclick={() => onboard(Number(bl.id))}>
               <span class="sys-who">#{bl.id}</span>
               <span class="sys-from">{t(`boardStatus_${bl.from}`)} →</span>
@@ -755,7 +786,7 @@
           {:else}
           {@const p = sysParts(item)}
           {@const c = sysVerbColor(p.verb)}
-          <div class="sys-item">
+          <div class="sys-item" class:jump-hit={!!hitId && b.ids?.[j] === hitId} data-msg={b.ids?.[j] || undefined}>
             {#if p.who}<span class="sys-who" style:--who-ink={agentHue(p.who)}>{p.who}</span>{/if}
             {#if p.verb}
               <span class="sys-verb" style:color={c}><span class="sv-dot" aria-hidden="true"></span>{p.verb}</span>
@@ -808,7 +839,8 @@
           class:ask-top={pinned && askEdge === 'top'}
           class:ask-bottom={pinned && askEdge === 'bottom'}
           class:held={pinned && askHeld}
-          data-ask={isAsk ? key : undefined}>
+          class:jump-hit={!!hitId && String(m.id ?? '') === hitId}
+          data-ask={isAsk ? key : undefined} data-msg={m.id ?? undefined}>
           <!-- Telegram-style bubble: agent name heads the bubble; the
                time — and on your own messages the delivery ring, right
                of it — is an inline trailer FLOATED at the end of the
@@ -998,8 +1030,8 @@
 {/if}
 <!-- Parked away from the tail: one tap back, with a dot when something
      arrived while you were reading. -->
-{#if !following}
-  <button class="to-tail to-bottom" class:news={newBelow} title={t('hubToBottom')} aria-label={t('hubToBottom')} onclick={() => scrollToTail(true)}>
+{#if !following || windowed}
+  <button class="to-tail to-bottom" class:news={newBelow} title={windowed ? t('hubBackToLatest') : t('hubToBottom')} aria-label={windowed ? t('hubBackToLatest') : t('hubToBottom')} onclick={() => (windowed ? onlatest() : scrollToTail(true))}>
     <Icon name="arrow-down" size={16} />
   </button>
 {/if}
@@ -1081,6 +1113,10 @@
      unified it with the Terminal's) — only the feed placement lives here. */
   .to-bottom { right: 14px; bottom: 12px; z-index: 7; }
   .msg { position: relative; display: flex; flex-direction: column; max-width: var(--msg-max); }
+  /* The centre's jump landed here (board #322): one accent ring that fades
+     out on the shared tempo — no new keyframe, no layout change. */
+  .msg, .sys-item { transition: box-shadow var(--t-move) ease; }
+  .jump-hit { box-shadow: 0 0 0 2px var(--accent-ink); border-radius: var(--ui-radius-control); }
   /* Both sides hug their content (default column-flex STRETCH made every
      agent bubble 76% wide, leaving a short line's inline time stranded at
      the far right). */

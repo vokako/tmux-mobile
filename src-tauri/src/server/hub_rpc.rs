@@ -254,7 +254,15 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
             // gapless and already on every message the client holds, which a ts is
             // not (two messages can share a millisecond).
             let before_seq = p.get("before_seq").and_then(|v| v.as_i64()).filter(|n| *n > 0);
-            let mut history = rooms::history_page(&room, before_seq, limit);
+            // `around_seq` (board #322): the page of THIS room around one of its
+            // messages, for a jump to it — the one documented helper; it wins
+            // over before_seq/since_ts and adds `newer_more`.
+            let around_seq = p.get("around_seq").and_then(|v| v.as_i64()).filter(|n| *n > 0);
+            let since_ts = if around_seq.is_some() { 0 } else { since_ts };
+            let mut history = match around_seq {
+                Some(seq) => rooms::around_page(&room, seq, limit),
+                None => rooms::history_page(&room, before_seq, limit),
+            };
             // An archived message is hidden, not gone: the room's own store still
             // has it (that is what makes a restore free), so the hiding happens
             // here, on the way out.
@@ -1760,6 +1768,33 @@ mod tests {
         assert_eq!(v["rooms"][&room], serde_json::json!({ "count": 1, "first_seq": a["seq"], "last_seq": a["seq"] }), "the archived one is not unread");
         assert!(v["rooms"].get(&quiet).is_none(), "own words are never unread");
         let _ = b;
+    }
+
+    /// Board #322: `around_seq` pages THIS room around a message, even when
+    /// other rooms' messages interleave its seqs.
+    #[test]
+    fn hub_log_around_seq_pages_the_room_around_its_message() {
+        crate::projects::tests::use_test_store();
+        let session = format!("around-{}", uuid::Uuid::new_v4());
+        let room = format!("proj:{session}");
+        let noise = format!("proj:noise-{}", uuid::Uuid::new_v4());
+        let mut mine = Vec::new();
+        for i in 0..20 {
+            mine.push(rooms::seed_msg(&room, &format!("a{i}-{session}"), 100 + i, "lead", &[], &format!("m{i}")));
+            rooms::seed_msg(&noise, &format!("n{i}-{session}"), 100 + i, "x", &[], "other room");
+        }
+        let target = mine[10]["seq"].as_i64().unwrap();
+        let r = handle_hub_request(&req("hub_log", serde_json::json!({ "session": session, "around_seq": target, "limit": 6 })), None);
+        let v = r.result.expect("page");
+        let bodies: Vec<&str> = v["messages"].as_array().unwrap().iter().map(|m| m["body"].as_str().unwrap()).collect();
+        assert_eq!(bodies, ["m7", "m8", "m9", "m10", "m11", "m12"], "three before, the target and two after");
+        assert_eq!(v["has_more"], true);
+        assert_eq!(v["newer_more"], true);
+        assert_eq!(v["oldest_seq"], mine[7]["seq"], "the older walk continues from here");
+        let last = mine[19]["seq"].as_i64().unwrap();
+        let v = handle_hub_request(&req("hub_log", serde_json::json!({ "session": session, "around_seq": last, "limit": 6 })), None).result.unwrap();
+        assert_eq!(v["newer_more"], false, "the newest message's window is the tail");
+        assert_eq!(v["messages"].as_array().unwrap().last().unwrap()["body"], "m19");
     }
 
     /// A page can lose EVERY row to the archive filter, and the walk still has to

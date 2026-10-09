@@ -28,9 +28,9 @@ const source = await readFile(new URL('./Feed.svelte', import.meta.url), 'utf8')
 const rule = (selector: string) =>
   source.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
 
-test('Feed exports three reading operations and owns its existing DOM lifecycle (#134)', () => {
+test('Feed exports its reading operations and owns its existing DOM lifecycle (#134, #322 showMsg)', () => {
   assert.deepEqual([...source.matchAll(/export (?:async )?function (\w+)/gu)].map((m) => m[1]).sort(),
-    ['resetForRoom', 'scrollToTail', 'withReadingAnchor']);
+    ['resetForRoom', 'scrollToTail', 'showMsg', 'withReadingAnchor']);
   assert.match(source, /following = \$bindable\(true\), newBelow = \$bindable\(false\)/u);
   assert.match(source, /export function resetForRoom\(\) \{\s*reading = null;\s*expanded = \{\};\s*setMessageActions\(-1\);\s*rawOpen = '';\s*\}/u,
     '#167 also invalidates pending copy/expiry through the shared message model');
@@ -312,7 +312,8 @@ test('leaving at the tail means returning to the tail — and ONLY then (board #
   // 1) every scroll event routes `following` through the ONE pure transition
   //    (visible + bottom gap), so a hidden page's layout noise cannot pollute
   //    it, and the rest of the handler stops off-screen;
-  assert.match(source, /following = tailAfterScroll\(visible, following, feedEl \? bottomGap\(feedEl\) : 0\);\n\s*if \(!visible\) return;/u,
+  // (#322: a jump's history window is never the tail, so it never follows.)
+  assert.match(source, /following = !windowed && tailAfterScroll\(visible, following, feedEl \? bottomGap\(feedEl\) : 0\);\n\s*if \(!visible\) return;/u,
     'the scroll handler speaks the transition rule, then stops when hidden');
   assert.match(source, /const atBottom = \(\) => !feedEl \|\| bottomGap\(feedEl\) < TAIL_GAP;/u,
     'atBottom is the same gap measure — no second definition of the tail');

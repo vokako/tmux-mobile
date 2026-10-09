@@ -72,6 +72,7 @@ const ROUND_ALLOWED: { file: string; match: string; why: string }[] = [
   { file: 'app.css', match: '.side-win-dot', why: 'a dot' },
   { file: 'app.css', match: '.proj-row .dot', why: 'a dot' },
   { file: 'app.css', match: '.unread-dot', why: 'the unread dot (board #322)' },
+  { file: 'App.svelte', match: '.bell-badge', why: 'the centre bell\'s count badge (board #322)' },
   { file: 'lib/app/Preferences.svelte', match: '.addr-dot', why: 'a dot' },
   { file: 'lib/app/ServerList.svelte', match: '.sm-dot', why: 'a dot' },
   { file: 'lib/ui/CommandButton.svelte', match: '.round, .round::before {', why: 'the composer Send — the one circular command' },

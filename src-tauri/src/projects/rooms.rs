@@ -108,6 +108,18 @@ pub fn history_page(room: &str, before_seq: Option<i64>, limit: i64) -> serde_js
     })
 }
 
+/// The jump window's page (board #322): `room`'s messages around `seq`, in
+/// `history_page`'s shape plus `newer_more` ("rows newer than this page
+/// exist", so the window is not the tail).
+pub fn around_page(room: &str, seq: i64, limit: i64) -> serde_json::Value {
+    let (msgs, has_more, newer_more) = with_store(|s| s.hub_around(room, seq, limit)).unwrap_or((Vec::new(), false, false));
+    serde_json::json!({
+        "messages": msgs.iter().map(message_json).collect::<Vec<_>>(),
+        "has_more": has_more,
+        "newer_more": newer_more,
+    })
+}
+
 /// ONE message by its id, however old — exact lookup, never a page scan.
 pub fn message_by_id(room: &str, id: &str) -> Option<serde_json::Value> {
     with_store(|s| s.hub_message_by_id(room, id))

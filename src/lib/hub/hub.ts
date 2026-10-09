@@ -1478,7 +1478,7 @@ export type FeedBlock =
   /** `steps`: the tool-call group this reply closed for its OWN window
    *  (board #295) — rendered inside the reply's card, folded by default. */
   | { type: 'msg'; ts: number; msg: any; delivered: boolean; command?: SentCommand; steered?: boolean; steps?: Extract<FeedBlock, { type: 'steps' }> }
-  | { type: 'sys'; ts: number; key: string; items: string[] }
+  | { type: 'sys'; ts: number; key: string; items: string[]; /** each item's message id, parallel to items (board #322's jump anchor) */ ids?: string[] }
   | { type: 'prompt'; ts: number; window: string; text: string }
   | { type: 'progress'; ts: number; window: string; state: string; text: string }
   | { type: 'note'; ts: number; window: string; event: HubActivityEvent }
@@ -1652,8 +1652,9 @@ export function filterBlocks(blocks: FeedBlock[], name: string, window?: string)
       continue;
     }
     if (b.type === 'sys') {
-      const items = b.items.filter((line) => word.test(line));
-      if (items.length) out.push({ ...b, items });
+      const keep = b.items.map((line) => word.test(line));
+      const items = b.items.filter((_, i) => keep[i]);
+      if (items.length) out.push({ ...b, items, ids: b.ids?.filter((_, i) => keep[i]) });
       continue;
     }
     // prompt / progress / note / steps — all carry the window they belong to.
@@ -1819,6 +1820,10 @@ export function feedBlocks(
   activity: readonly HubActivityEvent[],
   level: FeedLevel,
   windowOf?: (from: string) => string | undefined,
+  /** A message id a jump must reach (board #322): a lifecycle line the
+   * chat-only level would drop is kept for that one message. The stored
+   * level is never changed. */
+  reveal = '',
 ): FeedBlock[] {
   // Lifecycle lines ("[tmm] spawned dev") are the app's record, not the
   // conversation: at the chat-only level they disappear, and elsewhere they
@@ -1839,8 +1844,8 @@ export function feedBlocks(
       const body = [...command.to.map((n) => `@${n}`), typed].join(' ');
       return [{ type: 'msg' as const, ts: m.ts ?? 0, msg: { ...m, body }, delivered: false, command }];
     }
-    if (level === 'chat') return [];
-    return [{ type: 'sys' as const, ts: m.ts ?? 0, key: `sys${m.id ?? m.ts}`, items: [sys] }];
+    if (level === 'chat' && !(reveal && String(m.id ?? '') === reveal)) return [];
+    return [{ type: 'sys' as const, ts: m.ts ?? 0, key: `sys${m.id ?? m.ts}`, items: [sys], ids: [String(m.id ?? '')] }];
   });
 
   // Rule 1: pair echoes with the messages that produced them.
@@ -2027,6 +2032,7 @@ export function feedBlocks(
     const prev = out[out.length - 1];
     if (item.type === 'sys' && prev?.type === 'sys') {
       prev.items.push(...item.items);
+      prev.ids = [...(prev.ids ?? []), ...(item.ids ?? item.items.map(() => ''))];
       continue;
     }
     out.push(item);
