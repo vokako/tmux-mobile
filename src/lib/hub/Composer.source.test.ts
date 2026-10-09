@@ -3,6 +3,12 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const source = await readFile(new URL('./Composer.svelte', import.meta.url), 'utf8');
+// The attachment strip and the staging pipeline moved out of Composer
+// unchanged (board #329): the same contracts, read where they now live.
+const strip = await readFile(new URL('./AttachStrip.svelte', import.meta.url), 'utf8');
+const pipeline = await readFile(new URL('./attachments.svelte.ts', import.meta.url), 'utf8');
+const ruleIn = (src: string, selector: string) =>
+  src.match(new RegExp(`(?:^|\\n)\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
 const rule = (selector: string) =>
   source.match(new RegExp(`(?:^|\\n)\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
 
@@ -85,12 +91,14 @@ test('Composer registers only palette Back and preserves the capture boundary (#
 
 test('Composer attachment rendering and button gates retain the coordinator verdicts (#133)', () => {
   assert.match(source, /disabled=\{!selected \|\| attaching \|\| failed \|\| !sendable\}/u);
-  assert.match(source, /\{#each pending as a, i \(a\.key\)\}\s*\n\s*\{#if a\.error\}/u);
-  const err = rule('.pend-chip.err');
+  assert.match(source, /<AttachStrip \{pending\} onremove=\{removeAttachment\} \{onpreview\}/u, 'the composer renders the ONE strip');
+  assert.match(strip, /\{#each pending as a, i \(a\.key\)\}\s*\n\s*\{#if a\.error\}/u);
+  const err = ruleIn(strip, '.pend-row :global(.pend-chip.err)');
   assert.match(err, /var\(--status-danger\)/u);
   assert.doesNotMatch(err, /#[0-9a-f]{3,8}\b/iu);
-  assert.match(source, /onclick=\{\(\) => removeAttachment\(i\)\}/u);
-  assert.match(source, /onpreview\(a\.thumb\)/u, 'the preview opens the original local thumbnail URL');
+  assert.match(strip, /onclick=\{\(\) => onremove\(i\)\}/u);
+  assert.match(strip, /onpreview\(a\.thumb\)/u, 'the preview opens the original local thumbnail URL');
+  assert.doesNotMatch(source, /class="pend-thumb/u, 'one thumbnail species: the strip owns it');
 });
 
 test('the remaining command palette keeps its measured upward placement (#168)', () => {
@@ -125,7 +133,9 @@ test('paste and the + button stage attachments through ONE pipeline (board #25)'
   // re-encode, .tmm/uploads layout) the moment either one changed.
   assert.match(source, /class="c-input"[^>]*onpaste=\{onComposerPaste\}/su,
     'the composer textarea must wire onpaste');
-  const handler = /function onComposerPaste\(e\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
+  const composerHandler = /function onComposerPaste\(e\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
+  assert.match(composerHandler, /attachPaste\(e, stageFiles\)/u, 'the composer routes a paste through the shared rule');
+  const handler = /export function attachPaste\([^)]*\)[^{]*\{([\s\S]*?)\n\}/u.exec(pipeline)?.[1] ?? '';
   assert.match(handler, /pastedFiles\(e\.clipboardData\)/u, 'files come from the pure extractor');
   assert.match(handler, /preventDefault/u, 'a file paste suppresses the default text insertion');
   // Office/browser pastes ship a PNG rendering beside the words; the words are
@@ -134,7 +144,7 @@ test('paste and the + button stage attachments through ONE pipeline (board #25)'
   // 总是被粘贴为了一个图片").
   assert.match(handler, /if \(textIsThePaste\(e\.clipboardData\?\.getData\('text\/plain'\), files\)\) return;[\s\S]*preventDefault/u,
     'text beside an image-only set wins, decided before preventDefault');
-  assert.match(handler, /stageFiles\(files\)/u, 'staging is the shared pipeline');
+  assert.match(handler, /stage\(files\)/u, 'staging is the shared pipeline');
   const picker = /async function onPickFiles\(e\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
   assert.match(picker, /stageFiles\(files\)/u, 'the + button goes through the same pipeline');
   assert.doesNotMatch(picker, /fsUpload|encodeImage/u, 'the picker holds no upload logic of its own');
@@ -227,8 +237,36 @@ test('double Ctrl+C has only a timestamp and asks the parent about the current r
 });
 
 test('a reply is a removable chip in the pending row, never text in the field (#290)', () => {
-  assert.match(source, /\{#if pending\.length \|\| replyTo\}\s*<div class="pend-row">\s*\{#if replyTo\}/u);
+  assert.match(source, /<AttachStrip [^>]*lead=\{replyTo \? replyChip : undefined\} \/>/u, 'the reply chip leads the pending row');
+  assert.match(strip, /\{#if pending\.length \|\| lead\}\s*<div class="pend-row">\s*\{@render lead\?\.\(\)\}/u);
   assert.match(source, /<span class="pend-chip reply appear-pop" title=\{replyTo\.preview\}>/u, 'the pending-chip species');
   assert.match(source, /<button class="pend-x" aria-label=\{t\('hubReplyClear'\)\} onclick=\{onclearreply\}>/u);
   assert.doesNotMatch(source, /\[re /u, 'the composer never writes the token: the server builds it');
+});
+
+test('ONE attachment pipeline in the app: upload, encode and paste rules live in attachments.svelte.ts (board #329)', async () => {
+  const { readdir } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  const root = new URL('../', import.meta.url).pathname;
+  const files: string[] = [];
+  const walk = async (dir: string) => {
+    for (const e of await readdir(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) await walk(p);
+      else if (/\.(svelte|ts)$/u.test(e.name) && !/\.test\.ts$/u.test(e.name)) files.push(p);
+    }
+  };
+  await walk(root);
+  const hits: { encode: string[]; ceiling: string[]; uploads: string[]; paste: string[] } = { encode: [], ceiling: [], uploads: [], paste: [] };
+  for (const f of files) {
+    const text = await readFile(f, 'utf8');
+    const rel = f.slice(root.length);
+    if (/canvas\.toBlob\(/u.test(text)) hits.encode.push(rel);
+    if (/1568/u.test(text)) hits.ceiling.push(rel);
+    if (/\.tmm\/uploads\/\.gitignore/u.test(text)) hits.uploads.push(rel);
+    if (/textIsThePaste\(/u.test(text) && !rel.endsWith('hub/hub.ts')) hits.paste.push(rel);
+  }
+  for (const [what, where] of Object.entries(hits)) {
+    assert.deepEqual(where, ['hub/attachments.svelte.ts'], `${what} lives in ONE place: ${where.join(', ')}`);
+  }
 });

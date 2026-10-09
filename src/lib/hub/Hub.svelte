@@ -38,9 +38,10 @@
   import { sortRows } from '../projects/projects.ts';
   import { centre, alertOf } from './notify-centre.svelte.ts';
   import { currentServerId } from '../app/servers.ts';
-  import { HUMAN, quotePreview, stateDotColor, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, pickDrawerAgent, addressed, addressedTeam, mentionedAgents, unreadSenders, stoppedAgents, slashCommand, uploadImagePath, uploadFilePath, imageId, inputModeSwitch } from './hub.ts';
+  import { HUMAN, quotePreview, stateDotColor, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, pickDrawerAgent, addressed, addressedTeam, mentionedAgents, unreadSenders, stoppedAgents, slashCommand, inputModeSwitch } from './hub.ts';
   import { resolvePathRef } from '../core/path-links.ts';
-  import { ALL_TARGET, attachmentBody, attachToken, busyTargetsFor, targetMembers, targetTeam, teamTarget } from './hub-composer.ts';
+  import { createStager } from './attachments.svelte.ts';
+  import { ALL_TARGET, attachmentBody, busyTargetsFor, targetMembers, targetTeam, teamTarget } from './hub-composer.ts';
   import { walkFeedGap } from './hub-history.ts';
   import { createHubBackRegistry } from './hub-back.ts';
   import { notifyNews, isAway, roomProjectName, playCue, systemNotify, notifyEnabled, notifyLevel, excerpt } from './notifications.ts';
@@ -836,7 +837,7 @@
     const re = replyTo?.id;
     const quoteBack = replyTo;
     composerText = '';
-    pending = [];
+    stager.pending = []; // detached, not cleared: the thumbs live until the post settles
     replyTo = null;
     following = true;
     scrollFeed(true);
@@ -845,7 +846,7 @@
       // The thumbs belong to the delivered attachments — dead either way.
       for (const a of atts) if (a.thumb) URL.revokeObjectURL(a.thumb);
       if (selected !== room) return; // the new room's numbering/feed are not ours
-      attachSeq = 1;
+      stager.resetSeq();
       await loadFeed();
       scrollFeed(true);
     } catch (e) {
@@ -854,190 +855,35 @@
       // the old room's draft/attachments into the new one. The refs are
       // already uploaded; the draft is lost with the failed post — losing it
       // beats corrupting another room.
-      if (selected === room) { pending = atts; composerText = raw; if (re && !replyTo) replyTo = quoteBack; }
+      if (selected === room) { stager.pending = atts; composerText = raw; if (re && !replyTo) replyTo = quoteBack; }
       else for (const a of atts) if (a.thumb) URL.revokeObjectURL(a.thumb);
     }
   }
 
-  // ── Attach an image (owner, 2026-08-26: "我发送图片时可以有一个小的+按钮，
-  // 上传到项目下…创建临时目录，随机图片 id，并且转 webp…限制一下原图"). The
-  // picked image is downscaled CLIENT-side to the models' effective ceiling —
-  // Claude reads best at ≤1568px on the long edge and GPT caps at 2048, so
-  // 1568 serves both and a 12 MB phone photo becomes a ~100 KB webp before it
-  // crosses the wire. Encoding prefers webp; WebKit cannot ENCODE webp, so the
-  // blob's own type decides the extension (jpeg there). The upload lands in
-  // <ws>/.tmm/uploads/ via the same fs_upload the file browser uses, and the
-  // composer gains a `![](path)` line — send() delivers the PATH into the
-  // agent's pane (an image is a reference, never bytes), and the feed renders
-  // it through ChatImage like any other ref.
-  // The staged set's generation: bumped whenever it is invalidated (project
-  // switch, explicit clear). An async stage job snapshots it at entry and
-  // refuses to touch pending/composerText once stale — without this, an
-  // upload finishing AFTER a project switch refilled the NEW room's composer
-  // with the OLD room's attachment (lead review, board #25).
-  let attachGen = $state(0);
-  // In-flight stage jobs, each remembering the GENERATION it belongs to. A
-  // list and not a flag (paste + picker overlap; a flag dropped the gate when
-  // the first job finished), and per-generation so `attaching` answers for
-  // the room on screen: a stale job from the room the user LEFT neither
-  // holds the new room's send closed nor — via its finally — unlocks a job
-  // the new room started, because every job adds and removes only its OWN
-  // entry (lead review, board #25: 旧 finally 不能解锁新 job).
-  let jobGens = $state([]);
-  const attaching = $derived(jobGens.includes(attachGen));
-  // Uploaded, waiting to ride the next send. The composer never shows the
-  // markdown path line (owner, 2026-08-26: "消息框内部不展示完整的上传图片的
-  // markdown 格式路径，就用一个 Image 的 placeholder 代替") — each attachment
-  // is a chip above the textarea; the ref joins the body at SEND time.
-  // [{ path, kind: 'image'|'file', name, n, thumb }] — n is the token number
-  // the composer text carries as `[img:n]` / `[file:n]` at the INSERTION
-  // POINT (owner, 2026-08-26: "会有图片在文本里的相对位置信息吗…要让我能够
-  // 看到图片插入的相对位置在哪里"): the token is the visible position marker
-  // (a textarea cannot style spans), and send() swaps it for the real ref IN
-  // PLACE, so the prompt keeps the image exactly where the words put it.
-  // thumb is an object URL for the picked image — the chip shows the picture
-  // itself, so "哪几张加上去了" is answered by looking.
-  // A FAILED attachment is a chip too (review, 2026-09-03: an oversized file
-  // or a failed upload only console.warned, so the user could not tell what
-  // the message would carry): `{ key, name, kind, error }` with no path, no
-  // token and no number — rendered in the error state with its reason,
-  // removable, and it BLOCKS send until removed. Nothing about an attachment
-  // is ever silent. `key` is the each-key: a path for a staged one, a fresh id
-  // for a failed one (two failures of the same file are two chips).
-  let pending = $state([]);
-  let attachSeq = 1;
-  const failedAttachment = (f, error) => ({
-    key: `err-${imageId()}`, path: '', kind: f.type?.startsWith('image/') ? 'image' : 'file',
-    name: f.name, n: 0, thumb: '', error,
+  // ── Attachments (board #25): the ONE pipeline lives in attachments.svelte.ts
+  // (board #329 moved it there unchanged; the Board's editors use it too).
+  // This room's stager: uploads land in the selected project, tokens at the
+  // composer's caret. Uploaded attachments wait as chips above the textarea
+  // (owner, 2026-08-26: "消息框内部不展示完整的上传图片的 markdown 格式路径")
+  // and their refs join the body at SEND time, where each token stood.
+  const stager = createStager({
+    ws: () => selectedRow?.project.path,
+    getText: () => composerText,
+    setText: (v) => { composerText = v; },
+    caret: () => composer?.caret(),
+    focus: () => composer?.focus(),
   });
-  const errText = (err) => String(err?.message ?? err ?? '');
-
-  function removeAttachment(i) {
-    const a = pending[i];
-    if (!a) return;
-    if (a.n) {
-      const tok = attachToken(a);
-      // Strip the token (and one adjacent space) wherever the user left it.
-      composerText = composerText.replace(new RegExp(`\\s?${tok.replace(/[[\\]]/g, '\\$&')}`), '');
-    }
-    if (a.thumb) URL.revokeObjectURL(a.thumb);
-    pending = pending.filter((_, j) => j !== i);
-    if (!pending.length) attachSeq = 1;
-  }
-  function clearAttachments() {
-    attachGen++; // any in-flight stage job is now stale — it must not refill
-    for (const a of pending) if (a.thumb) URL.revokeObjectURL(a.thumb);
-    pending = [];
-    attachSeq = 1;
-  }
+  const pending = $derived(stager.pending);
+  const attaching = $derived(stager.attaching);
   // A failed chip is not content: it does not make the composer sendable, and
   // while one is staged nothing sends (send() and the button agree, the same
   // two-gate rule as `attaching`) — the user removes it or re-attaches.
-  const failed = $derived(pending.some((a) => a.error));
-  const sendable = $derived(!!composerText.trim() || pending.some((a) => !a.error));
-  const IMG_EDGE = 1568;
-  const FILE_CAP = 32 * 1024 * 1024; // base64 over one RPC; beyond this, point the agent at the original path instead
+  const failed = $derived(stager.failed);
+  const sendable = $derived(stager.sendable(composerText));
+  const stageFiles = (files) => stager.stage(files);
+  const removeAttachment = (i) => stager.remove(i);
+  const clearAttachments = () => stager.clear();
 
-  async function encodeImage(file) {
-    const bmp = await createImageBitmap(file);
-    const k = Math.min(1, IMG_EDGE / Math.max(bmp.width, bmp.height));
-    const w = Math.max(1, Math.round(bmp.width * k)), h = Math.max(1, Math.round(bmp.height * k));
-    const canvas = document.createElement('canvas');
-    canvas.width = w; canvas.height = h;
-    canvas.getContext('2d').drawImage(bmp, 0, 0, w, h);
-    bmp.close?.();
-    const blob = await new Promise((res) => canvas.toBlob(res, 'image/webp', 0.85));
-    const out = blob?.type === 'image/webp' ? blob
-      : await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.85));
-    if (!out) throw new Error('encode failed');
-    return { b64: toB64(new Uint8Array(await out.arrayBuffer())), ext: out.type === 'image/webp' ? 'webp' : 'jpg' };
-  }
-
-  // Chunked, never one big spread (Key Patterns: base64 large data).
-  function toB64(bytes) {
-    let bin = '';
-    for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
-    return btoa(bin);
-  }
-
-  async function stageFiles(files) {
-    const ws = selectedRow?.project.path;
-    if (!ws || !files.length) return;
-    // Where the tokens land: the caret's last position (the file dialog
-    // blurs the box but the selection survives; a paste's caret is live),
-    // else the end.
-    let at = composer?.caret() ?? composerText.length;
-    // Room snapshot + generation: every await below is a chance for the user
-    // to switch projects (selectProject → clearAttachments bumps the gen). A
-    // stale job may still finish its upload — a harmless orphan in the OLD
-    // room's .tmm/uploads — but must never touch pending, the composer text
-    // or the sequence counter again: those belong to the room on screen NOW.
-    const gen = attachGen;
-    const stale = () => gen !== attachGen;
-    jobGens = [...jobGens, gen];
-    try {
-      await fsMkdir(`${ws}/.tmm/uploads`); // create_dir_all — idempotent
-      if (stale()) return;
-      // Self-gitignored like the other .tmm runtime dirs — a chat attachment
-      // must never show up in the project's `git status`.
-      await fsUpload(`${ws}/.tmm/uploads/.gitignore`, btoa('*\n'));
-      if (stale()) return;
-      for (const f of files) {
-        let item;
-        // Per FILE: one bad file must not take the others down with it, and
-        // its failure must land as a chip the user can see and remove — never
-        // only in the console (review, 2026-09-03).
-        try {
-          if (f.type.startsWith('image/')) {
-            // Images are re-encoded (webp, capped long edge) — 2(c).
-            const { b64, ext } = await encodeImage(f);
-            if (stale()) return;
-            const path = uploadImagePath(ws, imageId(), ext);
-            await fsUpload(path, b64);
-            if (stale()) return;
-            item = { key: path, path, kind: 'image', name: f.name, n: attachSeq++, thumb: URL.createObjectURL(f) };
-          } else {
-            // Everything else lands BYTE-IDENTICAL under its own name — 2(a)/3(a).
-            if (f.size > FILE_CAP) {
-              // No await since the last check, so the verdict still holds.
-              pending = [...pending, failedAttachment(f, t('hubAttachTooLarge').replace('{mb}', String(FILE_CAP / 1024 / 1024)))];
-              continue;
-            }
-            const b64 = toB64(new Uint8Array(await f.arrayBuffer()));
-            if (stale()) return;
-            const path = uploadFilePath(ws, imageId(), f.name);
-            await fsUpload(path, b64);
-            if (stale()) return;
-            item = { key: path, path, kind: 'file', name: f.name, n: attachSeq++, thumb: '' };
-          }
-        } catch (err) {
-          // The throw came out of an await, so the room may have changed under
-          // it: a guard, not a return — the loop goes on to the next file.
-          if (!stale()) pending = [...pending, failedAttachment(f, t('hubAttachFailed').replace('{err}', errText(err)))];
-          continue;
-        }
-        // No await between the last check and these mutations — the commit
-        // is atomic with the verdict that this job's room is still on screen.
-        pending = [...pending, item];
-        // The visible position marker, at the caret.
-        const tok = attachToken(item);
-        const pre = composerText.slice(0, at), post = composerText.slice(at);
-        const sep = pre && !/\s$/.test(pre) ? ' ' : '';
-        composerText = `${pre}${sep}${tok}${post}`;
-        at += sep.length + tok.length;
-      }
-      composer?.focus();
-    } catch (err) {
-      // The uploads dir itself could not be prepared: every file of this job
-      // failed, and each says so as a chip (same staleness guard as above).
-      if (!stale()) pending = [...pending, ...files.map((f) => failedAttachment(f, t('hubAttachFailed').replace('{err}', errText(err))))];
-    } finally {
-      // Remove exactly THIS job's entry — never a blanket reset: a stale
-      // job's finally must not unlock a job the new room started.
-      const i = jobGens.indexOf(gen);
-      if (i >= 0) jobGens = [...jobGens.slice(0, i), ...jobGens.slice(i + 1)];
-    }
-  }
 
   // The draft survives a reload because a half-written message is work. Written
   // on every keystroke: one small JSON string, and the alternative (a debounce)

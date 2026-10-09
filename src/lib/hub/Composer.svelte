@@ -3,7 +3,9 @@
   import Icon from '../ui/Icon.svelte';
   import CommandButton from '../ui/CommandButton.svelte';
   import { t } from '../core/i18n.svelte.ts';
-  import { slashCommand, commandPalette, mentionPalette, readlineEdit, pastedFiles, textIsThePaste } from './hub.ts';
+  import { slashCommand, commandPalette, mentionPalette, readlineEdit } from './hub.ts';
+  import { attachPaste } from './attachments.svelte.ts';
+  import AttachStrip from './AttachStrip.svelte';
   import { ALL_TARGET, paletteBackendFor, signatureLayout, targetTeam } from './hub-composer.ts';
   import { fonts, uiFont } from '../app/fonts.svelte.ts';
 
@@ -174,14 +176,10 @@
     await stageFiles(files);
   }
 
-  /** Picker and paste retain one staging pipeline. Office image renderings
-   * beside real text remain native text pastes, not duplicate attachments. */
+  /** Picker and paste retain one staging pipeline (attachments.svelte.ts):
+   * Office image renderings beside real text remain native text pastes. */
   function onComposerPaste(e) {
-    const files = pastedFiles(e.clipboardData);
-    if (!files.length) return;
-    if (textIsThePaste(e.clipboardData?.getData('text/plain'), files)) return;
-    e.preventDefault();
-    stageFiles(files);
+    attachPaste(e, stageFiles);
   }
 
   // Match Hub's command branch: an explicit addressee or recipient must exist.
@@ -330,56 +328,19 @@
       disabled={!selected || attaching || failed || !sendable} onclick={send} />
   </div>
   </div>
-  {#if pending.length || replyTo}
-    <div class="pend-row">
-      {#if replyTo}
-        <!-- The reply chip (board #290): the pending-chip species, the
-             sender and the quoted line's preview; × drops the quote. -->
-        <span class="pend-chip reply appear-pop" title={replyTo.preview}>
-          <Icon name="arc-left" size={12} />
-          <span class="pend-name">{t('hubReplyTo').replace('{name}', replyTo.from)}</span>
-          <span class="pend-why">{replyTo.preview}</span>
-          <button class="pend-x" aria-label={t('hubReplyClear')} onclick={onclearreply}>
-            <Icon name="x" size={11} />
-          </button>
-        </span>
-      {/if}
-      {#each pending as a, i (a.key)}
-        {#if a.error}
-          <span class="pend-chip err appear-pop" title={`${a.name} — ${a.error}`}>
-            <Icon name="info" size={12} />
-            <span class="pend-name">{a.name}</span>
-            <span class="pend-why">{a.error}</span>
-            <button class="pend-x" aria-label={t('hubRemoveAttachment')}
-              onclick={() => removeAttachment(i)}>
-              <Icon name="x" size={11} />
-            </button>
-          </span>
-        {:else if a.kind === 'image'}
-          <span class="pend-thumb appear-pop" title={`[img:${a.n}] ${a.name}`}>
-            <button class="pend-view" aria-label={a.name}
-              onclick={() => onpreview(a.thumb)}>
-              <img src={a.thumb} alt={a.name} />
-            </button>
-            <span class="pend-n">{a.n}</span>
-            <button class="pend-x on-img" aria-label={t('hubRemoveAttachment')}
-              onclick={() => removeAttachment(i)}>
-              <Icon name="x" size={10} />
-            </button>
-          </span>
-        {:else}
-          <span class="pend-chip appear-pop" title={`[file:${a.n}] ${a.path}`}>
-            <Icon name="file" size={12} />
-            <span class="pend-name">{a.name}</span>
-            <button class="pend-x" aria-label={t('hubRemoveAttachment')}
-              onclick={() => removeAttachment(i)}>
-              <Icon name="x" size={11} />
-            </button>
-          </span>
-        {/if}
-      {/each}
-    </div>
-  {/if}
+  <AttachStrip {pending} onremove={removeAttachment} {onpreview} lead={replyTo ? replyChip : undefined} />
+  {#snippet replyChip()}
+    <!-- The reply chip (board #290): the pending-chip species, the
+         sender and the quoted line's preview; × drops the quote. -->
+    <span class="pend-chip reply appear-pop" title={replyTo.preview}>
+      <Icon name="arc-left" size={12} />
+      <span class="pend-name">{t('hubReplyTo').replace('{name}', replyTo.from)}</span>
+      <span class="pend-why">{replyTo.preview}</span>
+      <button class="pend-x" aria-label={t('hubReplyClear')} onclick={onclearreply}>
+        <Icon name="x" size={11} />
+      </button>
+    </span>
+  {/snippet}
   <input type="file" multiple hidden bind:this={fileEl} onchange={onPickFiles} />
   </div>
 </div>
@@ -445,23 +406,6 @@
     position: absolute; top: 0; left: 0; width: 100%; height: 0;
     overflow: hidden; visibility: hidden; pointer-events: none;
   }
-  .pend-row { display: flex; flex-wrap: wrap; gap: 6px; padding-block: 5px; }
-  .pend-chip {
-    display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 3px 7px;
-    border: 1px solid var(--border); border-radius: 6px; background: var(--surface);
-    color: var(--text2); font-size: var(--fs-sub);
-  }
-  .pend-chip.err { color: var(--status-danger); border-color: var(--status-danger); }
-  .pend-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pend-why { max-width: 15em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pend-x {
-    display: grid; place-items: center; width: var(--control-height); height: var(--control-height);
-    flex: none; padding: 0; border: 0; border-radius: var(--ui-radius-control); background: transparent; color: inherit;
-  }
-  .pend-thumb { display: flex; align-items: center; position: relative; }
-  .pend-view { padding: 0; border: 0; background: transparent; }
-  .pend-view img { display: block; max-height: 48px; max-width: 100px; }
-  .pend-n { position: absolute; left: 2px; top: 2px; font-size: var(--fs-micro); }
   .cmd-menu {
     position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; z-index: 14;
     max-height: calc(40vh / var(--ui-zoom, 1)); overflow-y: auto; background: var(--bg);

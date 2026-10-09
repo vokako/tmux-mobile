@@ -4,6 +4,9 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const source = await readFile(new URL('./Hub.svelte', import.meta.url), 'utf8');
+// The staging pipeline moved out of Hub unchanged (board #329): its rules are
+// read where it now lives; send()'s own snapshot/restore stays here.
+const pipeline = await readFile(new URL('./attachments.svelte.ts', import.meta.url), 'utf8');
 
 test('Chat header hit targets occupy layout instead of overlapping neighbors (#166)', () => {
   assert.doesNotMatch(source, /\.hub-root\.compact \.page-head [^\n]*::before/u);
@@ -187,8 +190,10 @@ test('Hub keeps Composer transport and capture listeners at the coordinator boun
   assert.match(source, /onmodels=\{modelsList\} oninterrupt=\{interrupt\}/u);
   assert.match(source, /onheightchange=\{\(\) => \{ if \(following\) scrollFeed\(true\); \}\}/u);
   assert.doesNotMatch(source, /onfocus=/u, 'focusing the composer must not drag a reader to the tail (#303)');
-  assert.match(source, /let at = composer\?\.caret\(\) \?\? composerText\.length;/u);
-  assert.match(source, /composer\?\.focus\(\);/u);
+  assert.match(source, /caret: \(\) => composer\?\.caret\(\),/u, 'tokens land at the composer caret');
+  assert.match(source, /focus: \(\) => composer\?\.focus\(\),/u);
+  assert.match(pipeline, /let at = host\.caret\?\.\(\) \?\? host\.getText\(\)\.length;/u);
+  assert.match(pipeline, /host\.focus\?\.\(\);/u);
   assert.doesNotMatch(source, /recipientChanged|closeRecipient/u);
   assert.match(source, /hubPrefs\.setDraft\(selected, composerText\)/u);
   const drawer = source.indexOf("if (!termOpen || !visible) return;");
@@ -538,9 +543,10 @@ test('a stage job dies with its room, and nothing sends while one is in flight (
   // calls) bumps the generation; the job snapshots it at entry and re-checks
   // after EVERY await; the commit (pending, token, sequence) sits after the
   // last check with no await in between.
-  assert.match(source, /function clearAttachments\(\) \{\n\s*attachGen\+\+;/u,
+  assert.match(source, /const clearAttachments = \(\) => stager\.clear\(\);/u, 'the switch clears through the stager');
+  assert.match(pipeline, /clear\(\) \{\n\s*attachGen\+\+;/u,
     'clear/switch invalidates every in-flight stage job');
-  const stage = /async function stageFiles\(files\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
+  const stage = /async stage\(files: File\[\]\) \{([\s\S]*?)\n    \},/u.exec(pipeline)?.[1] ?? '';
   assert.ok(stage, 'stageFiles found');
   assert.match(stage, /const gen = attachGen;/u, 'the job snapshots its generation at entry');
   const code = stage.replace(/\/\/[^\n]*/g, ''); // comments SAY "await" too
@@ -566,12 +572,13 @@ test('a stage job dies with its room, and nothing sends while one is in flight (
   // via its finally — unlocks a job the new room started. A count or a flag
   // fails one side or the other (a blanket reset in clearAttachments would
   // let the old finally push it negative and free a running new job).
-  assert.match(source, /const attaching = \$derived\(jobGens\.includes\(attachGen\)\);/u,
+  assert.match(pipeline, /get attaching\(\) \{ return jobGens\.includes\(attachGen\); \}/u,
     'attaching asks whether the CURRENT generation has jobs');
+  assert.match(source, /const attaching = \$derived\(stager\.attaching\);/u);
   assert.match(stage, /jobGens = \[\.\.\.jobGens, gen\];/u, 'a job books itself under its own generation');
-  const fin = /finally \{([\s\S]*?)\n    \}/u.exec(stage)?.[1] ?? '';
+  const fin = /finally \{([\s\S]*?)\n      \}/u.exec(stage)?.[1] ?? '';
   assert.match(fin, /jobGens\.indexOf\(gen\)/u, 'finally releases exactly its own entry');
-  assert.ok(!/jobGens = \[\]/u.test(source), 'nothing blanket-resets the job list');
+  assert.ok(!/jobGens = \[\]/u.test(pipeline), 'nothing blanket-resets the job list');
   // Same genre on the way out (round 2): the SUCCESS path after `await
   // hubPost` used to reset attachSeq and refresh the feed unconditionally —
   // a room switched to mid-post that had staged its own attachments got its
@@ -584,10 +591,10 @@ test('a stage job dies with its room, and nothing sends while one is in flight (
     'BOTH branches (command, message) stop their success path at the room boundary');
   const postIdx = sendFn.indexOf("await hubPost(room, text, 'human', re);");
   const guardIdx = sendFn.indexOf('if (selected !== room) return;', postIdx);
-  const seqIdx = sendFn.indexOf('attachSeq = 1;');
+  const seqIdx = sendFn.indexOf('stager.resetSeq();');
   assert.ok(guardIdx > postIdx && seqIdx > guardIdx,
     'the message-path guard sits BETWEEN the post and the per-room mutations (attachSeq/loadFeed/scroll)');
-  assert.match(sendFn, /if \(selected === room\) \{ pending = atts; composerText = raw; if \(re && !replyTo\) replyTo = quoteBack; \}/u,
+  assert.match(sendFn, /if \(selected === room\) \{ stager\.pending = atts; composerText = raw; if \(re && !replyTo\) replyTo = quoteBack; \}/u,
     'a failed post restores only into its own room');
   // The slash-command branch is the same function, same race, same rule.
   assert.match(sendFn, /await hubCommand\(room, cmdTarget, cmd\.command\);/u);
@@ -598,19 +605,21 @@ test('a stage job dies with its room, and nothing sends while one is in flight (
 test('a failed attachment is a chip that blocks send, never a console line', () => {
   // Review, 2026-09-03: an oversized file or a failed upload only
   // console.warned, so the user could not tell what the message would carry.
-  const stage = /async function stageFiles\(files\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
+  const stage = /async stage\(files: File\[\]\) \{([\s\S]*?)\n    \},/u.exec(pipeline)?.[1] ?? '';
+  assert.ok(stage, 'stage found');
   assert.ok(!/console\.warn/u.test(stage), 'staging reports to the user, not to the console');
   assert.ok([...stage.matchAll(/failedAttachment\(/g)].length >= 3, 'too large, a per-file throw and a dir failure each become a chip');
   assert.match(stage, /try \{[\s\S]*?\} catch \(err\) \{[\s\S]*?if \(!stale\(\)\) pending = \[\.\.\.pending, failedAttachment/u,
     'the per-file catch guards staleness before it touches the room');
   const sendFn = /async function send\(\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
   assert.match(sendFn, /if \(failed\) return;/u, 'send() refuses while a failed chip stands');
-  assert.match(source, /const sendable = \$derived\(!!composerText\.trim\(\) \|\| pending\.some\(\(a\) => !a\.error\)\);/u,
+  assert.match(pipeline, /sendable\(text: string\) \{ return !!text\.trim\(\) \|\| pending\.some\(\(a\) => !a\.error\); \}/u,
     'a failed chip alone is not content');
+  assert.match(source, /const sendable = \$derived\(stager\.sendable\(composerText\)\);/u);
 });
 
 test('composer calculations use the pure helpers without moving send or its gates (#117)', () => {
-  assert.match(source, /import \{ ALL_TARGET, attachmentBody, attachToken, busyTargetsFor, targetMembers, targetTeam, teamTarget \} from '\.\/hub-composer\.ts';/u);
+  assert.match(source, /import \{ ALL_TARGET, attachmentBody, busyTargetsFor, targetMembers, targetTeam, teamTarget \} from '\.\/hub-composer\.ts';/u);
   const send = /async function send\(\) \{[\s\S]*?\n  \}/u.exec(source)?.[0] ?? '';
   const interpolation = send.indexOf('const body = attachmentBody(raw, atts);');
   assert.ok(interpolation > send.indexOf('if (attaching) return;'));
@@ -621,8 +630,8 @@ test('composer calculations use the pure helpers without moving send or its gate
     'a team slash command is the native per-agent command path, not a new server target');
   assert.match(send, /if \(team && !members\.length\) \{\s*setRecipient\(''\);\s*if \(!cmd\?\.to && !mentionedAgents\(raw, targetMembers\(ALL_TARGET, agents\)\)\.length\) return;/u,
     'a vanished team stops implicit delivery but an explicit @name still wins');
-  assert.match(source, /const tok = attachToken\(a\);/u, 'removal uses the shared spelling');
-  assert.match(source, /const tok = attachToken\(item\);/u, 'staging uses that same spelling');
+  assert.match(pipeline, /const tok = attachToken\(a\);/u, 'removal uses the shared spelling');
+  assert.match(pipeline, /const tok = attachToken\(item\);/u, 'staging uses that same spelling');
 });
 
 test('command failures use the shared anchored feedback surface (#239 review)', () => {
@@ -752,11 +761,21 @@ test('the phone Chat head is ONE dense tool group and the name may run up to it 
 });
 
 test('a reply sends the quoted message\u2019s id; the server builds the quote, one per send (#290)', () => {
-  assert.match(source, /const re = replyTo\?\.id;\s*const quoteBack = replyTo;\s*composerText = '';\s*pending = \[\];\s*replyTo = null;/u, 'taken, then cleared, before the RPC');
+  assert.match(source, /const re = replyTo\?\.id;\s*const quoteBack = replyTo;\s*composerText = '';\s*stager\.pending = \[\]; \/\/ detached, not cleared[^\n]*\n\s*replyTo = null;/u, 'taken, then cleared, before the RPC');
   assert.match(source, /await hubPost\(room, text, 'human', re\);/u);
   assert.match(source, /if \(re && !replyTo\) replyTo = quoteBack;/u, 'a failed post keeps the quote with the draft');
   assert.match(source, /if \(!recipient && m\.from && managedAgents\.some\(\(a\) => a\.name === m\.from\)\) setRecipient\(m\.from\);/u, 'seats the quoted agent only when nobody is chosen');
   assert.match(source, /replyTo = null; \/\/ a quote belongs to the room it was taken in/u);
   assert.match(source, /backLayers\.register\('reply', \(\) => \{ if \(replyTo\) \{ replyTo = null; return true; \}/u, 'Back drops it');
   assert.doesNotMatch(source, /\[re /u, 'no second formatter in the client');
+});
+
+test('send DETACHES the staged set, never clears it: the thumbs live until the post settles (board #329 review)', () => {
+  // clear() revokes the thumbs and bumps the generation; a send that used it
+  // would kill the previews a failed post restores, and invalidate jobs.
+  const sendFn = /async function send\(\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
+  assert.ok(!/stager\.clear\(\)|clearAttachments\(\)/u.test(sendFn), 'send never clears');
+  assert.match(sendFn, /const atts = pending;/u, 'the set is snapshotted');
+  assert.match(sendFn, /stager\.pending = \[\];/u, 'then detached');
+  assert.match(sendFn, /for \(const a of atts\) if \(a\.thumb\) URL\.revokeObjectURL\(a\.thumb\);\s*if \(selected !== room\) return;/u, 'revoked only after success');
 });
