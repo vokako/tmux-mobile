@@ -34,9 +34,12 @@ async function pair(t: TestContext) {
   const serverB = new FakeE2eServer('tok-b', 2, 'machine-b', 'bravo');
   const a = createConnection();
   const b = createConnection();
+  // Registered BEFORE the first await: a fixture failure (either handshake's
+  // own assertion) must still release both idle probes, or the file hangs
+  // instead of reporting (reviewer P2, 2026-10-09).
+  t.after(() => { a.dispose(); b.dispose(); });
   const socketA = await handshake(a, serverA, A_URL, 'tok-a');
   const socketB = await handshake(b, serverB, B_URL, 'tok-b');
-  t.after(() => { a.dispose(); b.dispose(); });
   return {
     a, b, serverA, serverB, socketA, socketB,
     apiA: createWsApi(a), apiB: createWsApi(b),
