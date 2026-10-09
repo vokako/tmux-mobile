@@ -59,6 +59,12 @@ const RESPAWN_HOOK: &str = "respawn-pane";
 /// `free_session_name` chose. `tmm-scratch-rec-<digest>` is 22. Derived from
 /// the reserved name, so a TEST run never writes a production session name
 /// onto the shared tmux server (testing.md).
+///
+/// This answer can go stale — the name it picked is free under one lock and
+/// taken under the rename's next one — and that direction is safe: `rename`
+/// refuses a session name another project holds, so a lost race here is an
+/// error and an unchanged store, never a release onto an occupied name. The
+/// reader's retry picks the next free one.
 fn recovered_name(project_id: &str) -> Result<String, String> {
     let pretty = bounded(&name(), "-recovered", 0);
     crate::projects::with_store(|store| {
@@ -266,7 +272,14 @@ pub fn release(project_id: &str, session: &str) -> Result<serde_json::Value, Str
         ));
     }
     let recovered = recovered_name(&row.id)?;
-    super::rename(&row.id, &recovered)?;
+    // The decision above is a fast, informative refusal; it is not what makes
+    // this safe, because the store lock is released between it and the write.
+    // The expectation travels INTO the rename, which re-reads the row under
+    // the lock it writes with (review P1-a): if that row stopped declaring the
+    // reserved name in between — another client renamed it, a release ran
+    // twice — the rename refuses and the project the user has since named is
+    // left wearing its own name.
+    super::projects::rename_if_session(&row.id, Some(&n), &recovered)?;
     // Verified, not assumed: a rename that refused would otherwise report a
     // release while the name stayed held.
     if let Some(still) = declaring_project()? {

@@ -310,6 +310,22 @@ pub fn down(id: &str) -> Result<Value, String> {
 /// conversation and leave a live session no project claims; the name is the
 /// part a user actually reads, and it is the part that moves.
 pub fn rename(id: &str, name: &str) -> Result<Value, String> {
+    rename_if_session(id, None, name)
+}
+
+/// `rename`, plus the caller's precondition about WHICH session the row must
+/// still declare — checked inside the same store lock that writes, so the two
+/// are one critical section.
+///
+/// A caller that reads a project, decides from what it read, and then renames
+/// has a window between the two in which someone else renames the same row:
+/// the decision was about a project that no longer exists in that shape, and
+/// the write lands on it anyway (board #337 review P1-a — the scratch release
+/// checked that a project still held the reserved name, and by the time it
+/// renamed, that project could be wearing a name the user had just chosen).
+/// Re-reading the row here is not enough on its own: `id` still exists, so
+/// the only thing that can refuse is the expectation the caller carried in.
+pub(crate) fn rename_if_session(id: &str, expect_session: Option<&str>, name: &str) -> Result<Value, String> {
     let name = name.trim();
     if name.is_empty() {
         return Err("project name must not be empty".into());
@@ -319,6 +335,14 @@ pub fn rename(id: &str, name: &str) -> Result<Value, String> {
         let Some(project) = store.project(id)? else {
             return Err(format!("no project with id '{id}'"));
         };
+        if let Some(expect) = expect_session {
+            if project.session != expect {
+                return Err(format!(
+                    "project '{}' no longer declares session '{expect}' — nothing was renamed",
+                    project.name
+                ));
+            }
+        }
         // The tmux SESSION follows the name, because it is the name the Terminal
         // and `tmux ls` show — leaving it behind made one project wear two names
         // (owner, 2026-08-19: "没有改tmux session的名字 所以在terminal显示不对").
@@ -608,6 +632,22 @@ mod tests {
         assert_eq!(untouched.session, "new-name", "a refused rename changes nothing");
         assert_eq!(untouched.name, "New Name", "…including the label: no half-applied rename");
         let _ = std::fs::remove_dir_all(&other);
+
+        // A caller that DECIDED from an earlier read carries the session it
+        // decided about, and the rename refuses once the row has moved on
+        // since — the previous name still RESOLVES through the alias below,
+        // and must not satisfy the expectation (board #337 review P1-a).
+        // Without this precondition the rename succeeds, which is how the
+        // scratch release could rename a project the reader had just named.
+        let stale = rename_if_session(&id, Some(&born_session), "Decided Elsewhere")
+            .expect_err("the row no longer declares the session the caller decided about");
+        assert!(stale.contains(&born_session), "the message names the session: {stale}");
+        let intact = with_store(|s| s.project(&id)).unwrap().unwrap();
+        assert_eq!(intact.name, "New Name", "nothing was renamed");
+        assert_eq!(intact.session, "new-name");
+        // The same expectation, met, renames exactly as `rename` does.
+        let kept = rename_if_session(&id, Some("new-name"), "New Name").expect("the expectation holds");
+        assert_eq!(kept["session"].as_str(), Some("new-name"));
 
         // The old name still resolves, so an agent started before the rename can
         // keep using the TMM_PROJECT it was launched with.

@@ -111,7 +111,17 @@ make a workspace. Two consequences fall out of that:
     cut re-resolving the holder at execution time: the reader would have
     approved releasing one project and a different one could have been renamed
     if the name changed hands in between, which a confirmation button cannot
-    prevent. The recovered name is `<reserved>-recovered`, or — when that is
+    prevent. **The expectation travels into the write**: the holder check and
+    the rename were still two separate critical sections — the store lock is
+    released between them — so the expected session is passed to
+    `projects::rename_if_session`, which re-reads the row under the lock it
+    writes with. Re-reading alone would refuse nothing, because the id still
+    exists; the caller's expectation is the only thing that can. Release's own
+    check stays as the fast, informative refusal, and the candidate name is
+    allowed to go stale in the other direction: `rename` refuses a name
+    another project holds, so a lost race there is an error and an unchanged
+    store, never a release onto an occupied name.
+    The recovered name is `<reserved>-recovered`, or — when that is
     taken — the name the ONE suffixing rule picks (`free_session_name`'s
     digest on a shortened `-rec` base); every candidate is bounded to `slug`'s
     24 characters BEFORE it is offered, because a truncated label is a name
