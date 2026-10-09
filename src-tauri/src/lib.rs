@@ -236,7 +236,7 @@ pub fn run() {
         let cfg = Config::load();
         tmux::set_scrollback(cfg.scrollback);
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-        let verdict = rt.block_on(gateway::probe(&cfg));
+        let verdict = rt.block_on(gateway::probe::probe(&cfg));
         let mode = server_mode_of(&verdict, &cfg.local_url());
         // One line on stderr, so a launch can be checked from outside.
         eprintln!("tmux-mobile: local server {} at {}{}", mode.mode, mode.url, mode.reason.as_deref().map(|r| format!(" ({r})")).unwrap_or_default());
