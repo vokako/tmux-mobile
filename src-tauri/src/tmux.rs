@@ -1266,10 +1266,25 @@ pub fn window_option(target: &str, option: &str) -> Option<String> {
 /// A pane's liveness as tmux reports it: `Some(true)` while its command runs,
 /// `Some(false)` for tmux's DEAD state (the command exited while
 /// `remain-on-exit` was on, so the pane is still there with nothing running),
-/// and `None` when the answer cannot be read at all. ONE reading of the fact,
-/// so no caller has to decide what an unreadable answer means by itself.
+/// and `None` when the answer cannot be read OR is not one tmux promises.
+/// ONE reading of the fact, so no caller has to decide what an unreadable
+/// answer means by itself.
+///
+/// STRICT on purpose (#326 review): `#{pane_dead}` is `0` or `1`, and
+/// anything else — a missing pane's empty answer, a format tmux stops
+/// supporting, a future value — is UNKNOWN. Mapping "not 1" to live is how an
+/// unreadable pane would have been handed out as ready.
 pub fn pane_live(target: &str) -> Option<bool> {
-    pane_format(target, "#{pane_dead}").map(|dead| dead != "1")
+    liveness(pane_format(target, "#{pane_dead}").as_deref())
+}
+
+/// The pure mapping, so the three answers can be tested without tmux.
+fn liveness(raw: Option<&str>) -> Option<bool> {
+    match raw? {
+        "0" => Some(true),
+        "1" => Some(false),
+        _ => None,
+    }
 }
 
 /// Restart a DEAD pane's command IN PLACE, keeping the pane (and therefore its
@@ -1386,6 +1401,19 @@ mod tests {
         assert_eq!(exact_session("dev"), "=dev:");
         assert_eq!(exact_session("=dev:"), "=dev:", "an already-exact target is left alone");
         assert_eq!(exact_session("a b"), "=a b:");
+    }
+
+    /// `#{pane_dead}` is `0` or `1`; everything else is UNKNOWN, never live
+    /// (#326 review). The three states exist so a caller cannot read an
+    /// unanswerable pane as ready — the mapping is pure, so it is pinned
+    /// here rather than inferred from a live session.
+    #[test]
+    fn liveness_is_strict_about_what_tmux_promises() {
+        assert_eq!(liveness(Some("0")), Some(true));
+        assert_eq!(liveness(Some("1")), Some(false));
+        for odd in [None, Some(""), Some(" "), Some("2"), Some("true"), Some("01"), Some("1\n")] {
+            assert_eq!(liveness(odd), None, "{odd:?} is not an answer tmux promises");
+        }
     }
 
     #[test]

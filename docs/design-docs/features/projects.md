@@ -123,7 +123,12 @@ make a workspace. Two consequences fall out of that:
     on — a refusal whose pane is now live is success (someone else won the
     race), and anything still not live is an error naming the target — and an
     UNREADABLE liveness answer (`pane_live` → `None`) falls on the repair side,
-    which costs nothing now that a repair cannot kill anything. Everything
+    which costs nothing now that a repair cannot kill anything — and
+    `pane_live` is STRICT about what it accepts as an answer: `#{pane_dead}`
+    is `0` or `1`, and anything else (a missing pane's empty answer, a format
+    tmux stops supporting) is UNKNOWN rather than live, because "not 1 means
+    live" is exactly how an unanswerable pane would be handed out as ready.
+    Everything
     after the first read names the pane by its tmux `%id`, read once:
     `session:window.pane` is a POSITION and a pane created beside ours
     renumbers it, so the check and the repair could otherwise land on two
