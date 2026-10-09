@@ -1062,6 +1062,11 @@
   }
   .colm.sparse { flex: none; }
   .colm:not(.sparse) { flex: 1 1 0; }
+  /* 1 column (board #328): every card is COMPACT — the title clamps to 2
+     lines and the preview to 1 (in .c-title / .c-body below) — so a lone
+     card is short by construction and #33's rule (a sparse area hugs its
+     content) cannot hand it the screen. The 350px step restores the full
+     card (`.card .c-*`, one step more specific than the base). */
   /* ≥2 columns: back to the #27 grid — equal rows, never 3 across; flex
      properties on .colm are inert here (grid items ignore them). */
   @container board (min-width: 350px) {
@@ -1070,6 +1075,9 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
       grid-auto-rows: minmax(0, 1fr);
     }
+    /* The grids share height equally: the full card returns (board #328). */
+    .card .c-title { -webkit-line-clamp: unset; line-clamp: none; }
+    .card .c-body { -webkit-line-clamp: 4; line-clamp: 4; }
   }
   @container board (min-width: 710px) {
     .cols { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -1104,7 +1112,11 @@
     min-width: 0;
   }
   .card:hover { background: var(--surface2); }
-  .c-title { font-size: var(--fs-ui); color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+  .c-title {
+    font-size: var(--fs-ui); color: var(--text); font-weight: 600; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden;
+    -webkit-line-clamp: 2; line-clamp: 2;
+  }
   /* The body PREVIEW (owner, 2026-08-29): short text shows whole, long text
      clamps — one mechanism, the clamp; the card is already the door to the
      detail view, so a clamped preview needs no separate "more" control.
@@ -1118,8 +1130,8 @@
     white-space: pre-line;
     overflow-wrap: anywhere;
     display: -webkit-box;
-    -webkit-line-clamp: 4;
-    line-clamp: 4;
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }

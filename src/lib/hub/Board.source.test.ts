@@ -423,6 +423,19 @@ test('the 1-column base sizes areas by their CONTENT class — sparse hugs, dens
   assert.match(source, /\.col-scroll \{\s*overflow-y: auto;/su, 'the internal scroller stays');
 });
 
+test('in one column every card is compact, so a lone card cannot take the screen (board #328)', () => {
+  // #33 sizes a sparse area by its content; one long card was content too.
+  // The base clamps the title to 2 lines and the preview to 1; the 2-column
+  // step — the same one that restores the grid — restores the full card.
+  const rule = (sel: string) => new RegExp(`\\n  ${sel.replace(/\./g, '\\.')} \\{([^}]*)\\}`, 'u').exec(source)?.[1] ?? '';
+  assert.match(rule('.c-title'), /-webkit-line-clamp: 2;\s*line-clamp: 2;/u, 'base: title to 2 lines');
+  assert.match(rule('.c-body'), /-webkit-line-clamp: 1;\s*line-clamp: 1;/u, 'base: preview to 1 line');
+  assert.match(source, /@container board \(min-width: 350px\) \{\s*\.cols \{[^}]*\}\s*\/\*[^*]*\*\/\s*\.card \.c-title \{ -webkit-line-clamp: unset; line-clamp: none; \}\s*\.card \.c-body \{ -webkit-line-clamp: 4; line-clamp: 4; \}\s*\}/su,
+    'the 2-column step restores the full card');
+  assert.equal([...source.matchAll(/(?<!-webkit-)line-clamp: 4/g)].length, 1, 'ONE place sets the 4-line preview');
+  assert.ok(!/\.colm\.sparse \{[^}]*max-height/u.test(source), 'no second sizing rule on sparse areas');
+});
+
 test('the note reply wraps and grows — one autoGrow, chat keyboard semantics (board #28)', () => {
   // "发送消息如果消息过长要自动帮我换行，现在是一直在一行里，前边都看不到了":
   // the reply was a single-line <input> that scrolled horizontally. It is now

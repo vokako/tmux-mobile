@@ -303,7 +303,10 @@ completion).
   (0–1 cards) takes header + content height only, **dense** areas (2+)
   flex-share the remaining height with their own internal scroll, and when
   all four are sparse the leftover blank stays at the bottom — empty areas
-  are never inflated. The ≥2-column grids keep splitting the height
+  are never inflated. In this 1-column stack every card is COMPACT (board
+  #328): the title clamps to 2 lines and the body preview to 1, so a
+  single card stays short and cannot take the screen from the dense areas;
+  the 2- and 4-column grids show the full title and a 4-line preview. The ≥2-column grids keep splitting the height
   equally (rows must not content-size, or the page would scroll).
 - The human writes/edits here; agents use `tmm board` (`take` = claim +
   doing; only the acceptor moves to done). Same rows, same vocabulary —
