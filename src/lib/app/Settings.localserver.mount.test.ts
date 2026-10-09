@@ -40,8 +40,8 @@ test('a start that fails after the page opened shows its reason at once (#323)',
 });
 
 test('a slow first read never undoes an event that landed while it was in flight (#323 review)', async (context) => {
-  let emit!: (payload: unknown) => void;
-  let release!: () => void;
+  let emit: ((payload: unknown) => void) | undefined;
+  let release: (() => void) | undefined;
   const app = await (await compiled).mount(context, {
     props: { onConnected() {} },
     modules: [{ copyText: () => true }],
@@ -59,10 +59,10 @@ test('a slow first read never undoes an event that landed while it was in flight
     for (let i = 0; i < 8 && !release; i++) await app.flush();
     assert.ok(emit && release, 'subscribed, and the read is in flight');
     const note = () => app.document.querySelector('.config-note[role="status"]')?.textContent ?? '';
-    emit({ mode: 'failed', url: 'ws://127.0.0.1:9899', reason: 'Address already in use', gen: 1, seq: 3 });
+    emit!({ mode: 'failed', url: 'ws://127.0.0.1:9899', reason: 'Address already in use', gen: 1, seq: 3 });
     await app.flush();
     assert.equal(note(), 'This computer: Server failed · Address already in use');
-    release();                                   // the read was taken at seq 1
+    release!();                                   // the read was taken at seq 1
     for (let i = 0; i < 6; i++) await app.flush();
     assert.equal(note(), 'This computer: Server failed · Address already in use', 'the older read did not undo the newer event');
   } finally { await app.close(); }
