@@ -48,10 +48,14 @@ const MARK: &str = "@tmm-scratch";
 ///   (`tmux::respawn_pane`).
 const RESPAWN_HOOK: &str = "respawn-pane";
 /// Where a project that held the reserved name is renamed to when the reader
-/// releases it. Deterministic and short enough to survive `projects::slug`'s
-/// 24-character bound unchanged, so the recovered name is the one the message
-/// promises (`tmm-scratch-recovered` is 21).
-const RECOVERED: &str = "tmm-scratch-recovered";
+/// releases it. Deterministic, and derived from the reserved name so a TEST
+/// run never writes a production session name onto the shared tmux server
+/// (testing.md). `tmm-scratch-recovered` is 21 characters, inside
+/// `projects::slug`'s 24-character bound, so the recovered name in production
+/// is exactly the one the log line promises.
+fn recovered_name() -> String {
+    format!("{}-recovered", name())
+}
 
 /// The session name every path below uses. Production: `SCRATCH_SESSION`.
 /// A test points it at a name its `tmux::Scratch` guard owns, so a test run
@@ -209,7 +213,7 @@ pub fn release() -> Result<serde_json::Value, String> {
     let Some(row) = declaring_project()? else {
         return Err(format!("no project holds the name '{n}'"));
     };
-    let recovered = RECOVERED.to_string();
+    let recovered = recovered_name();
     super::rename(&row.id, &recovered)?;
     // Verified, not assumed: a rename that refused would otherwise report a
     // release while the name stayed held.
@@ -445,7 +449,7 @@ mod tests {
     /// Poll a tmux fact that an asynchronous hook changes. The hook fires in
     /// milliseconds; the budget is for a loaded host, not for the mechanism.
     fn settles(mut done: impl FnMut() -> bool) -> bool {
-        for _ in 0..60 {
+        for _ in 0..120 {
             if done() {
                 return true;
             }
@@ -456,6 +460,29 @@ mod tests {
     fn pane_pid(target: &str) -> String {
         tmux::pane_format(target, "#{pane_pid}").unwrap_or_default()
     }
+    /// Type `exit` into a shell that is READY to act on it, and wait for the
+    /// result. A zsh that has not printed its prompt yet DISCARDS typed keys
+    /// (#325's lesson, measured again here: this test went flaky only inside
+    /// the full suite, where the host is loaded and a fresh shell takes
+    /// longer to come up — never in isolation). So the prompt is waited for,
+    /// and a lost `exit` is retried rather than read as a broken keep-alive.
+    fn exit_shell(target: &str, before: &str) {
+        for _ in 0..3 {
+            assert!(
+                // The WHOLE pane, not its last lines: a fresh shell's prompt
+                // sits at the TOP and the rows under it are blank, so a
+                // tail-shaped capture reads as "nothing here yet" forever.
+                settles(|| tmux::capture_pane(target, None).map(|s| !s.trim().is_empty()).unwrap_or(false)),
+                "the shell printed a prompt before anything was typed into it"
+            );
+            tmux::send_command(target, "exit").expect("typed exit");
+            if settles(|| pane_pid(target) != before || tmux::pane_live(target) == Some(false)) {
+                return;
+            }
+        }
+        panic!("the shell in {target} never acted on `exit`");
+    }
+
     fn global_hook() -> Option<String> {
         tmux::run_tmux(&["show-options", "-g", "-v", "pane-died"]).ok().map(|s| s.trim().to_string())
     }
@@ -498,7 +525,7 @@ mod tests {
 
         // Ctrl-D / `exit`: the pane comes back IN PLACE — same target, so the
         // Terminal's subscription stays valid — and the session survives.
-        tmux::send_command(&target, "exit").expect("typed exit");
+        exit_shell(&target, &pid);
         assert!(settles(|| pane_pid(&target) != pid && tmux::pane_live(&target) == Some(true)),
             "the pane-died hook respawns the shell in place");
         assert!(tmux::session_exists(&n), "the hidden session does not end with its shell");
@@ -509,7 +536,7 @@ mod tests {
         // removed hook): ensure repairs it instead of handing out a dead pane.
         tmux::run_tmux(&["set-hook", "-u", "-t", &n, "pane-died"]).expect("hook removed");
         assert_eq!(tmux::session_hook(&n, "pane-died"), None);
-        tmux::send_command(&target, "exit").expect("typed exit");
+        exit_shell(&target, &revived);
         assert!(settles(|| tmux::pane_live(&target) == Some(false)), "with no hook the pane stays dead");
         // The review's exact sequence: this path has OBSERVED the pane dead,
         // and another path (the hook, or a concurrent ensure) revives it
@@ -527,7 +554,7 @@ mod tests {
         // Back to dead, so the repair path itself is still exercised below.
         // (That last ensure re-installed the hook, as it is meant to.)
         tmux::run_tmux(&["set-hook", "-u", "-t", &n, "pane-died"]).expect("hook removed again");
-        tmux::send_command(&target, "exit").expect("typed exit");
+        exit_shell(&target, &winner);
         assert!(settles(|| tmux::pane_live(&target) == Some(false)), "dead again, with no hook");
         let repaired = ensure().expect("ensure repairs a dead pane");
         assert_eq!(repaired["target"], target.as_str());
@@ -692,12 +719,13 @@ mod tests {
 
         let out = release().expect("released on request");
         assert_eq!(out["released"], true);
-        assert_eq!(out["renamed_to"], RECOVERED);
+        let recovered = recovered_name();
+        assert_eq!(out["renamed_to"], recovered.as_str());
         assert!(declaring_project().unwrap().is_none(), "the name is free");
         let moved = crate::projects::with_store(|store| store.project(&row_id)).unwrap().expect("the row still exists");
-        assert_eq!(moved.session, RECOVERED, "renamed, not deleted and not archived");
+        assert_eq!(moved.session, crate::projects::slug(&recovered), "renamed, not deleted and not archived");
         assert!(!moved.archived);
-        assert!(tmux::session_exists(RECOVERED), "and the live shell came with it");
+        assert!(tmux::session_exists(&moved.session), "and the live shell came with it");
         assert!(!tmux::session_exists(&n), "so the reserved name is unoccupied");
         // Which is the point: the panel works again. (And the renamed row's
         // prev_session alias must not read as an occupant — that is why
@@ -709,7 +737,7 @@ mod tests {
         assert!(release().unwrap_err().contains("no project holds"));
         assert_eq!(owned().unwrap(), Ownership::Ours);
         kill().unwrap();
-        tmux::kill_session(RECOVERED).ok();
+        tmux::kill_session(&moved.session).ok();
         crate::projects::delete(&row_id).ok();
     }
 
