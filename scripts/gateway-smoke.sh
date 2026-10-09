@@ -1,29 +1,118 @@
 #!/usr/bin/env bash
-# Board #323 smoke: tmm gateway install/status/restart/uninstall under the
-# TEST service identity, a scratch config root and port 19899 — never the
-# production unit or ~/.config (every call goes through T(), which prefixes
-# the environment; no exported state to lose). Linux (systemd --user) only.
-# Usage: scripts/gateway-smoke.sh <path to a built tmm>
-set -eu
-S=$(mktemp -d /tmp/gw323.XXXX)
+# Board #323 smoke: tmm gateway install/status/restart/uninstall on a REAL
+# systemd user manager, under a TEST service identity, a scratch config root
+# and a free port — never the production unit, never ~/.config.
+#
+# Safety:
+# - preflight refuses when the test unit already exists (someone else's run)
+#   or the port is taken;
+# - every tmm call goes through T(): `env -i` with only HOME, PATH, the
+#   user-manager bus (XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS),
+#   XDG_CONFIG_HOME and TMM_GATEWAY_SERVICE, so no override (HOST, PORT,
+#   TOKEN, TLS_*, TMUX_SOCKET, …) reaches it;
+# - an EXIT trap removes exactly what THIS run created (the unit file it
+#   wrote, the scratch root) and stops that unit; on failure the journal
+#   tail and the unit are kept in $S/evidence before cleanup and the script
+#   exits non-zero;
+# - every check is an assertion: a failed one fails the run.
+#
+# Usage: scripts/gateway-smoke.sh <path to a built tmm> [port]
+set -euo pipefail
+TMM_SRC=${1:?usage: gateway-smoke.sh <tmm> [port]}
+PORT=${2:-19899}
+NAME=tmux-mobile-gateway-test.service
+UNIT=~/.config/systemd/user/$NAME
+fail() { echo "SMOKE FAIL: $*" >&2; exit 1; }
+ok() { echo "  ok: $*"; }
+
+# ── preflight ────────────────────────────────────────────────────────────────
+[ -e "$UNIT" ] && fail "$UNIT already exists — another run, or someone else's; not touching it"
+systemctl --user cat "$NAME" >/dev/null 2>&1 && fail "$NAME is known to the user manager already"
+ss -ltn "sport = :$PORT" | grep -q LISTEN && fail "port $PORT is in use"
+
+S=$(mktemp -d /tmp/gw323-smoke.XXXX)
+CREATED_UNIT=0
+cleanup() {
+  rc=$?
+  if [ "$CREATED_UNIT" = 1 ]; then
+    if [ $rc -ne 0 ]; then
+      mkdir -p "$S/evidence"
+      journalctl --user -u "$NAME" -n 50 --no-pager > "$S/evidence/journal.txt" 2>&1 || true
+      cp "$UNIT" "$S/evidence/" 2>/dev/null || true
+      cp -r "$S/evidence" "/tmp/gw323-smoke-evidence-$$" && echo "evidence kept in /tmp/gw323-smoke-evidence-$$" >&2
+    fi
+    systemctl --user disable --now "$NAME" >/dev/null 2>&1 || true
+    # Only the file this run wrote: it must still be ours (our scratch root).
+    if [ -e "$UNIT" ] && grep -q "XDG_CONFIG_HOME=$S\"" "$UNIT"; then rm -f "$UNIT"; fi
+    systemctl --user daemon-reload || true
+    systemctl --user reset-failed "$NAME" >/dev/null 2>&1 || true
+  fi
+  rm -rf "$S"
+  [ $rc -eq 0 ] && echo "SMOKE OK" || echo "SMOKE FAILED (rc=$rc)" >&2
+  exit $rc
+}
+trap cleanup EXIT
+
 mkdir -p "$S/tmux-mobile"
-printf 'port = 19899\nhost = "127.0.0.1"\n' > "$S/tmux-mobile/config.toml"
-cp "$1" "$S/tmm"
-T() { env -u PORT -u HOST XDG_CONFIG_HOME="$S" TMM_GATEWAY_SERVICE=tmux-mobile-gateway-test.service "$S/tmm" "$@"; }
-[ "$(env XDG_CONFIG_HOME="$S" sh -c 'echo $XDG_CONFIG_HOME')" = "$S" ] || { echo "env not applied"; exit 9; }
-echo "--- install"; T gateway install
-U=~/.config/systemd/user/tmux-mobile-gateway-test.service
-grep -q "XDG_CONFIG_HOME=$S\"" "$U" && echo "unit carries the scratch root"
-sleep 2
-echo "--- the service reads the scratch config"; journalctl --user -u tmux-mobile-gateway-test.service -n 5 --no-pager | grep -o "listening on .*"
-echo "--- status"; T gateway status; echo "status rc=$?"
-echo "--- idempotent: same bytes and running, the pid is unchanged"
-P1=$(systemctl --user show tmux-mobile-gateway-test.service -p MainPID --value); T gateway install >/dev/null 2>&1; P2=$(systemctl --user show tmux-mobile-gateway-test.service -p MainPID --value); [ "$P1" = "$P2" ] && echo "pid $P1 kept"
-echo "--- restart is the forced one"; T gateway restart; sleep 2; P3=$(systemctl --user show tmux-mobile-gateway-test.service -p MainPID --value); [ "$P3" != "$P1" ] && echo "pid $P1 -> $P3"
-echo "--- a second foreground start says who holds the port"; (T gateway start 2>&1 || true) | tail -1
-echo "--- another tmm (different exe) is refused"; cp "$S/tmm" "$S/tmm2"
-env -u PORT -u HOST XDG_CONFIG_HOME="$S" TMM_GATEWAY_SERVICE=tmux-mobile-gateway-test.service "$S/tmm2" gateway uninstall 2>&1 | tail -1 || true
-echo "--- uninstall ours"; T gateway uninstall
-systemctl --user is-active tmux-mobile-gateway-test.service || true
-[ -e "$U" ] && echo "unit still there!" || echo "unit removed"
-rm -rf "$S"
+printf 'port = %s\nhost = "127.0.0.1"\n' "$PORT" > "$S/tmux-mobile/config.toml"
+cp "$TMM_SRC" "$S/tmm"
+BASE=(HOME="$HOME" PATH="$PATH" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}")
+T() { env -i "${BASE[@]}" XDG_CONFIG_HOME="$S" TMM_GATEWAY_SERVICE="$NAME" "$S/tmm" "$@"; }
+pid() { systemctl --user show "$NAME" -p MainPID --value; }
+
+echo "--- a managed start ignores the environment (--service reads config.toml alone)"
+env -i "${BASE[@]}" XDG_CONFIG_HOME="$S" PORT=1 HOST=9.9.9.9 "$S/tmm" gateway start --service > "$S/fg.log" 2>&1 &
+FG=$!
+for _ in $(seq 40); do grep -q "listening on" "$S/fg.log" && break; sleep 0.25; done
+grep -q "listening on ws://127.0.0.1:$PORT" "$S/fg.log" || { cat "$S/fg.log" >&2; kill $FG 2>/dev/null; fail "--service did not use config.toml's port"; }
+kill $FG; wait $FG 2>/dev/null || true
+ok "PORT=1 HOST=9.9.9.9 ignored; listened on 127.0.0.1:$PORT"
+
+echo "--- install"
+CREATED_UNIT=1
+T gateway install
+grep -q "XDG_CONFIG_HOME=$S\"" "$UNIT" || fail "the unit does not carry the scratch root"
+grep -q " gateway start --service$" "$UNIT" || fail "the unit does not run gateway start --service"
+grep -qi token "$UNIT" && fail "a token-ish string is in the unit"
+ok "unit carries the scratch root, runs --service, holds no token"
+journalctl --user -u "$NAME" -n 20 --no-pager | grep -q "listening on ws://127.0.0.1:$PORT" || fail "the service is not on the scratch config's port"
+ok "the service listens on 127.0.0.1:$PORT"
+
+echo "--- status (read-only, exit 0 when ours answers)"
+T gateway status
+T gateway status | grep -q "answering at ws://127.0.0.1:$PORT (this machine)" || fail "status does not see our gateway"
+
+echo "--- idempotent install keeps the pid"
+P1=$(pid); T gateway install >/dev/null; P2=$(pid)
+[ "$P1" = "$P2" ] || fail "install restarted a running, unchanged service ($P1 -> $P2)"
+ok "pid $P1 kept"
+
+echo "--- restart is the forced one"
+T gateway restart; P3=$(pid)
+[ "$P3" != "$P1" ] || fail "restart did not restart"
+ok "pid $P1 -> $P3"
+
+echo "--- a second foreground start names the holder"
+OUT=$(T gateway start 2>&1 || true)
+echo "$OUT" | tail -1
+echo "$OUT" | grep -q "already answers at ws://127.0.0.1:$PORT" || fail "a second start did not name the holder"
+
+echo "--- another tmm (different executable) is refused, and changes nothing"
+cp "$S/tmm" "$S/tmm2"
+OUT=$(env -i "${BASE[@]}" XDG_CONFIG_HOME="$S" TMM_GATEWAY_SERVICE="$NAME" "$S/tmm2" gateway uninstall 2>&1 || true)
+echo "$OUT" | tail -1
+echo "$OUT" | grep -q "not this tmm" || fail "another executable's uninstall was not refused"
+[ -e "$UNIT" ] && [ "$(pid)" = "$P3" ] || fail "the refused uninstall changed something"
+ok "refused; unit and pid unchanged"
+
+echo "--- an invalid service name is refused"
+OUT=$(env -i "${BASE[@]}" XDG_CONFIG_HOME="$S" TMM_GATEWAY_SERVICE="../escape.service" "$S/tmm" gateway status 2>&1 || true)
+echo "$OUT" | grep -q "not a valid service name" || fail "a path-escaping name was accepted"
+ok "../escape.service refused"
+
+echo "--- uninstall ours"
+T gateway uninstall
+[ -e "$UNIT" ] && fail "the unit is still there"
+systemctl --user is-active --quiet "$NAME" && fail "the service still runs"
+CREATED_UNIT=0
+ok "removed, stopped"
