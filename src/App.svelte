@@ -37,6 +37,7 @@
   import { confirmLeave } from './lib/app/leave-guards.ts';
   import { terminalFocusTarget } from './lib/sessions/split-focus.ts';
   import { createServerSwitch } from './lib/app/server-switch.ts';
+  import { readScratchEdge, writeScratchEdge } from './lib/app/scratch-edge.ts';
   import { forgetAll as forgetDownloadRows } from './lib/files/downloads.svelte.ts';
   import { hoverCard } from './lib/ui/hover.svelte.ts';
   import { anchorOf, menuPlacement, popOrigin, viewBox, POPOVER_EDGE, POPOVER_GAP } from './lib/ui/placement.ts';
@@ -180,8 +181,9 @@
   // closes it the moment it starts; the next explicit open ensures the
   // session on the server you are on.
   let scratchOpen = $state(false);
-  let scratchEdge = $state(localStorage.getItem('tmux_scratch_edge') === 'left' ? 'left' : 'bottom');
-  function setScratchEdge(e) { scratchEdge = e; localStorage.setItem('tmux_scratch_edge', e); }
+  // bottom | right, with a pre-#326 `left` migrated on read (scratch-edge.ts).
+  let scratchEdge = $state(readScratchEdge(localStorage));
+  function setScratchEdge(e) { scratchEdge = e; writeScratchEdge(localStorage, e); }
   $effect(() => {
     for (const [v, k, lo, hi] of [['--scratch-h', 'tmux_scratch_h', 160, 1200], ['--scratch-w', 'tmux_scratch_w', 280, 1400]]) {
       const saved = parseInt(localStorage.getItem(k) || '', 10);
@@ -1779,16 +1781,6 @@
           <!-- The notification centre (board #322): above the server switcher,
                a CONTROL like it. The badge counts unviewed alerts, static
                accent ink — the unread language, never red. -->
-          <!-- The scratch terminal (board #324): "可以放到桌面版的左下角" — the
-               bottom group's first control, never draggable. -->
-          <button
-            class="rail-btn rail-scratch"
-            class:open={scratchOpen}
-            aria-label={t('scratchTitle')}
-            aria-pressed={scratchOpen}
-            use:hoverInfo={() => { const key = shortcutsOn ? shortcuts.get('toggleScratch') : ''; return { title: t('scratchTitle'), note: key ? shortcutLabel(key) : undefined }; }}
-            onclick={() => (scratchOpen = !scratchOpen)}
-          ><Icon name="terminal" size={17} /></button>
           {#if centreShown}
             <button
               class="rail-btn rail-bell"
@@ -1866,8 +1858,25 @@
        side-sheet opens, then occupies the same drawer width and its reserved
        bottom space. No copy per page, no second poll timer. -->
   {#if sysMounted}
+    <!-- The system status bar also carries the scratch terminal's toggle
+         (board #326, owner 2026-10-09: "可以把它放到我们的系统状态栏里 我们不是
+         有一个系统状态栏嘛 在旁边可以画一个小选项 用来打开快捷 terminal"). In
+         the rail it read as a second Terminal PAGE icon, a page it is not;
+         beside the readings it reads as what it is — a small thing the server
+         offers. It retracts with the bar when the sidebar collapses (#200),
+         and the `toggleScratch` shortcut is the door that is always open. -->
     <aside class="sys-sidebar" aria-label="Server system status">
       <SystemStatus load={systemStatus} visible={connected} />
+      {#if !layout.isTouchDevice}
+        <button
+          class="sys-scratch"
+          class:open={scratchOpen}
+          aria-label={t('scratchTitle')}
+          aria-pressed={scratchOpen}
+          use:hoverInfo={() => { const key = shortcutsOn ? shortcuts.get('toggleScratch') : ''; return { title: t('scratchTitle'), note: key ? shortcutLabel(key) : undefined }; }}
+          onclick={() => (scratchOpen = !scratchOpen)}
+        ><Icon name="terminal" size={14} /></button>
+      {/if}
     </aside>
   {/if}
 
@@ -2126,6 +2135,13 @@
   main, nav { transition: background-color 0.3s ease, color 0.3s ease; }
 
   main {
+    /* The status bar's height and the room its control needs inside it
+       (#326) are ONE pair: every sidebar reserves this height as bottom
+       padding, so a bar that grew past the reservation would cover the last
+       row, and the bar clips its own content. A mouse gets a 20px target
+       inside the unchanged 24px bar (the readings are one line of --fs-micro,
+       so the bar's vertical padding gives way, not its height). */
+    --sys-ctl: 20px;
     --sys-sidebar-h: 24px;
     display: flex;
     flex-direction: column;
@@ -2220,7 +2236,23 @@
   /* Server picker geometry and two-line rows are local; shared atoms own paint. */
   .rail-server { margin-bottom: 4px; }
   .rail-bell { position: relative; }
-  .rail-scratch.open { color: var(--accent); }
+  /* The scratch terminal's toggle, in the system status bar (#326). The bar
+     is a quiet monitor readout, so the control is quiet too: borderless, the
+     icon-only hover wash, accent ink while the panel is open. It sizes from
+     the shared control tokens rather than a literal, so the bar reserves room
+     for it instead of clipping it, and a touch tablet running the desktop
+     layout still gets a 44px target (--control-height is 44 on a coarse
+     pointer, design-language §3). */
+  .sys-scratch {
+    flex: none; margin-left: auto; display: grid; place-items: center;
+    width: var(--sys-ctl); height: var(--sys-ctl); padding: 0;
+    border: 0; border-radius: var(--control-radius); background: none;
+    color: var(--text3); cursor: pointer;
+    transition: color var(--t-fast), background var(--t-fast);
+  }
+  .sys-scratch:hover { color: var(--text); background: var(--surface2); }
+  .sys-scratch.open { color: var(--accent); }
+  @media (prefers-reduced-motion: reduce) { .sys-scratch { transition: none; } }
   .bell-badge {
     position: absolute; top: 3px; right: 2px; min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box;
     border-radius: var(--ui-radius-pill); background: var(--accent-ink); color: var(--bg);
@@ -2277,6 +2309,17 @@
   .with-rail :global(.files-left) {
     padding-bottom: var(--sys-sidebar-h);
   }
+  /* A touch device running the DESKTOP layout still has to be able to hit the
+     control, so it takes the shared coarse control height (44px,
+     design-language §3) and the bar grows with it. Scoped to the rail layout:
+     the phone drawer's status row carries no control and its reserved height
+     must not move. */
+  @media (any-pointer: coarse) {
+    main.with-rail {
+      --sys-ctl: var(--control-height);
+      --sys-sidebar-h: calc(var(--control-height) + 4px);
+    }
+  }
   .sys-sidebar {
     position: fixed;
     left: 46px;
@@ -2285,7 +2328,8 @@
     height: var(--sys-sidebar-h);
     display: flex;
     align-items: center;
-    padding: 4px 6px;
+    gap: 6px;
+    padding: 2px 6px;
     background: var(--bg2);
     border-top: 1px solid var(--border);
     border-right: 1px solid var(--border);
@@ -2310,7 +2354,7 @@
     left: 0;
     width: min(300px, 86vw);
     height: calc(var(--sys-sidebar-h) + var(--sab));
-    padding: 4px 8px calc(4px + var(--sab));
+    padding: 2px 8px calc(2px + var(--sab));
     border-right: none;
     z-index: 27;
   }

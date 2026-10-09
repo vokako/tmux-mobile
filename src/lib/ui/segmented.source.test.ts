@@ -12,7 +12,7 @@ const source = await readFile(new URL('ui/Segmented.svelte', SRC), 'utf8');
 const style = source.match(/<style>[\s\S]*<\/style>/u)?.[0] ?? '';
 
 test('the pill is the atom and the action places it', () => {
-  assert.match(source, /<div class="segmented" role="group"[^>]*use:slideIndicator=\{\{ key: value, active: '\.active' \}\}>/u,
+  assert.match(source, /<div class="segmented" class:iconic role="group"[^>]*use:slideIndicator=\{\{ key: value, active: '\.active' \}\}>/u,
     'the container carries the action keyed on the value');
   assert.match(source, /<span class="slide-pill control" aria-hidden="true"><\/span>/u, 'the shared compact paint variant is the first child');
   assert.match(source, /class="state-ctl" class:active=\{o\.value === value\} aria-pressed=\{o\.value === value\}/u,
@@ -53,4 +53,21 @@ test('Preferences spells every segmented row through the component', async () =>
   assert.ok(uses.length >= 5, `theme, language, layout, feed level, notify level — got ${uses.length}`);
   assert.match(markup, /<Switch checked=\{notifyOn\}/u);
   assert.doesNotMatch(prefs, /\.segmented/u, 'the dialect’s CSS moved with it');
+});
+
+test('an icon option draws a glyph and keeps its words as the accessible name (#326)', () => {
+  // The scratch panel's two edges are icons ("你用两个小图标去做状态切换"), and
+  // that is a MODE of the one segmented control, not two hand-rolled buttons:
+  // same travelling pill, same aria-pressed, same disabled contract.
+  assert.match(source, /options: \{ value: T; label: string; icon\?: string \}\[\];/u, 'the icon is part of the option');
+  assert.match(source, /const iconic = \$derived\(options\.every\(\(o\) => !!o\.icon\)\);/u,
+    'a row is iconic only when EVERY option is — the pill cannot travel between cells of two shapes');
+  assert.match(source, /aria-label=\{o\.icon \? o\.label : undefined\}/u, 'the label becomes the accessible name');
+  assert.match(source, /\{#if o\.icon\}<Icon name=\{o\.icon\} size=\{14\} \/>\{:else\}\{o\.label\}\{\/if\}/u);
+  assert.doesNotMatch(source, /title=\{o\./u, 'no native title beside the shared hover card');
+  // Icon cells are square and wear the icon-only ink families; the text rows
+  // keep their own padding and size untouched.
+  assert.match(style, /\.segmented\.iconic button \{ display: grid; place-items: center; padding: 0; color: var\(--text2\); \}/u);
+  assert.match(style, /\.segmented\.iconic button\.active \{ color: var\(--text\); \}/u);
+  assert.match(style, /\.segmented button \{[^}]*padding: 0 8px/u, 'the text dialect is unchanged');
 });

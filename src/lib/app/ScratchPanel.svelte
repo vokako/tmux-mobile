@@ -16,6 +16,11 @@
   // mounted and records frames without rendering, rule 7); Kill ends the
   // session. Escape belongs to the shell inside: it closes the panel only from
   // the head's own controls.
+  //
+  // The panel docks at the BOTTOM or the RIGHT (board #326, owner 2026-10-09:
+  // "这个 terminal 应该可以显示在下方或右侧 上面的按钮不用写'bottom'之类的文字
+  // 了 你用两个小图标去做状态切换"); the right dock reuses the vertical axis's
+  // stored size, so a reader who had chosen `left` keeps their width.
   import { tick, untrack, onDestroy } from 'svelte';
   import Terminal from '../terminal/Terminal.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
@@ -69,13 +74,23 @@
   // effect tracks `open` and `live` alone, so an answer — success or a
   // refusal — never triggers the next ensure (#324 review: an error state
   // re-ensured in a loop).
+  //
+  // `ended` ensures too (board #326). It did not, and that is why the owner
+  // kept opening the panel on nothing: a hidden Terminal stays subscribed, so
+  // a session that ended behind the panel's back (before #326 the shell's own
+  // `exit` did exactly that) delivered `pane_closed` while the panel was
+  // CLOSED, leaving `phase = 'ended'` and no target — and the next open did
+  // not ensure, so it showed the bare "Session ended" line instead of a
+  // prompt. Opening now converges on a live session from every state the
+  // panel knows about; `ready` still trusts what it has until the
+  // subscription says otherwise.
   $effect(() => {
     if (!live) { intent++; return; }
     if (open) untrack(() => {
       const a = document.activeElement;
       if (a instanceof HTMLElement && !panelEl?.contains(a)) opener = a;
-      if (phase === 'idle' || phase === 'error') void ensure();
-      else if (phase === 'ready') void focusTerminal(intent);
+      if (phase === 'ready') void focusTerminal(intent);
+      else void ensure();
     });
     else untrack(restoreFocus);
   });
@@ -112,10 +127,12 @@
   }
 </script>
 
-<section class="scratch" class:open class:left={edge === 'left'} bind:this={panelEl}
+<section class="scratch" class:open class:right={edge === 'right'} bind:this={panelEl}
   inert={!open} aria-hidden={!open} aria-label={t('scratchTitle')}>
-  {#if edge === 'left'}
-    <SideHandle varName="--scratch-w" storeKey="tmux_scratch_w" min={280} max={1400} def={560} edge="right" label={t('scratchTitle')} always />
+  {#if edge === 'right'}
+    <!-- Docked RIGHT, the grab edge is the panel's LEFT side: dragging left
+         grows it, which is the handle's own `left` reading. -->
+    <SideHandle varName="--scratch-w" storeKey="tmux_scratch_w" min={280} max={1400} def={560} edge="left" label={t('scratchTitle')} always />
   {:else}
     <SideHandle varName="--scratch-h" storeKey="tmux_scratch_h" min={160} max={1200} def={320} edge="top" label={t('scratchTitle')} always />
   {/if}
@@ -123,7 +140,7 @@
   <header class="scratch-head" onkeydown={onHeadKey} role="toolbar" aria-label={t('scratchTitle')} tabindex="-1">
     <span class="scratch-name">{t('scratchTitle')}</span>
     <span class="spacer"></span>
-    <Segmented options={[{ value: 'bottom', label: t('scratchBottom') }, { value: 'left', label: t('scratchLeft') }]}
+    <Segmented options={[{ value: 'bottom', label: t('scratchBottom'), icon: 'panel-bottom' }, { value: 'right', label: t('scratchRight'), icon: 'panel-right' }]}
       value={edge} onchange={(v) => onedge(v)} ariaLabel={t('scratchEdge')} />
     <CommandButton variant="icon" icon="stop" label={t('scratchKill')} disabled={phase !== 'ready'} onclick={() => { killError = ''; killAsk = true; }} />
     <CommandButton variant="icon" icon="x" label={t('close')} onclick={onclose} />
@@ -161,14 +178,16 @@
     transform: translateY(100%); visibility: hidden;
     transition: transform var(--t-move) ease, visibility 0s linear var(--t-move);
   }
-  .scratch.left {
+  .scratch.right {
     /* Fixed, so it adds the status-bar inset itself (#332): a tablet in the
-       desktop layout shows this panel, and main's padding never reaches it. */
-    right: auto; top: var(--sat, 0px); height: auto;
+       desktop layout shows this panel, and main's padding never reaches it.
+       The width still subtracts the rail (--shell-left), so a stored size
+       cannot cover the controls on the far side. */
+    left: auto; top: var(--sat, 0px); height: auto;
     width: min(var(--scratch-w, 560px), calc(100vw / var(--ui-zoom, 1) - var(--shell-left, 0px) - 80px));
-    border-top: none; border-right: 1px solid var(--border);
-    box-shadow: 8px 0 24px rgba(0, 0, 0, 0.18);
-    transform: translateX(-100%);
+    border-top: none; border-left: 1px solid var(--border);
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.18);
+    transform: translateX(100%);
   }
   .scratch.open { transform: none; visibility: visible; transition: transform var(--t-move) ease; }
   .scratch-head { display: flex; align-items: center; gap: 6px; padding: 4px 8px; min-height: 36px; box-sizing: border-box; border-bottom: 1px solid var(--border); outline: none; }

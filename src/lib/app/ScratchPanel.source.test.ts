@@ -12,7 +12,8 @@ test('the shared Terminal and SideHandle, one slide tempo, no backdrop', () => {
   assert.match(source, /import Terminal from '\.\.\/terminal\/Terminal\.svelte';/u);
   assert.match(source, /<Terminal \{target\} \{session\} \{fontSize\} embedded chromeless active=\{open\} visible=\{open\} onPaneExit=\{ended\} \/>/u);
   assert.match(source, /<SideHandle varName="--scratch-h"[^>]*edge="top"[^>]*always \/>/u);
-  assert.match(source, /<SideHandle varName="--scratch-w"[^>]*edge="right"[^>]*always \/>/u);
+  // Docked RIGHT since #326, so the grab edge is the panel's LEFT side.
+  assert.match(source, /<SideHandle varName="--scratch-w"[^>]*edge="left"[^>]*always \/>/u);
   const css = (/<style>[\s\S]*<\/style>/u.exec(source)?.[0] ?? '').replace(/\/\*[\s\S]*?\*\//gu, '');
   assert.match(css, /transition: transform var\(--t-move\) ease/u);
   assert.doesNotMatch(css, /\d+ms|scrim|backdrop/u, 'no private tempo, no backdrop');
@@ -50,7 +51,33 @@ test('the panel size is clamped by the layout itself, on restore and as the wind
   assert.doesNotMatch(source, /setTimeout|setInterval/u, 'no timed resize');
 });
 
-test('the left-docked panel starts under the Android status bar (#332)', () => {
-  const left = source.match(/\.scratch\.left \{([^}]*)\}/u)?.[1] ?? '';
-  assert.match(left, /right: auto; top: var\(--sat, 0px\); height: auto;/u, 'fixed, so it carries --sat itself');
+test('the side-docked panel starts under the Android status bar (#332)', () => {
+  // The vertical dock moved from the left edge to the right (#326); it is
+  // still fixed, so it still adds the status-bar inset itself. (The popover
+  // top-inset gap #332 recorded is a separate, still-open item.)
+  const right = source.match(/\.scratch\.right \{([^}]*)\}/u)?.[1] ?? '';
+  assert.match(right, /left: auto; top: var\(--sat, 0px\); height: auto;/u, 'fixed, so it carries --sat itself');
+  assert.match(right, /border-left: 1px solid var\(--border\)/u, 'the border faces the content it covers');
+  assert.match(right, /transform: translateX\(100%\)/u, 'and it rests off the RIGHT edge');
+  assert.doesNotMatch(source, /\.scratch\.left|scratchLeft/u, 'the left dock is gone, not kept beside it');
+});
+
+test('the edge is two icons, bottom | right, with their words as accessible names (#326)', () => {
+  // Owner, 2026-10-09: "上面的按钮不用写'bottom'之类的文字了 你用两个小图标去
+  // 做状态切换" — the ONE Segmented control, in its icon mode, not two
+  // hand-rolled buttons.
+  assert.match(source, /<Segmented options=\{\[\{ value: 'bottom', label: t\('scratchBottom'\), icon: 'panel-bottom' \}, \{ value: 'right', label: t\('scratchRight'\), icon: 'panel-right' \}\]\}/u);
+  assert.match(source, /value=\{edge\} onchange=\{\(v\) => onedge\(v\)\} ariaLabel=\{t\('scratchEdge'\)\}/u);
+});
+
+test('opening converges on a live session, from every state the panel knows (#326)', () => {
+  // The owner kept opening the panel on nothing: a hidden Terminal stays
+  // subscribed, so a session that ended behind the panel's back delivered
+  // pane_closed while it was CLOSED, and the open effect only re-ensured from
+  // idle|error — leaving the bare "Session ended" line.
+  assert.match(source, /if \(phase === 'ready'\) void focusTerminal\(intent\);\s*\n\s*else void ensure\(\);/u,
+    'ready focuses what it has; every other state ensures');
+  // The retry-loop guard it must not lose: the effect still tracks `open` and
+  // `live` only, so no ANSWER can trigger the next ensure.
+  assert.match(source, /\$effect\(\(\) => \{\s*\n\s*if \(!live\) \{ intent\+\+; return; \}\s*\n\s*if \(open\) untrack\(\(\) => \{/u);
 });

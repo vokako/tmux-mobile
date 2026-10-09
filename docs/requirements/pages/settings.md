@@ -17,7 +17,7 @@ where Agents is a page of its own, reads as one plain list):
 - **Appearance** — how the app looks: theme, language, responsive layout, interface scale, the three font roles (content, display, terminal family), then the terminal's size and line spacing (owner, 2026-09-24: the terminal's style settings belong to Appearance; the one-row Terminal category is retired)
 - **Chat** — how much of the conversation the feed shows: chat detail and tool rows (moved out of Appearance 2026-09-25: they set what is said, not how it looks)
 - **Notifications** — message notifications On/Off, the level (Finished / Replies / Everything) and a test row (its own category, owner 2026-09-02)
-- **Shortcuts** — configurable bindings for pages, servers, panels (including the scratch terminal toggle, board #324) and Terminal windows (every desktop form factor: browser, PWA and the desktop app; absent on the touch layout)
+- **Shortcuts** — configurable bindings for pages, servers, panels (including the scratch terminal toggle, board #324 — its other door is the system status bar control, #326) and Terminal windows (every desktop form factor: browser, PWA and the desktop app; absent on the touch layout)
 - **Connection** — every saved server (switch/rename/remove/add), then the current server's addresses, optimize/share/disconnect (the global debug switch and its floating log panel were retired 2026-09-26)
 
 **Agent** (phone only, where Agents is not a page of its own)

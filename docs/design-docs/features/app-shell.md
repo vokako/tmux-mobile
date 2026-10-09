@@ -84,23 +84,52 @@ Owner, 2026-10-09: "帮我再加一个全局可呼出的 Terminal 菜单…有�
 Terminal 只是临时用的，并且跟你的项目没有关系". Desktop only (the #316 gate,
 `!layout.isTouchDevice`).
 
-- **Doors.** A rail control at the top of the bottom group (above the
-  notification bell and the server switcher; a control, never draggable;
-  `aria-pressed`; hover card with its shortcut) and the registry shortcut
+- **Doors.** A control in the SYSTEM STATUS BAR, beside the vitals
+  (`aria-pressed`, hover card with its shortcut), and the registry shortcut
   `toggleScratch` (⌘⌥` / Ctrl+Alt+`, free of the reserved chords). Both toggle;
   so does the panel's × . **Escape belongs to the shell** (vim, readline, agent
   TUIs): it closes the panel only from the head's own controls.
+  It was a rail control until #326, at the top of the bottom group. Owner,
+  2026-10-09: "左下角的快捷 Terminal 按钮和上方的 Terminal 按钮感觉有一点重叠，
+  看起来一样了…我想到 可以把它放到我们的系统状态栏里 我们不是有一个系统状态栏嘛
+  在旁边可以画一个小选项 用来打开快捷 terminal" — in a column of page icons a
+  second terminal glyph reads as a second Terminal PAGE, which it is not;
+  beside the readings it reads as what it is, something the server offers.
+  App owns it (like the rail buttons and the sidebar toggle) and renders it
+  INSIDE `aside.sys-sidebar`, not inside `SystemStatus.svelte`: that component
+  is deliberately transport-dumb and renders nothing until its first reading
+  lands, and a toggle that appears a poll later is not a door.
+  `--sys-ctl`/`--sys-sidebar-h` are ONE pair, because every desktop sidebar
+  reserves that height as bottom padding and the bar clips its own content: a
+  mouse gets a 20px target inside the unchanged 24px bar (its vertical padding
+  gives way, not its height), and `@media (any-pointer: coarse)` takes the
+  control to `--control-height` (44px) with the bar growing to match — scoped
+  to `main.with-rail`, so the phone drawer's status row, which carries no
+  control, does not move. **Consequence, accepted:** the bar retracts with the
+  primary sidebar (`.with-rail.side-collapsed .sys-sidebar`, owner #200
+  "左侧边栏收起的时候，底下的系统状态显示也要收起"), so the control retracts with
+  it; the shortcut is the door that is always open.
 - **Panel.** `app/ScratchPanel.svelte`, fixed over the content area right of the
   rail, no backdrop (a tool panel, not a modal), one `--t-move` slide (reduced
-  motion: none). Edge `bottom` (default) or `left`, chosen in its own head (one
-  place, no Settings row; `tmux_scratch_edge`); its size per edge through the one
-  `SideHandle` (`edge="top"` on `--scratch-h`, `edge="right"` on `--scratch-w`,
+  motion: none). Edge `bottom` (default) or `right`, chosen in its own head by
+  TWO ICONS (one place, no Settings row; `tmux_scratch_edge`) — the one
+  `ui/Segmented` in its icon mode (`panel-bottom` / `panel-right`, each
+  option's word kept as its accessible name), because the owner asked for the
+  words to go: "这个 terminal 应该可以显示在下方或右侧 上面的按钮不用写'bottom'
+  之类的文字了 你用两个小图标去做状态切换" (2026-10-09). The vertical dock was
+  the LEFT edge until #326; it is the same axis and the same stored size, so
+  `scratch-edge.ts` migrates a stored `left` to `right` on read and writes it
+  back once (a reader that only recognised `right` would have thrown every
+  existing user back to the bottom edge — hence a tested function rather than
+  a ternary in App). Its size per edge through the one
+  `SideHandle` (`edge="top"` on `--scratch-h`, `edge="left"` on `--scratch-w`,
   `always`, clamped to the viewport), restored by App like `--sidebar-w`, and clamped by the layout itself (`min(var, viewport − 80px)`, zoom-corrected) so a size stored on a larger window, or a window shrunk with the panel open, keeps the head and handle on screen (measured: h=1200/w=1400 into 900×600 then 700×420, both edges). Closed
   it is off-screen, `visibility: hidden` after the slide and `inert`, so nothing
   in it takes focus. Opening focuses the terminal once it is mounted and shown;
   closing returns focus to what had it, only if focus is still in the panel and
   that control is still there and visible.
-- **Only the reader ensures.** Opening the panel (and an explicit "Open again") is the only thing that calls `scratch_session`; the effect tracks `open`/`live` only, so a refusal is a stable error with its reason, not a retry loop. The Terminal takes the session name the server returned.
+- **Only the reader ensures, and opening converges on a LIVE session.** Opening the panel (and an explicit "Open again") is the only thing that calls `scratch_session`; the effect tracks `open`/`live` only, so a refusal is a stable error with its reason, not a retry loop. The Terminal takes the session name the server returned.
+  #326 added `ended` to the states an open ensures from, which is the client half of 「点开 Terminal 之后，我现在经常看到里面什么都没有」. A hidden Terminal stays SUBSCRIBED (rule 7), so a session that ended behind the panel's back — before #326 the shell's own `exit` ended it, see projects.md — delivered `pane_closed` while the panel was CLOSED and left `phase = 'ended'` with no target; the open effect re-ensured only from `idle | error`, so the next open rendered the bare "Session ended" line. The boundary, stated: a `ready` panel still trusts the pane it has, so a session killed from outside and reopened BEFORE its `pane_closed` arrives shows the stale pane until the subscription reports it — then the next open re-ensures. Both halves are mount-tested; the retry-loop guard is unchanged.
 - **Session.** `scratch_session` ensures the one project-less session the server
   owns (projects.md § the scratch terminal's session) and answers its concrete
   `session:window.pane`; the panel embeds the ONE Terminal on it (`embedded
@@ -118,8 +147,10 @@ Terminal 只是临时用的，并且跟你的项目没有关系". Desktop only (
   bumped on destroy, whatever order the keyed tree is torn down in), and
   nothing ensures on the new server until the reader opens it there.
 - **Independence.** The Terminal page's window switcher, split and the Hub
-  drawer never retarget to it; Sessions lists it like any tmux session (we do not
-  hide tmux), and it is not a project.
+  drawer never retarget to it, and it is not a project. Since #326 it is also
+  HIDDEN from every session listing and its shell can exit without ending it —
+  both are server rules, with their measurements, in
+  [projects.md § the scratch terminal's session](projects.md).
 
 `ScratchPanel.mount.test.ts` pins lazy ensure, focus in and back, inert when
 closed, hide-not-kill, Kill behind its confirmation, "Open again", the edge
@@ -128,7 +159,10 @@ stays an error until Open again, and a kill completion after the keyed tree was
 destroyed (negative controls: no intent guard, ensure on every open, no `inert`,
 the effect tracking the phase, no destroy bump);
 `ScratchPanel.source.test.ts` pins the shared Terminal/SideHandle, the tempo, the
-head-only Escape and App's mount inside the key.
+head-only Escape and App's mount inside the key; since #326 also the right
+dock's `--sat` and `translateX(100%)`, the two edge icons, and the open effect's
+`ready ? focus : ensure`. `App.source.test.ts` pins the rail WITHOUT a scratch
+control and the status bar WITH one, including the coarse-pointer growth.
 
 ## The tab slide belongs to the swipe, not to the app
 

@@ -8,6 +8,7 @@
   // `--t-fast` (`.state-ctl`). Values may be strings, numbers or booleans
   // (On/Off rows pass `true`/`false`).
   import { slideIndicator } from './indicator.ts';
+  import Icon from './Icon.svelte';
 
   let {
     options,
@@ -16,20 +17,28 @@
     ariaLabel = undefined,
     disabled = false,
   }: {
-    options: { value: T; label: string }[];
+    /** An option with an `icon` draws that glyph instead of its text, and the
+     * `label` becomes its accessible name (board #326: two edges the owner
+     * wanted as icons — "上面的按钮不用写'bottom'之类的文字了 你用两个小图标去
+     * 做状态切换"). Icons and words do not mix inside one row: the pill would
+     * travel between cells of two different widths. */
+    options: { value: T; label: string; icon?: string }[];
     value: T;
     onchange: (value: T) => void;
     /** The row's name for a screen reader (the visible label sits beside it). */
     ariaLabel?: string;
     disabled?: boolean;
   } = $props();
+  const iconic = $derived(options.every((o) => !!o.icon));
 </script>
 
-<div class="segmented" role="group" aria-label={ariaLabel} use:slideIndicator={{ key: value, active: '.active' }}>
+<div class="segmented" class:iconic role="group" aria-label={ariaLabel} use:slideIndicator={{ key: value, active: '.active' }}>
   <span class="slide-pill control" aria-hidden="true"></span>
   {#each options as o (String(o.value))}
     <button type="button" class="state-ctl" class:active={o.value === value} aria-pressed={o.value === value} {disabled}
-      onclick={() => { if (!disabled) onchange(o.value); }}>{o.label}</button>
+      aria-label={o.icon ? o.label : undefined} title={undefined}
+      onclick={() => { if (!disabled) onchange(o.value); }}
+    >{#if o.icon}<Icon name={o.icon} size={14} />{:else}{o.label}{/if}</button>
   {/each}
 </div>
 
@@ -53,6 +62,11 @@
   }
   /* Weight complements the single moving surface when color is unavailable. */
   .segmented button.active { font-weight: 600; }
+  /* An icon row: square cells (the glyph carries the meaning, the accessible
+     name carries the words) and the ink families the rest of the app uses for
+     icon-only controls — at rest muted, chosen is full ink. */
+  .segmented.iconic button { display: grid; place-items: center; padding: 0; color: var(--text2); }
+  .segmented.iconic button.active { color: var(--text); }
   .segmented button:active:not(:disabled) { color: var(--accent-ink); }
   .segmented button:disabled { opacity: var(--control-disabled-opacity); cursor: default; }
 </style>

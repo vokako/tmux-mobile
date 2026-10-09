@@ -164,10 +164,11 @@ test('every page icon is draggable and the brand is not', () => {
   // brand is the app's mark, not a page; the server switcher (board #55) is
   // the one CONTROL among the buttons — no slot, no drag, only a popover.
   const buttons = rail.match(/<button[\s\S]*?<\/button>/gu) ?? [];
-  assert.equal(buttons.length, 4, 'the templated page button and three controls: the scratch terminal (#324), the notification centre (#322) and the server switcher');
-  const scratchBtn = buttons.find((b) => b.includes('rail-scratch')) ?? '';
-  assert.match(String(scratchBtn), /aria-pressed=\{scratchOpen\}/u, 'the toggle states whether the panel is open');
-  assert.doesNotMatch(String(scratchBtn), /data-rail-slot|onpointerdown/u, 'the scratch toggle is a control too');
+  assert.equal(buttons.length, 3, 'the templated page button and two controls: the notification centre (#322) and the server switcher');
+  // The scratch terminal's toggle LEFT the rail in #326 — beside a column of
+  // page icons it read as a second Terminal page, which it is not. It lives
+  // in the system status bar now (its own contract below).
+  assert.doesNotMatch(rail, /scratch/u, 'no scratch control among the rail icons');
   const bellBtn = buttons.find((b) => b.includes('rail-bell')) ?? '';
   assert.doesNotMatch(String(bellBtn), /data-rail-slot|onpointerdown/u, 'the bell is a control too');
   const pageBtn = buttons.find((b) => b.includes('data-rail-slot={slot}')) ?? '';
@@ -545,7 +546,7 @@ test('one system-vitals strip serves desktop sidebar and an open phone drawer (b
     'connected clients share one sampler; layout only decides visibility');
   assert.match(source, /<main[^>]*class:touch-layout=\{shell && layout\.isTouchDevice\}/u,
     'touch mode is explicit on the shell');
-  assert.match(source, /\{#if sysMounted\}[\s\S]{0,500}<aside class="sys-sidebar"[\s\S]{0,100}<SystemStatus/u,
+  assert.match(source, /\{#if sysMounted\}[\s\S]{0,1200}<aside class="sys-sidebar"[\s\S]{0,100}<SystemStatus/u,
     'mount gate wraps the sidebar strip');
   assert.match(source, /<SystemStatus[^/]*visible=\{connected\}/u,
     'a disconnect stops the singleton timer');
@@ -553,6 +554,21 @@ test('one system-vitals strip serves desktop sidebar and an open phone drawer (b
   assert.match(source, /\.sys-sidebar \{[^}]*position: fixed[^}]*left: 46px[^}]*width: var\(--sidebar-w\)/u,
     'desktop strip is confined to the primary sidebar column');
   assert.match(source, /--sys-sidebar-h: 24px/u, 'one compact named height owns geometry');
+  // The bar also carries the scratch terminal's toggle (#326, owner: "可以把
+  // 它放到我们的系统状态栏里"), desktop only, sized from the shared control
+  // tokens so the bar reserves room instead of clipping it — and so a touch
+  // device on the DESKTOP layout still gets a 44px target.
+  assert.match(source, /<aside class="sys-sidebar"[\s\S]{0,400}\{#if !layout\.isTouchDevice\}\s*\n\s*<button\s*\n\s*class="sys-scratch"/u,
+    'the control sits beside the readings, in the one status bar');
+  const ctl = source.slice(source.indexOf('class="sys-scratch"'), source.indexOf('><Icon name="terminal" size={14} /></button>'));
+  assert.match(ctl, /aria-label=\{t\('scratchTitle'\)\}/u);
+  assert.match(ctl, /aria-pressed=\{scratchOpen\}/u, 'the toggle states whether the panel is open');
+  assert.match(ctl, /use:hoverInfo=\{\(\) => \{ const key = shortcutsOn \? shortcuts\.get\('toggleScratch'\) : ''/u,
+    'the hover card still names it and its shortcut');
+  assert.match(source, /--sys-ctl: 20px;/u, 'a mouse target that fits the 24px bar');
+  assert.match(source, /@media \(any-pointer: coarse\) \{\s*\n\s*main\.with-rail \{\s*\n\s*--sys-ctl: var\(--control-height\);\s*\n\s*--sys-sidebar-h: calc\(var\(--control-height\) \+ 4px\);/u,
+    'a coarse pointer takes the control to --control-height and the bar grows with it — scoped to the rail layout, so the phone drawer\u2019s row does not move');
+  assert.match(source, /\.sys-scratch \{[^}]*width: var\(--sys-ctl\); height: var\(--sys-ctl\)/u, 'one token sizes both');
   assert.match(source, /\.with-rail :global\(\.sidebar\),\s*\.with-rail \.term-side,\s*\.with-rail :global\(\.files-left\) \{[^}]*padding-bottom: var\(--sys-sidebar-h\)/u,
     'every desktop primary sidebar reserves the exact strip height');
   // Touch: hidden at rest, shown only with the shared drawer's real OPEN
