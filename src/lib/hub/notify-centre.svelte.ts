@@ -114,4 +114,7 @@ export const centre = {
   get jump(): JumpRequest | null { return state.jump; },
   requestJump(alert: Alert) { state.jump = { alert, n: ++jumps }; },
   isCurrent(n: number) { return state.jump?.n === n; },
+  /** The request `n` is done (landed, failed, or invalidated): it is never
+   * replayed. A newer request is left alone. */
+  consume(n: number) { if (state.jump?.n === n) state.jump = null; },
 };

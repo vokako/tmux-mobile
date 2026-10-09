@@ -2807,3 +2807,110 @@ test('a jump reaches a finished-task line at the chat-only level and clears a fi
     assert.equal(centre.items[0].viewed, true);
   } finally { await app.close(); }
 });
+
+// Board #322 review: ONE reading generation owns the visible feed. Requests
+// already in flight when a jump or a return starts may not write into it.
+test('a poll and an older page in flight when a jump lands are dropped; the window, its cursor and seen stay (#322 review)', { timeout: 60000 }, async (context) => {
+  const f = jumpFixture();
+  const held: Record<string, (v: unknown) => void> = {};
+  const befores: number[] = [];
+  const rpc = { ...f.rpc,
+    hubLog: async (session: string, sinceTs = 0, _limit = 100, beforeSeq = 0) => {
+      if (session !== 'other') return { has_more: false, messages: [] };
+      if (beforeSeq) { befores.push(beforeSeq); if (beforeSeq === 200) return new Promise((r) => { held.older = r; }); return { has_more: false, messages: [] }; }
+      if (sinceTs > 0) return new Promise((r) => { held.poll = r; });
+      return { has_more: true, oldest_seq: 200, messages: f.tail };
+    } };
+  const app = await mountJump(context, rpc, (w) => { w.localStorage.setItem('tmux_hub_project', 'other'); });
+  try {
+    await until(app, () => !!app.document.querySelector('[data-msg="id209"]'));
+    await app.advance(10000); // the tail poll goes out and hangs
+    await until(app, () => !!held.poll);
+    app.document.querySelector<HTMLButtonElement>('.older-more')?.click();
+    await until(app, () => !!held.older);
+    assert.ok(held.poll && held.older, 'both requests are in flight');
+    const seenBefore = app.window.localStorage.getItem('tmux_hub_seen');
+    const centre = centreOf(app);
+    centre.record(alertFor());
+    centre.requestJump(centre.items[0]);
+    await until(app, () => !!app.document.querySelector('.jump-hit[data-msg="target"]'));
+    held.poll!({ has_more: false, messages: [f.msg(400, 'late tail')] });
+    held.older!({ has_more: true, oldest_seq: 150, messages: [f.msg(150, 'old page')] });
+    for (let i = 0; i < 8; i++) await app.flush();
+    assert.equal(app.document.querySelector('[data-msg="id400"]'), null, 'the old poll did not join the window');
+    assert.equal(app.document.querySelector('[data-msg="id150"]'), null, 'the old page did not join the window');
+    assert.ok(app.document.querySelector('[data-msg="target"]'));
+    assert.equal(app.window.localStorage.getItem('tmux_hub_seen'), seenBefore, 'seen did not move');
+    assert.ok(centre.items.some((a: { id: string }) => a.id === 'id400'), 'the dropped row still reached the centre');
+    app.document.querySelector<HTMLButtonElement>('.older-more')?.click();
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.equal(befores.at(-1), 48, 'the older walk continues from the window, not the stale cursor');
+  } finally { await app.close(); }
+});
+
+test('a slow return is superseded by a same-room jump: the old tail lands nowhere (#322 review)', { timeout: 60000 }, async (context) => {
+  let tail: ((v: unknown) => void) | null = null;
+  const f = jumpFixture();
+  let armed = false;
+  const rpc = { ...f.rpc,
+    hubLog: async (session: string, sinceTs = 0) => (session === 'other' && armed && sinceTs === 0 ? new Promise((r) => { tail = r; }) : f.rpc.hubLog(session)),
+    hubLogAround: async (_s: string, seq: number) => (seq === 60
+      ? { has_more: true, newer_more: true, oldest_seq: 58, messages: [f.msg(58), { ...f.msg(60), id: 'second' }, f.msg(61)] }
+      : { has_more: true, newer_more: true, oldest_seq: 48, messages: f.around }) };
+  const app = await mountJump(context, rpc);
+  try {
+    await until(app, () => !!app.document.querySelector('.proj-row[aria-label^="other"]'));
+    const centre = centreOf(app);
+    centre.record(alertFor());
+    centre.record(alertFor('second', 60));
+    centre.requestJump(centre.items.find((a: { id: string }) => a.id === 'target'));
+    await until(app, () => !!app.document.querySelector('.jump-hit[data-msg="target"]'));
+    armed = true;
+    app.document.querySelector<HTMLButtonElement>('.to-tail')!.click();
+    await until(app, () => !!tail);
+    centre.requestJump(centre.items.find((a: { id: string }) => a.id === 'second'));
+    await until(app, () => !!app.document.querySelector('.jump-hit[data-msg="second"]'));
+    tail!({ has_more: true, oldest_seq: 200, messages: f.tail });
+    for (let i = 0; i < 8; i++) await app.flush();
+    assert.ok(app.document.querySelector('[data-msg="second"]'), 'window 2 intact');
+    assert.equal(app.document.querySelector('[data-msg="id209"]'), null, 'the superseded tail did not land');
+    assert.equal(app.document.querySelector('.to-tail')?.getAttribute('aria-label'), 'Back to latest', 'still a window, not following');
+  } finally { await app.close(); }
+});
+
+test('a jump is one-shot: leaving and returning never replays it; one pending when you leave neither lands nor marks viewed (#322 review)', { timeout: 60000 }, async (context) => {
+  let around: ((v: unknown) => void) | null = null;
+  let hold = false;
+  const f = jumpFixture();
+  const rpc = { ...f.rpc, hubLogAround: async () => (hold ? new Promise((r) => { around = r; }) : { has_more: true, newer_more: true, oldest_seq: 48, messages: f.around }) };
+  const app = await mountJump(context, rpc);
+  const setVisible = async (v: boolean) => { app.window.__setVisible(v); for (let i = 0; i < 4; i++) await app.flush(); };
+  try {
+    await until(app, () => !!app.document.querySelector('.proj-row[aria-label^="other"]'));
+    const centre = centreOf(app);
+    centre.record(alertFor());
+    centre.requestJump(centre.items[0]);
+    await until(app, () => !!app.document.querySelector('.jump-hit[data-msg="target"]'));
+    assert.equal(centre.jump, null, 'the request is consumed when it lands');
+    // The reader moves on: another room, then away and back.
+    app.document.querySelector<HTMLElement>('.proj-row[aria-label="fixture"] .proj-pick')!.click();
+    await until(app, () => app.document.querySelector('.h1-text')?.textContent === 'fixture');
+    await setVisible(false);
+    await setVisible(true);
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.equal(app.document.querySelector('.h1-text')?.textContent, 'fixture', 'no replay moved the reader');
+    // A jump pending when the reader leaves the Hub.
+    hold = true;
+    centre.record(alertFor('later', 70));
+    centre.requestJump(centre.items.find((a: { id: string }) => a.id === 'later'));
+    await until(app, () => !!around);
+    await setVisible(false);
+    around!({ has_more: true, newer_more: true, oldest_seq: 69, messages: [f.msg(69), { ...f.msg(70), id: 'later' }] });
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.equal(centre.items.find((a: { id: string }) => a.id === 'later').viewed, false, 'not viewed on a hidden page');
+    assert.equal(centre.jump, null, 'the left-behind request is spent');
+    await setVisible(true);
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.equal(app.document.querySelector('[data-msg="later"]'), null, 'no forced jump on return');
+  } finally { await app.close(); }
+});

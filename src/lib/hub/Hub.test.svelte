@@ -7,8 +7,11 @@
   (globalThis as unknown as { __centre: typeof centre }).__centre = centre;
   // What App.svelte does on connect: the server's backends_list, before the
   // Hub reads it (board #271 — the live queue/steer switch is server truth).
-  let { backends = null, ...rest }: { backends?: BackendInfo[] | null; [key: string]: unknown } = $props();
+  let { backends = null, visible: shown = false, ...rest }: { backends?: BackendInfo[] | null; visible?: boolean; [key: string]: unknown } = $props();
   untrack(() => setServedBackends(backends));
+  // A test leaves and returns to the Hub page the way App does: by `visible`.
+  let visible = $state(untrack(() => shown));
+  (globalThis as unknown as { __setVisible: (v: boolean) => void }).__setVisible = (v) => { visible = v; };
 </script>
 
-<Hub {...rest} />
+<Hub {...rest} {visible} />

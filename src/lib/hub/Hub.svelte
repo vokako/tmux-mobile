@@ -316,7 +316,8 @@
     // A history window is not the room's state; it is never parked (#322).
     if (selected && windowed) roomCache.delete(selected);
     else if (selected) roomCache.set(selected, { feed, lastTs, activity, lastActivityTs, agents, histSeq, histMore, actCursor, actMore });
-    if (selected !== session || !jumpIntent) { windowed = null; revealId = ''; returning = 0; filterBefore = ''; filterNote = ''; }
+    if (selected !== session || !jumpIntent) { windowed = null; revealId = ''; filterBefore = ''; filterNote = ''; }
+    newReading();
     selected = session;
     openedAt = Infinity; rosterBase = null; // nothing is fresh until this room has settled
     clearTimeout(justLoadedTimer); justLoaded = false; // an unfold belongs to the room that loaded
@@ -400,6 +401,8 @@
     // NEW room's feed (same identity bug as the context-menu close: resolving
     // a live `selected` after the fact; owner, 2026-08-24).
     const s = selected;
+    const g = readGen;
+    const ours = () => selected === s && readGen === g && !windowed;
     try {
       // First load asks for ONE page (the server's newest 100) and keeps its
       // cursor; every later call is the same incremental since_ts poll as
@@ -409,6 +412,10 @@
       const res = await hubLog(s, lastTs, 100);
       if (selected !== s) return;
       const messages = res.messages;
+      // The batch is news even when the feed is no longer the one it was
+      // asked for (a jump landed meanwhile): notify first, then decide.
+      if (messages?.length) notifyNews(messages, newsCtx(room(s), s, first), undefined, newsEffects);
+      if (!ours()) return;
       if (first) {
         histSeq = res.oldest_seq ?? 0;
         histMore = (res.has_more ?? false) && histSeq > 0;
@@ -421,23 +428,21 @@
         // in one absence, past which the first-load page is the honest answer.
         const walked = await walkFeedGap({ session: s, floorTs, cursor: res.oldest_seq }, {
           readPage: (session, cursor) => hubLog(session, 0, 100, cursor),
-          stillCurrent: (session) => selected === session,
-          mergePage: (newer) => { feed = mergeMessages(feed, newer); },
+          stillCurrent: (session) => selected === session && ours(),
+          mergePage: (newer) => { if (ours()) feed = mergeMessages(feed, newer); },
         });
         // The helper return adds an await boundary before adopting the poll batch.
-        if (!walked || selected !== s) return;
+        if (!walked || !ours()) return;
       }
       if (messages?.length) {
         feed = mergeMessages(feed, messages);
         lastTs = Math.max(lastTs, ...messages.map((m) => m.ts ?? 0));
-        // New-message notification (board #57): a poll batch that lands while
-        // the reader is AWAY — tab hidden or window unfocused — plays the cue
-        // and raises a system notification. The first page is history, never
-        // news; the gate drops the rest. This is the FALLBACK site: the poll
-        // only runs while this page is visible, so the push handler below is
+        // New-message notification (board #57) ran above, before the
+        // generation check: a poll batch that lands while the reader is AWAY
+        // plays the cue and raises a system notification. The first page is
+        // history, never news. This is the FALLBACK site: the push handler is
         // where an off-screen reader is actually reached (board #72); sift's
         // seen keys make the two alert once.
-        notifyNews(messages, newsCtx(room(s), s, first), undefined, newsEffects);
         if (following) scrollFeed(); else newBelow = true;
       }
     } catch (e) { if (report) throw e; /* hub not available */ }
@@ -562,9 +567,17 @@
   // from its top, and "Back to latest" swaps the tail page in only once it
   // has answered. viewed only when the message is mounted and scrolled to.
   let jumpIntent = 0;
+  // ONE reading generation for the visible feed (board #322 review): every
+  // write into the feed, its cursors or its anchor — tail poll, gap walk,
+  // older page, around_seq landing, Back-to-latest completion — captures it
+  // when its request STARTS and is dropped if it moved by the time the
+  // answer lands. A jump, a return and a room switch each mint a new one (a
+  // server switch remounts the page). Dropped rows still went through
+  // notifyNews, so the centre, the cue and unread lose nothing.
+  let readGen = 0;
+  const newReading = () => ++readGen;
   let windowed = $state(null);      // {newestSeq, newestTs} while a window is on screen
   let revealId = $state('');        // the target a level/filter would hide, kept for this jump
-  let returning = 0;                // the Back-to-latest intent
   let filterNote = $state('');      // "filter cleared for this jump" — visible, Back restores it
   let filterBefore = '';
   $effect(() => {
@@ -577,10 +590,12 @@
     const row = rows.find((r) => r.project.session === alert.session || roomKey(r) === alert.room);
     if (!row) { centre.failed(alert.key, t('hubJumpNoProject')); return; }
     jumpIntent = n;
-    const current = () => centre.isCurrent(n) && alive;
+    let g = 0;
+    const current = () => centre.isCurrent(n) && alive && visible && readGen === g && selected === row.project.session;
     try {
       if (selected !== row.project.session) await selectProject(row.project.session);
-      if (!current() || selected !== row.project.session) return;
+      g = newReading(); // this jump owns the visible feed from here on
+      if (!current()) return;
       // A room-scoped reading filter that would hide the target is cleared
       // VISIBLY (the chip changes; Back puts it back). The level is a stored
       // preference and is never touched: the target is revealed instead.
@@ -588,7 +603,7 @@
       revealId = alert.id;
       if (!feed.some((m) => String(m.id) === alert.id)) {
         const res = await hubLogAround(row.project.session, alert.seq, 100).catch(() => null);
-        if (!current() || selected !== row.project.session) return;
+        if (!current()) return;
         if (!res) { centre.failed(alert.key, t('hubJumpLoadFailed')); return; }
         const msgs = res.messages ?? [];
         if (!msgs.some((m) => String(m.id) === alert.id)) { centre.failed(alert.key, t('hubJumpGone')); return; }
@@ -610,8 +625,15 @@
       else centre.failed(alert.key, t('hubJumpGone'));
     } finally {
       if (jumpIntent === n) jumpIntent = 0;
+      centre.consume(n); // one-shot: never replayed, never a newer request's
     }
   }
+  // Leaving the Hub page invalidates a pending jump: it may not land on a
+  // hidden feed, mark anything viewed, or move the reader on return.
+  $effect(() => {
+    if (visible) return;
+    untrack(() => { if (jumpIntent) { const n = jumpIntent; jumpIntent = 0; newReading(); centre.consume(n); } });
+  });
   /** Back to latest from a history window: the window stays (no live rows,
    * no seen) until the tail page answers for the same room and intent, then
    * messages, activity bound and cursors are replaced in one step. A failure
@@ -622,9 +644,9 @@
   async function returnToLatest() {
     if (!windowed || !selected) { scrollFeed(true); return; }
     const s = selected;
-    const me = ++returning;
+    const g = newReading(); // a return is a reading of its own: a later jump supersedes it
     const res = await hubLog(s, 0, 100).catch(() => null);
-    if (!alive || selected !== s || returning !== me || !windowed) return;
+    if (!alive || selected !== s || readGen !== g || !windowed) return;
     if (!res) return; // the window and its control stay; tap again to retry
     const msgs = res.messages ?? [];
     feed = msgs;
@@ -688,13 +710,14 @@
   async function loadOlder() {
     if (loadingOlder || !selected || (!histMore && !actMore)) return;
     const s = selected;
+    const g = readGen;
     loadingOlder = true;
     try {
       const [older, olderAct] = await Promise.all([
         histMore && histSeq > 0 ? hubLog(s, 0, 100, histSeq) : Promise.resolve(null),
         actMore && actCursor ? hubActivity(s, 0, { limit: ACT_PAGE, before: actCursor }) : Promise.resolve(null),
       ]);
-      if (selected !== s) return; // the room changed — this page is not ours
+      if (selected !== s || readGen !== g) return; // the room or the reading changed — this page is not ours
       // AWAITED: withReadingAnchor is async (it settles the DOM and then
       // compensates scrollTop). Releasing `loadingOlder` before that scroll
       // lands let the compensation itself re-enter onFeedScroll and walk the
@@ -713,7 +736,7 @@
       });
     } catch { /* keep the cursors — the next nudge retries */ }
     finally {
-      if (selected === s) loadingOlder = false;
+      if (selected === s) loadingOlder = false; // released for the next reading too
     }
   }
 
