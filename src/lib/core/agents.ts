@@ -65,29 +65,85 @@ export interface BackendInfo {
    * Ctrl+S). Absent on older servers, which offer no switch. */
   input_mode_toggle?: boolean;
 }
-let served: BackendInfo[] | null = null;
-const servedListeners = new Set<() => void>();
-export function setServedBackends(list: BackendInfo[] | null): void {
-  served = Array.isArray(list) && list.length > 0 ? list : null;
-  for (const fn of servedListeners) fn();
+/**
+ * One SERVER's backend list (board #335 ②a-4).
+ *
+ * The list is the answer of one machine: which CLIs it has installed, what
+ * efforts they accept, whether their input mode can be switched. Two servers
+ * give two answers, so this is a record per server rather than per app — and
+ * `setServedBackends(null)` existed only because a switch invalidated the one
+ * record there was.
+ *
+ * What stays module-level is what the CLIENT ships: the frozen pre-#130
+ * fallback lists and the avatar switch. Those describe this build, not any
+ * server, so they belong to no instance.
+ *
+ * Not wired into production: the module keeps ONE catalog and re-exports its
+ * methods under the names every caller already uses. ②b gives each runtime
+ * its own, at which point "reset it on a switch" becomes "drop that server's
+ * instance".
+ */
+export interface BackendCatalog {
+  /** The server answered. An empty list counts as "not answered": a present
+   * but empty one tells us nothing, and every reader falls back. */
+  set(list: BackendInfo[] | null): void;
+  /** Called whenever the list is (re)set, so a page that is already open can
+   * re-read it: the list arrives on connect, possibly after the page
+   * rendered (board #245). Returns the unsubscribe. */
+  onChange(fn: () => void): () => void;
+  /** Whether this server's list has arrived — "no switch" is only a verdict
+   * then. */
+  known(): boolean;
+  /** Backend names a registry agent can run on, in the server's order. */
+  spawnable(): string[];
+  /** The backend an absent field means — the server's first entry. */
+  defaultBackend(): string;
+  /** The effort levels a backend's editor offers ('' default is added by the
+   * caller). */
+  efforts(backend: string | null | undefined): readonly string[];
+  /** Whether this backend's editor offers queue|steer (board #245). Server
+   * truth only: no fallback list, so an older server offers nothing. */
+  switchesInputMode(backend: string | null | undefined): boolean;
+  /** Whether a RUNNING agent of this backend can switch queue|steer (#271).
+   * Server truth only, like `switchesInputMode`. */
+  togglesInputMode(backend: string | null | undefined): boolean;
+  /** The backend's colour token NAME (`--backend-x`), or null. */
+  colorToken(backend: string | null | undefined): string | null;
+  /** The backend's avatar icon: this server's answer first, then what the
+   * client ships. Null for a backend we have no avatar for. */
+  icon(backend: string | null | undefined): string | null;
 }
-/** Called whenever the served list is (re)set, so a page that is already
- * open can re-read it: the list arrives on connect, possibly after the page
- * rendered (board #245). Returns the unsubscribe. */
-export function onServedBackends(fn: () => void): () => void {
-  servedListeners.add(fn);
-  return () => { servedListeners.delete(fn); };
+
+export function createBackendCatalog(): BackendCatalog {
+  let served: BackendInfo[] | null = null;
+  const listeners = new Set<() => void>();
+  const of = (backend: string | null | undefined): BackendInfo | null => {
+    const key = (backend ?? '').toLowerCase();
+    return served?.find((b) => b.name === key) ?? null;
+  };
+  return {
+    set(list) {
+      served = Array.isArray(list) && list.length > 0 ? list : null;
+      for (const fn of listeners) fn();
+    },
+    onChange(fn) {
+      listeners.add(fn);
+      return () => { listeners.delete(fn); };
+    },
+    known: () => served !== null,
+    spawnable: () => served?.map((b) => b.name) ?? FALLBACK_BACKENDS,
+    defaultBackend() { return this.spawnable()[0] ?? FALLBACK_BACKENDS[0]!; },
+    efforts: (backend) => of(backend)?.efforts ?? FALLBACK_EFFORTS[backend ?? ''] ?? [],
+    switchesInputMode: (backend) => of(backend)?.input_modes === true,
+    togglesInputMode: (backend) => of(backend)?.input_mode_toggle === true,
+    colorToken: (backend) => of(backend)?.color ?? null,
+    icon: (backend) => of(backend)?.icon ?? shippedIcon(backend),
+  };
 }
-/** Whether the server's list has arrived — "no switch" is only a verdict then. */
-export function servedBackendsKnown(): boolean {
-  return served !== null;
-}
-function servedBackend(backend: string | null | undefined): BackendInfo | null {
-  const key = (backend ?? '').toLowerCase();
-  return served?.find((b) => b.name === key) ?? null;
-}
+
 // Pre-#130 servers: the list the client validated against by hand. Frozen —
-// a new backend appears through the server's list, not here.
+// a new backend appears through the server's list, not here. Module-level
+// because it describes what THIS BUILD shipped, not what any server serves.
 const FALLBACK_BACKENDS = ['kiro', 'claude', 'codex', 'grok', 'omp'];
 const FALLBACK_EFFORTS: Record<string, string[]> = {
   kiro: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -95,32 +151,21 @@ const FALLBACK_EFFORTS: Record<string, string[]> = {
   codex: ['minimal', 'low', 'medium', 'high', 'xhigh'],
   grok: ['low', 'medium', 'high', 'xhigh'],
 };
-/** Backend names a registry agent can run on, in the server's order. */
-export function spawnableBackends(): string[] {
-  return served?.map((b) => b.name) ?? FALLBACK_BACKENDS;
-}
-/** The backend an absent field means — the server's first entry. */
-export function defaultBackend(): string {
-  return spawnableBackends()[0] ?? FALLBACK_BACKENDS[0]!;
-}
-/** The effort levels a backend's editor offers ('' default is added by the caller). */
-export function backendEfforts(backend: string | null | undefined): readonly string[] {
-  return servedBackend(backend)?.efforts ?? FALLBACK_EFFORTS[backend ?? ''] ?? [];
-}
-/** Whether this backend's editor offers queue|steer (board #245). Server
- * truth only: no fallback list, so an older server offers nothing. */
-export function backendSwitchesInputMode(backend: string | null | undefined): boolean {
-  return servedBackend(backend)?.input_modes === true;
-}
-/** Whether a running agent of this backend can switch queue|steer (#271).
- * Server truth only, like `backendSwitchesInputMode`. */
-export function backendTogglesInputMode(backend: string | null | undefined): boolean {
-  return servedBackend(backend)?.input_mode_toggle === true;
-}
-/** The backend's colour token NAME (`--backend-x`), or null when it has none. */
-export function backendColorToken(backend: string | null | undefined): string | null {
-  return servedBackend(backend)?.color ?? null;
-}
+
+/** The app's one catalog, for as long as the app looks at one server. The
+ * named exports below are its methods, so every existing caller is unchanged
+ * and the function identities stay stable. */
+export const backendCatalog = createBackendCatalog();
+
+export const setServedBackends = (list: BackendInfo[] | null) => backendCatalog.set(list);
+export const onServedBackends = (fn: () => void) => backendCatalog.onChange(fn);
+export const servedBackendsKnown = () => backendCatalog.known();
+export const spawnableBackends = () => backendCatalog.spawnable();
+export const defaultBackend = () => backendCatalog.defaultBackend();
+export const backendEfforts = (backend: string | null | undefined) => backendCatalog.efforts(backend);
+export const backendSwitchesInputMode = (backend: string | null | undefined) => backendCatalog.switchesInputMode(backend);
+export const backendTogglesInputMode = (backend: string | null | undefined) => backendCatalog.togglesInputMode(backend);
+export const backendColorToken = (backend: string | null | undefined) => backendCatalog.colorToken(backend);
 
 // Backend id → the backend's avatar icon, for agent AVATARS (roster cards,
 // registry rows, presets): the logo says which CLI an agent runs on at a
@@ -128,9 +173,14 @@ export function backendColorToken(backend: string | null | undefined): string | 
 // icon可以用backend的logo，不用字母了"). The served list answers first; the
 // switch is the older-server fallback plus the detection-only CLIs. Null for
 // a backend we ship no avatar for — callers keep the lettered fallback.
-export function backendIcon(backend: string | null | undefined): string | null {
-  const s = servedBackend(backend);
-  if (s) return s.icon;
+export const backendIcon = (backend: string | null | undefined) => backendCatalog.icon(backend);
+
+/** The avatars this build ships: the older-server fallback plus the
+ * detection-only CLIs. The detection-only openclaw is never in a server's
+ * list — recognised in panes, not spawned — so its avatar stays here on
+ * purpose; kimi joined the served list with board #224 and keeps its row for
+ * older servers. */
+function shippedIcon(backend: string | null | undefined): string | null {
   switch ((backend ?? '').toLowerCase()) {
     case 'kiro': return '/assets/kiro.svg';
     case 'claude': return '/assets/claude.svg';

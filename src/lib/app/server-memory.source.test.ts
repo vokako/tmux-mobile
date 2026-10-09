@@ -25,7 +25,10 @@ const PER_SERVER: Record<string, Record<string, RegExp>> = {
   // app holds one of them: ②b replaces "reset it on a switch" with "drop that
   // server's instance".
   'files/downloads.svelte.ts': { downloadStore: /forgetDownloadRows\(\)/u },
-  'core/agents.ts': { served: /setServedBackends\(null\)/u, servedListeners: /setServedBackends\(null\)/u },
+  // Since #335 ②a-4 the list and its listeners are an INSTANCE of
+  // createBackendCatalog(); the frozen fallback lists stayed module-level
+  // because they describe what this BUILD ships, not what a server serves.
+  'core/agents.ts': { backendCatalog: /setServedBackends\(null\)/u },
   'ui/hover.svelte.ts': { shown: /hoverCard\.hide\(\)/u, hiddenAt: /hoverCard\.hide\(\)/u },
   // Re-read from the parked keys after pointTo (comeUp), not reset here.
   'hub/hub-prefs.svelte.ts': { state: /./u },
@@ -88,7 +91,9 @@ test('every module-level store is reset on a switch or named global (board 315)'
     }
   }
   assert.ok(found.includes('files/Files.svelte:browsed'), 'the scan sees module scripts');
-  assert.ok(found.includes('files/downloads.svelte.ts:downloadStore'), 'and it sees a factory instance');
+  for (const instance of ['files/downloads.svelte.ts:downloadStore', 'core/agents.ts:backendCatalog']) {
+    assert.ok(found.includes(instance), `the scan sees the factory instance ${instance}`);
+  }
   assert.match(app, /resetMemory: resetServerMemory,/u, 'the switch runs the reset');
   assert.match(app, /comeUp: \(target\) => \{\s*hubPrefs\.reloadServerState\(\);\s*centre\.reload\(\);/u, 'hub prefs and the centre re-read the target’s parked keys');
 });
