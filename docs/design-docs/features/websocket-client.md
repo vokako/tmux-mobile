@@ -9,7 +9,9 @@ multi-address failover. Since board #335 ① it is four modules —
 `core/connection.ts` (one link as an object), `core/ws-api.ts` (every RPC,
 bound to one connection), `core/connection-registry.ts` (object lifetime) and
 `core/ws.ts`, the facade every caller still imports. See
-§ The transport is an object, not a module.
+§ The transport is an object, not a module. Phase ② adds `app/refs.ts`: every
+reference to a session, pane, room, issue or project carries its `ServerId`
+(§ A name stopped being an address).
 
 ## How It Works
 - **Browser development has one public origin.** `npm run dev:all` exposes
@@ -256,6 +258,40 @@ in production, no serverId on any runtime reference, no change to parking
 (#315), read marks (#334) or the default page (#333). The union views and the
 Aggregate switch are phases ② and ③.
 
+## A name stopped being an address (board #335 ②)
+
+Phase ② gives every referenced object a server, so one client can hold two
+servers' worth of state without the two leaking into each other. Before it, a
+name WAS the address: a session called `work`, a room called `proj:work`, an
+issue `#3` and a project row all resolved against whichever server happened to
+be current, and two servers can each have all four.
+
+`src/lib/app/refs.ts` is the vocabulary: `ServerId` (always `ServerEntry.id`,
+never a URL, a hostname or a machine id), plus `SessionRef`, `PaneRef`,
+`RoomRef`, `IssueRef` and `ProjectRef`. Three properties are the whole design:
+
+- **A ref is an identity, not a payload.** It carries the server plus the
+  smallest thing tmux or the bus needs to resolve the object. `ProjectRef`
+  holds `projectId` and not the project's name, path or room, because a copy in
+  a ref is a second definition of what a project is and it goes stale on the
+  first rename.
+- **The serverId never reaches the wire.** It selects which connection carries
+  a call; the call's own `session`, `target` and `room` arguments stay exactly
+  the strings a single-server build sends. `refs.ts` imports nothing but
+  `nav-state.retarget`, so it cannot send, and `refKey` emits a JSON tuple
+  precisely so a composite key that leaked into a `target` argument would fail
+  loudly instead of addressing a real pane.
+- **A rename belongs to one server.** `retargetRef(ref, rename)` takes the
+  serverId together with `from`/`to`, so the bug where server A's rename
+  rewrites server B's identically named session cannot be written. A `RoomRef`
+  and a `ProjectRef` do not move at all: the room is recorded on the project so
+  a rename cannot orphan the chat, and `Project.id` is stable by construction.
+
+`refKey` is a JSON tuple rather than `a|b|c` because every part is user data —
+a session may contain any character a human types, including the separator —
+and it is tagged by kind so one map can hold a project, its session, its room
+and a pane that all share a name.
+
 ## Multi-Server (board #55)
 
 `src/lib/app/servers.ts` is the named-server registry over the same keys this
@@ -499,6 +535,20 @@ memory-only Symbol slot, never persisted and never chosen by URL or machine
 id, which retires in phase ② when every server gets an explicit runtime keyed
 by its entry id; adding a second door onto the facade re-creates the implicit
 "current server" this slot exists to avoid.
+
+### Every referenced object names its server (#335 ②)
+
+A reference to a session, pane, room, issue or project carries its `ServerId`
+(`ServerEntry.id`) alongside the name — `src/lib/app/refs.ts` is the only
+vocabulary for it, and `refKey(ref)` the only composite key. Three rules, each
+of which has a failing test behind it: a ref carries identity and never a copy
+of the object's fields (a copy is a second definition that goes stale on
+rename); a serverId never appears in a `session`, `target` or `room` string
+sent to a server, which `refs.source.test.ts` pins by keeping `refs.ts` free of
+every import but `nav-state.retarget`; and `retargetRef` takes the rename's
+serverId with its `from`/`to`, so applying server A's rename to server B's
+same-named session is unwritable rather than merely untested. A `RoomRef` and a
+`ProjectRef` never follow a rename at all.
 
 ### Connection-link copy feedback belongs to its attempt (#167, 2026-09-12)
 
