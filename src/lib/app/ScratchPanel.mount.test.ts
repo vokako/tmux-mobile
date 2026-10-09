@@ -405,6 +405,54 @@ test('a release that FAILED keeps its sentence on screen (#337)', { timeout: 600
   } finally { await app.close(); }
 });
 
+test('the CODE decides, not the sentence: a message that disagrees with it changes nothing (#337 review P2)', { timeout: 60000 }, async (context) => {
+  // The message is the server's one sentence for the human — translated,
+  // reworded, and in #337's case naming a project — so the panel keys on the
+  // code alone. These two fixtures disagree on purpose, in both directions,
+  // and the behaviour follows the code every time: without this the rule is
+  // only implemented, not pinned.
+  const held = Object.assign(new Error("the name 'tmm-scratch' belongs to project 'tmm-scratch'"), {
+    code: -32010,
+    data: { projectId: 'tmm-scratch-871f72', projectName: 'tmm-scratch', session: 'tmm-scratch' },
+  });
+  // A stale code wearing a failure's words.
+  const staleCode = Object.assign(new Error("a tmux session named 'tmm-scratch-recovered' already exists"), { code: -32011 });
+  // A failure code wearing a stale refusal's words.
+  const failedCode = Object.assign(new Error("'tmm-scratch' is no longer held by that project — it is held by 'my-work' now, so nothing was renamed"), { code: -32603 });
+  let answer: Error = staleCode;
+  const r = rpc({
+    scratchSession: async () => { r.calls.push('ensure'); throw held; },
+    scratchRelease: async () => { r.calls.push('release'); throw answer; },
+  });
+  const app = await mount(context, r.mod);
+  const confirmRelease = async () => {
+    app.document.querySelector<HTMLButtonElement>('.scratch-state button')!.click();
+    await until(app, () => !!app.document.querySelector('[role=alertdialog]'));
+    app.document.querySelector<HTMLButtonElement>('[role=alertdialog] .dlg-actions button:last-child')!.click();
+  };
+  try {
+    app.window.__scratch.open = true;
+    await until(app, () => !!app.document.querySelector('.scratch-err'));
+    // -32011 wearing a failure's sentence: still RECOVERED from — the
+    // snapshot is dropped and the panel asks once what is true now.
+    await confirmRelease();
+    await until(app, () => r.calls.length === 3);
+    assert.deepEqual(r.calls, ['ensure', 'release', 'ensure'], 'the stale code re-asked, whatever its words said');
+    assert.equal(app.document.querySelector('[role=alertdialog]'), null, 'and the stale confirmation closed');
+    assert.ok(app.document.querySelector('.scratch-err'), 'the re-ask met the same holder, so the action is offered again');
+    // -32603 wearing a stale refusal's sentence: still SHOWN, no re-ask.
+    answer = failedCode;
+    await confirmRelease();
+    await until(app, () => r.calls.length === 4);
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.deepEqual(r.calls, ['ensure', 'release', 'ensure', 'release'],
+      'nothing follows the failure code: it is read, not recovered from');
+    const dialog = app.document.querySelector('[role=alertdialog]')!;
+    assert.ok(dialog, 'the confirmation stays open on a failure code');
+    assert.match(dialog.textContent!, /no longer held by that project/u, 'showing the words it came with');
+  } finally { await app.close(); }
+});
+
 test('a refusal with no holder data offers only the retry (#337)', { timeout: 60000 }, async (context) => {
   // A plain tmux session of that name, or a failed read of who holds it: the
   // panel must not offer to release something it cannot identify.
