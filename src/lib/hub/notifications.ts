@@ -51,7 +51,7 @@
 // asynchronously at startup, so a caption read at mount may lag one tick.
 import { systemLine, statusNote, boardLine, newsKind, type NewsKind } from './hub.ts';
 
-export type FeedMsg = { id?: number | string; ts?: number; from?: string; body?: string };
+export type FeedMsg = { id?: number | string; ts?: number; from?: string; body?: string; to?: unknown };
 export type NotifyState = { seen: Set<string>; lastCueAt: number };
 
 /** The placeholder cue (owner will supply options later — see board #57). */
@@ -67,15 +67,18 @@ export const SEEN_CAP = 800;
 const ENABLED_KEY = 'tmux_notify';
 const LEVEL_KEY = 'tmux_notify_level';
 
-/** How much of the room is news (owner, 2026-09-02, board #72: "能设置通知的
- * 级别，比如只有完成才通知，还是中间状态都通知"). Three rungs, each a
- * superset of the one before:
- * - `done`    — a task finished: a `[tmm done]` summary, or an agent moving
- *               a board issue to review/done. Nothing else.
- * - `replies` — plus every agent reply (the default: what a chat app does).
- * - `all`     — plus the ambient `[tmm status working|waiting|blocked]`
- *               progress notes ("中间状态").
- * App narration (`[tmm] spawned…`) and your own words are never news. */
+/** How much of the BELL rings (owner, 2026-09-02, board #72: "能设置通知的
+ * 级别，比如只有完成才通知，还是中间状态都通知"; narrowed by board #334: "不是
+ * 每一条 reply 都会在小铃铛里产生一条通知 而是当他最后 @我 或者以 finish 的状态
+ * 结束时"). The bell only ever holds `bellKind` messages — a finished task, or
+ * a reply / status note addressed to the human — and the level picks which of
+ * those ring. Three rungs, each a superset of the one before; the stored
+ * values are the pre-#334 ones, so nobody's setting moves:
+ * - `done`    — "Finished": a `[tmm done]` summary, or an agent moving a
+ *               board issue to review/done.
+ * - `replies` — "To me": plus every reply addressed to you (the default).
+ * - `all`     — "To me + progress": plus status notes addressed to you.
+ * Agent↔agent replies and unaddressed notes are room unread, never the bell. */
 export type NotifyLevel = 'done' | 'replies' | 'all';
 export const NOTIFY_LEVELS: readonly NotifyLevel[] = ['done', 'replies', 'all'];
 export const DEFAULT_LEVEL: NotifyLevel = 'replies';
@@ -131,21 +134,36 @@ export function taskFinished(body: string | null | undefined): { id: string; to:
 
 export { newsKind, type NewsKind } from './hub.ts';
 
+/** Whether a message's `to` names the human (#289). */
+export function toHuman(m: { to?: unknown }): boolean {
+  return Array.isArray(m.to) && m.to.includes('human');
+}
+
+/** What a message is to the BELL (board #334): a finished task always; a
+ * reply or status note only when it is addressed to the human; everything
+ * else `none`. ONE eligibility for the centre's record and the cue — record
+ * first, then level / mute / away decide only whether it sounds. Per
+ * MESSAGE: a turn that moves an issue to review and then answers you is two
+ * entries (HubMsg has no turn identity). Room unread is `newsKind`, wider. */
+export function bellKind(m: FeedMsg): NewsKind {
+  const kind = newsKind(m);
+  return kind === 'finished' || (kind !== 'none' && toHuman(m)) ? kind : 'none';
+}
+
 /** The kinds that RING at a level (notifications.md: done = finished only;
  * replies adds replies; all adds progress notes). */
 export function levelKinds(level: NotifyLevel): ReadonlySet<NewsKind> {
   return new Set<NewsKind>(level === 'done' ? ['finished'] : level === 'replies' ? ['finished', 'reply'] : ['finished', 'reply', 'status']);
 }
 
-/** Which of a batch's NEVER-SEEN messages deserve the reader's attention.
- * `first` marks a room's initial page (history, never news); `away` is the
- * reader-not-looking verdict computed by the caller from the live document.
- * News is what the owner asked the phone to say — "谁完成了什么任务": an
- * agent's reply, its `[tmm done]` summary, and a board move to review/done. */
+/** Which of a batch's NEVER-SEEN messages ring. `first` marks a room's
+ * initial page (history, never news); `away` is the reader-not-looking
+ * verdict computed by the caller from the live document. Only bell messages
+ * (`bellKind`) can ring, and the level picks among them. */
 export function notifiable(msgs: readonly FeedMsg[], opts: { first: boolean; away: boolean; level?: NotifyLevel }): FeedMsg[] {
   if (opts.first || !opts.away) return [];
   const kinds = levelKinds(opts.level ?? DEFAULT_LEVEL);
-  return msgs.filter((m) => kinds.has(newsKind(m)));
+  return msgs.filter((m) => kinds.has(bellKind(m)));
 }
 
 /** Title + body for the system notification. Composed from NAMES only —
@@ -335,8 +353,8 @@ export type RecordFn = (m: FeedMsg, ctx: NewsCtx & { kind: NewsKind }) => void;
 /** The one call sites use. Order is the contract (board #322):
  * 1. sift — remember the whole batch (first pages, history, cache restores,
  *    watched and muted batches) so nothing backfills; keys carry the source.
- * 2. RECORD every never-seen message `newsKind` calls news (not a first page)
- *    in the centre, whatever the level, mute or away — every cue has a
+ * 2. RECORD every never-seen bell message (`bellKind`, not a first page) in
+ *    the centre, whatever the level, mute or away — every cue has a
  *    findable record, and a failed sound or permission loses nothing.
  * 3. Only then do enabled / level / away decide the cue and the tray. */
 export function notifyNews(
@@ -348,7 +366,7 @@ export function notifyNews(
   const fresh = sift(msgs, st.seen, SEEN_CAP, ctx.server || ctx.room ? `${ctx.server ?? ''}|${ctx.room ?? ''}|` : '');
   if (!ctx.first && effects.record) {
     for (const m of fresh) {
-      const kind = newsKind(m);
+      const kind = bellKind(m);
       if (kind !== 'none') effects.record(m, { ...ctx, kind });
     }
   }

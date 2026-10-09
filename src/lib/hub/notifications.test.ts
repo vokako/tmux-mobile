@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import {
   notifiable, notifyText, excerpt, cueDue, msgKey, sift, playCue, notifyNews,
   isAway, roomProjectName, systemNotify, taskFinished, DEFAULT_LEVEL, NOTIFY_LEVELS,
-  CUE_COOLDOWN_MS, CUE_SRC, SEEN_CAP, newsKind,
+  CUE_COOLDOWN_MS, CUE_SRC, SEEN_CAP, newsKind, bellKind,
   type FeedMsg, type NotifyState, type NotifyEnv, type NotifyLevel,
 } from './notifications.ts';
 
@@ -31,8 +31,10 @@ function harness(enabled = true) {
 
 // ─── Layer 2: the news gate ─────────────────────────────────────────────────
 
-test('notifiable: an agent message while away is news', () => {
-  assert.equal(notifiable([{ from: 'builder-2', body: 'done with the parser', ts: 5 }], away).length, 1);
+test('notifiable: an agent message to you while away is news; one to another agent is not (#334)', () => {
+  assert.equal(notifiable([{ from: 'builder-2', body: 'done with the parser', ts: 5, to: ['human'] }], away).length, 1);
+  assert.equal(notifiable([{ from: 'builder-2', body: 'over to you', ts: 5, to: ['validator'] }], away).length, 0);
+  assert.equal(notifiable([{ from: 'builder-2', body: 'to the room', ts: 5 }], away).length, 0);
 });
 
 test('notifiable: the first page is history, never news', () => {
@@ -74,18 +76,21 @@ test('notifiable: ambient [tmm status] progress is not news, [tmm done] is', () 
   assert.match(out[0]?.body ?? '', /\[tmm done\]/u);
 });
 
-test('notifiable: the LEVEL is three nested rungs — done ⊂ replies ⊂ all (board #72)', () => {
+test('notifiable: the LEVEL is three nested rungs over the bell — Finished ⊂ To me ⊂ To me + progress (#72, #334)', () => {
+  const me = ['human'];
   const batch: FeedMsg[] = [
-    { from: 'b', body: 'a plain reply' },
+    { from: 'b', body: 'a reply to you', to: me },
+    { from: 'b', body: 'a reply to an agent', to: ['dev'] },
     { from: 'b', body: '[tmm done] shipped it' },
     { from: 'b', body: '[tmm] board #3 doing → review — Task' },
-    { from: 'b', body: '[tmm status working] still at it' },
+    { from: 'b', body: '[tmm status working] still at it', to: me },
+    { from: 'b', body: '[tmm status working] unaddressed' },
     { from: 'b', body: '[tmm] spawned dev — brief' },
   ];
   const bodies = (level: 'done' | 'replies' | 'all') => notifiable(batch, { ...away, level }).map((m) => m.body);
   assert.deepEqual(bodies('done'), ['[tmm done] shipped it', '[tmm] board #3 doing → review — Task']);
-  assert.deepEqual(bodies('replies'), ['a plain reply', '[tmm done] shipped it', '[tmm] board #3 doing → review — Task']);
-  assert.deepEqual(bodies('all'), ['a plain reply', '[tmm done] shipped it', '[tmm] board #3 doing → review — Task', '[tmm status working] still at it']);
+  assert.deepEqual(bodies('replies'), ['a reply to you', '[tmm done] shipped it', '[tmm] board #3 doing → review — Task']);
+  assert.deepEqual(bodies('all'), ['a reply to you', '[tmm done] shipped it', '[tmm] board #3 doing → review — Task', '[tmm status working] still at it']);
   assert.equal(DEFAULT_LEVEL, 'replies');
   assert.deepEqual(notifiable(batch, away), notifiable(batch, { ...away, level: DEFAULT_LEVEL }), 'no level = the default');
   assert.deepEqual([...NOTIFY_LEVELS], ['done', 'replies', 'all'], 'the Settings row offers them in rising order');
@@ -112,7 +117,7 @@ test('sift: splits never-seen, remembers everything, stays bounded', () => {
 test('notifyNews: the same batch replayed alerts exactly once', () => {
   const st = fresh();
   const { fired, effects } = harness();
-  const batch: FeedMsg[] = [{ from: 'builder-2', ts: 100, body: 'reply' }];
+  const batch: FeedMsg[] = [{ from: 'builder-2', ts: 100, body: 'reply', to: ['human'] }];
   assert.equal(notifyNews(batch, { ...away, project: 'p' }, st, effects), true);
   assert.equal(notifyNews(batch, { ...away, project: 'p' }, st, effects), false); // inclusive since_ts re-pull
   assert.equal(fired.cue, 1);
@@ -347,8 +352,8 @@ test('levels ring what they rang before #322: a legacy [tmm done] rings at done,
   const msgs = [
     { from: 'lead', body: '[tmm done] shipped' },
     { from: 'lead', body: '[tmm] board #2 doing → review — x' },
-    { from: 'lead', body: 'a reply' },
-    { from: 'lead', body: '[tmm status running] busy' },
+    { from: 'lead', body: 'a reply', to: ['human'] },
+    { from: 'lead', body: '[tmm status running] busy', to: ['human'] },
     { from: 'lead', body: '[tmm] spawned dev' },
     { from: 'human', body: 'me' },
   ];
@@ -365,13 +370,13 @@ test('notifyNews records before it rings: muted, level-filtered and watched news
   const muted = { ...harness(false).effects, level: () => 'done' as const, record };
   const ctx = { first: false, away: true, project: 'p', server: 's1', room: 'proj:p', viewed: false };
   const batch: FeedMsg[] = [
-    { id: 1, from: 'dev', body: 'a reply' },
-    { id: 2, from: 'dev', body: '[tmm status running] busy' },
+    { id: 1, from: 'dev', body: 'a reply', to: ['human'] },
+    { id: 2, from: 'dev', body: '[tmm status running] busy', to: ['human'] },
     { id: 3, from: 'dev', body: '[tmm] spawned x' },
     { id: 4, from: 'human', body: 'mine' },
   ];
   assert.equal(notifyNews(batch, ctx, st, muted), false, 'muted: no cue');
-  assert.deepEqual(recorded.map((r) => r.kind), ['reply', 'status'], 'news of every kind is recorded, not own words or narration');
+  assert.deepEqual(recorded.map((r) => r.kind), ['reply', 'status'], 'bell news of every kind is recorded, not own words or narration');
   notifyNews(batch, ctx, st, muted);
   assert.equal(recorded.length, 2, 'a replay is not recorded twice (one sift)');
   // Another server's message with the same id is its own message.
@@ -381,6 +386,41 @@ test('notifyNews records before it rings: muted, level-filtered and watched news
   notifyNews([{ id: 9, from: 'dev', body: 'old' }], { ...ctx, first: true }, st, muted);
   assert.equal(recorded.length, 3);
   // The caller's at-tail verdict rides into the record.
-  notifyNews([{ id: 10, from: 'dev', body: 'seen live' }], { ...ctx, away: false, viewed: true }, st, { ...harness().effects, record });
+  notifyNews([{ id: 10, from: 'dev', body: 'seen live', to: ['human'] }], { ...ctx, away: false, viewed: true }, st, { ...harness().effects, record });
   assert.equal(recorded.at(-1)!.viewed, true);
+});
+
+test('the bell holds finished tasks and what is addressed to you; agent↔agent talk is room unread only (#334)', () => {
+  const recorded: string[] = [];
+  const effects = { ...harness().effects, level: () => 'all' as const, record: (m: FeedMsg) => { recorded.push(String(m.id)); } };
+  const ctx = { first: false, away: true, project: 'p', server: 's1', room: 'proj:p' };
+  const batch: FeedMsg[] = [
+    { id: 'plain', from: 'dev', body: 'handing this to qa', to: ['qa'] },
+    { id: 'room', from: 'dev', body: 'thinking out loud' },
+    { id: 'note', from: 'dev', body: '[tmm status working] busy' },
+    { id: 'done', from: 'dev', body: '[tmm done] parser shipped', to: ['lead'] },
+    { id: 'me', from: 'dev', body: 'your call', to: ['qa', 'human'] },
+  ];
+  assert.equal(notifyNews(batch, ctx, fresh(), effects), true);
+  assert.deepEqual(recorded, ['done', 'me'], 'recorded = what may ring');
+  assert.deepEqual(batch.map((m) => bellKind(m)), ['none', 'none', 'none', 'finished', 'reply']);
+  assert.deepEqual(batch.map((m) => newsKind(m)), ['reply', 'reply', 'status', 'finished', 'reply'], 'all still room unread (the sidebar count, the roster dot)');
+  // Nothing addressed to you and nothing finished: no record, no cue.
+  const quiet = harness();
+  assert.equal(notifyNews([{ id: 'x', from: 'dev', body: 'agent chat', to: ['qa'] }], ctx, fresh(), { ...quiet.effects, record: () => assert.fail('not a bell entry') }), false);
+  assert.equal(quiet.fired.cue, 0);
+});
+
+test('the bell is per MESSAGE, not per turn: a review move then a reply to you are two entries; the next turn is its own (#334)', () => {
+  const recorded: string[] = [];
+  const effects = { ...harness().effects, record: (m: FeedMsg) => { recorded.push(String(m.id)); } };
+  const ctx = { first: false, away: true, project: 'p', server: 's1', room: 'proj:p' };
+  const st = fresh();
+  notifyNews([
+    { id: 't1-move', from: 'dev', body: '[tmm] board #4 doing → review — Parser' },
+    { id: 't1-final', from: 'dev', body: 'parser is in review', to: ['human'] },
+  ], ctx, st, effects);
+  assert.deepEqual(recorded, ['t1-move', 't1-final'], 'no turn identity on a message: no merge');
+  notifyNews([{ id: 't2-final', from: 'dev', body: 'and the docs too', to: ['human'] }], ctx, st, effects);
+  assert.deepEqual(recorded, ['t1-move', 't1-final', 't2-final'], 'the next turn is not suppressed');
 });

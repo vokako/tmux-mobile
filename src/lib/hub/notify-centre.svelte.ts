@@ -50,10 +50,15 @@ export interface JumpRequest { alert: Alert; n: number }
 
 type Store = Pick<Storage, 'getItem' | 'setItem'>;
 
+/** Whether a stored entry is still a bell entry (board #334, `bellKind`):
+ * a list written before #334 also held agent↔agent replies and unaddressed
+ * notes. They are dropped on load; no room's read mark moves. */
+export const bellEntry = (a: Pick<Alert, 'kind' | 'toHuman'>): boolean => a.kind === 'finished' || a.toHuman === true;
+
 function read(storage: Store | null): Alert[] {
   try {
     const raw = JSON.parse(storage?.getItem(ALERTS_KEY) ?? '[]');
-    return Array.isArray(raw) ? raw.filter((a) => a && typeof a.key === 'string' && typeof a.room === 'string').slice(0, CENTRE_CAP) : [];
+    return Array.isArray(raw) ? raw.filter((a) => a && typeof a.key === 'string' && typeof a.room === 'string' && bellEntry(a)).slice(0, CENTRE_CAP) : [];
   } catch { return []; }
 }
 

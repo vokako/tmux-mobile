@@ -15,7 +15,7 @@ const store = new Map<string, string>();
 const { withAlert, readThrough, alertOf, centre, CENTRE_CAP, ALERTS_KEY } = await import('./notify-centre.svelte.ts');
 
 const ctx = { server: 's1', room: 'proj:p', session: 'p', project: 'P', kind: 'reply' as const, viewed: false, excerpt: 'x' };
-const a = (id: number, ts = id, over: Partial<Alert> = {}): Alert => ({ ...alertOf({ id, seq: id, ts, from: 'dev', to: [] }, ctx), ...over });
+const a = (id: number, ts = id, over: Partial<Alert> = {}): Alert => ({ ...alertOf({ id, seq: id, ts, from: 'dev', to: ['human'] }, ctx), ...over });
 
 test('withAlert keeps one entry per message, newest first, capped', () => {
   let list: Alert[] = [];
@@ -65,6 +65,18 @@ test('the store persists per live key, clears records only, and reloads a switch
   assert.equal(centre.jump, null, 'a pending jump does not cross servers');
   centre.clear();
   assert.equal(centre.items.length, 0);
+});
+
+test('a pre-#334 list loses its non-bell entries on load; read marks are not the centre\'s (#334)', () => {
+  const plain = a(4, 4, { toHuman: false });                     // an agent↔agent reply
+  const note = a(5, 5, { toHuman: false, kind: 'status' });      // an unaddressed note
+  const done = a(6, 6, { toHuman: false, kind: 'finished' });    // a finished task, to anyone
+  const mine = a(7);                                             // a reply to the human
+  store.set(ALERTS_KEY, JSON.stringify([mine, done, note, plain]));
+  store.set('tmux_hub_seen', JSON.stringify({ p: { seq: 1, ts: 1 } }));
+  centre.reload();
+  assert.deepEqual(centre.items.map((x) => x.id), ['7', '6']);
+  assert.equal(store.get('tmux_hub_seen'), JSON.stringify({ p: { seq: 1, ts: 1 } }), 'no room read mark moved');
 });
 
 test('tmux_hub_alerts is parked per server (#315)', async () => {

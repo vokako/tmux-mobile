@@ -32,7 +32,7 @@
   import { t } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectDown, projectDelete, projectArchive, projectCreate, projectRename, listSessionsWithPanes,
-    hubPost, hubCommand, modelsList, hubLog, hubLogAround, hubRooms, hubUnread, hubAgents, fsCwd, hubSpawn, hubSpawnTeam, teamsList, hubAgentStop, hubAgentRestart, hubTeamRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, hubAgentInputMode, registryList,
+    hubPost, hubCommand, modelsList, hubLog, hubLogAround, hubRooms, hubUnread, hubRead, hubAgents, fsCwd, hubSpawn, hubSpawnTeam, teamsList, hubAgentStop, hubAgentRestart, hubTeamRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, hubAgentInputMode, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
@@ -535,11 +535,53 @@
     const newest = feed.reduce((best, m) => ((m.seq ?? 0) > (best?.seq ?? 0) ? m : best), null);
     const mark = hubPrefs.seen(selected);
     if (!newest || (newest.seq ?? 0) <= mark.seq && (newest.ts ?? 0) <= mark.ts) return;
-    hubPrefs.setSeen(selected, { seq: newest.seq ?? 0, ts: Math.max(mark.ts, newest.ts ?? 0) });
+    const next = { seq: newest.seq ?? 0, ts: Math.max(mark.ts, newest.ts ?? 0) };
+    hubPrefs.setSeen(selected, next);
     centre.markRoomRead(selected, newest.seq ?? 0);
-    // The room is read: its cue goes now, and the server confirms.
+    // The room is read: its cue goes now (an optimistic cache), the server
+    // is told, and the mark stays PENDING until hub_read ACKs it (#334).
     if (roomUnread[selected]) { const { [selected]: _, ...rest } = roomUnread; roomUnread = rest; }
+    pendingRead[selected] = next;
+    void flushRead([selected]);
     void refreshUnread([selected]);
+  }
+
+  // ── The shared read mark (board #334) ────────────────────────────────
+  // The server holds ONE read mark per room for the human; `hubPrefs.seen`
+  // is this client's cache of it. A mark this client set is PENDING until
+  // `hub_read` ACKs it; a failed or lost ACK is re-sent by the next
+  // `refreshUnread` (the 20 s sidebar cadence, a push, a reconnect). With
+  // nothing pending, the cache adopts the server's PERSISTED mark — another
+  // client's reading, or the server's correction of an impossible cache.
+  // A server switch remounts this page; an answer that lands after it, or
+  // for another server id, touches nothing.
+  const pendingRead = {};          // session -> the mark not yet ACKed
+  function adoptMark(s, m) {
+    const cur = hubPrefs.seen(s);
+    const seq = Number(m?.seq) || 0, ts = Number(m?.ts) || 0;
+    if (cur.seq === seq && cur.ts === ts) return;
+    hubPrefs.setSeen(s, { seq, ts });
+    if (seq > cur.seq) centre.markRoomRead(s, seq);
+  }
+  async function flushRead(sessions = Object.keys(pendingRead)) {
+    const ask = {};
+    const sent = {};
+    for (const s of sessions) {
+      const p = pendingRead[s];
+      const row = rows.find((r) => r.project.session === s);
+      if (!p || !row) continue;
+      ask[roomKey(row)] = p.seq > 0 ? { seq: p.seq } : { ts: p.ts };
+      sent[roomKey(row)] = { s, p };
+    }
+    if (!Object.keys(ask).length) return;
+    const server = serverId();
+    const res = await hubRead(ask).catch(() => null);
+    if (!res || !alive || serverId() !== server) return;   // still pending: the next refresh re-sends
+    for (const [key, { s, p }] of Object.entries(sent)) {
+      if (pendingRead[s] !== p) continue;                    // a newer read is on its way
+      delete pendingRead[s];
+      if (res.rooms?.[key]) adoptMark(s, res.rooms[key]);
+    }
   }
   const unread = $derived(unreadSenders(feed, hubPrefs.seen(selected)));
 
@@ -701,16 +743,24 @@
       asked[roomKey(row)] = { s, mark };
     }
     if (!Object.keys(marks).length) return;
+    const server = serverId();
     const res = await hubUnread(marks).catch(() => null);
-    if (!res || !alive) return;
+    if (!res || !alive || serverId() !== server) return;
     const next = { ...roomUnread };
+    const retry = [];
     for (const [key, { s, mark }] of Object.entries(asked)) {
       const now = hubPrefs.seen(s);
       if (now.seq !== mark.seq || now.ts !== mark.ts) continue;
       if (res.rooms?.[key]) next[s] = res.rooms[key];
       else delete next[s];
+      // #334: a pending mark is re-sent; otherwise the cache becomes the
+      // server's persisted mark (absent = the server has none). A pre-#334
+      // server answers no `marks` at all and the cache is left alone.
+      if (pendingRead[s]) retry.push(s);
+      else if (res.marks) adoptMark(s, res.marks[key] ?? { seq: 0, ts: 0 });
     }
     roomUnread = next;
+    if (retry.length) void flushRead(retry);
   }
   let unreadPushTimer = 0;
   const unreadPushed = new Set();

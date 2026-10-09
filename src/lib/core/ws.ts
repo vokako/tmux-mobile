@@ -862,8 +862,17 @@ export const hubRooms = () =>
 export interface RoomUnread { count: number; first_seq: number; last_seq: number }
 /** The watermark per room: the last read seq, or a legacy ts. */
 export type ReadMark = { seq: number } | { ts: number };
-export const hubUnread = (rooms: Record<string, ReadMark>) =>
-  call<{ rooms: Record<string, RoomUnread> }>('hub_unread', { rooms });
+/** The server's PERSISTED read mark of a room (board #334). */
+export interface ServerMark { seq: number; ts: number }
+/** `marks` is the persisted server mark of every asked room that has one —
+ * never the effective watermark the count was read from (board #334). */
+export const hubUnread = (rooms: Record<string, ReadMark | Record<string, never>>) =>
+  call<{ rooms: Record<string, RoomUnread>; marks?: Record<string, ServerMark> }>('hub_unread', { rooms });
+/** The human read these rooms (board #334): moves each room's ONE server
+ * mark forward. The answer is the persisted marks — the ACK; a room absent
+ * from it wrote nothing. Only the human's clients call this, never tmm. */
+export const hubRead = (rooms: Record<string, ReadMark>) =>
+  call<{ rooms: Record<string, ServerMark> }>('hub_read', { rooms });
 // ── Server system vitals (board #56) ────────────────────────────────────────
 /** One low-frequency reading of the machine the SERVER runs on (cpu/mem/root
  * disk — `src-tauri/src/system_status.rs` is the authority on the shape).

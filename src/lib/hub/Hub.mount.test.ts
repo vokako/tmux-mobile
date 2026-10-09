@@ -31,6 +31,7 @@ function roomFixture() {
       listSessionsWithPanes: async () => ({ panes: [] }),
       hubRooms: async () => ({ rooms: {}, states: {} }),
       hubUnread: async () => ({ rooms: {} }),
+      hubRead: async () => ({ rooms: {} }),
       registryList: async () => ({ agents: [] }),
       teamsList: async () => ({ teams: [] }),
       hubAgents: async () => ({ agents: [
@@ -2642,6 +2643,166 @@ test('every project row shows its unread count; reading the room clears it by se
   } finally { await app.close(); }
 });
 
+// Board #334: ONE read mark per room on the server. A fake server that keeps
+// it the way hub_rpc.rs does: hub_read resolves (clamps to the head) and only
+// moves forward; hub_unread reads from the later of the server's and the
+// client's mark and answers the PERSISTED marks.
+function readServer() {
+  const room = 'proj:other';
+  const msgs = [
+    { seq: 10, id: 'a', ts: 60, room, from: 'alice', to: [], body: 'one' },
+    { seq: 11, id: 'b', ts: 60, room, from: 'bob', to: [], body: 'two' },
+  ];
+  const marks: Record<string, { seq: number; ts: number }> = {};
+  const reads: Record<string, unknown>[] = [];
+  let failReads = 0;
+  const head = msgs.at(-1)!;
+  return {
+    marks, reads, msgs,
+    failNextReads(n: number) { failReads = n; },
+    rpc: {
+      projectList: async () => ({ projects: ['fixture', 'other'].map((session) => ({
+        project: { id: session, name: session, session, path: `/${session}` }, live: true, slots: [],
+      })) }),
+      hubLog: async (session: string) => ({ has_more: false, messages: session === 'other' ? msgs : [] }),
+      hubUnread: async (rooms: Record<string, { seq?: number; ts?: number }>) => {
+        const out: Record<string, unknown> = {};
+        const persisted: Record<string, unknown> = {};
+        for (const [r, m] of Object.entries(rooms)) {
+          if (r !== room) continue;
+          const client = (m.seq ?? 0) <= head.seq ? (m.seq ?? 0) : 0;
+          const at = Math.max(client, marks[r]?.seq ?? 0);
+          const above = msgs.filter((x) => x.seq > at);
+          if (above.length) out[r] = { count: above.length, first_seq: above[0]!.seq, last_seq: above.at(-1)!.seq };
+          if (marks[r]) persisted[r] = marks[r];
+        }
+        return { rooms: out, marks: persisted };
+      },
+      hubRead: async (rooms: Record<string, { seq?: number; ts?: number }>) => {
+        reads.push(rooms);
+        if (failReads > 0) { failReads--; throw new Error('offline'); }
+        const out: Record<string, unknown> = {};
+        for (const [r, m] of Object.entries(rooms)) {
+          if (r !== room || !m.seq) continue;
+          const seq = Math.min(m.seq, head.seq);
+          const ts = msgs.find((x) => x.seq === seq)!.ts;
+          marks[r] = { seq: Math.max(seq, marks[r]?.seq ?? 0), ts: Math.max(ts, marks[r]?.ts ?? 0) };
+          out[r] = marks[r];
+        }
+        return { rooms: out };
+      },
+    },
+  };
+}
+async function mountReader(context: TestContext, rpc: Record<string, unknown>, seen?: Record<string, unknown>) {
+  const fixture = await compiledHub();
+  const { rpc: base } = roomFixture();
+  return fixture.mount(context, {
+    props: { visible: true },
+    setup(window) {
+      window.Element.prototype.getAnimations = () => [];
+      window.HTMLCanvasElement.prototype.getContext = () => null;
+      window.localStorage.setItem('tmux_hub_project', 'fixture');
+      window.localStorage.setItem('tmux_server_current', 's1');
+      if (seen) window.localStorage.setItem('tmux_hub_seen', JSON.stringify(seen));
+    },
+    modules: [{ ...base, ...rpc }],
+  });
+}
+const otherRow = (app: { document: Document }) => app.document.querySelector<HTMLElement>('.proj-row[aria-label^="other"]');
+const otherCount = (app: { document: Document }) => otherRow(app)?.querySelector('.side-unread')?.textContent?.trim() ?? '';
+const seenOf = (app: { window: any }) => JSON.parse(app.window.localStorage.getItem('tmux_hub_seen') ?? '{}').other;
+
+test('a fresh client inherits the server\'s read mark; its reading reaches the next client (#334)', { timeout: 60000 }, async (context) => {
+  const srv = readServer();
+  srv.marks['proj:other'] = { seq: 10, ts: 60 };          // read to `one` on another client
+  const a = await mountReader(context, srv.rpc);
+  try {
+    for (let i = 0; i < 12 && otherCount(a) !== '1'; i++) await a.flush();
+    assert.equal(otherCount(a), '1', 'no local mark: the server\'s mark is the watermark, not the whole room');
+    assert.deepEqual(seenOf(a), { seq: 10, ts: 60 }, 'and the cache adopts the persisted mark');
+    otherRow(a)!.querySelector<HTMLElement>('.proj-pick')!.click();
+    for (let i = 0; i < 20 && (otherCount(a) || !srv.marks['proj:other'] || srv.marks['proj:other'].seq < 11); i++) await a.flush();
+    assert.equal(otherCount(a), '');
+    assert.deepEqual(srv.marks['proj:other'], { seq: 11, ts: 60 }, 'the server holds the read');
+  } finally { await a.close(); }
+  const b = await mountReader(context, srv.rpc);          // another fresh client
+  try {
+    for (let i = 0; i < 12 && !otherRow(b); i++) await b.flush();
+    for (let i = 0; i < 6; i++) await b.flush();
+    assert.equal(otherCount(b), '', 'the next client agrees: nothing unread');
+    assert.deepEqual(seenOf(b), { seq: 11, ts: 60 });
+  } finally { await b.close(); }
+});
+
+test('an idle client converges on its next refresh after another client reads (#334)', { timeout: 60000 }, async (context) => {
+  const srv = readServer();
+  const app = await mountReader(context, srv.rpc);
+  try {
+    for (let i = 0; i < 12 && otherCount(app) !== '2'; i++) await app.flush();
+    assert.equal(otherCount(app), '2');
+    srv.marks['proj:other'] = { seq: 11, ts: 60 };        // the phone read the room
+    for (let i = 0; i < 4; i++) await app.flush();
+    assert.equal(otherCount(app), '2', 'no instant push is claimed');
+    await app.advance(20000);
+    for (let i = 0; i < 12 && otherCount(app); i++) await app.flush();
+    assert.equal(otherCount(app), '', 'the 20 s sidebar read adopts it');
+    assert.deepEqual(seenOf(app), { seq: 11, ts: 60 });
+  } finally { await app.close(); }
+});
+
+test('a read whose hub_read fails stays pending and is re-sent until ACKed (#334)', { timeout: 60000 }, async (context) => {
+  const srv = readServer();
+  srv.failNextReads(1_000);                               // offline for a while
+  const app = await mountReader(context, srv.rpc);
+  try {
+    for (let i = 0; i < 12 && otherCount(app) !== '2'; i++) await app.flush();
+    otherRow(app)!.querySelector<HTMLElement>('.proj-pick')!.click();
+    for (let i = 0; i < 20 && srv.reads.length < 1; i++) await app.flush();
+    for (let i = 0; i < 4; i++) await app.flush();
+    assert.equal(srv.marks['proj:other'], undefined, 'every hub_read so far failed');
+    srv.failNextReads(0);
+    assert.deepEqual(seenOf(app), { seq: 11, ts: 60 }, 'the optimistic cache keeps the room read here');
+    assert.equal(otherCount(app), '', 'the count reads from the later of the two marks');
+    await app.advance(20000);
+    for (let i = 0; i < 12 && !srv.marks['proj:other']; i++) await app.flush();
+    assert.ok(srv.reads.length >= 2, 'the pending mark was re-sent by the refresh');
+    assert.deepEqual(srv.marks['proj:other'], { seq: 11, ts: 60 }, 'and ACKed: another client now agrees');
+    const sent = srv.reads.length;
+    await app.advance(20000);
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.equal(srv.reads.length, sent, 'an ACKed mark is not re-sent');
+  } finally { await app.close(); }
+});
+
+test('an impossible cached mark is corrected by the server; a late ACK after a server switch touches nothing (#334)', { timeout: 60000 }, async (context) => {
+  const srv = readServer();
+  srv.marks['proj:other'] = { seq: 10, ts: 60 };
+  let release: (() => void) | null = null;
+  const app = await mountReader(context, {
+    ...srv.rpc,
+    // The ACK lands late and differs from the optimistic cache (the server
+    // resolved the mark lower — a deleted head), so a write would show.
+    hubRead: async () => {
+      await new Promise<void>((r) => { release = r; });
+      return { rooms: { 'proj:other': { seq: 10, ts: 60 } } };
+    },
+  }, { other: { seq: 9_000_000, ts: 9_000_000 } });
+  try {
+    for (let i = 0; i < 12 && otherCount(app) !== '1'; i++) await app.flush();
+    assert.equal(otherCount(app), '1', 'the future mark hides nothing');
+    assert.deepEqual(seenOf(app), { seq: 10, ts: 60 }, 'the cache became the server\'s persisted mark');
+    otherRow(app)!.querySelector<HTMLElement>('.proj-pick')!.click();
+    for (let i = 0; i < 20 && !release; i++) await app.flush();
+    assert.ok(release, 'hub_read in flight');
+    app.window.localStorage.setItem('tmux_server_current', 's2');
+    app.window.localStorage.setItem('tmux_hub_seen', JSON.stringify({ other: { seq: 3, ts: 3 } }));
+    release!();
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.deepEqual(seenOf(app), { seq: 3, ts: 3 }, 'the late ACK did not write into the other server\'s cache');
+  } finally { await app.close(); }
+});
+
 // Board #322: the centre's jump. A record names server + room + seq + id;
 // the Hub opens that room, loads ONE page around the message as a history
 // window when it is not loaded, rings it, and only then marks it viewed. The
@@ -2649,7 +2810,8 @@ test('every project row shows its unread count; reading the room clears it by se
 // tail page in only once it has answered.
 function jumpFixture(over: Record<string, unknown> = {}) {
   const { rpc, pushed } = roomFixture();
-  const msg = (seq: number, body = `m${seq}`, from = 'alice') => ({ seq, id: `id${seq}`, ts: 1_000 + seq, room: 'proj:other', from, to: [], body });
+  // Addressed to the human: only those (and finished tasks) are bell entries (#334).
+  const msg = (seq: number, body = `m${seq}`, from = 'alice') => ({ seq, id: `id${seq}`, ts: 1_000 + seq, room: 'proj:other', from, to: ['human'], body });
   const tail = Array.from({ length: 10 }, (_, i) => msg(200 + i));
   const around = [msg(48), msg(49), { ...msg(50), id: 'target', body: 'the reply you heard' }, msg(51), msg(52)];
   return {
