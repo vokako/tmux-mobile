@@ -587,6 +587,7 @@ Status and action are distinct roles.
 | `--accent-fill` / `--accent-fill-ink` | `#0074ad` / white | `#056f87` / white |
 | `--accent-ink` | `#006699` | `#00d4ff` |
 | `--text2` | `#5f636b` | `#a7abb3` |
+| `--text3` | `#a8a8b1` | `#6b6e74` |
 | `--control-border` | `#7a808a` | `#727884` |
 | `--control-surface` | `#ededf2` | `#2a2a30` |
 | `--control-hover` | `#e4e5eb` | `#393940` |
@@ -599,6 +600,15 @@ Brand accents and canvas colours remain unchanged in #161. Control boundaries di
 from decorative dividers: normal text pairs need 4.5:1 and essential boundary
 marks 3:1. The fill/white-ink pairs remain above 4.5:1 even on hover.
 Do not put necessary labels in the faint decorative `--text3` role.
+Every ink token is OPAQUE (board #321, owner 2026-10-09: "左侧大侧边栏的灰色 icon
+图标…拐折处的那一点比较亮"). `--text3` was `rgba(226,232,240,0.45)` /
+`rgba(26,26,46,0.35)`; an icon's separate strokes each composite that alpha, so
+where two meet (the files fold on its outline, the board divider's caps, a plus's
+crossing) the overlap read 0.69 / 0.58 instead of 0.45 / 0.35 — measured on 36
+of the 76 Icon.svelte glyphs, so the cause is the ink, not a few paths. The
+opaque value is the old ink composited on `--bg`; on `--surface` lifts it differs
+by under 3% luminance. A translucent ink token is a regression; tint with
+`color-mix` or a surface, not an alpha ink.
 
 The shared `config-*` atoms establish an 860px left-aligned canvas, aligned
 header/body leading edges, field roles and 8/16/24px rhythm for #156 consumers.
