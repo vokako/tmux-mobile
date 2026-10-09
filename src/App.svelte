@@ -47,7 +47,8 @@
   import { cycleItem, dispatchShortcut, shortcutLabel } from './lib/app/shortcuts.ts';
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.ts';
   import { installExternalLinkHandler } from './lib/core/external-links.ts';
-  import { isTauri, isTauriDesktop } from './lib/core/platform.ts';
+  import { isTauri, isTauriDesktop, tauriReady } from './lib/core/platform.ts';
+  import { localServerLine } from './lib/app/server-mode.ts';
   import { flip } from 'svelte/animate';
   import { moveMs } from './lib/ui/motion.ts';
   import { slideIndicator } from './lib/ui/indicator.ts';
@@ -1416,7 +1417,20 @@
     const key = RAIL_SHORTCUT[slot] && shortcutsOn ? shortcuts.get(RAIL_SHORTCUT[slot]) : '';
     return { title: t(RAIL_ITEMS[slot].label), note: key ? shortcutLabel(key) : undefined };
   }
+  // This computer's own server (board #323): what the desktop app found at
+  // start — a reused gateway, its embedded server, or neither. It is about
+  // THIS machine, not the connection, so its line is labelled as such and
+  // reads the same whatever server is connected. Read again whenever the
+  // card opens (a `starting` becomes `embedded` or `failed`).
+  let localServer = $state(null);
+  function readLocalServer() {
+    if (!isTauriDesktop) return;
+    tauriReady.then(() => window.__TAURI__?.core.invoke('server_mode')).then((m) => { localServer = m ?? null; }).catch(() => {});
+  }
+  readLocalServer();
   function serverCardInfo() {
+    readLocalServer();
+    const local = localServerLine(localServer, t);
     // Mid-switch the card describes the TARGET being reached (board 315): the
     // server we left is not connected any more, and saying so is the truth.
     if (switching) {
@@ -1444,6 +1458,7 @@
         reconnecting
           ? { label: t('status'), value: t('reconnecting'), tone: 'warn' }
           : { label: t('status'), value: t('connected'), tone: 'ok' },
+        ...(local ? [local] : []),
       ],
     };
   }

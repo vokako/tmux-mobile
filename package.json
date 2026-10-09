@@ -22,7 +22,7 @@
     "dev:server": "node scripts/preflight.mjs server && cargo run --manifest-path src-tauri/Cargo.toml --no-default-features --release --bin server",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --no-default-features -- --test-threads=1",
     "build:all": "npm run build && npm run tauri:build && npx tauri android build --target aarch64 --apk",
-    "build:mac": "npm run tauri:build",
+    "build:mac": "node scripts/build-mac.mjs",
     "build:android": "npx tauri android build --target aarch64 --apk && node scripts/preflight.mjs android-apk"
   },
   "devDependencies": {

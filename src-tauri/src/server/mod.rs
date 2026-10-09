@@ -162,6 +162,25 @@ pub async fn start_with_socket(
     tls_key: Option<String>,
     disconnect_grace_secs: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    start_with_socket_ready(host, port, token, machine_id, socket, tls_cert, tls_key, disconnect_grace_secs, None).await
+}
+
+/// `start_with_socket`, telling `ready` the moment the listener is bound and
+/// TLS is loaded — i.e. right before the first `accept` (board #323: the
+/// desktop app says `embedded` only then). Every earlier failure returns Err
+/// with `ready` dropped unsent.
+#[allow(clippy::too_many_arguments)]
+pub async fn start_with_socket_ready(
+    host: &str,
+    port: u16,
+    token: &str,
+    machine_id: &str,
+    socket: Option<String>,
+    tls_cert: Option<String>,
+    tls_key: Option<String>,
+    disconnect_grace_secs: u64,
+    ready: Option<tokio::sync::oneshot::Sender<()>>,
+) -> Result<(), Box<dyn std::error::Error>> {
     tmux::set_socket(socket);
     // Best-effort harden existing config.toml so upgraded installs with the
     // old loose permissions get fixed on next start.
@@ -240,6 +259,9 @@ pub async fn start_with_socket(
     }
     println!("   Methods: auth, list_sessions, list_panes, capture_pane, send_keys, send_command, new_session, kill_session, subscribe, unsubscribe");
 
+    if let Some(tx) = ready {
+        let _ = tx.send(());
+    }
     loop {
         let (stream, addr) = listener.accept().await?;
         // OS-level NAT-friendly heartbeat. Must happen on the raw TcpStream

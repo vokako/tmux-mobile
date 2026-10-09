@@ -56,3 +56,5 @@ crew/__pycache__/
 # NFS silly-rename leftovers from files deleted while open.
 .nfs.*
 /.claude/
+# build:mac sidecar (board #323): a copy of target/release/tmm
+/src-tauri/binaries

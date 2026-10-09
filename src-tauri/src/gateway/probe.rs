@@ -434,6 +434,37 @@ mod tests {
         assert_eq!(probe(&cfg(free)).await, Verdict::None);
     }
 
+    /// Board #323, the desktop app's start: `ready` fires only once the
+    /// listener is bound (and then the probe proves it ours); a port taken
+    /// between the probe and the bind returns an error with `ready` never
+    /// sent — so the app says `failed`, never a false `embedded`, and no
+    /// second instance runs.
+    #[tokio::test]
+    async fn ready_fires_only_for_a_bound_listener() {
+        let (l, port) = listener().await;
+        drop(l);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let _ = crate::server::start_with_socket_ready("127.0.0.1", port, "tok-ours", "m-ours", None, None, None, 5, Some(tx)).await;
+        });
+        tokio::time::timeout(Duration::from_secs(5), rx).await.expect("ready in time").expect("ready sent");
+        assert!(matches!(probe(&cfg(port)).await, Verdict::Ours { .. }), "ready means really listening");
+
+        // The race: something takes the port after a None probe.
+        let (held, busy) = listener().await;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let r = crate::server::start_with_socket_ready("127.0.0.1", busy, "tok-ours", "m-ours", None, None, None, 5, Some(tx)).await;
+        assert!(r.is_err(), "the bind fails");
+        assert!(rx.await.is_err(), "ready was never sent");
+        drop(held);
+        // A TLS file that does not load fails after the bind, still before ready.
+        let (l, port) = listener().await;
+        drop(l);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let r = crate::server::start_with_socket_ready("127.0.0.1", port, "tok-ours", "m-ours", None, Some("/nonexistent/c.pem".into()), Some("/nonexistent/k.pem".into()), 5, Some(tx)).await;
+        assert!(r.is_err() && rx.await.is_err(), "no ready for a server that cannot serve");
+    }
+
     /// The real (plain) server: Ours with our token, Occupied with another
     /// token or another machine id.
     #[tokio::test]

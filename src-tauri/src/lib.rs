@@ -48,6 +48,49 @@ fn get_local_config() -> serde_json::Value {
     config::get_config_json()
 }
 
+/// Where this desktop app's server is (board #323): `embedded` (started
+/// in-process because nothing answered), `gateway` (a running gateway proven
+/// ours was reused), `occupied` (something unproven holds the port, so no
+/// server was started; `reason` is the probe's own text, never peer text),
+/// `starting` (embedded, not yet listening) or `failed` (the embedded server stopped with an error — the bind lost a race
+/// after the probe, a TLS file did not load; `reason` is our own error).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ServerMode {
+    pub mode: &'static str,
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// The one decision from a probe verdict (pure, tested).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn server_mode_of(v: &gateway::probe::Verdict, local_url: &str) -> ServerMode {
+    use gateway::probe::Verdict;
+    match v {
+        Verdict::Ours { url, .. } => ServerMode { mode: "gateway", url: url.clone(), reason: None },
+        Verdict::None => ServerMode { mode: "embedded", url: local_url.to_string(), reason: None },
+        Verdict::Occupied(r) => ServerMode { mode: "occupied", url: local_url.to_string(), reason: Some(r.clone()) },
+    }
+}
+
+#[cfg(feature = "gui")]
+static SERVER_MODE: std::sync::RwLock<Option<ServerMode>> = std::sync::RwLock::new(None);
+
+#[cfg(all(feature = "gui", desktop))]
+fn set_server_mode(m: ServerMode) {
+    if let Ok(mut g) = SERVER_MODE.write() {
+        *g = Some(m);
+    }
+}
+
+/// The frontend's read of `ServerMode`, current at call time (a later
+/// failure is visible); `null` where there is none (mobile).
+#[cfg(feature = "gui")]
+#[tauri::command]
+fn server_mode() -> Option<ServerMode> {
+    SERVER_MODE.read().ok().and_then(|g| g.clone())
+}
+
 #[cfg(feature = "gui")]
 use downloads::sanitize_filename;
 
@@ -186,16 +229,44 @@ fn get_download_path(name: String) -> Result<String, String> {
 pub fn run() {
     #[cfg(desktop)]
     {
+        // Reuse a running gateway (board #323): probe once, with tmm's own
+        // rules, before anything is started. Only a refused connection starts
+        // the embedded server; a port held by something unproven starts
+        // nothing (never a second server). Decided once at start.
         let cfg = Config::load();
         tmux::set_scrollback(cfg.scrollback);
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async {
-                if let Err(e) = server::start_with_socket(&cfg.host, cfg.port, &cfg.token, &cfg.machine_id, cfg.tmux_socket, cfg.tls_cert, cfg.tls_key, cfg.disconnect_grace_secs).await {
-                    eprintln!("Server error: {}", e);
-                }
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let verdict = rt.block_on(gateway::probe(&cfg));
+        let mode = server_mode_of(&verdict, &cfg.local_url());
+        // One line on stderr, so a launch can be checked from outside.
+        eprintln!("tmux-mobile: local server {} at {}{}", mode.mode, mode.url, mode.reason.as_deref().map(|r| format!(" ({r})")).unwrap_or_default());
+        if mode.mode == "embedded" {
+            // `starting` until the listener is bound: the app says
+            // `embedded` only for a server that is really listening. A
+            // failure before or after (the port taken between the probe and
+            // the bind, a TLS file that does not load) is `failed`, with our
+            // own error as the reason.
+            let url = mode.url.clone();
+            set_server_mode(ServerMode { mode: "starting", url: url.clone(), reason: None });
+            std::thread::spawn(move || {
+                rt.block_on(async {
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    let ready_url = url.clone();
+                    tokio::spawn(async move {
+                        if rx.await.is_ok() {
+                            eprintln!("tmux-mobile: local server embedded at {ready_url} (listening)");
+                            set_server_mode(ServerMode { mode: "embedded", url: ready_url, reason: None });
+                        }
+                    });
+                    if let Err(e) = gateway::start_ready(cfg, Some(tx)).await {
+                        eprintln!("Server error: {}", e);
+                        set_server_mode(ServerMode { mode: "failed", url, reason: Some(e) });
+                    }
+                });
             });
-        });
+        } else {
+            set_server_mode(mode);
+        }
     }
 
     tauri::Builder::default()
@@ -208,7 +279,7 @@ pub fn run() {
         // this plugin. The JS side (`hub/notifications.ts`) picks it when it
         // runs inside Tauri and keeps the browser path otherwise.
         .plugin(tauri_plugin_notification::init())
-        .invoke_handler(tauri::generate_handler![get_local_config, download_open, download_reset, download_chunk, download_finish, download_abort, download_release, download_release_all, download_list_parts, list_downloads, delete_download, get_download_path])
+        .invoke_handler(tauri::generate_handler![get_local_config, server_mode, download_open, download_reset, download_chunk, download_finish, download_abort, download_release, download_release_all, download_list_parts, list_downloads, delete_download, get_download_path])
         .setup(|app| {
             // Desktop: build a custom menu WITHOUT the default View → Zoom
             // items.
@@ -268,4 +339,26 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
+mod server_mode_tests {
+    use super::*;
+    use gateway::probe::Verdict;
+
+    /// Board #323: only a refused connection starts the embedded server; a
+    /// gateway proven ours is reused at ITS url; anything unproven starts
+    /// nothing and says why.
+    #[test]
+    fn the_probe_verdict_decides_the_server_mode() {
+        let local = "ws://127.0.0.1:19977";
+        let ours = server_mode_of(&Verdict::Ours { machine_id: "m".into(), url: "ws://127.0.0.1:19977".into() }, local);
+        assert_eq!((ours.mode, ours.url.as_str(), ours.reason.is_none()), ("gateway", "ws://127.0.0.1:19977", true));
+        let none = server_mode_of(&Verdict::None, local);
+        assert_eq!((none.mode, none.url.as_str()), ("embedded", local));
+        let busy = server_mode_of(&Verdict::Occupied("ws://127.0.0.1:19977 is another machine's gateway".into()), local);
+        assert_eq!(busy.mode, "occupied");
+        assert_eq!(busy.reason.as_deref(), Some("ws://127.0.0.1:19977 is another machine's gateway"));
+        assert_eq!(serde_json::to_value(&none).unwrap(), serde_json::json!({ "mode": "embedded", "url": local }), "no reason field unless occupied");
+    }
 }

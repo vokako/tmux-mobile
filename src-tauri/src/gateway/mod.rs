@@ -21,9 +21,14 @@ use crate::config::Config;
 
 /// Run the server for `cfg` in the foreground until it fails.
 pub async fn start(cfg: Config) -> Result<(), String> {
+    start_ready(cfg, None).await
+}
+
+/// `start`, telling `ready` once the listener is bound (board #323).
+pub async fn start_ready(cfg: Config, ready: Option<tokio::sync::oneshot::Sender<()>>) -> Result<(), String> {
     crate::tmux::set_scrollback(cfg.scrollback);
     crate::server::ui::configure(cfg.ui_dir.clone());
-    crate::server::start_with_socket(
+    crate::server::start_with_socket_ready(
         &cfg.host,
         cfg.port,
         &cfg.token,
@@ -32,6 +37,7 @@ pub async fn start(cfg: Config) -> Result<(), String> {
         cfg.tls_cert,
         cfg.tls_key,
         cfg.disconnect_grace_secs,
+        ready,
     )
     .await
     .map_err(|e| e.to_string())

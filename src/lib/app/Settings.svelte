@@ -3,6 +3,7 @@
   import { connect, disconnect } from '../core/ws.ts';
   import { defaultConnectionAddress, dropAutofilled, hostedByGateway, localAutofill, normalizeAddress as normalizeAddressFor, type Autofilled, type LocalConfig } from '../core/connection-address.ts';
   import { isAndroid, isTauriDesktop, tauriReady } from '../core/platform.ts';
+  import { localServerLine, type ServerMode } from './server-mode.ts';
   import { activateConnected } from './servers.ts';
   import Icon from '../ui/Icon.svelte';
   import ConnectFields from './ConnectFields.svelte';
@@ -58,6 +59,17 @@
         if (fill.socket !== undefined) socket = fill.socket;
         if ((fill.token !== undefined || fill.socket !== undefined) && cfg.url) autofilled = { address: cfg.url, token: fill.token, socket: fill.socket };
       })
+      .catch(() => {});
+  }
+
+  // This computer's server, when the desktop app did not get one (board
+  // #323): occupied or failed. Disconnected there is no rail, so the reason
+  // has to be readable here.
+  let localTrouble = $state<ReturnType<typeof localServerLine>>(null);
+  if (!isAndroid && isTauriDesktop) {
+    tauriReady
+      .then(() => window.__TAURI__?.core.invoke('server_mode'))
+      .then((m: ServerMode | undefined) => { if (m && (m.mode === 'occupied' || m.mode === 'failed')) localTrouble = localServerLine(m, t); })
       .catch(() => {});
   }
 
@@ -194,6 +206,9 @@
 
     {#if error}
       <div class="error appear">{error}</div>
+    {/if}
+    {#if localTrouble}
+      <div class="config-note" role="status">{localTrouble.label}: {localTrouble.value}</div>
     {/if}
 
     {#if connecting}
