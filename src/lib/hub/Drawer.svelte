@@ -114,7 +114,7 @@
     <!-- The task sidebar (board #13 follow-up): the REAL Board, embedded —
          no project sidebar, it follows this room's project. -->
     <div class="board-body appear">
-      <Board session={selected} visible={visible && drawerView === 'board'} embedded issueRequest={drawerIssueReq} createRequest={drawerBoardNew} />
+      <Board session={selected} guardPage="hub" visible={visible && drawerView === 'board'} embedded issueRequest={drawerIssueReq} createRequest={drawerBoardNew} />
     </div>
   {/if}
 </section>

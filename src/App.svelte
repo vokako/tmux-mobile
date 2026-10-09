@@ -1983,7 +1983,7 @@
     </div>
     <div class="page-layer" class:hidden={page !== 'board'}>
       {#if hubEligible}
-        <Board session={filesSession} visible={page === 'board'} sideCollapsed={shellSideCollapsed} onGoBack={(fn) => boardGoBack = fn} issueRequest={boardIssueReq} jumped={!!jumpedFrom} />
+        <Board session={filesSession} guardPage="board" visible={page === 'board'} sideCollapsed={shellSideCollapsed} onGoBack={(fn) => boardGoBack = fn} issueRequest={boardIssueReq} jumped={!!jumpedFrom} />
       {/if}
     </div>
     <div class="page-layer term-page" class:hidden={page !== 'terminal'} bind:this={termPageEl}>

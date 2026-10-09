@@ -196,7 +196,7 @@ export function createStager(host: StagerHost) {
           host.setText(`${pre}${sep}${tok}${post}`);
           at += sep.length + tok.length;
         }
-        host.focus?.();
+        if (!stale()) host.focus?.(); // never the editor of a context that replaced this one
       } catch (err) {
         // The uploads dir itself could not be prepared: every file of this job
         // failed, and each says so as a chip (same staleness guard as above).

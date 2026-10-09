@@ -32,7 +32,7 @@
   import { t } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectDown, projectDelete, projectArchive, projectCreate, projectRename, listSessionsWithPanes,
-    hubPost, hubCommand, modelsList, hubLog, hubLogAround, hubRooms, hubUnread, hubAgents, fsMkdir, fsUpload, fsCwd, hubSpawn, hubSpawnTeam, teamsList, hubAgentStop, hubAgentRestart, hubTeamRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, hubAgentInputMode, registryList,
+    hubPost, hubCommand, modelsList, hubLog, hubLogAround, hubRooms, hubUnread, hubAgents, fsCwd, hubSpawn, hubSpawnTeam, teamsList, hubAgentStop, hubAgentRestart, hubTeamRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, hubAgentInputMode, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';

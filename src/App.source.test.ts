@@ -684,7 +684,7 @@ test('one shell-wide sidebar state: the Terminal page and the system status foll
   assert.match(source, /const shellSideCollapsed = \$derived\(shell && !layout\.isTouchDevice && hubPrefs\.sidebarCollapsed\);/u);
   assert.match(source, /<main class:with-rail=\{[^}]+\} class:touch-layout=\{[^}]+\} class:side-collapsed=\{shellSideCollapsed\} class:side-page=\{pageHasSidebar\}/u);
   assert.match(source, /pageReselect\.terminal = pageReselect\.board = \(\) => hubPrefs\.setSidebarCollapsed\(!hubPrefs\.sidebarCollapsed\);/u, '#199 on every page, a toggle since #201');
-  assert.match(source, /<Board session=\{filesSession\} visible=\{page === 'board'\} sideCollapsed=\{shellSideCollapsed\}/u);
+  assert.match(source, /<Board session=\{filesSession\} guardPage="board" visible=\{page === 'board'\} sideCollapsed=\{shellSideCollapsed\}/u);
   // The Terminal page's track is the Hub's technique: factor, gate, pin, hidden at rest.
   assert.match(source, /const unpin = pinTrack\(termSideEl, 'end'\);\s*\n\s*void moveTrack\(termPageEl, '--side-open', collapsed \? 1 : 0\)\.then\(unpin\);/u);
   assert.match(source, /\.page-layer\.term-page:global\(\.moving\) \{ transition: --side-open var\(--t-move\) ease-out; \}/u);

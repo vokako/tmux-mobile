@@ -14,7 +14,7 @@ test('the issue detail is a DRAFT: explicit save, clean cancel, guarded exits (b
   assert.match(source, /const patch = draftPatch\(saved, draftBase\);/u,
     'save diffs against the draft BASE — diffing the live issue ships stale untouched fields (#11 review)');
   assert.match(source, /onclick=\{saveDraft\}/u, 'save is a button, not a side effect');
-  assert.match(source, /disabled=\{busy \|\| !draftValid\(draft\)\}/u, 'saving twice / a blank title is unclickable');
+  assert.match(source, /disabled=\{busy \|\| !draftValid\(draft\) \|\| blocked\(bodyStage\)\}/u, 'saving twice / a blank title is unclickable');
   // Cancel ASKS since board #15 ("当前状态没有保存，是否退出"): it routes
   // through the same guard every exit uses, and the dialog's confirm is the
   // one place that restores the base.
@@ -35,7 +35,7 @@ test('the issue detail is a DRAFT: explicit save, clean cancel, guarded exits (b
   // A refetch REBASES three-way: untouched fields follow the server, touched
   // fields keep the user's text (#11 review) — never a blind draft reset.
   const refetch = source.slice(source.indexOf('async function refetchSel'), source.indexOf('// Assigning DOES'));
-  assert.match(refetch, /const r = rebaseDraft\(draft, draftBase, draftOf\(sel\)\);/u, 'refetchSel rebases');
+  assert.match(refetch, /const r = rebaseDraft\(draft, draftBase, draftOf\(fresh\)\);/u, 'refetchSel rebases');
   assert.ok(!refetch.includes('draft = draftOf(sel)'), 'and never blindly resets the draft');
 });
 
@@ -43,7 +43,7 @@ test('assignment is ONE dispatch — the detail picker and the create dialog sha
   // dispatchAssign is the single carrier of assignment=dispatch semantics:
   // saving the assignee AND typing the brief into the agent's pane. Exactly
   // one hubPost call site proves nobody re-implements the delivery half.
-  assert.match(source, /async function dispatchAssign\(id: number, name: string, title = '', body = '', notes: \{ author: string; body: string; at: number \}\[\] = \[\]\)/u, 'the one dispatch function');
+  assert.match(source, /async function dispatchAssign\(ctx: OpCtx, id: number, name: string, title = '', body = '', notes: \{ author: string; body: string; at: number \}\[\] = \[\]\)/u, 'the one dispatch function');
   assert.equal(source.split('hubPost(').length - 1, 1, 'exactly one delivery call site, inside dispatchAssign');
   // The brief carries the NOTE THREAD too (board #42): the delivery appends
   // assignNotes — chronological, authored, budget-capped in board.ts — so an
@@ -51,7 +51,7 @@ test('assignment is ONE dispatch — the detail picker and the create dialog sha
   // …and the reading order is a HANDOFF (board #51): who assigned it leads
   // the message, the note thread follows the issue, and the tmm instructions
   // ride LAST — never between the issue and its thread.
-  assert.match(source, /await hubPost\(cur, `@\$\{name\} \$\{msg\}\$\{assignNotes\(id, notes\)\}\\n\$\{take\}`\);/u,
+  assert.match(source, /await hubPost\(ctx\.session, `@\$\{name\} \$\{msg\}\$\{assignNotes\(id, notes\)\}\\n\$\{take\}`\);/u,
     'the dispatch order: message, notes, then the take instructions last');
   // The ORIGINAL issue body is the task input, not a notification preview:
   // dispatch must carry all of it. The pane path uses paste-buffer and has no
@@ -62,16 +62,16 @@ test('assignment is ONE dispatch — the detail picker and the create dialog sha
   assert.match(source, /\.replace\('\{who\}', 'human'\)/u, 'the assigner is the subject at the front');
   assert.match(source, /const take = t\('boardAssignTake'\)\.replaceAll\('\{id\}', String\(id\)\);/u,
     'the instructions are their own i18n atom, filled per issue');
-  assert.match(source, /if \(assignee !== undefined\) await dispatchAssign\(sel\.id, assignee, saved\.title, saved\.body, Array\.isArray\(sel\.notes\) \? sel\.notes : \[\]\);/u,
+  assert.match(source, /const notes = Array\.isArray\(sel\.notes\) \? sel\.notes : \[\];[\s\S]*if \(assignee !== undefined && alive\) await dispatchAssign\(ctx, id, assignee, saved\.title, saved\.body, notes\);/u,
     'a ✓-confirmed assignee change routes through it (board #15) and carries the OPEN issue\u2019s thread (board #42)');
-  assert.match(source, /if \(wantAssign && created != null\) await dispatchAssign\(created, wantAssign, wantTitle, wantBody\);/u,
+  assert.match(source, /if \(wantAssign && created != null && alive\) await dispatchAssign\(ctx, created, wantAssign, title, body\);/u,
     'create-with-assignee dispatches too — a fresh issue HAS no notes, so none ride (board #42)');
   // The form closes the MOMENT the create succeeds — before the dispatch can
   // fail — because a retryable form after a successful create mints
   // duplicate issues (#11 review). Order in the source is the guarantee.
   const create = source.slice(source.indexOf('async function createIssue'), source.indexOf('async function addNote'));
   const closes = create.indexOf('creating = false;');
-  const dispatches = create.indexOf('await dispatchAssign(created');
+  const dispatches = create.indexOf('await dispatchAssign(ctx, created');
   assert.ok(closes > -1 && dispatches > -1 && closes < dispatches,
     'the form is gone before the dispatch is attempted');
   assert.ok(create.indexOf('busy = false;\n      return;') < closes,
@@ -455,7 +455,7 @@ test('the note reply wraps and grows — one autoGrow, chat keyboard semantics (
     'Enter sends; Shift+Enter and IME Enter do not');
   // Sending clears the bound value, and autoGrow's update refits — that is
   // the shrink-back path, so both halves must exist.
-  assert.match(source, /noteText = ''; noteStage\.clear\(\); \/\/ persisted\s*await refetchSel\(\);/u, 'send clears the value');
+  assert.match(source, /noteText = ''; noteStage\.clear\(\); \/\/ persisted\s*await refetchSel\(ctx\);/u, 'send clears the value');
   assert.match(source, /update: \(_v: string\) => fit\(\)/u, 'the action refits when the bound value changes');
   // The dress is the input's own (shared rule with the create title), the
   // box never shows a scrollbar while measuring, and the send button rides
@@ -666,9 +666,9 @@ test('titles are optional, and the WIRING honors it — not just the pure helper
 
   // 1) The create ENTRY and the create BUTTON both speak title||body — a
   //    body-only issue must be creatable from either path.
-  assert.match(source, /if \(!\(nTitle\.trim\(\) \|\| nBody\.trim\(\)\) \|\| busy \|\| blocked\(createStage\)\) return;/u,
+  assert.match(source, /if \(!\(nTitle\.trim\(\) \|\| createStage\.sendable\(nBody\)\) \|\| busy \|\| blocked\(createStage\)\) return;/u,
     'createIssue gates on title OR body');
-  assert.match(source, /disabled=\{!\(nTitle\.trim\(\) \|\| nBody\.trim\(\)\) \|\| busy \|\| blocked\(createStage\)\} onclick=\{createIssue\}/u,
+  assert.match(source, /disabled=\{!\(nTitle\.trim\(\) \|\| createStage\.sendable\(nBody\)\) \|\| busy \|\| blocked\(createStage\)\} onclick=\{createIssue\}/u,
     'the create button disables only when BOTH are empty');
 
   // 2) The card's title is the shared fallback, never the raw field…
@@ -911,17 +911,32 @@ test('images: one materialized body per submit, given to the save AND the brief;
   const save = source.slice(source.indexOf('async function saveDraft'), source.indexOf('async function createIssue'));
   assert.match(save, /if \(!sel \|\| busy \|\| blocked\(bodyStage\)\) return;/u, 'save refuses while uploading/failed');
   assert.match(save, /const saved = \{ \.\.\.draft, body: bodyStage\.body\(draft\.body\) \};/u, 'frozen at entry');
-  assert.match(save, /dispatchAssign\(sel\.id, assignee, saved\.title, saved\.body,/u, 'the brief carries the saved text');
+  assert.match(save, /dispatchAssign\(ctx, id, assignee, saved\.title, saved\.body, notes\)/u, 'the brief carries the saved text');
   const create = source.slice(source.indexOf('async function createIssue'), source.indexOf('async function addNote'));
   assert.match(create, /const body = createStage\.body\(nBody\)\.trim\(\);/u);
-  assert.match(create, /boardSave\(cur, \{ title: nTitle\.trim\(\), body \}\)/u);
-  assert.match(create, /const wantBody = body;/u, 'assign-at-birth briefs the stored body');
+  assert.match(create, /boardSave\(ctx\.session, \{ title, body \}\)/u);
+  assert.match(create, /dispatchAssign\(ctx, created, wantAssign, title, body\)/u, 'assign-at-birth briefs the stored body');
   const note = source.slice(source.indexOf('async function addNote'), source.indexOf('// ── Delete is CONFIRMED'));
-  assert.match(note, /blocked\(noteStage\)\) return;[\s\S]*const body = noteStage\.body\(noteText\)\.trim\(\);[\s\S]*await boardNote\(cur, id, body\);/u);
+  assert.match(note, /blocked\(noteStage\)\) return;[\s\S]*const body = noteStage\.body\(noteText\)\.trim\(\);[\s\S]*await boardNote\(ctx\.session, id, body\);/u);
   // The SAME atoms as the chat: one pipeline, one strip, one image, one viewer.
   assert.match(source, /import \{ createStager, attachPaste, type Stager \} from '\.\/attachments\.svelte\.ts';/u);
   assert.equal([...source.matchAll(/<AttachStrip /g)].length, 3, 'three editors, one strip');
   assert.match(source, /<ChatImage \{src\}/u);
   assert.match(source, /import Lightbox from '\.\.\/ui\/Lightbox\.svelte';/u);
   assert.doesNotMatch(source, /fsUpload|canvas|createImageBitmap/u, 'no second upload path');
+});
+
+test('every submit acts on its frozen context, never the live cur/sel; the page registers the server-switch guard (board #329 review)', () => {
+  for (const fn of ['saveDraft', 'createIssue', 'addNote']) {
+    const start = source.indexOf(`async function ${fn}()`);
+    const body = source.slice(start, source.indexOf('\n  }\n', start));
+    assert.match(body, /const ctx = freeze\(\);/u, `${fn} freezes its context`);
+    const code = body.replace(/\/\/[^\n]*/g, '');
+    assert.doesNotMatch(code, /\((?:cur|sel\.id),/u, `${fn}: no live cur/sel passed to an RPC`);
+    assert.doesNotMatch(code, /await [a-zA-Z]+\([^)]*\bsel\.id\b/u, `${fn}: the issue id is frozen, not read after an await`);
+    assert.match(body, /submitting = true/u, `${fn} locks its editors`);
+  }
+  assert.match(source, /const owns = \(c: OpCtx\) => alive && c\.gen === opGen;/u);
+  assert.match(source, /registerLeaveGuard\(\{\s*page: guardPage,/u, 'the #315 walk reaches the Board');
+  assert.match(source, /if \(noteDirty\) \{ await refetchSel\(ctx\); return; \}/u, 'a body save keeps a note draft on screen');
 });

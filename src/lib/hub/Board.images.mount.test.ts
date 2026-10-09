@@ -2,24 +2,28 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { TestContext } from 'node:test';
 import { compileMount } from '../test/mount.ts';
+import { clearLeaveGuardsForTests, confirmLeave, registerLeaveGuard, type LeaveGuard } from '../app/leave-guards.ts';
 
 // Board #329: images in the Board through the chat's ONE pipeline. The real
 // Board, the real stager, fake RPCs; the browser's encoder is stubbed in the
 // window (jsdom has no canvas), so the upload carries a fixed webp body.
-const compiled = compileMount(new URL('./Board.svelte', import.meta.url), [new URL('../core/ws.ts', import.meta.url)]);
+const compiled = compileMount(new URL('./Board.svelte', import.meta.url), [new URL('../core/ws.ts', import.meta.url), new URL('../app/leave-guards.ts', import.meta.url)]);
 const WS = '/work/fixture';
 const REF = /!\[\]\(\/work\/fixture\/\.tmm\/uploads\/[a-z0-9]+-[a-z0-9]{8}\.webp\)/u;
 const issueA = { id: 1, title: 'A', body: 'Body A', status: 'todo', assignee: '', editable: true, created_at: 100, updated_at: 100, notes: [] };
 const issueB = { id: 2, title: 'B', body: 'Body B', status: 'todo', assignee: '', editable: true, created_at: 100, updated_at: 100, notes: [] };
 
 type Calls = { saves: any[]; notes: any[]; posts: any[]; uploads: string[] };
-type Opts = { issues?: any[]; upload?: (path: string) => Promise<unknown>; agents?: any[]; save?: (patch: any) => Promise<unknown> };
+type Opts = { issues?: any[]; upload?: (path: string) => Promise<unknown>; agents?: any[]; save?: (patch: any) => Promise<unknown>; note?: () => Promise<unknown> };
+const guardsSeen: LeaveGuard[] = [];
+const walk = () => confirmLeave({ current: 'hub', reveal: async () => {}, hold: () => {} });
 async function mount(context: TestContext, opts: Opts = {}) {
+  clearLeaveGuardsForTests(); guardsSeen.length = 0;
   const calls: Calls = { saves: [], notes: [], posts: [], uploads: [] };
   const issues = opts.issues ?? [issueA, issueB];
   let back!: () => boolean;
   const app = await (await compiled).mount(context, {
-    props: { session: 'fixture', visible: true, onGoBack: (fn: typeof back) => back = fn },
+    props: { session: 'fixture', visible: true, guardPage: 'board', onGoBack: (fn: typeof back) => back = fn },
     setup(window) {
       window.Element.prototype.getAnimations = () => [];
       const w = window as any;
@@ -36,10 +40,10 @@ async function mount(context: TestContext, opts: Opts = {}) {
       hubAgents: async () => ({ agents: opts.agents ?? [] }),
       boardList: async () => ({ issues }),
       boardGet: async (_s: string, id: number) => issues.find((i) => i.id === id),
-      boardSave: async (_s: string, patch: any) => { calls.saves.push(patch); if (opts.save) await opts.save(patch); return { id: patch.id ?? 9 }; },
+      boardSave: async (session: string, patch: any) => { calls.saves.push({ ...patch, session }); if (opts.save) await opts.save(patch); return { id: patch.id ?? 9 }; },
       boardDelete: async () => ({}),
-      boardNote: async (_s: string, id: number, body: string) => { calls.notes.push({ id, body }); return {}; },
-      hubPost: async (_s: string, body: string) => { calls.posts.push(body); return {}; },
+      boardNote: async (session: string, id: number, body: string) => { calls.notes.push({ id, body, session }); if (opts.note) await opts.note(); return {}; },
+      hubPost: async (session: string, body: string) => { calls.posts.push({ session, body }); return {}; },
       fsMkdir: async () => ({}),
       fsUpload: async (path: string) => {
         if (path.endsWith('/.gitignore')) return {};
@@ -47,6 +51,10 @@ async function mount(context: TestContext, opts: Opts = {}) {
         return opts.upload ? opts.upload(path) : {};
       },
       fsDownloadHttp: async (path: string) => ({ url: `https://dl.test/?p=${encodeURIComponent(path)}` }),
+    }, {
+      // The REAL registry and walk (this realm's leave-guards.ts) receive the
+      // Board's own guard object; the cleanup it returns cannot cross realms.
+      registerLeaveGuard: (g: LeaveGuard) => { registerLeaveGuard(g); guardsSeen.push(g); return undefined; },
     }],
   });
   const flush = async () => { for (let i = 0; i < 10; i++) await app.flush(); };
@@ -247,5 +255,150 @@ test('deleting an issue drops its staged images; the next issue starts clean', a
     cards()[cards().length - 1]!.click(); await app.flush();
     assert.ok(app.q('.d-body-edit'), 'another issue is open');
     assert.equal(app.q('.pend-thumb'), null, 'no chip from the deleted issue');
+  } finally { await app.close(); }
+});
+
+test('a server switch asks the Board through the real leave walk; cancel keeps the image note, confirm leaves', async (context) => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const app = await mount(context, { upload: () => gate.then(() => ({})) });
+  try {
+    assert.equal(guardsSeen.length, 1, 'the Board registered its guard');
+    app.q<HTMLButtonElement>('.card')!.click(); await app.flush();
+    const note = app.q<HTMLTextAreaElement>('.note-input')!;
+    await app.type(note, 'see ');
+    await app.paste(note); // still uploading
+    let answer = walk();
+    await app.flush();
+    assert.ok(app.q('[role=alertdialog]'), 'the Board\u2019s own discard confirm asks');
+    app.q<HTMLButtonElement>('.dlg-actions button:first-child')!.click(); // keep editing
+    assert.equal(await answer, false, 'cancel: the switch is refused');
+    release(); await app.flush();
+    assert.equal(note.value, 'see [img:1]', 'nothing lost: text and token');
+    assert.ok(app.q('.pend-thumb'), 'and the chip');
+    answer = walk(); await app.flush();
+    app.q<HTMLButtonElement>('.dlg-actions button:last-child')!.click();
+    assert.equal(await answer, true, 'confirm: the switch may go');
+  } finally { release(); await app.close(); }
+});
+
+test('a failed chip alone is unsaved work to the switch', async (context) => {
+  const app = await mount(context, { upload: async () => { throw new Error('disk full'); } });
+  try {
+    [...app.document.querySelectorAll<HTMLButtonElement>('button')].find((b) => /new/i.test(b.getAttribute('aria-label') ?? b.title ?? ''))?.click();
+    await app.flush();
+    await app.paste(app.q<HTMLTextAreaElement>('.d-body-edit.fill')!);
+    assert.ok(app.q('.pend-chip.err'));
+    const answer = walk(); await app.flush();
+    assert.ok(app.q('[role=alertdialog]'), 'asked');
+    app.q<HTMLButtonElement>('.dlg-actions button:first-child')!.click();
+    assert.equal(await answer, false);
+    assert.ok(app.q('.pend-chip.err'), 'kept');
+  } finally { await app.close(); }
+});
+
+test('while a save runs its editors are locked and nothing navigates; the answer acts on the frozen issue', async (context) => {
+  let release!: () => void;
+  const app = await mount(context, { agents: [{ name: 'alice', managed: true, state: 'idle', agent: 'kiro' }], save: (patch) => patch.body ? new Promise<void>((r) => { release = r; }) : Promise.resolve() });
+  try {
+    app.q<HTMLButtonElement>('.card')!.click(); await app.flush();
+    const body = app.q<HTMLTextAreaElement>('.d-body-edit')!;
+    await app.type(body, 'Body A edited ');
+    await app.paste(body);
+    const save = () => [...app.document.querySelectorAll<HTMLButtonElement>('.detail button')].find((b) => b.getAttribute('aria-label') === 'Save')!;
+    save().click(); await app.flush();
+    assert.equal(body.readOnly, true, 'the body editor is locked while its request runs');
+    assert.equal(app.back(), true, 'Back is consumed…');
+    await app.flush();
+    assert.ok(app.q('.d-body-edit'), '…and the detail stays: nothing navigates under a request');
+    assert.equal(app.q('[role=alertdialog]'), null, 'no discard question over a running save');
+    const note = app.q<HTMLTextAreaElement>('.note-input')!;
+    assert.equal(note.readOnly, true, 'the note editor is locked too');
+    release(); await app.flush();
+    assert.deepEqual(app.calls.saves.map((x) => [x.session, x.id]), [['fixture', 1]], 'the frozen session and issue');
+    assert.match(app.calls.saves[0].body, REF);
+    assert.equal(app.q('.d-body-edit'), null, 'then the ✓ closes the detail');
+  } finally { release?.(); await app.close(); }
+});
+
+test('a body Save leaves the note draft alone: the detail stays, the note text and image remain submittable', async (context) => {
+  const app = await mount(context);
+  try {
+    app.q<HTMLButtonElement>('.card')!.click(); await app.flush();
+    await app.type(app.q<HTMLTextAreaElement>('.d-body-edit')!, 'Body A changed');
+    const note = app.q<HTMLTextAreaElement>('.note-input')!;
+    await app.type(note, 'my note ');
+    await app.paste(note);
+    [...app.document.querySelectorAll<HTMLButtonElement>('.detail button')].find((b) => b.getAttribute('aria-label') === 'Save')!.click();
+    await app.flush();
+    assert.equal(app.calls.saves.length, 1);
+    assert.equal(app.calls.saves[0].body, 'Body A changed');
+    assert.ok(app.q('.note-input'), 'the detail stays');
+    assert.equal(app.q<HTMLTextAreaElement>('.note-input')!.value, 'my note [img:1]', 'the note text and token');
+    assert.ok(app.q('.pend-thumb'), 'and its chip');
+    app.q<HTMLButtonElement>('.note-add .icon-btn.go')!.click(); await app.flush();
+    assert.equal(app.calls.notes.length, 1, 'the note still goes');
+    assert.match(app.calls.notes[0].body, /^my note !\[\]\(/u);
+  } finally { await app.close(); }
+});
+
+test('after a confirmed leave of A, B carries none of A\u2019s note text or token', async (context) => {
+  const app = await mount(context);
+  try {
+    const cards = () => [...app.document.querySelectorAll<HTMLButtonElement>('.card')];
+    cards()[0]!.click(); await app.flush();
+    const note = app.q<HTMLTextAreaElement>('.note-input')!;
+    await app.type(note, 'A note ');
+    await app.paste(note);
+    assert.equal(app.back(), true); await app.flush();
+    app.q<HTMLButtonElement>('.dlg-actions button:last-child')!.click(); await app.flush();
+    cards()[1]!.click(); await app.flush();
+    assert.equal(app.q<HTMLTextAreaElement>('.note-input')!.value, '', 'no A text');
+    assert.equal(app.q('.pend-thumb'), null, 'no A chip');
+  } finally { await app.close(); }
+});
+
+test('a save answered after the page was destroyed (server switch) sends no brief to the new server', async (context) => {
+  let release!: () => void;
+  const app = await mount(context, {
+    agents: [{ name: 'alice', managed: true, state: 'idle', agent: 'kiro' }],
+    save: (patch) => (patch.title ? new Promise<void>((r) => { release = r; }) : Promise.resolve()),
+  });
+  app.q<HTMLButtonElement>('.card')!.click(); await app.flush();
+  const title = app.q<HTMLInputElement>('.d-title-input')!;
+  title.value = 'A renamed'; title.dispatchEvent(new app.window.Event('input', { bubbles: true })); await app.flush();
+  // Assign alice in the draft (the Select writes draft.assignee).
+  const pick = app.q<HTMLButtonElement>('.detail .sel-trigger, .detail [aria-haspopup="listbox"]');
+  pick?.click(); await app.flush();
+  [...app.document.querySelectorAll<HTMLElement>('[role="option"]')].find((o) => o.textContent?.includes('alice'))?.click();
+  await app.flush();
+  [...app.document.querySelectorAll<HTMLButtonElement>('.detail button')].find((b) => b.getAttribute('aria-label') === 'Save')!.click();
+  await app.flush();
+  assert.deepEqual(app.calls.saves.map((x) => [x.session, x.id, x.title]), [['fixture', 1, 'A renamed']]);
+  await app.close(); // the switch destroys the page mid-request
+  release();
+  for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+  assert.equal(app.calls.saves.length, 1, 'no assignee write after the page is gone');
+  assert.equal(app.calls.posts.length, 0, 'no brief typed into a pane from a dead context');
+});
+
+test('removing one of two tokens removes only it; a file token too', async (context) => {
+  const app = await mount(context);
+  try {
+    [...app.document.querySelectorAll<HTMLButtonElement>('button')].find((b) => /new/i.test(b.getAttribute('aria-label') ?? b.title ?? ''))?.click();
+    await app.flush();
+    const body = app.q<HTMLTextAreaElement>('.d-body-edit.fill')!;
+    await app.type(body, 'a ');
+    await app.paste(body);
+    await app.type(body, body.value + ' b ');
+    const file = new app.window.File(['x'], 'log.txt', { type: 'text/plain' });
+    const ev = new app.window.Event('paste', { bubbles: true, cancelable: true }) as any;
+    ev.clipboardData = { items: [{ kind: 'file', getAsFile: () => file }], files: [file], getData: () => '' };
+    body.dispatchEvent(ev); await app.flush(); await app.flush();
+    assert.equal(body.value, 'a [img:1] b [file:2]');
+    app.q<HTMLButtonElement>('.pend-thumb .pend-x')!.click(); await app.flush();
+    assert.equal(body.value, 'a b [file:2]', 'only the image token');
+    app.q<HTMLButtonElement>('.pend-chip .pend-x')!.click(); await app.flush();
+    assert.equal(body.value, 'a b', 'then the file token');
   } finally { await app.close(); }
 });
