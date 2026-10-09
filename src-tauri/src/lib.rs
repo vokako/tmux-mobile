@@ -73,13 +73,41 @@ pub fn server_mode_of(v: &gateway::probe::Verdict, local_url: &str) -> ServerMod
     }
 }
 
-#[cfg(feature = "gui")]
-static SERVER_MODE: std::sync::RwLock<Option<ServerMode>> = std::sync::RwLock::new(None);
+/// One transition of the local server's mode (board #323 review), pure: the
+/// state is `(start generation, mode)`. A new generation (a start decision)
+/// always applies; within one generation `embedded` applies only over
+/// `starting` (a late ready never revives `failed`), and `failed` is
+/// terminal. Returns the new state, or None when the transition is refused.
+pub fn advance_mode(cur: Option<&(u64, ServerMode)>, gen: u64, next: ServerMode) -> Option<(u64, ServerMode)> {
+    match cur {
+        Some((g, _)) if *g > gen => None,
+        Some((g, m)) if *g == gen => match (m.mode, next.mode) {
+            ("starting", "embedded") | ("starting", "failed") | ("embedded", "failed") => Some((gen, next)),
+            _ => None,
+        },
+        _ => Some((gen, next)),
+    }
+}
 
+#[cfg(feature = "gui")]
+static SERVER_MODE: std::sync::RwLock<Option<(u64, ServerMode)>> = std::sync::RwLock::new(None);
+#[cfg(feature = "gui")]
+static APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
+/// Apply a transition and, when it applied, tell the webview
+/// (`server_mode_changed`, payload = the new mode). Before the window exists
+/// there is no one to tell; the frontend's first `server_mode` read covers it.
 #[cfg(all(feature = "gui", desktop))]
-fn set_server_mode(m: ServerMode) {
-    if let Ok(mut g) = SERVER_MODE.write() {
-        *g = Some(m);
+fn set_server_mode(gen: u64, m: ServerMode) {
+    let applied = SERVER_MODE.write().ok().and_then(|mut g| {
+        let next = advance_mode(g.as_ref(), gen, m)?;
+        let mode = next.1.clone();
+        *g = Some(next);
+        Some(mode)
+    });
+    if let (Some(mode), Some(app)) = (applied, APP_HANDLE.get()) {
+        use tauri::Emitter;
+        let _ = app.emit("server_mode_changed", mode);
     }
 }
 
@@ -88,7 +116,7 @@ fn set_server_mode(m: ServerMode) {
 #[cfg(feature = "gui")]
 #[tauri::command]
 fn server_mode() -> Option<ServerMode> {
-    SERVER_MODE.read().ok().and_then(|g| g.clone())
+    SERVER_MODE.read().ok().and_then(|g| g.as_ref().map(|(_, m)| m.clone()))
 }
 
 #[cfg(feature = "gui")]
@@ -238,16 +266,21 @@ pub fn run() {
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let verdict = rt.block_on(gateway::probe::probe(&cfg));
         let mode = server_mode_of(&verdict, &cfg.local_url());
-        // One line on stderr, so a launch can be checked from outside.
-        eprintln!("tmux-mobile: local server {} at {}{}", mode.mode, mode.url, mode.reason.as_deref().map(|r| format!(" ({r})")).unwrap_or_default());
+        // One line on stderr per transition, so a launch can be checked from
+        // outside: the start DECISION here (`starting` for an embedded start
+        // — only the later "listening" line, and a real listener, prove it).
+        let decided = if mode.mode == "embedded" { "starting" } else { mode.mode };
+        eprintln!("tmux-mobile: local server decision {decided} at {}{}", mode.url, mode.reason.as_deref().map(|r| format!(" ({r})")).unwrap_or_default());
         if mode.mode == "embedded" {
             // `starting` until the listener is bound: the app says
             // `embedded` only for a server that is really listening. A
             // failure before or after (the port taken between the probe and
             // the bind, a TLS file that does not load) is `failed`, with our
             // own error as the reason.
+            // One start per process today: generation 1.
+            const GEN: u64 = 1;
             let url = mode.url.clone();
-            set_server_mode(ServerMode { mode: "starting", url: url.clone(), reason: None });
+            set_server_mode(GEN, ServerMode { mode: "starting", url: url.clone(), reason: None });
             std::thread::spawn(move || {
                 rt.block_on(async {
                     let (tx, rx) = tokio::sync::oneshot::channel();
@@ -255,17 +288,17 @@ pub fn run() {
                     tokio::spawn(async move {
                         if rx.await.is_ok() {
                             eprintln!("tmux-mobile: local server embedded at {ready_url} (listening)");
-                            set_server_mode(ServerMode { mode: "embedded", url: ready_url, reason: None });
+                            set_server_mode(GEN, ServerMode { mode: "embedded", url: ready_url, reason: None });
                         }
                     });
                     if let Err(e) = gateway::start_ready(cfg, Some(tx)).await {
                         eprintln!("Server error: {}", e);
-                        set_server_mode(ServerMode { mode: "failed", url, reason: Some(e) });
+                        set_server_mode(GEN, ServerMode { mode: "failed", url, reason: Some(e) });
                     }
                 });
             });
         } else {
-            set_server_mode(mode);
+            set_server_mode(1, mode);
         }
     }
 
@@ -281,6 +314,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![get_local_config, server_mode, download_open, download_reset, download_chunk, download_finish, download_abort, download_release, download_release_all, download_list_parts, list_downloads, delete_download, get_download_path])
         .setup(|app| {
+            let _ = APP_HANDLE.set(app.handle().clone());
             // Desktop: build a custom menu WITHOUT the default View → Zoom
             // items.
             //
@@ -360,5 +394,25 @@ mod server_mode_tests {
         assert_eq!(busy.mode, "occupied");
         assert_eq!(busy.reason.as_deref(), Some("ws://127.0.0.1:19977 is another machine's gateway"));
         assert_eq!(serde_json::to_value(&none).unwrap(), serde_json::json!({ "mode": "embedded", "url": local }), "no reason field unless occupied");
+    }
+
+    /// Board #323 review P1-a: ready advances only `starting` of its own
+    /// generation; `failed` is terminal, so a ready that lands after the
+    /// failure (sent, but its task ran late) cannot revive the mode.
+    #[test]
+    fn a_late_ready_never_revives_a_failed_start() {
+        let m = |mode: &'static str| ServerMode { mode, url: "u".into(), reason: None };
+        let starting = advance_mode(None, 1, m("starting")).unwrap();
+        // Normal: ready, then a later failure still shows.
+        let up = advance_mode(Some(&starting), 1, m("embedded")).unwrap();
+        assert_eq!(up.1.mode, "embedded");
+        assert_eq!(advance_mode(Some(&up), 1, m("failed")).unwrap().1.mode, "failed", "a failure after ready is shown");
+        // The race: failure applied first, the ready lands after.
+        let failed = advance_mode(Some(&starting), 1, m("failed")).unwrap();
+        assert!(advance_mode(Some(&failed), 1, m("embedded")).is_none(), "the late ready is refused");
+        assert!(advance_mode(Some(&failed), 1, m("starting")).is_none(), "failed is terminal for its generation");
+        // An older generation never overwrites a newer one; a newer one always applies.
+        assert!(advance_mode(Some(&(2, m("starting"))), 1, m("embedded")).is_none());
+        assert_eq!(advance_mode(Some(&failed), 2, m("starting")).unwrap().0, 2);
     }
 }

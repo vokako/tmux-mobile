@@ -4,7 +4,8 @@
  * long-press already means "menu" (ui/longpress). Opens after a short
  * dwell (immediately when the pointer hops from a neighbouring card — the
  * reader is scanning), closes on leave, press, scroll, Escape and blur. The
- * getter runs at open time, so the card always shows the CURRENT state.
+ * getter runs at open time and again whenever what it reads changes while
+ * the card is open, so the card always shows the CURRENT state.
  */
 import { hoverCard, type HoverInfo } from './hover.svelte.ts';
 import { anchorOf } from './placement.ts';
@@ -25,7 +26,8 @@ export function hoverInfo(node: HTMLElement, get: HoverGetter) {
     const r = node.getBoundingClientRect();
     const align = r.left > window.innerWidth / 2 ? 'right' : 'left';
     open = true;
-    hoverCard.show(anchorOf(node), info, align);
+    const live = getter;
+    hoverCard.show(anchorOf(node), info, align, () => live?.());
   };
   const arm = () => {
     if (layout.isTouchDevice || !getter) return;

@@ -37,6 +37,7 @@ const GLOBAL: Record<string, Record<string, string>> = {
   'app/shortcuts.svelte.ts': { state: 'a preference' },
   'app/terminal-prefs.svelte.ts': { state: 'a preference' },
   'app/layout.svelte.ts': { mode: 'a preference' },
+  'app/server-mode.svelte.ts': { current: 'THIS computer\'s own server, not the connected one', started: 'one subscription per page' },
   'core/i18n.svelte.ts': { i18n: 'a preference' },
   'test/ssr.ts': { harness: 'test-only' },
 };

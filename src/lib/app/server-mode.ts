@@ -1,6 +1,9 @@
 // This computer's server, as the desktop app found it at start (board #323):
-// `server_mode` (lib.rs) answers what the start probe decided. Pure, so the
-// wording rule is testable.
+// `server_mode` (lib.rs) answers the current mode, and every transition
+// (starting → embedded / failed) is pushed as the `server_mode_changed`
+// event. `localServer` subscribes ONCE, then reads once, so a transition
+// between the two is not lost (the event arrives after the read and wins);
+// no polling (the store is server-mode.svelte.ts). The wording rule here is pure.
 
 export interface ServerMode { mode: 'embedded' | 'gateway' | 'occupied' | 'starting' | 'failed' | string; url: string; reason?: string }
 export type HoverLine = { label: string; value: string; tone?: 'ok' | 'warn' | 'danger' };

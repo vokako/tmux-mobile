@@ -19,16 +19,22 @@ export interface HoverInfo {
   note?: string;
 }
 
-interface Shown { anchor: AnchorRect; info: HoverInfo; align: 'left' | 'right' }
+interface Shown { anchor: AnchorRect; info: HoverInfo; align: 'left' | 'right'; live?: () => HoverInfo | null | undefined }
 
 let shown = $state<Shown | null>(null);
 /** When the last card hid — a hop between two neighbours reopens without the delay. */
 let hiddenAt = 0;
 
 export const hoverCard = {
-  get current(): Shown | null { return shown; },
-  show(anchor: AnchorRect, info: HoverInfo, align: 'left' | 'right' = 'left') {
-    shown = { anchor, info, align };
+  /** The card on screen. `info` is re-read through `live` (the action's
+   * getter), so a card that is OPEN follows the state it describes (board
+   * #323: the local server going from starting to embedded or failed). */
+  get current(): Shown | null {
+    if (!shown?.live) return shown;
+    return { ...shown, info: shown.live() ?? shown.info };
+  },
+  show(anchor: AnchorRect, info: HoverInfo, align: 'left' | 'right' = 'left', live?: () => HoverInfo | null | undefined) {
+    shown = { anchor, info, align, live };
   },
   hide() {
     if (shown) hiddenAt = Date.now();

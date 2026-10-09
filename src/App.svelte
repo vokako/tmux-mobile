@@ -48,7 +48,7 @@
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.ts';
   import { installExternalLinkHandler } from './lib/core/external-links.ts';
   import { isTauri, isTauriDesktop, tauriReady } from './lib/core/platform.ts';
-  import { localServerLine } from './lib/app/server-mode.ts';
+  import { localServerLine, localServer } from './lib/app/server-mode.svelte.ts';
   import { flip } from 'svelte/animate';
   import { moveMs } from './lib/ui/motion.ts';
   import { slideIndicator } from './lib/ui/indicator.ts';
@@ -1420,17 +1420,12 @@
   // This computer's own server (board #323): what the desktop app found at
   // start — a reused gateway, its embedded server, or neither. It is about
   // THIS machine, not the connection, so its line is labelled as such and
-  // reads the same whatever server is connected. Read again whenever the
-  // card opens (a `starting` becomes `embedded` or `failed`).
-  let localServer = $state(null);
-  function readLocalServer() {
-    if (!isTauriDesktop) return;
-    tauriReady.then(() => window.__TAURI__?.core.invoke('server_mode')).then((m) => { localServer = m ?? null; }).catch(() => {});
-  }
-  readLocalServer();
+  // reads the same whatever server is connected. `localServer` follows every
+  // transition (the server_mode_changed event), and the hover card re-reads
+  // this getter while it is shown, so an open card follows too.
+  if (isTauriDesktop) localServer.start(tauriReady, () => window.__TAURI__);
   function serverCardInfo() {
-    readLocalServer();
-    const local = localServerLine(localServer, t);
+    const local = localServerLine(localServer.mode, t);
     // Mid-switch the card describes the TARGET being reached (board 315): the
     // server we left is not connected any more, and saying so is the truth.
     if (switching) {

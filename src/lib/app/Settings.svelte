@@ -3,7 +3,7 @@
   import { connect, disconnect } from '../core/ws.ts';
   import { defaultConnectionAddress, dropAutofilled, hostedByGateway, localAutofill, normalizeAddress as normalizeAddressFor, type Autofilled, type LocalConfig } from '../core/connection-address.ts';
   import { isAndroid, isTauriDesktop, tauriReady } from '../core/platform.ts';
-  import { localServerLine, type ServerMode } from './server-mode.ts';
+  import { localServerLine, localServer } from './server-mode.svelte.ts';
   import { activateConnected } from './servers.ts';
   import Icon from '../ui/Icon.svelte';
   import ConnectFields from './ConnectFields.svelte';
@@ -65,13 +65,10 @@
   // This computer's server, when the desktop app did not get one (board
   // #323): occupied or failed. Disconnected there is no rail, so the reason
   // has to be readable here.
-  let localTrouble = $state<ReturnType<typeof localServerLine>>(null);
-  if (!isAndroid && isTauriDesktop) {
-    tauriReady
-      .then(() => window.__TAURI__?.core.invoke('server_mode'))
-      .then((m: ServerMode | undefined) => { if (m && (m.mode === 'occupied' || m.mode === 'failed')) localTrouble = localServerLine(m, t); })
-      .catch(() => {});
-  }
+  // Follows every transition: a `starting` that turns `failed` shows its
+  // reason without reopening the page.
+  if (!isAndroid && isTauriDesktop) localServer.start(tauriReady, () => window.__TAURI__ as never);
+  const localTrouble = $derived(localServer.mode && (localServer.mode.mode === 'occupied' || localServer.mode.mode === 'failed') ? localServerLine(localServer.mode, t) : null);
 
   // Local credentials the autofill put in, and the local address they are
   // for: they never follow the address to another server.
