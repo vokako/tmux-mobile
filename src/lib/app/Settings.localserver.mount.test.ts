@@ -38,3 +38,32 @@ test('a start that fails after the page opened shows its reason at once (#323)',
     assert.equal(calls.filter((c) => c === 'server_mode').length, 1, 'one read; the rest is events');
   } finally { await app.close(); }
 });
+
+test('a slow first read never undoes an event that landed while it was in flight (#323 review)', async (context) => {
+  let emit!: (payload: unknown) => void;
+  let release!: () => void;
+  const app = await (await compiled).mount(context, {
+    props: { onConnected() {} },
+    modules: [{ copyText: () => true }],
+    setup(window) {
+      window.localStorage.setItem('tmux_locale', 'en');
+      (window as unknown as { __TAURI__: unknown }).__TAURI__ = {
+        core: { invoke: (cmd: string) => cmd === 'server_mode'
+          ? new Promise((yes) => { release = () => yes({ mode: 'starting', url: 'ws://127.0.0.1:9899', gen: 1, seq: 1 }); })
+          : Promise.reject(new Error(cmd)) },
+        event: { listen: (name: string, fn: (e: { payload: unknown }) => void) => { if (name === 'server_mode_changed') emit = (p) => fn({ payload: p }); return Promise.resolve(() => {}); } },
+      };
+    },
+  });
+  try {
+    for (let i = 0; i < 8 && !release; i++) await app.flush();
+    assert.ok(emit && release, 'subscribed, and the read is in flight');
+    const note = () => app.document.querySelector('.config-note[role="status"]')?.textContent ?? '';
+    emit({ mode: 'failed', url: 'ws://127.0.0.1:9899', reason: 'Address already in use', gen: 1, seq: 3 });
+    await app.flush();
+    assert.equal(note(), 'This computer: Server failed · Address already in use');
+    release();                                   // the read was taken at seq 1
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.equal(note(), 'This computer: Server failed · Address already in use', 'the older read did not undo the newer event');
+  } finally { await app.close(); }
+});
