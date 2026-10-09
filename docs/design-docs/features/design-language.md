@@ -1226,9 +1226,22 @@ running vs idle is the one pair a reader must resolve at a glance, and a 5–7px
 
 **22 points darker, so half of every 1.4 s cycle the running dot read as the less alive of the two** (light washed out the other way, L*=82). So an opacity keyframe on a state dot is BANNED, and the cue is now `.live-dot` in app.css: full-strength fill + a `color-mix` halo over the dot's own `--live-hue` + the `dot-breathe` SCALE loop (the presence tempo CollabGraph already speaks). The halo is the load-bearing half — ~3× the visual mass of a resting dot, which survives greyscale, 5px, and `prefers-reduced-motion` (that stills only the loop, and the old cue vanished entirely there). ONE mechanism, worn by class: the Hub sidebar chip, the roster card, the recipient picker and the tool lane's `.s-live` all add it, `stateIsLive()` (pure + tested) is the single definition of WHICH states get it (running + the legacy `working` — exactly the accent-coloured ones, pinned against `stateDotColor`), and Team's wider vocabulary reuses the same class with `--live-hue` overridden to its amber/orange states rather than re-implementing it. `--live-ring`/`--live-glow` shrink for the dense 5px sidebar chip so the glow does not sit on the name. `ui/statusdot.source.test.ts` pins the achromatic token, the halo+scale+reduced-motion shape, and that no component re-implements the cue or names the retired fade.
 
+### Unread is accent ink; red is failure only (2026-10-09, board #322)
+
+Owner, 2026-10-09: "现在的状态显示经常有红色的小点。比如网络断掉时，它就会显示这个红色的小点…如果这个红色小点没必要，我们甚至可以都不要了。或者你把它用来做通知提示". The red the owner saw was the roster's unread dot, painted `--status-danger`: after a reconnect the poll brings in the messages missed offline, they are newer than the read mark, and every agent that spoke lit red — which reads as "failed". Real failures are rare (15 `failed` turn ends in the whole live log by 2026-10-09) and come from the CLI's own failure edge (agent-status.md), never from the phone's connection, which shows the reconnect banner and keeps the last roster. One colour was carrying two meanings, so the grammar is now:
+
+| meaning | paint | where |
+|---|---|---|
+| news you have not read | `--accent-ink`, STATIC (`.unread-dot`, `.side-unread`, `.to-tail.news::after`) | roster card, project row (dot + count), back-to-tail |
+| in motion | `--accent` + `.live-dot` halo and breathe | state dots of running agents |
+| needs a person / failed / at rest | `--status-warn` / `--status-danger` / `--status-sleep` | agent state dots and words only |
+| destructive / error | `--danger*` | verbs, error text |
+
+Unread never wears `--status-*` (it is not a state; `--status-ok` already means "ended well") and never the halo or breathe (those say a turn is open). Two labelled red uses stay outside the dot language: the Board sidebar's categorical `todo` count chip (with its word) and the context bar's >85% band. `Sidebar.source.test.ts` and `totail.source.test.ts` pin the tokens and the absence of `--status-`/`--danger`/animation on the unread atoms.
+
 ### One back-to-tail control across scrolling records
 
-(board #49): Chat and Terminal both wear global `.to-tail` from app.css — 38px token-surface circle, quiet ink/accent hover, scale press, 44px `::before`, and token-red `.news::after`; component-scoped `.to-bottom`/`.scroll-btn` rules may POSITION only (right/bottom/z), never redraw the box. The old Terminal glass square/span dot is retired.
+(board #49): Chat and Terminal both wear global `.to-tail` from app.css — 38px token-surface circle, quiet ink/accent hover, scale press, 44px `::before`, and the unread-ink (`--accent-ink`, board #322) `.news::after`; component-scoped `.to-bottom`/`.scroll-btn` rules may POSITION only (right/bottom/z), never redraw the box. The old Terminal glass square/span dot is retired.
 
 ## User-facing vocabulary (the contract; moved from tmm-cli.md, board #102)
 

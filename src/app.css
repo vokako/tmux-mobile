@@ -638,6 +638,15 @@ button:disabled {
    quiet mono text, not a tray of bordered pills. */
 .side-age { margin-left: auto; flex: none; font-size: var(--fs-meta); color: var(--text3); font-variant-numeric: tabular-nums; }
 .side-wins { display: flex; flex-wrap: wrap; gap: 2px 10px; min-width: 0; }
+/* Unread (board #322): NEWS the reader has not looked at, in the accent ink —
+   static, no halo or breathe (those say "a turn is open"), never a
+   --status-* colour (unread is not a state; red is failure only). The
+   project row shows the count where its age stands; the roster card and the
+   Hub tab wear the bare dot. One atom for all three. */
+.unread-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-ink); flex: none; }
+.side-unread { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-meta); font-weight: 650; color: var(--accent-ink); font-variant-numeric: tabular-nums; }
+.side-unread + .side-age { margin-left: 0; }
+.proj-row.unread .p-name { font-weight: 650; }
 /* .grid: the Board sidebar's four count chips are a FIXED set, and flex-wrap
    broke them 3+1 with a ragged orphan (owner, 2026-09-01: "不要 3 1 这样的布
    局，列之间左侧点点要对齐"). Equal grid columns align the left dots per
@@ -700,7 +709,7 @@ button:disabled {
 .to-tail::before { content: ''; position: absolute; inset: -3px; }
 .to-tail.news::after {
   content: ''; position: absolute; top: 1px; right: 1px; width: 9px; height: 9px;
-  border-radius: 50%; background: var(--status-danger); border: 2px solid var(--bg);
+  border-radius: 50%; background: var(--accent-ink); border: 2px solid var(--bg);
 }
 .side-wins.dim { opacity: 0.65; }
 .side-win {

@@ -91,7 +91,7 @@ test('renameSession moves and persists roster expansion exactly once (#168)', as
   prefs.setRosterExpanded('other', true);
   prefs.setDrawer('old', 'files');
   prefs.setLead('old', '');
-  prefs.setSeen('old', 123);
+  prefs.setSeen('old', { seq: 7, ts: 123 });
   prefs.setDraft('old', 'draft');
   prefs.setProject('old');
   writes.length = 0;
@@ -103,7 +103,7 @@ test('renameSession moves and persists roster expansion exactly once (#168)', as
   assert.equal(prefs.rosterExpanded('other'), true);
   assert.equal(prefs.drawer('new'), 'files');
   assert.equal(prefs.lead('new'), '');
-  assert.equal(prefs.seen('new'), 123);
+  assert.deepEqual(prefs.seen('new'), { seq: 7, ts: 123 });
   assert.equal(prefs.draft('new'), 'draft');
   assert.equal(prefs.project, 'new');
   const reloaded = await freshPrefs();
@@ -133,4 +133,15 @@ test('the sidebar collapse is one app-wide switch: persisted, default open, unto
   assert.ok(!writes.includes('tmux_hub_sidebar'), 'not a per-project preference');
   reloaded.setSidebarCollapsed(false);
   assert.equal(store.get('tmux_hub_sidebar'), '0');
+});
+
+test('the read mark is a seq + ts; a legacy bare ts reads as seq 0 (#322)', async () => {
+  store.clear();
+  store.set('tmux_hub_seen', JSON.stringify({ old: 500 }));
+  const prefs = await freshPrefs();
+  assert.deepEqual(prefs.seen('old'), { seq: 0, ts: 500 });
+  assert.deepEqual(prefs.seen('none'), { seq: 0, ts: 0 });
+  prefs.setSeen('old', { seq: 42, ts: 600 });
+  assert.deepEqual(JSON.parse(store.get('tmux_hub_seen')!), { old: { seq: 42, ts: 600 } });
+  assert.deepEqual(prefs.seen('old'), { seq: 42, ts: 600 });
 });

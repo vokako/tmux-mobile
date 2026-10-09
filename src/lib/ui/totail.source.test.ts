@@ -34,9 +34,10 @@ test('the to-tail atoms live in app.css, once', async () => {
   assert.match(css, /\.to-tail:active \{ transform: scale\(0\.9\); \}/u, 'the tactile press');
   assert.match(css, /\.to-tail::before \{ content: ''; position: absolute; inset: -3px; \}/u,
     'the 44px touch overlay travels with the class');
-  // ONE "something arrived below" cue: the news dot, in the status language.
-  assert.match(css, /\.to-tail\.news::after \{[\s\S]*?background: var\(--status-danger\); border: 2px solid var\(--bg\);/u,
-    'the news dot is the shared ::after, coloured by token');
+  // ONE "something arrived below" cue: the news dot, in the unread accent
+  // (board #322: news is not a state, and red is failure only).
+  assert.match(css, /\.to-tail\.news::after \{[\s\S]*?background: var\(--accent-ink\); border: 2px solid var\(--bg\);/u,
+    'the news dot is the shared ::after, in the unread ink');
   // A true circle takes no part in the squircle corner policy: the retired
   // .scroll-btn entry left app.css entirely.
   assert.ok(!css.includes('.scroll-btn'), 'the retired .scroll-btn entry left the squircle list');

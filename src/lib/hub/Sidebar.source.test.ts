@@ -27,7 +27,8 @@ test('hover reads the full live count and the same clock at open time', () => {
   assert.match(source, /use:hoverInfo=\{\(\) => rowInfo\(row\)\}/u);
   assert.match(source, /const n = rowAgentCounts\(row, panes\)/u);
   assert.match(source, /const age = projectAgeLabel\(row, talkMap, tick\)/u);
-  assert.match(source, /row\.project\.session === selected && unreadCount/u);
+  // Board #322: every row's unread count comes from the per-room summary.
+  assert.match(source, /const unread = roomUnread\[row\.project\.session\]\?\.count \?\? 0;\n\s*if \(unread\) lines\.push\(\{ label: t\('hubHoverUnread'\)/u);
   assert.doesNotMatch(source, /getBoundingClientRect|setInterval/u,
     'the sidebar adds neither its own geometry calculation nor a clock');
 });
@@ -59,4 +60,19 @@ test('the sidebar owns no collapse control — the shell\'s single toggle stands
   assert.match(source, /use:slideIndicator=\{\{ key: rowKey, active: '\.proj-row\.open', hidden: !rowLit \}\}>\n[\s\S]{0,300}?<span class="slide-pill soft" aria-hidden="true"><\/span>/u);
   assert.doesNotMatch(source, /\.side-row\.open|\.proj-row\s*\{/u, 'the row\'s stacking and its absent in-place wash live with the shared atoms in app.css');
   assert.doesNotMatch(source, /CommandButton/u, 'no second button species in the sidebar');
+});
+
+test('every project row shows its unread count in the accent ink, never a state colour (#322)', async () => {
+  assert.match(source, /\{@const unread = roomUnread\[row\.project\.session\]\?\.count \?\? 0\}/u);
+  assert.match(source, /class:unread=\{unread > 0\}/u);
+  assert.match(source, /\{#if unread\}<span class="side-unread appear-pop"><span class="unread-dot"><\/span>\{unread\}<\/span>\{\/if\}/u);
+  const css = await readFile(new URL('../../app.css', import.meta.url), 'utf8');
+  const dot = /\.unread-dot \{[^}]*\}/u.exec(css)?.[0] ?? '';
+  const count = /\.side-unread \{[^}]*\}/u.exec(css)?.[0] ?? '';
+  assert.match(dot, /background: var\(--accent-ink\);/u);
+  assert.match(count, /color: var\(--accent-ink\);/u);
+  for (const rule of [dot, count]) assert.doesNotMatch(rule, /--status-|--danger|animation/u, 'unread is not a state, not red, not live');
+  const roster = await readFile(new URL('./Roster.svelte', import.meta.url), 'utf8');
+  assert.match(roster, /<span class="unread-dot appear-pop" aria-hidden="true"><\/span>/u, 'the roster card wears the same atom');
+  assert.doesNotMatch(roster, /\.unread \{/u, 'no private (red) unread dot');
 });

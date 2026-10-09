@@ -30,6 +30,7 @@ function roomFixture() {
       }] }),
       listSessionsWithPanes: async () => ({ panes: [] }),
       hubRooms: async () => ({ rooms: {}, states: {} }),
+      hubUnread: async () => ({ rooms: {} }),
       registryList: async () => ({ agents: [] }),
       teamsList: async () => ({ teams: [] }),
       hubAgents: async () => ({ agents: [
@@ -2594,5 +2595,49 @@ test('without the served capability the kiro card offers no switch (#271)', { ti
     const buttons = await menuOf(app, 'alice');
     assert.ok(buttons.length > 0, 'the menu opened');
     assert.equal(buttons.find((b) => /Switch to/u.test(b.textContent ?? '')), undefined);
+  } finally { await app.close(); }
+});
+
+test('every project row shows its unread count; reading the room clears it by seq (#322)', { timeout: 60000 }, async (context) => {
+  const fixture = await compiledHub();
+  const { rpc } = roomFixture();
+  const asks: Record<string, unknown>[] = [];
+  const app = await fixture.mount(context, {
+    props: { visible: true },
+    setup(window) {
+      window.Element.prototype.getAnimations = () => [];
+      window.localStorage.setItem('tmux_hub_project', 'fixture');
+      window.localStorage.setItem('tmux_hub_seen', JSON.stringify({ other: 50 }));
+      window.HTMLCanvasElement.prototype.getContext = () => null;
+    },
+    modules: [{
+      ...rpc,
+      projectList: async () => ({ projects: ['fixture', 'other'].map((session) => ({
+        project: { id: session, name: session, session, path: `/${session}` }, live: true, slots: [],
+      })) }),
+      hubUnread: async (rooms: Record<string, { seq?: number; ts?: number }>) => {
+        asks.push(rooms);
+        const other = rooms['proj:other'];
+        return { rooms: other && !(other.seq! >= 11) ? { 'proj:other': { count: 2, first_seq: 10, last_seq: 11 } } : {} };
+      },
+      hubLog: async (session: string) => ({ has_more: false, messages: session === 'other' ? [
+        { seq: 10, id: 'a', ts: 60, room: 'proj:other', from: 'alice', to: [], body: 'one' },
+        { seq: 11, id: 'b', ts: 60, room: 'proj:other', from: 'bob', to: [], body: 'two' },
+      ] : [] }),
+    }],
+  });
+  try {
+    const row = () => app.document.querySelector<HTMLElement>('.proj-row[aria-label^="other"]');
+    for (let i = 0; i < 12 && !row()?.querySelector('.side-unread'); i++) await app.flush();
+    assert.equal(row()!.querySelector('.side-unread')!.textContent!.trim(), '2', 'a room not open shows its count');
+    assert.equal(row()!.getAttribute('aria-label'), 'other · 2 unread');
+    assert.ok(row()!.classList.contains('unread'));
+    assert.equal(app.document.querySelector('.proj-row[aria-label="fixture"] .side-unread'), null, 'a read room shows none');
+    assert.equal(JSON.stringify(asks[0]!['proj:other']), '{"ts":50}', 'a legacy mark is asked by ts');
+    row()!.querySelector<HTMLElement>('.proj-pick')!.click();
+    for (let i = 0; i < 20 && row()?.querySelector('.side-unread'); i++) await app.flush();
+    assert.equal(row()!.querySelector('.side-unread'), null, 'reading the room to its tail clears the cue');
+    assert.deepEqual(JSON.parse(app.window.localStorage.getItem('tmux_hub_seen')!).other, { seq: 11, ts: 60 }, 'the mark is the newest seq');
+    assert.equal(JSON.stringify(asks.at(-1)!['proj:other']), '{"seq":11}', 'and the server is asked with it');
   } finally { await app.close(); }
 });

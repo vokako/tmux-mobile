@@ -27,7 +27,8 @@
     agentStates?: Record<string, string>;
     talkMap?: Record<string, number>;
     tick?: number;
-    unreadCount?: number;
+    /** Unread news per project (board #322): `hub_unread`'s summary, by session. */
+    roomUnread?: Record<string, { count: number }>;
     onselect?: (session: string) => void;
     oncreate?: () => void;
     onclose?: () => void;
@@ -38,7 +39,7 @@
   let {
     compact = false, open = false, rows = [], trash = [], rowsBase = null,
     selected = '', panes = [], agentStates = {}, talkMap = {}, tick = Date.now(),
-    unreadCount = 0, onselect = () => {}, oncreate = () => {}, onclose = () => {},
+    roomUnread = {}, onselect = () => {}, oncreate = () => {}, onclose = () => {},
     onmenu = () => {}, onrestore = () => {}, onpurge = () => {},
   }: Props = $props();
   let trashOpen = $state(false);
@@ -55,7 +56,8 @@
     }
     const age = projectAgeLabel(row, talkMap, tick);
     if (age) lines.push({ label: t('hoverActivity'), value: age });
-    if (row.project.session === selected && unreadCount) lines.push({ label: t('hubHoverUnread'), value: String(unreadCount), tone: 'accent' });
+    const unread = roomUnread[row.project.session]?.count ?? 0;
+    if (unread) lines.push({ label: t('hubHoverUnread'), value: String(unread), tone: 'accent' });
     return { title: row.project.name, lines };
   }
 </script>
@@ -80,7 +82,8 @@
       </button>
     </div>
     {#each rows as row (row.project.id)}
-      <div class="side-row proj-row" role="group" aria-label={row.project.name} class:open={row.project.session === selected}
+      {@const unread = roomUnread[row.project.session]?.count ?? 0}
+      <div class="side-row proj-row" role="group" aria-label={unread ? `${row.project.name} · ${t('hubUnreadCount').replace('{n}', String(unread))}` : row.project.name} class:open={row.project.session === selected} class:unread={unread > 0}
         class:appear={!!rowsBase && !rowsBase.has(row.project.id)}
         animate:flip={{ duration: moveMs() }}
         oncontextmenu={(e) => { e.preventDefault(); onmenu(row, { x: e.clientX ?? 0, y: e.clientY ?? 0 }); }}
@@ -91,6 +94,7 @@
           <span class="p-main">
             <span class="p-top">
               <span class="p-name">{row.project.name}</span>
+              {#if unread}<span class="side-unread appear-pop"><span class="unread-dot"></span>{unread}</span>{/if}
               <span class="side-age">{projectAgeLabel(row, talkMap, tick)}</span>
             </span>
             {#if rowAgents(row, panes, agentStates).length}

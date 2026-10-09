@@ -432,3 +432,9 @@ test('a live card name wears agentHue, dimmed toward --text2 when unlit (board #
   assert.match(source, /\.tabs:not\(\.all-lit\) \.acard:not\(\.sel\):not\(\.off\) \.a-name \{ color: color-mix\(in srgb, var\(--who-ink\) 55%, var\(--text2\)\); \}/u);
   assert.doesNotMatch(source, /var\(--agent-\d\)/u);
 });
+
+test('a failed agent says why on the phone too: the state line carries the detail into the touch facts (#322)', () => {
+  // The long-press menu on a touch device renders cardInfo (#223), so the
+  // reason of a real CLI failure is reachable without a hover.
+  assert.match(source, /const lines = \[\{ label: t\('hubHoverState'\), value: \[stateLabel\(a\.state\), a\.detail\]\.filter\(Boolean\)\.join\(' · '\)/u);
+});

@@ -75,7 +75,7 @@ test('Roster renders the controlled destination strip (#168)', { timeout: RENDER
     assert.equal(root.querySelector('.roster-add')!.lastElementChild!.getAttribute('aria-label'), 'agent');
     assert.match(select(root, 'runner').getAttribute('aria-label')!, /unread/iu);
     assert.ok(card(root, 'runner').querySelector('.st.live-dot'));
-    assert.ok(card(root, 'runner').querySelector('.unread'));
+    assert.ok(card(root, 'runner').querySelector('.unread-dot'));
     assert.equal(card(root, 'runner').querySelector('.agent-marks')!.classList.contains('unmarked'), false);
     assert.equal(card(root, 'waiting').querySelector('.agent-marks')!.classList.contains('unmarked'), true);
     assert.match(card(root, 'waiting').querySelector('.st')!.getAttribute('style')!, /--status-warn/u);

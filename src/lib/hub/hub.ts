@@ -348,18 +348,40 @@ export function agoShort(ts: number, now: number): string {
   return `${Math.floor(h / 24)}d`;
 }
 
-/** Agents whose newest message the user has not seen yet — the red-dot rule.
- * Keyed by sender name, so a room where three agents replied marks all three.
- * `seenTs` is the newest message timestamp the user has looked at (ms).
- * Lifecycle lines (`[tmm] stopped dev`) are posted under the agent's name but
- * are not replies, so they never raise the dot. */
-export function unreadSenders(feed: readonly { ts?: number; from?: string; body?: string }[], seenTs: number): Set<string> {
+/** What kind of news a message is — the ONE rule shared with the server's
+ * unread summary (`rooms::news_kind`, whose case table hub.test.ts runs here,
+ * board #322). Own words and app narration are none, except a board move to
+ * review/done; that and a `done` status note are `finished` (rings at every
+ * level); other status notes are `status` (progress, `all` only); anything
+ * else an agent says is a `reply`. */
+export type NewsKind = 'none' | 'reply' | 'status' | 'finished';
+export function newsKind(m: { from?: string; body?: string }): NewsKind {
+  const from = m.from ?? '';
+  if (!from || from === 'human') return 'none';
+  if (systemLine(m.body) !== null) {
+    const b = boardLine(systemLine(m.body));
+    return b && (b.to === 'review' || b.to === 'done') ? 'finished' : 'none';
+  }
+  const note = statusNote(m.body);
+  if (note) return note.state === 'done' ? 'finished' : 'status';
+  return 'reply';
+}
+
+/** The read watermark of a room: the last read message's seq, and its ts (a
+ * legacy mark has only the ts). A message is above it by seq when the mark
+ * has one — two messages can share a millisecond — else by ts. */
+export type SeenMark = { seq: number; ts: number };
+export function aboveMark(m: { seq?: number; ts?: number }, mark: SeenMark): boolean {
+  return mark.seq > 0 && (m.seq ?? 0) > 0 ? (m.seq ?? 0) > mark.seq : (m.ts ?? 0) > mark.ts;
+}
+
+/** Who has said something NEW in the open room: the senders of the messages
+ * above the read mark that `newsKind` calls news (the roster card's unread
+ * dot; the same rule as the server's per-room summary, board #322). */
+export function unreadSenders(feed: readonly { seq?: number; ts?: number; from?: string; body?: string }[], mark: SeenMark): Set<string> {
   const out = new Set<string>();
   for (const m of feed) {
-    const from = m.from ?? '';
-    if (!from || from === 'human') continue;
-    if (systemLine(m.body) !== null) continue;
-    if ((m.ts ?? 0) > seenTs) out.add(from);
+    if (newsKind(m) !== 'none' && aboveMark(m, mark)) out.add(m.from ?? '');
   }
   return out;
 }

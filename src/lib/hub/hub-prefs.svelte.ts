@@ -7,7 +7,7 @@
 //   tools  — + individual tool calls ("Edit src/lib.rs")
 // Delivery receipts and undelivered-line reports are NOT levelled: they are
 // about a message the user sent, so feedBlocks() surfaces them at every level.
-import { draftUpdate, STEPS_ROWS, clampStepsRows } from './hub.ts';
+import { draftUpdate, STEPS_ROWS, clampStepsRows, type SeenMark } from './hub.ts';
 
 const FEED_LEVEL_KEY = 'tmux_hub_feed_level';
 const LEAD_KEY = 'tmux_hub_lead';
@@ -57,7 +57,7 @@ const state = $state({
   // reloads because "who am I talking to" is part of where the user left off.
   leads: readMap<string>(LEAD_KEY),
   // Per project: the newest message timestamp the user has actually seen.
-  seen: readMap<number>(SEEN_KEY),
+  seen: readMap<number | SeenMark>(SEEN_KEY),
   // The project whose conversation was open, restored if it still exists.
   project: localStorage.getItem(PROJECT_KEY) ?? '',
   // Per project: the message being written but not yet sent.
@@ -81,7 +81,7 @@ export const hubPrefs = {
    * component holds the old values. */
   reloadServerState() {
     state.leads = readMap<string>(LEAD_KEY);
-    state.seen = readMap<number>(SEEN_KEY);
+    state.seen = readMap<number | SeenMark>(SEEN_KEY);
     state.project = localStorage.getItem(PROJECT_KEY) ?? '';
     state.drafts = readMap<string>(DRAFT_KEY);
     state.drawers = readMap<string>(DRAWER_KEY);
@@ -149,12 +149,18 @@ export const hubPrefs = {
     delete state.leads[session];
     localStorage.setItem(LEAD_KEY, JSON.stringify(state.leads));
   },
-  /** Newest message timestamp (ms) the user has looked at, per project. Drives
-   * the "an agent replied" dot, so it has to survive a reload like the rest of
-   * "where I left off". */
-  seen(session: string) { return state.seen[session] ?? 0; },
-  setSeen(session: string, ts: number) {
-    state.seen[session] = ts;
+  /** Where the reader has read to, per project: the last read message's seq
+   * and ts (board #322 — seq, because two messages can share a millisecond).
+   * A legacy mark (a bare ts number, before #322) reads as seq 0, so the
+   * unread summary falls back to ts until the next markSeen upgrades it. It
+   * drives the unread cues, so it survives a reload and is parked per server. */
+  seen(session: string): SeenMark {
+    const v = state.seen[session];
+    if (typeof v === 'number') return { seq: 0, ts: v };
+    return { seq: Number(v?.seq) || 0, ts: Number(v?.ts) || 0 };
+  },
+  setSeen(session: string, mark: SeenMark) {
+    state.seen[session] = { seq: mark.seq, ts: mark.ts };
     localStorage.setItem(SEEN_KEY, JSON.stringify(state.seen));
   },
   /** The drawer partition a project had open — 'term' | 'files' | 'board',

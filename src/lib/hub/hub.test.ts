@@ -827,20 +827,25 @@ test('the tool-lane cap is a setting with a floor, a ceiling and a default', () 
   assert.equal(clampStepsRows(7.6), 8, 'fractions land on whole rows');
 });
 
-test('unreadSenders marks who replied after the user last looked', () => {
+test('unreadSenders marks who said something new since the read mark (#322)', () => {
+  const at = (ts: number, seq = 0) => ({ seq, ts });
   const feed = [
-    { ts: 100, from: 'human', body: 'go' },
-    { ts: 200, from: 'dev', body: 'done' },
-    { ts: 300, from: 'qa', body: 'looks fine' },
+    { seq: 1, ts: 100, from: 'human', body: 'go' },
+    { seq: 2, ts: 200, from: 'dev', body: 'done' },
+    { seq: 3, ts: 300, from: 'qa', body: 'looks fine' },
   ];
-  assert.deepEqual([...unreadSenders(feed, 150)], ['dev', 'qa']);
-  assert.deepEqual([...unreadSenders(feed, 250)], ['qa'], 'only what is newer than seen');
-  assert.deepEqual([...unreadSenders(feed, 300)], [], 'caught up');
-  assert.deepEqual([...unreadSenders([{ ts: 400, from: 'human' }], 0)], [],
+  assert.deepEqual([...unreadSenders(feed, at(150))], ['dev', 'qa'], 'a legacy ts mark reads by ts');
+  assert.deepEqual([...unreadSenders(feed, at(0, 2))], ['qa'], 'only what is above the seq');
+  assert.deepEqual([...unreadSenders(feed, at(0, 3))], [], 'caught up');
+  // Same millisecond: the seq decides, the ts cannot.
+  assert.deepEqual([...unreadSenders([{ seq: 5, ts: 300, from: 'dev' }, { seq: 6, ts: 300, from: 'qa' }], at(300, 5))], ['qa']);
+  assert.deepEqual([...unreadSenders([{ ts: 400, from: 'human' }], at(0))], [],
     'your own message is never unread');
-  // A lifecycle line is posted under the agent's name but is not a reply.
-  assert.deepEqual([...unreadSenders([{ ts: 400, from: 'dev', body: '[tmm] stopped dev' }], 0)], [],
+  // A lifecycle line is posted under the agent's name but is not a reply...
+  assert.deepEqual([...unreadSenders([{ ts: 400, from: 'dev', body: '[tmm] stopped dev' }], at(0))], [],
     'stopping an agent is not the agent answering you');
+  // ...except a finished task, the one rule the server's summary uses.
+  assert.deepEqual([...unreadSenders([{ ts: 400, from: 'dev', body: '[tmm] board #3 doing → review — x' }], at(0))], ['dev']);
 });
 
 test('stoppedAgents lists declared agents with no live window', () => {

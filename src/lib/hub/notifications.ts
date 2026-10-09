@@ -49,7 +49,7 @@
 // `permission` reads `denied` (not `default`) before the user was ever asked,
 // so `ensurePermission` asks whenever it is not `granted`; and it settles
 // asynchronously at startup, so a caption read at mount may lag one tick.
-import { systemLine, statusNote, boardLine } from './hub.ts';
+import { systemLine, statusNote, boardLine, newsKind, type NewsKind } from './hub.ts';
 
 export type FeedMsg = { id?: number | string; ts?: number; from?: string; body?: string };
 export type NotifyState = { seen: Set<string>; lastCueAt: number };
@@ -127,21 +127,7 @@ export function taskFinished(body: string | null | undefined): { id: string; to:
   return b && (b.to === 'review' || b.to === 'done') ? { id: b.id, to: b.to, title: b.title } : null;
 }
 
-/** What kind of news a message is — the ONE rule shared with the server's
- * unread summary (`rooms::news_kind`, whose case table hub.test.ts runs here,
- * board #322). Own words and app narration are none, except a board move to
- * review/done; that and a `done` status note are `finished` (rings at every
- * level); other status notes are `status` (progress, `all` only); anything
- * else an agent says is a `reply`. */
-export type NewsKind = 'none' | 'reply' | 'status' | 'finished';
-export function newsKind(m: FeedMsg): NewsKind {
-  const from = m.from ?? '';
-  if (!from || from === 'human') return 'none';
-  if (systemLine(m.body) !== null) return taskFinished(m.body) ? 'finished' : 'none';
-  const note = statusNote(m.body);
-  if (note) return note.state === 'done' ? 'finished' : 'status';
-  return 'reply';
-}
+export { newsKind, type NewsKind } from './hub.ts';
 
 /** The kinds that RING at a level (notifications.md: done = finished only;
  * replies adds replies; all adds progress notes). */

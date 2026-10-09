@@ -314,7 +314,7 @@
             <span class="a-name" style:--who-ink={agentHue(a.name)}>{a.name}<span class="ac-top"><span class="st" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span></span></span>
             <span class="agent-marks" class:unmarked={!mentioned && !unread.has(a.name)}>
               {#if mentioned}<span class="agent-mention" aria-hidden="true">@</span>{/if}
-              {#if unread.has(a.name)}<span class="unread appear-pop" aria-hidden="true"></span>{/if}
+              {#if unread.has(a.name)}<span class="unread-dot appear-pop" aria-hidden="true"></span>{/if}
             </span>
             {#if filterAgent === a.name}<span class="agent-filter" aria-hidden="true"><Icon name="filter" size={12} /></span>{/if}
             {#if expanded && a.vitals?.context_pct != null}<span class="ctx-value">{a.vitals.context_pct}%</span>{/if}
@@ -706,7 +706,6 @@
   /* The overflow probe reads the single row with the list's figures still in
      the DOM: they belong to the wrapped list only (#266). */
   .cards:not(.expanded) .ctx-value { display: none; }
-  .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--status-danger); flex: none; }
   .off { color: var(--text2); }
   .ava.dim { background: var(--surface2); color: var(--text3); }
   img.ava.dim { background: none !important; filter: grayscale(1); opacity: 0.55; }

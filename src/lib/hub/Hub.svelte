@@ -32,7 +32,7 @@
   import { t } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectDown, projectDelete, projectArchive, projectCreate, projectRename, listSessionsWithPanes,
-    hubPost, hubCommand, modelsList, hubLog, hubRooms, hubAgents, fsMkdir, fsUpload, fsCwd, hubSpawn, hubSpawnTeam, teamsList, hubAgentStop, hubAgentRestart, hubTeamRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, hubAgentInputMode, registryList,
+    hubPost, hubCommand, modelsList, hubLog, hubRooms, hubUnread, hubAgents, fsMkdir, fsUpload, fsCwd, hubSpawn, hubSpawnTeam, teamsList, hubAgentStop, hubAgentRestart, hubTeamRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, hubAgentInputMode, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
@@ -237,6 +237,7 @@
       const all = projects ?? [];
       trash = all.filter((r) => r.project.archived);
       rows = sortRows(all.filter((r) => !r.project.archived), talk);
+      void refreshUnread();
       if (!rowsBase && rows.length) rowsBase = new Set(rows.map((r) => r.project.id));
       panes = sp.panes ?? [];
       // First load: go back to the conversation that was open, and only fall
@@ -508,15 +509,61 @@
 
   const scrollFeed = (force = false) => feedView?.scrollToTail(force);
 
-  /** The red dot means "an agent replied and you have not looked". So it clears
-   * when the newest message is on screen — the bottom of the feed — and when
-   * you send, since you are plainly looking then. */
+  /** The unread cue means "an agent said something and you have not looked".
+   * So it clears when the newest message is on screen — the bottom of the
+   * feed — and when you send, since you are plainly looking then. The mark is
+   * the newest message's seq (board #322; two messages can share a ms). */
   function markSeen() {
     if (!selected || !visible) return;
-    const newest = feed.reduce((max, m) => Math.max(max, m.ts ?? 0), 0);
-    if (newest > hubPrefs.seen(selected)) hubPrefs.setSeen(selected, newest);
+    const newest = feed.reduce((best, m) => ((m.seq ?? 0) > (best?.seq ?? 0) ? m : best), null);
+    const mark = hubPrefs.seen(selected);
+    if (!newest || (newest.seq ?? 0) <= mark.seq && (newest.ts ?? 0) <= mark.ts) return;
+    hubPrefs.setSeen(selected, { seq: newest.seq ?? 0, ts: Math.max(mark.ts, newest.ts ?? 0) });
+    // The room is read: its cue goes now, and the server confirms.
+    if (roomUnread[selected]) { const { [selected]: _, ...rest } = roomUnread; roomUnread = rest; }
+    void refreshUnread([selected]);
   }
   const unread = $derived(unreadSenders(feed, hubPrefs.seen(selected)));
+
+  // Unread per ROOM, for every project (board #322): the server's summary of
+  // the news above each room's read mark — `hub_unread`, the same news rule
+  // as the roster dot. Asked with every sidebar read, at once for a room a
+  // push touched, and for the open room when it is read. An answer is applied
+  // only while the mark it was asked with is still the room's mark: a newer
+  // mark means a fresher question is already on its way.
+  let roomUnread = $state({});      // session -> {count, first_seq, last_seq}
+  const roomKey = (r) => r.project.room ?? `proj:${r.project.session}`;
+  async function refreshUnread(sessions = rows.map((r) => r.project.session)) {
+    const asked = {};
+    const marks = {};
+    for (const s of sessions) {
+      const row = rows.find((r) => r.project.session === s);
+      if (!row) continue;
+      const mark = hubPrefs.seen(s);
+      marks[roomKey(row)] = mark.seq > 0 ? { seq: mark.seq } : { ts: mark.ts };
+      asked[roomKey(row)] = { s, mark };
+    }
+    if (!Object.keys(marks).length) return;
+    const res = await hubUnread(marks).catch(() => null);
+    if (!res || !alive) return;
+    const next = { ...roomUnread };
+    for (const [key, { s, mark }] of Object.entries(asked)) {
+      const now = hubPrefs.seen(s);
+      if (now.seq !== mark.seq || now.ts !== mark.ts) continue;
+      if (res.rooms?.[key]) next[s] = res.rooms[key];
+      else delete next[s];
+    }
+    roomUnread = next;
+  }
+  let unreadPushTimer = 0;
+  const unreadPushed = new Set();
+  function unreadSoon(room) {
+    const row = rows.find((r) => roomKey(r) === room);
+    if (!row) return;
+    unreadPushed.add(row.project.session);
+    clearTimeout(unreadPushTimer);
+    unreadPushTimer = setTimeout(() => { const s = [...unreadPushed]; unreadPushed.clear(); void refreshUnread(s); }, 400);
+  }
 
   let following = $state(true);   // the feed is parked at the tail
   let newBelow = $state(false);   // something arrived while it was not
@@ -1401,6 +1448,7 @@
         project: roomProjectName(rows, m.room),
       });
     }
+    if (m?.room) unreadSoon(m.room);
     if (!selected || m?.room !== room(selected)) return;
     feed = mergeMessages(feed, [m]);
     lastTs = Math.max(lastTs, m.ts ?? 0);
@@ -1415,7 +1463,7 @@
   let agentsRefresh = 0;
   $effect(() => {
     addTeamMessageListener(onPush);
-    return () => { removeTeamMessageListener(onPush); clearTimeout(agentsRefresh); agentsRefresh = 0; };
+    return () => { removeTeamMessageListener(onPush); clearTimeout(agentsRefresh); agentsRefresh = 0; clearTimeout(unreadPushTimer); };
   });
   $effect(() => {
     if (!visible) return;
@@ -1805,7 +1853,7 @@
          changes size while the track moves (board #174). -->
     <div class="track side" bind:this={sideTrackEl}>
     <Sidebar {compact} open={sideOpen} {rows} {trash} {rowsBase} {selected}
-      {panes} {agentStates} {talkMap} {tick} unreadCount={unread.size}
+      {panes} {agentStates} {talkMap} {tick} {roomUnread}
       onselect={(session) => { selectProject(session); sideOpen = false; }}
       oncreate={() => { createOpen = true; sideOpen = false; }}
       onclose={() => { sideOpen = false; }}
