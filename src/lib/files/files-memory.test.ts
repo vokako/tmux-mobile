@@ -96,20 +96,61 @@ test('a suspend on one server does not touch the other s attempts', () => {
   });
 });
 
-test('an untracked attempt is not aborted twice, and a cancel is per row', () => {
+test('a finished attempt is no longer waited for', () => {
+  // `untrack` runs in each attempt's `finally`. Forgetting the SETTLE is the
+  // half that bites: a switch would then wait forever on a promise belonging
+  // to a transfer that has already ended. (Forgetting the abort handle is
+  // unobservable housekeeping — aborting an aborted controller fires nothing,
+  // and re-tracking a row id overwrites the entry — so this test does not
+  // claim to cover it.)
   const a = createFilesMemory();
   const aborted: string[] = [];
-  for (const id of ['r1', 'r2']) {
-    const control = new AbortController();
-    control.signal.addEventListener('abort', () => aborted.push(id));
-    a.track(id, control, Promise.resolve());
-  }
-  a.abort('r1');
-  assert.deepEqual(aborted, ['r1'], 'Cancel stops one row');
+  const control = new AbortController();
+  control.signal.addEventListener('abort', () => aborted.push('r1'));
+  a.track('r1', control, new Promise<void>(() => { /* never settles */ }));
   a.untrack('r1');
+  a.abort('gone');                   // an unknown row is a no-op, not a throw
   return a.suspend('switching').then(() => {
-    assert.deepEqual(aborted, ['r1', 'r2'], 'the finished row is not aborted again');
-    a.abort('gone');                 // an unknown row is a no-op, not a throw
+    assert.deepEqual(aborted, [], 'the finished attempt was neither aborted nor awaited');
+  });
+});
+
+test('an attempt that untracks itself on abort is still awaited', () => {
+  // What the component does: the `finally` untracks the row, so by the time
+  // the abort has propagated the live map is already shorter. `suspend` must
+  // therefore snapshot the settles BEFORE aborting, or it waits for nothing.
+  const a = createFilesMemory();
+  let settle: () => void = () => {};
+  const control = new AbortController();
+  const settled = new Promise<void>((resolve) => { settle = resolve; });
+  control.signal.addEventListener('abort', () => { a.untrack('r1'); });
+  a.track('r1', control, settled);
+
+  let done = false;
+  const suspending = a.suspend('switching').then(() => { done = true; });
+  return Promise.resolve().then(() => Promise.resolve()).then(() => {
+    assert.equal(done, false, 'it is waiting for an attempt that has already untracked itself');
+    settle();
+    return suspending;
+  }).then(() => assert.equal(done, true));
+});
+
+test('resetting the browse positions does not forget a running transfer', () => {
+  // A switch resets the positions AND suspends the transfers; whichever order
+  // App calls them in, dropping the attempt bookkeeping would leave a running
+  // download nobody can stop or wait for — and its part is the leaving
+  // server's file.
+  const a = createFilesMemory();
+  const aborted: string[] = [];
+  const control = new AbortController();
+  control.signal.addEventListener('abort', () => aborted.push('r1'));
+  a.track('r1', control, Promise.resolve());
+  a.claim('part-1', { owner: {}, adopt() {} });
+
+  a.reset();
+  assert.ok(a.writerOf('part-1'), 'the part still has its writer');
+  return a.suspend('switching').then(() => {
+    assert.deepEqual(aborted, ['r1'], 'and the transfer could still be stopped and awaited');
   });
 });
 
