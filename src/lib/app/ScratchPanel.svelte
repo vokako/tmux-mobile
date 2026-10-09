@@ -31,7 +31,7 @@
   import { scratchSession, scratchKill, scratchRelease } from '../core/ws.ts';
   // From rpc-codes, not ws.ts: the mount fixtures mock ws.ts, and a constant
   // read as `undefined` there would silently disable the action (#337).
-  import { ERR_SCRATCH_HELD } from '../core/rpc-codes.ts';
+  import { ERR_SCRATCH_HELD, ERR_SCRATCH_STALE } from '../core/rpc-codes.ts';
 
   let {
     open = false, live = true, edge = 'bottom', fontSize = 14,
@@ -94,7 +94,22 @@
       held = null;
       await ensure();              // the name is free: open on a live shell
     } catch (e) {
-      if (mine(n)) releaseError = e?.message ?? String(e);
+      if (!mine(n)) return;
+      // The snapshot the reader confirmed is stale and NOTHING was renamed
+      // (board #337, orchestrator 19:07). A sentence about a project that has
+      // since moved on leaves them where the incident left them, so the panel
+      // drops the stale snapshot and asks once what is true now: free, and it
+      // opens; still held, and `ensure`'s own refusal names the CURRENT holder
+      // and offers the action again. The new confirmation is not opened for
+      // them — it names a project they have not looked at yet, and approving
+      // one project must never carry over to another (the review that made
+      // this snapshot exist at all).
+      if (e?.code === ERR_SCRATCH_STALE) {
+        releaseAsk = false; releaseError = ''; held = null;
+        await ensure();
+        return;
+      }
+      releaseError = e?.message ?? String(e);
     } finally { releasing = false; }
   }
   /** Focus only once the Terminal is mounted AND the panel is shown. */

@@ -56,7 +56,7 @@ JSON-RPC over WebSocket (`ws://` or `wss://`).
 | `new_session` | `name?`, `path?`, `command?` | OK |
 | `kill_session` | `name` | OK |
 | `scratch_session` | — | `{session, target}` — ensures the scratch terminal's session (board #324: `tmm-scratch`, in `$HOME`, marked `@tmm-scratch=1`, never a project) and answers its first window's first pane as `session:window.pane`, always a LIVE one: #326 applies the keep-alive (`remain-on-exit` + a `pane-died: respawn-pane` hook) and repairs a pane that is already dead — `respawn-pane` without `-k`, so tmux itself refuses to restart a pane whose shell or command is still running; refuses with the reason when the name belongs to a plain session or a project |
-| `scratch_release` | `projectId`, `session` | `{released, project, renamed_to}` — frees the scratch terminal's reserved session name by renaming the holder's session (board #337). The params are the snapshot the REFUSAL carried, and the server renames only if that project still declares that session right now; otherwise nothing is touched and the error names the current holder. So what the reader confirmed is what happens, even if the holder changed in between. The recovered name is `<reserved>-recovered`, or the same name `create` would pick (`free_session_name`'s digest suffix on a shortened base) when that is taken — always inside `slug`'s 24 characters, so the name chosen is the name written |
+| `scratch_release` | `projectId`, `session` | `{released, project, renamed_to}` — frees the scratch terminal's reserved session name by renaming the holder's session (board #337). The params are the snapshot the REFUSAL carried, and the server renames only if that project still declares that session right now; otherwise nothing is touched and the refusal is `-32011`, with the current holder named in its message. So what the reader confirmed is what happens, even if the holder changed in between, and `renamed_to` is the session that was actually WRITTEN, never the one the server asked for. The recovered name is `<reserved>-recovered`, or the same name `create` would pick (`free_session_name`'s digest suffix on a shortened base) when that is taken — always inside `slug`'s 24 characters, so the name chosen is the name written |
 | `scratch_kill` | — | `{killed}` — kills the scratch session only when it is ours; `false` when absent; refuses when the name belongs to something else |
 | `new_window` | `session` | OK |
 | `kill_window` | `target` | OK |
@@ -234,7 +234,8 @@ The `message` is the server's ONE sentence for the human and may be
 translated or reworded; a client that needs to act on a particular failure
 keys on the CODE, never on the text (board #337). An error may also carry
 `data`, the facts needed to ACT on it rather than only show it — today only
-`-32010` does.
+`-32010` does; `-32011` deliberately does not, because the fact it would
+carry has one source and copying it is how a snapshot goes stale twice.
 
 | Code | Name | Meaning |
 |---|---|---|
@@ -244,3 +245,4 @@ keys on the CODE, never on the text (board #337). An error may also carry
 | `-32603` | internal error | the operation failed; `message` carries the reason |
 | `-32000` | auth required | the connection has not authenticated, or the token was refused |
 | `-32010` | scratch name held | `scratch_session` refused because a PROJECT holds the scratch terminal's reserved session name. The one refusal a client can act on, and the only one with `data`: `{projectId, projectName, session}` identifies the holder, so the confirmation names it and `scratch_release` can only touch that project. The panel keys on this code alone, so its copy and its action cannot drift apart (board #337) |
+| `-32011` | scratch snapshot stale | `scratch_release` refused because the project the reader confirmed is not the one holding the name any more — nothing was renamed. The panel RECOVERS rather than showing it: the snapshot is dropped and `scratch_session` is asked once, since that is the one path that says who holds the name now (free → it opens; still held → a fresh `-32010` names the current holder and offers the action again). No `data`, for that reason: a holder copied onto this error could be stale again by the time it was used (board #337) |

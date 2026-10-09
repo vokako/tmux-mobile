@@ -238,6 +238,32 @@ fn keep_alive(pane: &str) -> Result<(), String> {
     tmux::set_hook(&name(), "pane-died", RESPAWN_HOOK)
 }
 
+/// Why a release refused — the ONE distinction a client acts on (board #337).
+///
+/// `Stale` means the snapshot the reader confirmed no longer describes the
+/// name: nothing was touched, so a sentence about a project that has since
+/// moved on is not what they need. Asking `ensure` again is, because that is
+/// the one path that says who holds the name NOW — and if nobody does, the
+/// panel simply opens. Every other refusal is a failure the reader reads.
+///
+/// The distinction is drawn HERE, where the comparison already lives, so no
+/// caller re-derives it from the sentence or asks the store a second time.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Refused {
+    Stale(String),
+    Failed(String),
+}
+
+#[cfg(test)]
+impl Refused {
+    /// The sentence, for a test that pins the words as well as the variant.
+    fn text(&self) -> &str {
+        match self {
+            Refused::Stale(m) | Refused::Failed(m) => m,
+        }
+    }
+}
+
 /// Release the reserved name from the project that holds it, on an explicit
 /// request from the reader (board #337, orchestrator's revised ruling).
 ///
@@ -255,10 +281,10 @@ fn keep_alive(pane: &str) -> Result<(), String> {
 /// session on the next open. Archiving would not have worked — an archived
 /// project still holds its session name on purpose, since it can be restored
 /// and brought up.
-pub fn release(project_id: &str, session: &str) -> Result<serde_json::Value, String> {
+pub fn release(project_id: &str, session: &str) -> Result<serde_json::Value, Refused> {
     let n = name();
-    let Some(row) = declaring_project()? else {
-        return Err(format!("no project holds the name '{n}'"));
+    let Some(row) = declaring_project().map_err(Refused::Failed)? else {
+        return Err(Refused::Stale(format!("no project holds the name '{n}'")));
     };
     // The reader approved releasing ONE identified project (board #337
     // review). If the holder has changed since the refusal they saw — another
@@ -266,12 +292,12 @@ pub fn release(project_id: &str, session: &str) -> Result<serde_json::Value, Str
     // nothing is touched and the answer says so, rather than renaming a
     // project nobody agreed to.
     if row.id != project_id || row.session != session {
-        return Err(format!(
+        return Err(Refused::Stale(format!(
             "'{n}' is no longer held by that project — it is held by '{}' now, so nothing was renamed",
             row.name
-        ));
+        )));
     }
-    let recovered = recovered_name(&row.id)?;
+    let recovered = recovered_name(&row.id).map_err(Refused::Failed)?;
     // The decision above is a fast, informative refusal; it is not what makes
     // this safe, because the store lock is released between it and the write.
     // The expectation travels INTO the rename, which re-reads the row under
@@ -279,9 +305,9 @@ pub fn release(project_id: &str, session: &str) -> Result<serde_json::Value, Str
     // reserved name in between — another client renamed it, a release ran
     // twice — the rename refuses and the project the user has since named is
     // left wearing its own name.
-    let written = super::projects::rename_if_session(&row.id, Some(&n), &recovered)?;
-    let holder = declaring_project()?.map(|p| p.name);
-    let renamed_to = freed(&n, written["session"].as_str(), holder.as_deref())?;
+    let written = super::projects::rename_if_session(&row.id, Some(&n), &recovered).map_err(Refused::Failed)?;
+    let holder = declaring_project().map_err(Refused::Failed)?.map(|p| p.name);
+    let renamed_to = freed(&n, written["session"].as_str(), holder.as_deref()).map_err(Refused::Failed)?;
     eprintln!("scratch: project '{}' released the reserved session name '{n}' (board #337)", row.name);
     Ok(serde_json::json!({ "released": true, "project": row.name, "renamed_to": renamed_to }))
 }
@@ -860,7 +886,9 @@ mod tests {
         let dir = guard.path();
         // Nothing to release yet: the refusal names that, rather than
         // pretending to have done something.
-        assert!(release("whatever", &n).unwrap_err().contains("no project holds"));
+        let nothing = release("whatever", &n).unwrap_err();
+        assert!(matches!(nothing, Refused::Stale(_)), "{nothing:?}");
+        assert!(nothing.text().contains("no project holds"), "{nothing:?}");
         assert!(holder().is_none());
         // The state the incident left, written at the STORE level because no
         // public path can declare that name any more — which is the fix.
@@ -877,10 +905,14 @@ mod tests {
         // A release aimed at a DIFFERENT project touches nothing — the reader
         // approved one project, not "whoever holds the name when I run".
         let stale = release("some-other-row", &n).unwrap_err();
-        assert!(stale.contains("no longer held by that project"), "{stale}");
+        // STALE, not a plain failure: nothing was touched, and the panel
+        // recovers from this code instead of showing the sentence (#337).
+        assert!(matches!(stale, Refused::Stale(_)), "{stale:?}");
+        assert!(stale.text().contains("no longer held by that project"), "{stale:?}");
         assert!(declaring_project().unwrap().is_some(), "and the holder is untouched");
         let wrong_session = release(&row_id, "not-the-session").unwrap_err();
-        assert!(wrong_session.contains("no longer held"), "{wrong_session}");
+        assert!(matches!(wrong_session, Refused::Stale(_)), "{wrong_session:?}");
+        assert!(wrong_session.text().contains("no longer held"), "{wrong_session:?}");
 
         let out = release(&row_id, &n).expect("released on request");
         assert_eq!(out["released"], true);
@@ -904,7 +936,8 @@ mod tests {
         assert_eq!(fresh["session"], n.as_str());
         assert_eq!(owned().unwrap(), Ownership::Ours);
         // A second release has nothing to do and says so; ours is untouched.
-        assert!(release(&row_id, &n).unwrap_err().contains("no project holds"));
+        let again = release(&row_id, &n).unwrap_err();
+        assert!(matches!(again, Refused::Stale(_)) && again.text().contains("no project holds"), "{again:?}");
         assert_eq!(owned().unwrap(), Ownership::Ours);
         // And when the readable name is already taken, the recovered name is
         // the one the ONE suffixing rule picks, inside slug's bound.

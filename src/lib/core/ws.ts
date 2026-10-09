@@ -52,7 +52,7 @@ export const {
 // The wire error codes a client acts on live in rpc-codes.ts, outside this
 // mocked-in-tests module (board #337); re-exported so the public surface is
 // one import.
-export { ERR_SCRATCH_HELD } from './rpc-codes.ts';
+export { ERR_SCRATCH_HELD, ERR_SCRATCH_STALE } from './rpc-codes.ts';
 
 // Every RPC, bound to the connection above.
 export const {

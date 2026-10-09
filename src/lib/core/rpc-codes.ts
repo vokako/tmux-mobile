@@ -19,3 +19,11 @@
  * this code — never on the message, which is the server's one sentence for
  * the human and may be translated. */
 export const ERR_SCRATCH_HELD = -32010;
+
+/** `scratch_release` refused because the project the reader confirmed is not
+ * the one holding the name any more — nothing was renamed. The panel RECOVERS
+ * from this instead of showing it: the snapshot it was about is gone, so it
+ * drops it and asks `scratch_session` once, which is the one path that says
+ * who holds the name now. The error carries no holder for that reason — a
+ * copy here could be stale again by the time it was used. */
+export const ERR_SCRATCH_STALE = -32011;

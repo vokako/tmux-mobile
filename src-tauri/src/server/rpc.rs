@@ -56,6 +56,12 @@ pub(super) const ERR_AUTH: i32 = -32000;
 /// sentence the server composed for the human — one definition of the
 /// message, one machine-readable fact beside it.
 pub(super) const ERR_SCRATCH_HELD: i32 = -32010;
+/// A `scratch_release` refused because the holder the reader confirmed is not
+/// the holder now — nothing was touched (board #337). Its own code because
+/// the panel RECOVERS from it instead of showing it: it drops the stale
+/// snapshot and asks `scratch_session` again, which is the one path that says
+/// who holds the name now.
+pub(super) const ERR_SCRATCH_STALE: i32 = -32011;
 
 impl Response {
     pub(super) fn ok(id: Option<u64>, result: serde_json::Value) -> Self {
@@ -84,6 +90,7 @@ impl Response {
                 result: None,
                 error: Some(ErrorInfo { code: ERR_SCRATCH_HELD, message: m, data: Some(held) }),
             },
+            RpcError::ScratchStale(m) => Self::err(id, ERR_SCRATCH_STALE, m),
         }
     }
     /// Fold a dispatcher's `Result` into a response.
@@ -115,6 +122,12 @@ pub(super) enum RpcError {
     /// they approve are about one identified project, not about whoever
     /// happens to hold the name when the action runs.
     ScratchHeld(String, serde_json::Value),
+    /// `scratch_release` refused because the reader's snapshot is stale and
+    /// nothing was touched (board #337). No `data`: who holds the name now is
+    /// `scratch_session`'s answer to give, and one definition of that fact is
+    /// the point — a second copy on this error could already be out of date
+    /// by the time the panel acted on it.
+    ScratchStale(String),
 }
 
 /// The scratch terminal's session is hidden from every listing (board #326,
@@ -310,7 +323,13 @@ fn dispatch(req: &Request, token: &str) -> Result<serde_json::Value, RpcError> {
             // that project still declares that session right now.
             let project = param(p, "projectId")?;
             let session = param(p, "session")?;
-            crate::projects::scratch::release(project, session).map_err(RpcError::Internal)
+            // The refusal's own classification, not a sentence read here
+            // (board #337): a stale snapshot is the one the panel recovers
+            // from, so it travels as its own code.
+            crate::projects::scratch::release(project, session).map_err(|e| match e {
+                crate::projects::scratch::Refused::Stale(m) => RpcError::ScratchStale(m),
+                crate::projects::scratch::Refused::Failed(m) => RpcError::Internal(m),
+            })
         }
 
         "kill_session" => {

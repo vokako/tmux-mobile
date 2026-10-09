@@ -121,6 +121,20 @@ make a workspace. Two consequences fall out of that:
     allowed to go stale in the other direction: `rename` refuses a name
     another project holds, so a lost race there is an error and an unchanged
     store, never a release onto an occupied name.
+    **A stale confirmation is RECOVERED from, not reported.** Those two
+    snapshot refusals — nobody holds the name, or somebody else does — are
+    `scratch::Refused::Stale`, which the server sends as its own code
+    (`-32011`): nothing was touched, so a sentence about a project that has
+    since moved on leaves the reader exactly where the incident left them.
+    The panel drops the stale snapshot and asks `scratch_session` ONCE, the
+    one path that says who holds the name now — free, and it opens; still
+    held, and that refusal names the CURRENT holder and offers the action
+    again. It does not open the new confirmation for them: approving one
+    project must not carry over to a project they have not looked at, which
+    is the same rule that made the snapshot exist. Everything else the release
+    can answer is a failure with the server's sentence, and the panel keeps it
+    on screen — which is why the distinction is drawn inside `release`, where
+    the comparison already lives, instead of being sniffed from the message.
     The recovered name is `<reserved>-recovered`, or — when that is
     taken — the name the ONE suffixing rule picks (`free_session_name`'s
     digest on a shortened `-rec` base); every candidate is bounded to `slug`'s

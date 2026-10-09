@@ -292,6 +292,119 @@ test('a held name offers a release the reader confirms, about the project the re
   } finally { await app.close(); }
 });
 
+test('a stale confirm recovers: the snapshot is dropped and the panel asks once what is true now (#337)', { timeout: 60000 }, async (context) => {
+  // The reader confirms a release, and by the time it arrives the holder has
+  // changed or let go — nothing is renamed. Showing that sentence would leave
+  // them exactly where the incident left them, so the panel drops the stale
+  // snapshot and re-asks. Here the name turned out to be FREE: the panel
+  // opens, with no second confirmation to answer.
+  const held = Object.assign(new Error("the name 'tmm-scratch' belongs to project 'tmm-scratch'"), {
+    code: -32010,
+    data: { projectId: 'tmm-scratch-871f72', projectName: 'tmm-scratch', session: 'tmm-scratch' },
+  });
+  let refuse = true;
+  const r = rpc({
+    scratchSession: async () => { r.calls.push('ensure'); if (refuse) throw held; return { session: 'tmm-scratch', target: 'tmm-scratch:1.1' }; },
+    scratchRelease: async () => {
+      r.calls.push('release');
+      refuse = false;                                  // someone else freed it in the meantime
+      throw Object.assign(new Error("'tmm-scratch' is no longer held by that project — it is held by 'my-work' now, so nothing was renamed"), { code: -32011 });
+    },
+  });
+  const app = await mount(context, r.mod);
+  try {
+    app.window.__scratch.open = true;
+    await until(app, () => !!app.document.querySelector('.scratch-err'));
+    app.document.querySelector<HTMLButtonElement>('.scratch-state button')!.click();
+    await until(app, () => !!app.document.querySelector('[role=alertdialog]'));
+    app.document.querySelector<HTMLButtonElement>('[role=alertdialog] .dlg-actions button:last-child')!.click();
+    await until(app, () => !!app.document.querySelector('.scratch .xterm-wrap'));
+    assert.deepEqual(r.calls, ['ensure', 'release', 'ensure'], 'one re-ask, not a retry loop');
+    assert.equal(app.document.querySelector('[role=alertdialog]'), null, 'the stale confirmation is gone');
+    assert.equal(app.document.querySelector('.scratch-err'), null, 'and the refusal text with it');
+    assert.equal(app.document.querySelector<HTMLElement>('.scratch .xterm-wrap')!.dataset.target, 'tmm-scratch:1.1');
+  } finally { await app.close(); }
+});
+
+test('a stale confirm whose name is STILL held re-asks the reader about the NEW holder (#337)', { timeout: 60000 }, async (context) => {
+  // The other half: the name changed hands. The panel shows the fresh
+  // refusal, which names the project holding it NOW, and offers the action
+  // again — it does NOT carry the approval over by reopening the dialog on a
+  // project the reader has never seen (the review that made the snapshot
+  // exist in the first place).
+  const firstHolder = Object.assign(new Error("the name 'tmm-scratch' belongs to project 'tmm-scratch'"), {
+    code: -32010,
+    data: { projectId: 'tmm-scratch-871f72', projectName: 'tmm-scratch', session: 'tmm-scratch' },
+  });
+  const newHolder = Object.assign(new Error("the name 'tmm-scratch' belongs to project 'my-work'"), {
+    code: -32010,
+    data: { projectId: 'my-work-44ab10', projectName: 'my-work', session: 'tmm-scratch' },
+  });
+  let answer = firstHolder;
+  const sent: unknown[] = [];
+  const r = rpc({
+    scratchSession: async () => { r.calls.push('ensure'); throw answer; },
+    scratchRelease: async (projectId: string, session: string) => {
+      r.calls.push('release'); sent.push({ projectId, session });
+      answer = newHolder;                              // it changed hands under the confirmation
+      throw Object.assign(new Error("'tmm-scratch' is no longer held by that project — it is held by 'my-work' now, so nothing was renamed"), { code: -32011 });
+    },
+  });
+  const app = await mount(context, r.mod);
+  try {
+    app.window.__scratch.open = true;
+    await until(app, () => !!app.document.querySelector('.scratch-err'));
+    app.document.querySelector<HTMLButtonElement>('.scratch-state button')!.click();
+    await until(app, () => !!app.document.querySelector('[role=alertdialog]'));
+    app.document.querySelector<HTMLButtonElement>('[role=alertdialog] .dlg-actions button:last-child')!.click();
+    await until(app, () => r.calls.length === 3);
+    assert.deepEqual(r.calls, ['ensure', 'release', 'ensure']);
+    assert.deepEqual(sent, [{ projectId: 'tmm-scratch-871f72', session: 'tmm-scratch' }], 'only ever the project that was on screen');
+    assert.equal(app.document.querySelector('[role=alertdialog]'), null, 'no confirmation is opened for them');
+    assert.match(app.document.querySelector('.scratch-err')!.textContent!, /project 'my-work'/u, 'the refusal names the holder NOW');
+    const actions = [...app.document.querySelectorAll<HTMLButtonElement>('.scratch-state button')];
+    assert.deepEqual(actions.map((b) => b.textContent?.trim()), ['Release the name', 'Open again'], 'and the way out is offered again');
+    // Confirming THAT one sends the new holder's snapshot, never the old.
+    actions[0]!.click();
+    await until(app, () => !!app.document.querySelector('[role=alertdialog]'));
+    assert.match(app.document.querySelector('[role=alertdialog]')!.textContent!, /my-work/u);
+    app.document.querySelector<HTMLButtonElement>('[role=alertdialog] .dlg-actions button:last-child')!.click();
+    await until(app, () => sent.length === 2);
+    assert.deepEqual(sent[1], { projectId: 'my-work-44ab10', session: 'tmm-scratch' });
+  } finally { await app.close(); }
+});
+
+test('a release that FAILED keeps its sentence on screen (#337)', { timeout: 60000 }, async (context) => {
+  // Only a stale snapshot is recovered from. A release that was about the
+  // right project and could not finish is the server's one sentence for the
+  // human, and re-asking would hide it behind the same refusal.
+  const held = Object.assign(new Error("the name 'tmm-scratch' belongs to project 'tmm-scratch'"), {
+    code: -32010,
+    data: { projectId: 'tmm-scratch-871f72', projectName: 'tmm-scratch', session: 'tmm-scratch' },
+  });
+  const r = rpc({
+    scratchSession: async () => { r.calls.push('ensure'); throw held; },
+    scratchRelease: async () => {
+      r.calls.push('release');
+      throw Object.assign(new Error("a tmux session named 'tmm-scratch-recovered' already exists"), { code: -32603 });
+    },
+  });
+  const app = await mount(context, r.mod);
+  try {
+    app.window.__scratch.open = true;
+    await until(app, () => !!app.document.querySelector('.scratch-err'));
+    app.document.querySelector<HTMLButtonElement>('.scratch-state button')!.click();
+    await until(app, () => !!app.document.querySelector('[role=alertdialog]'));
+    app.document.querySelector<HTMLButtonElement>('[role=alertdialog] .dlg-actions button:last-child')!.click();
+    await until(app, () => r.calls.includes('release'));
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.deepEqual(r.calls, ['ensure', 'release'], 'no re-ask for a failure that is not stale');
+    const dialog = app.document.querySelector('[role=alertdialog]')!;
+    assert.ok(dialog, 'the confirmation stays open, with the reason in it');
+    assert.match(dialog.textContent!, /already exists/u);
+  } finally { await app.close(); }
+});
+
 test('a refusal with no holder data offers only the retry (#337)', { timeout: 60000 }, async (context) => {
   // A plain tmux session of that name, or a failed read of who holds it: the
   // panel must not offer to release something it cannot identify.
