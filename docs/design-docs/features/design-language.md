@@ -606,8 +606,9 @@ Every ink token is OPAQUE (board #321, owner 2026-10-09: "左侧大侧边栏的�
 where two meet (the files fold on its outline, the board divider's caps, a plus's
 crossing) the overlap read 0.69 / 0.58 instead of 0.45 / 0.35 — measured on 36
 of the 76 Icon.svelte glyphs, so the cause is the ink, not a few paths. The
-opaque value is the old ink composited on `--bg`; on `--surface` lifts it differs
-by under 3% luminance. A translucent ink token is a regression; tint with
+opaque value is the old ink composited on `--bg`, so the two are identical on
+`--bg` only; on any other ground (a `--surface` lift, an accent tint) the opaque
+grey no longer takes on the ground's colour. A translucent ink token is a regression; tint with
 `color-mix` or a surface, not an alpha ink.
 
 The shared `config-*` atoms establish an 860px left-aligned canvas, aligned
