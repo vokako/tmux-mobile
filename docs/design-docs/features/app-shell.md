@@ -129,7 +129,16 @@ Terminal 只是临时用的，并且跟你的项目没有关系". Desktop only (
   closing returns focus to what had it, only if focus is still in the panel and
   that control is still there and visible.
 - **Only the reader ensures, and opening converges on a LIVE session.** Opening the panel (and an explicit "Open again") is the only thing that calls `scratch_session`; the effect tracks `open`/`live` only, so a refusal is a stable error with its reason, not a retry loop. The Terminal takes the session name the server returned.
-  #326 added `ended` to the states an open ensures from, which is the client half of 「点开 Terminal 之后，我现在经常看到里面什么都没有」. A hidden Terminal stays SUBSCRIBED (rule 7), so a session that ended behind the panel's back — before #326 the shell's own `exit` ended it, see projects.md — delivered `pane_closed` while the panel was CLOSED and left `phase = 'ended'` with no target; the open effect re-ensured only from `idle | error`, so the next open rendered the bare "Session ended" line. The boundary, stated: a `ready` panel still trusts the pane it has, so a session killed from outside and reopened BEFORE its `pane_closed` arrives shows the stale pane until the subscription reports it — then the next open re-ensures. Both halves are mount-tested; the retry-loop guard is unchanged.
+  #326 added `ended` to the states an open ensures from, which is the client half of 「点开 Terminal 之后，我现在经常看到里面什么都没有」. A hidden Terminal stays SUBSCRIBED (rule 7), so a session that ended behind the panel's back — before #326 the shell's own `exit` ended it, see projects.md — delivered `pane_closed` while the panel was CLOSED and left `phase = 'ended'` with no target; the open effect re-ensured only from `idle | error`, so the next open rendered the bare "Session ended" line. Both halves are mount-tested; the retry-loop guard is unchanged.
+  **Known limit, accepted (orchestrator, 2026-10-09, #326 review):** a `ready`
+  panel still trusts the pane it has, so a session killed from OUTSIDE
+  (`kill-session`, `kill-server`) and reopened before its `pane_closed` arrives
+  shows the stale pane for that moment; once the subscription reports it the
+  state is `ended` and the next open re-ensures. Closing that window means
+  ensuring on EVERY open, which #324 decided against ("no second ensure for a
+  session that is still there") — and the owner's bug was the self-inflicted
+  `exit` path, now fixed at the tmux layer. The window is mount-tested as it
+  stands, so a future change to it is a deliberate one.
 - **Session.** `scratch_session` ensures the one project-less session the server
   owns (projects.md § the scratch terminal's session) and answers its concrete
   `session:window.pane`; the panel embeds the ONE Terminal on it (`embedded
