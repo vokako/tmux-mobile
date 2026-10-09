@@ -44,6 +44,23 @@
   let newName = $state('');
   let createErr = $state('');
 
+  /** Cancel the innermost layer this picker owns, if it has one open — the
+   * new-folder field. `true` when it consumed the dismissal.
+   *
+   * A host asks this BEFORE treating Escape (or a phone Back) as "close the
+   * whole thing": the picker lives inside dialogs whose shell owns Escape at
+   * the window level, and without being asked, cancelling a folder name threw
+   * away the entire project form (#317 review P1-b). Same dialect as
+   * `ServerList.cancelRename` — the component with the state exposes the
+   * cancel; the host decides the order. */
+  export function cancelLocal(): boolean {
+    if (!creating) return false;
+    creating = false;
+    newName = '';
+    createErr = '';
+    return true;
+  }
+
   // Navigation KEEPS the current list on screen and swaps it atomically when
   // the answer arrives — clearing first made every tap blank-then-repaint
   // (owner, 2026-08-28: "每次点击一个路径…先清空再重新刷新…要交互更流畅").
@@ -122,7 +139,7 @@
       <Icon name="folder-plus" size={13} />
       <input class="pk-new-input" bind:value={newName} placeholder={t('newFolderName')}
         autocapitalize="off" autocomplete="off"
-        onkeydown={(e) => { if (e.key === 'Enter') createFolder(); else if (e.key === 'Escape') { creating = false; newName = ''; } }} />
+        onkeydown={(e) => { if (e.key === 'Enter') createFolder(); else if (e.key === 'Escape' && !e.isComposing) cancelLocal(); }} />
       <button class="chip-btn primary" onclick={createFolder} disabled={!newName.trim()}>{t('create')}</button>
     </div>
     {#if createErr}<div class="pk-err appear">{createErr}</div>{/if}

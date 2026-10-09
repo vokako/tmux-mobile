@@ -19,6 +19,21 @@
 
   let { compact = false, oncreated, oncancel } = $props();
 
+  let pickerEl = $state(null);   // the DirPicker instance, for its own layer
+
+  /** Peel this form's innermost open layer; `false` when there is none left
+   * and the host may close the dialog (#317 review P1-b).
+   *
+   * ONE order for every dismissal — the shell's Escape and the phone's Back
+   * both ask here — so a folder name, the picker and the form are peeled in
+   * the order they were opened instead of a half of them taking the whole
+   * draft with it. Same dialect as ServerList's rename cancel. */
+  export function goBack() {
+    if (pickerEl?.cancelLocal()) return true;   // the new-folder field
+    if (pickerOpen) { pickerOpen = false; return true; }  // back to the form
+    return false;
+  }
+
   let name = $state('');
   let path = $state('');
   let agents = $state([]);          // selected registry names
@@ -59,11 +74,11 @@
   }
 </script>
 
-<Dialog {compact} label={t('projectNew')} oncancel={() => oncancel?.()}>
+<Dialog {compact} label={t('projectNew')} escapeGuard={goBack} oncancel={() => oncancel?.()}>
   <h2>{t('projectNew')}</h2>
   {#if error}<p class="err">{error}</p>{/if}
   {#if pickerOpen}
-    <DirPicker start={path.trim() || '~'}
+    <DirPicker bind:this={pickerEl} start={path.trim() || '~'}
       onpick={(p) => { path = p; pickerOpen = false; }}
       oncancel={() => pickerOpen = false} />
   {:else}

@@ -110,9 +110,31 @@ chain (App's `popstate` handler, Hub's `backLayers`); a shell that consumed
 So each host registers its dialog: App peels `addServer` as its FIRST layer
 (a dialog is modal — peeling a page layer behind it would act on something
 the reader cannot see), Hub registers `picker`/`create`/`action`/`trash`, and
-Projects/Sessions/Files peel theirs in their own `goBack`.
+Projects/Sessions/Files peel theirs in their own `goBack`. Review of #317
+found the gap that rule creates if a host forgets: **Sessions** hosts
+`CreateProjectDialog` and did not register it, so on a phone — where Sessions
+IS the Terminal page's drawer — Back could not dismiss New Project at all. It
+registers it now, and `Sessions.mount.test.ts` exercises the real chain.
 
-`ui/dialog.source.test.ts` fails the fifth copy: no component outside the
+**Escape is a CONSUMABLE dismissal (#317 review, 2026-10-09).** The shell owns
+one window-level listener, so by default it answered for layers it knows
+nothing about: cancelling a NAME in `DirPicker`'s new-folder field closed the
+whole New Project form and took the draft with it. The shell now asks
+`escapeGuard()` first and closes only when nothing consumed the key (it still
+`preventDefault`s either way — the key was handled by someone). The order has
+ONE definition, `CreateProjectDialog.goBack()`: the new-folder field, then the
+picker, then the host closes the dialog — and that same function is what
+Sessions and Hub call for Back, so the two dismissals cannot disagree about
+what a draft is. The component that owns the state exposes the cancel
+(`DirPicker.cancelLocal()`, the `ServerList.cancelRename` dialect); the shell
+never reaches into a child. The scrim is deliberately NOT routed through the
+guard: clicking outside the dialog is unambiguous.
+`CreateProjectDialog.mount.test.ts` walks the three layers with a draft in the
+form; negative controls: a shell that stops asking, and a `goBack` that skips
+the field, each fail it.
+
+`ui/dialog.source.test.ts` also pins that one peel order across the shell, the
+dialog, DirPicker and both hosts. It fails the fifth copy: no component outside the
 shell may declare a `.dlg`/`.dlg-backdrop`/`.dlg.sheet` rule or render a
 `dlg-backdrop` element, all four dialogs must render `<Dialog>`, and the
 shell must keep the modal contract (top-modal-only keys, IME-safe Escape,

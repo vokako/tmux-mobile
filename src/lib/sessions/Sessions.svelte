@@ -49,6 +49,7 @@
 
   // New session form
   let showNew = $state(false);
+  let createEl = $state<{ goBack: () => boolean } | null>(null);
 
   // Folder picker (inside new form)
 
@@ -86,6 +87,15 @@
   let killing = $state(false);
   let projectsGoBack = $state<(() => boolean) | null>(null);
   function goBack() {
+    // The New Project dialog is MODAL, so it is the top layer whatever else
+    // is open behind it, and it peels its own steps first (the folder picker,
+    // a new-folder field) before it closes — the same order its Escape takes
+    // (#317 review P1-a: the phone's Back did not reach it at all, so from
+    // Terminal there was no way back out of it).
+    if (showNew) {
+      if (!createEl?.goBack()) showNew = false;
+      return true;
+    }
     if (pendingKill) {
       if (!killing) { pendingKill = null; killError = ''; }
       return true;
@@ -654,7 +664,7 @@
          used to look designed by different people — an inline form with its
          own second directory picker and raw backend presets vs the dialog).
          After creation, jump straight into the new session's first pane. -->
-    <CreateProjectDialog compact={isMobile}
+    <CreateProjectDialog bind:this={createEl} compact={isMobile}
       oncreated={async (proj: { id: string; session: string }) => {
         showNew = false;
         await reloadProjects?.();

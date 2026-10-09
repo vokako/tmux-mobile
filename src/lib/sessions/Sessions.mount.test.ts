@@ -187,3 +187,43 @@ for (const kind of ['down', 'archive'] as const) {
     } finally { await app.close(); }
   });
 }
+
+test('the phone Back closes the New Project dialog, and nothing behind it (#317 review P1-a)', async context => {
+  // The dialog shell deliberately does NOT consume popstate (it would race
+  // the host's layer chain and peel two layers for one gesture), so the HOST
+  // must register it. Sessions did not, which meant that on a phone — where
+  // Sessions is the Terminal page's drawer — the New Project dialog could not
+  // be dismissed with Back at all.
+  let goBack!: () => boolean;
+  const app = await (await compiled).mount(context, {
+    props: { visible: true, openTerminal: () => assert.fail('unexpected navigation'),
+      onGoBack: (fn: () => boolean) => { goBack = fn; } },
+    modules: [rpc({ registryList: async () => ({ agents: [] }), fsList: async () => ({ path: '/', entries: [] }) })],
+  });
+  try {
+    for (let i = 0; i < 8 && !app.document.querySelector('.new-btn'); i++) await app.flush();
+    assert.equal(goBack(), false, 'with nothing open, Back is not ours to consume');
+    app.document.querySelector<HTMLButtonElement>('.new-btn')!.click();
+    for (let i = 0; i < 8 && !app.document.querySelector('.dlg'); i++) await app.flush();
+    assert.ok(app.document.querySelector('.dlg'), 'the dialog is up');
+    // And it peels the dialog's own steps first, in the order Escape takes:
+    // the folder picker's new-folder field, then the picker, then the dialog.
+    // One definition (CreateProjectDialog.goBack) serves both dismissals, so
+    // Back and Escape cannot disagree about what a draft is.
+    app.document.querySelector<HTMLButtonElement>('.dlg .path-row .chip-btn')!.click();
+    for (let i = 0; i < 8 && !app.document.querySelector('.pk-head'); i++) await app.flush();
+    app.document.querySelector<HTMLButtonElement>('.dlg [aria-label="New folder"]')!.click();
+    for (let i = 0; i < 4 && !app.document.querySelector('.pk-new-input'); i++) await app.flush();
+    assert.equal(goBack(), true); await app.flush();
+    assert.equal(app.document.querySelector('.pk-new-input'), null, 'the folder field first');
+    assert.ok(app.document.querySelector('.pk-head'), 'the picker is still open');
+    assert.equal(goBack(), true); await app.flush();
+    assert.equal(app.document.querySelector('.pk-head'), null, 'then the picker');
+    assert.ok(app.document.querySelector('.dlg'), 'and the form is still there with its draft');
+    assert.equal(goBack(), true, 'Back is consumed by the modal');
+    for (let i = 0; i < 4; i++) await app.flush();
+    assert.equal(app.document.querySelector('.dlg'), null, 'and closes it');
+    assert.ok(app.document.querySelector('.new-btn'), 'the page behind it is untouched');
+    assert.equal(goBack(), false, 'the next Back falls through to the page again');
+  } finally { await app.close(); }
+});

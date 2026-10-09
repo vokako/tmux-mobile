@@ -103,6 +103,15 @@ test('the shell owns the modal contract its consumers stopped repeating', () => 
   // shell needs no class prop for a caller to paint a fifth dialog with.
   assert.match(text, /\{role\} aria-modal="true"/u, 'the caller\u2019s role reaches the element');
   assert.doesNotMatch(code(text), /class[:=]\s*(?:extra|className|classes)/u, 'no class door');
+  // Escape is a CONSUMABLE dismissal: the innermost open layer gets it first,
+  // and the dialog closes only when nothing consumed it (#317 review P1-b —
+  // the shell's one window listener used to cancel a folder NAME by closing
+  // the whole project form). The scrim is deliberately NOT routed through the
+  // guard: clicking outside is unambiguous.
+  assert.match(text, /if \(!escapeGuard\(\)\) cancel\(\);/u);
+  assert.match(text, /e\.stopPropagation\(\); e\.preventDefault\(\);\s*\n\s*if \(!escapeGuard\(\)\)/u,
+    'handled either way, so nothing further acts on the key');
+  assert.match(text, /onclick=\{cancel\}/u, 'the scrim closes without asking');
   // Back is the host's layer chain, not the shell's: a shell that consumed
   // popstate would peel two layers for one gesture.
   assert.doesNotMatch(code(text), /popstate|history\./u);
@@ -119,6 +128,27 @@ test('the dialog content dialect lives once, in app.css', async () => {
     assert.match(css, rule);
   }
   assert.doesNotMatch(code(shell.text), /\.dlg-actions|\.dlg-note/u, 'the shell does not scope what it does not render');
+});
+
+test('one peel order serves Escape and the phone Back (#317 review)', async () => {
+  // The dialog's own steps are peeled innermost-first by ONE function, which
+  // the shell asks as its escapeGuard and the host calls for Back. Two orders
+  // would mean the two dismissals disagreeing about what a draft is.
+  const create = files.find((f) => f.rel === 'lib/projects/CreateProjectDialog.svelte')!.text;
+  assert.match(create, /export function goBack\(\) \{\s*\n\s*if \(pickerEl\?\.cancelLocal\(\)\) return true;[\s\S]{0,120}?if \(pickerOpen\) \{ pickerOpen = false; return true; \}[\s\S]{0,80}?return false;/u,
+    'field, then picker, then the host closes it');
+  assert.match(create, /<Dialog \{compact\} label=\{t\('projectNew'\)\} escapeGuard=\{goBack\}/u, 'Escape asks that function');
+  // The component that OWNS the state exposes the cancel (the ServerList
+  // dialect), so the dialog never reaches into a child's internals.
+  const picker = files.find((f) => f.rel === 'lib/files/DirPicker.svelte')!.text;
+  assert.match(picker, /export function cancelLocal\(\): boolean \{\s*\n\s*if \(!creating\) return false;/u);
+  assert.match(picker, /e\.key === 'Escape' && !e\.isComposing\) cancelLocal\(\)/u,
+    'the field\u2019s own handler runs the same cancel, not a second copy');
+  // Both hosts of that dialog peel through it — one order, two hosts.
+  for (const [rel, re] of [
+    ['lib/sessions/Sessions.svelte', /if \(showNew\) \{\s*\n\s*if \(!createEl\?\.goBack\(\)\) showNew = false;\s*\n\s*return true;/u],
+    ['lib/hub/Hub.svelte', /if \(!createOpen\) return false; if \(!createEl\?\.goBack\(\)\) createOpen = false; return true;/u],
+  ] as const) assert.match(files.find((f) => f.rel === rel)!.text, re, `${rel}: peels through the dialog`);
 });
 
 test('the phone Back peels the shell’s dialog before any page layer (#317)', async () => {

@@ -43,6 +43,15 @@
     /** An operation is running: Escape and the scrim stop cancelling, and
      * assistive tech is told. */
     busy = false,
+    /** Asked before Escape closes the dialog, because Escape is a CONSUMABLE
+     * dismissal: the innermost open layer gets it first. A caller whose
+     * content has its own steps (CreateProjectDialog's folder picker and its
+     * new-folder field) returns true when one of them consumed the key, and
+     * the dialog stays open with its draft (#317 review P1-b — the shell's
+     * window-level listener used to cancel a folder name by closing the whole
+     * project form). Only Escape routes through this: clicking the scrim is
+     * unambiguous, and so is the × . */
+    escapeGuard = () => false,
     /** Id of an element inside that describes the dialog (an error alert). */
     describedby = undefined,
     /** The card, for a caller that must move focus itself (ConfirmDialog's
@@ -56,6 +65,7 @@
     role?: 'dialog' | 'alertdialog';
     compact?: boolean;
     busy?: boolean;
+    escapeGuard?: () => boolean;
     describedby?: string | undefined;
     element?: HTMLDivElement | null;
     oncancel?: () => void;
@@ -90,8 +100,10 @@
       // An IME composition swallows Escape to cancel the candidate window —
       // closing the dialog on it would lose the draft with the candidates.
       if (e.key === 'Escape' && !e.isComposing) {
+        // Handled either way — by the layer that consumed it or by us — so
+        // nothing further acts on this key.
         e.stopPropagation(); e.preventDefault();
-        cancel();
+        if (!escapeGuard()) cancel();
       } else if (e.key === 'Tab') {
         const focusables = items();
         if (!focusables.length) { e.preventDefault(); dialog.focus(); return; }

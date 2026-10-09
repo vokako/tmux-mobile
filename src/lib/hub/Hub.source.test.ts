@@ -213,7 +213,10 @@ test('Back keeps the original priority and current live guards in one dispatcher
     action: 'if (!pendingAct) return false; if (!acting) pendingAct = null; return true;',
     trash: 'if (!trashAsk) return false; if (!purging) trashAsk = null; return true;',
     picker: 'if (pickerOpen) { pickerOpen = false; return true; }',
-    create: 'if (createOpen) { createOpen = false; return true; }',
+    // #317: the dialog peels its OWN steps first (folder picker, new-folder
+    // field) through the one function its Escape also asks, so Back and
+    // Escape cannot disagree about what a draft is.
+    create: 'if (!createOpen) return false; if (!createEl?.goBack()) createOpen = false; return true;',
     rename: 'if (renaming) { renaming = false; return true; }',
     jumpFilter: 'if (filterBefore) { restoreFilter(); return true; }',
     filter: "if (filterAgent) { filterAgent = ''; return true; }",
@@ -224,7 +227,7 @@ test('Back keeps the original priority and current live guards in one dispatcher
   };
   for (const [layer, guard] of Object.entries(guards)) {
     // #167 deliberately replaces the busy fallthrough while keeping priority.
-    const suffix = layer === 'action' || layer === 'trash' ? '' : ' return false;';
+    const suffix = layer === 'action' || layer === 'trash' || layer === 'create' ? '' : ' return false;';
     assert.ok(region.includes(`backLayers.register('${layer}', () => { ${guard}${suffix} })`),
       `${layer} keeps its current guard/action inside a live callback`);
   }

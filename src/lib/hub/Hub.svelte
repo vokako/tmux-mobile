@@ -192,6 +192,7 @@
 
   // New-project dialog.
   let createOpen = $state(false);
+  let createEl = $state(null);   // the CreateProjectDialog instance (its own back layers)
 
 
   const room = (session) => `proj:${session}`;
@@ -1690,7 +1691,9 @@
       backLayers.register('action', () => { if (!pendingAct) return false; if (!acting) pendingAct = null; return true; }),
       backLayers.register('trash', () => { if (!trashAsk) return false; if (!purging) trashAsk = null; return true; }),
       backLayers.register('picker', () => { if (pickerOpen) { pickerOpen = false; return true; } return false; }),
-      backLayers.register('create', () => { if (createOpen) { createOpen = false; return true; } return false; }),
+      // The dialog peels its own steps first, exactly as in Sessions and as
+      // its Escape does (#317): one order per dismissal, one definition.
+      backLayers.register('create', () => { if (!createOpen) return false; if (!createEl?.goBack()) createOpen = false; return true; }),
       backLayers.register('rename', () => { if (renaming) { renaming = false; return true; } return false; }),
       backLayers.register('jumpFilter', () => { if (filterBefore) { restoreFilter(); return true; } return false; }),
       backLayers.register('filter', () => { if (filterAgent) { filterAgent = ''; return true; } return false; }),
@@ -2225,7 +2228,7 @@
   {#if createOpen}
     <!-- ONE New Project surface app-wide (CreateProjectDialog): the Terminal
          sidebar opens the same component, so they cannot drift apart. -->
-    <CreateProjectDialog {compact}
+    <CreateProjectDialog bind:this={createEl} {compact}
       oncreated={async (proj) => {
         createOpen = false;
         await reload();
