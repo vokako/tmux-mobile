@@ -18,7 +18,7 @@
 // a second client for a machine that already has one.
 import { createConnectionRegistry, type ConnectionRegistry } from '../core/connection-registry.ts';
 import type { ServerId } from './refs.ts';
-import type { ServerEntry } from './servers.ts';
+import { loadServers, type ServerEntry } from './servers.ts';
 import { createServerRuntime, type ServerRuntime } from './server-runtime.ts';
 
 type Store = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
@@ -33,14 +33,32 @@ export interface ServerFleetDeps {
 
 export interface ServerFleet {
   /** The runtime for this entry, created idle on first ask. Returns the
-   * EXISTING runtime when one already serves that entry — or that machine. */
-  include(entry: ServerEntry): ServerRuntime;
+   * EXISTING runtime when one already serves that entry — or that machine —
+   * and `undefined` for an entry that is no longer in the saved registry, so
+   * a caller holding a stale list cannot re-register a server that identity
+   * has already merged away or removed. */
+  include(entry: ServerEntry): ServerRuntime | undefined;
   get(id: ServerId): ServerRuntime | undefined;
   /** The runtime serving a machine, by the id its entry or its live socket
    * reports. Empty machine ids never match. */
   byMachine(machineId: string): ServerRuntime | undefined;
   ids(): ServerId[];
   all(): ServerRuntime[];
+  /**
+   * Drop every runtime whose entry has left the saved registry.
+   *
+   * `servers.ts` is the identity authority, and `recordServer` can delete
+   * entries that belong to OTHER runtimes: it absorbs every twin of the
+   * machine that just authenticated. So membership follows the entry set,
+   * reconciled here after each `recordServer`, instead of each runtime
+   * discovering its own loss — a runtime that has not dialled yet, or is
+   * still authenticating, has no occasion to discover anything and would sit
+   * here holding a socket for a server that no longer exists.
+   *
+   * This re-applies `servers.ts`'s rules; it does not re-decide identity. The
+   * fleet never merges by address on its own.
+   */
+  reconcile(): ServerId[];
   /** Drop one server: its runtime is disposed and its connection released.
    * Every other runtime, including a dial in flight, is untouched. */
   drop(id: ServerId): void;
@@ -58,22 +76,36 @@ export function createServerFleet(deps: ServerFleetDeps): ServerFleet {
     return undefined;
   }
 
-  function include(entry: ServerEntry): ServerRuntime {
+  function include(entry: ServerEntry): ServerRuntime | undefined {
     const held = runtimes.get(entry.id);
     if (held) return held;
+    // A stale list must not re-register a server identity has let go of. The
+    // saved registry is the authority on what exists, and an entry absent
+    // from it has either been removed or absorbed into another machine's.
+    if (!loadServers(storage).some((s) => s.id === entry.id)) return undefined;
     const twin = entry.machineId ? byMachine(entry.machineId) : undefined;
     if (twin) return twin;
     const runtime = createServerRuntime(entry, {
       storage,
       slot: registry.ensure(entry.id),
-      // A dial can prove the entry was absorbed into another machine's. The
-      // runtime disposes itself; the fleet forgets the key, so neither map is
-      // left pointing at a server that no longer exists.
-      onIdentityLost: () => { if (runtimes.get(entry.id) === runtime) drop(entry.id); },
+      // Every recordServer can change the entry SET, so membership is
+      // reconciled against it rather than each runtime watching itself.
+      onRegistryChanged: reconcile,
       ...(connectTimeoutMs == null ? {} : { connectTimeoutMs }),
     });
     runtimes.set(entry.id, runtime);
     return runtime;
+  }
+
+  function reconcile(): ServerId[] {
+    const saved = new Set(loadServers(storage).map((s) => s.id));
+    const gone = [...runtimes.keys()].filter((id) => !saved.has(id));
+    // drop() disposes the runtime, which is terminal: a dial still
+    // authenticating is cancelled, the socket closes, the liveness clock
+    // stops, and a reply already on the wire resolves nothing — so a late
+    // answer cannot recreate the entry identity has just absorbed.
+    for (const id of gone) drop(id);
+    return gone;
   }
 
   function drop(id: ServerId): void {
@@ -96,6 +128,7 @@ export function createServerFleet(deps: ServerFleetDeps): ServerFleet {
     byMachine,
     ids: () => [...runtimes.keys()],
     all: () => [...runtimes.values()],
+    reconcile,
     drop,
     dropAll,
   };

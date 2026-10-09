@@ -67,8 +67,14 @@ export type DialResult =
   | { ok: false; reason: 'elsewhere'; entry: ServerEntry; machineId: string; hostname: string }
   /** Never got there: no socket, no auth, a timeout. */
   | { ok: false; reason: 'failed'; error: unknown }
-  /** The runtime was dropped while dialling, or there is no saved entry to
-   * dial any more. */
+  /** A LATER dial (or a dispose) took over while this one was in flight. The
+   * attempt touched nothing: it did not record, adopt, disconnect or report an
+   * identity, because by the time it came back the socket it dialled had
+   * already been replaced by the one that superseded it. */
+  | { ok: false; reason: 'superseded' }
+  /** The runtime was dropped, or there is no saved entry to dial any more —
+   * including an entry removed WHILE this dial was in flight, which must not
+   * be resurrected by recording the connection that just succeeded. */
   | { ok: false; reason: 'gone' };
 
 export interface ServerRuntime {
@@ -101,23 +107,37 @@ export interface ServerRuntimeDeps {
   storage: Store;
   /** From the connection registry, which owns this object's lifetime. */
   slot: ConnectionSlot;
-  /** Called once when a dial proves this runtime's ENTRY no longer exists:
-   * it authenticated as a machine whose canonical entry is another one, and
-   * `recordServer` absorbed this id into it. The runtime has already disposed
-   * itself by then; this is how the layer that holds the membership (the
-   * fleet) learns to forget the key, so a merged-away server cannot linger as
-   * a live socket, a liveness timer and a store slot under a dead id. */
-  onIdentityLost?: () => void;
+  /**
+   * Called after every `recordServer`, whatever the outcome, because that call
+   * is the one moment the saved entry SET can change: it stamps a machine onto
+   * an entry and absorbs every twin of the survivor, which may delete entries
+   * belonging to OTHER runtimes.
+   *
+   * The layer that holds the membership reconciles against `servers.ts`'s set
+   * (the fleet's `reconcile`). One edge, rather than each runtime discovering
+   * its own loss: a runtime that has not dialled yet — or is still
+   * authenticating — has no occasion to discover anything, and would sit in
+   * the fleet holding a socket for a server that no longer exists (reviewer
+   * P1-c).
+   */
+  onRegistryChanged?: () => void;
   connectTimeoutMs?: number;
 }
 
 export function createServerRuntime(entry: ServerEntry, deps: ServerRuntimeDeps): ServerRuntime {
-  const { storage, slot, onIdentityLost, connectTimeoutMs } = deps;
+  const { storage, slot, onRegistryChanged, connectTimeoutMs } = deps;
   const { connection, api } = slot;
   const id = entry.id;
   let known: ServerEntry = entry;
   let caps: ServerCaps = { hub: null, backends: null };
   let dead = false;
+  /** How many dials this runtime has started. The counter IS the attempt
+   * identity: only the latest may record, adopt, disconnect or report ok. */
+  let dialled = 0;
+  /** Same idea for capabilities: a slower probe must not overwrite a newer
+   * one's answer, or an old `method not found` can unmount a Hub a later
+   * probe has confirmed (reviewer P2). */
+  let probed = 0;
 
   /** The saved entry for this id. A removed entry leaves the last known one,
    * so a caller still has a name to show while it tears the runtime down. */
@@ -147,6 +167,19 @@ export function createServerRuntime(entry: ServerEntry, deps: ServerRuntimeDeps)
 
   async function dial(): Promise<DialResult> {
     if (dead) return { ok: false, reason: 'gone' };
+    // This attempt's identity, captured before the first await. A runtime may
+    // dial more than once, and `Connection` can only reject a dial that has
+    // not SETTLED — it cannot un-resolve a promise whose continuation has not
+    // run yet. Without this, an older attempt that authenticated just before a
+    // newer one started would come back and record its stale target, adopt its
+    // hostname, close the socket the new attempt is using, or return a
+    // long-expired `ok` (reviewer P1-b; the same kind of ownership bug as
+    // #315's old onAddress continuation reconnecting to another machine).
+    // `dead` cannot stand in for it: being alive says nothing about WHICH
+    // attempt is current.
+    const attempt = ++dialled;
+    /** Is this still the attempt that owns the runtime? */
+    const mine = () => !dead && attempt === dialled;
     const target = loadServers(storage).find((s) => s.id === id);
     // Nothing saved under this id: the entry was removed (or merged away)
     // while the runtime was idle. Dialling the last known address would mint a
@@ -157,11 +190,34 @@ export function createServerRuntime(entry: ServerEntry, deps: ServerRuntimeDeps)
     try {
       reported = await connection.connect(target.address, target.token, connectTimeoutMs);
     } catch (error) {
+      // A superseded attempt reports neither the failure nor the success it
+      // might otherwise have: whoever took over owns the outcome now.
+      if (!mine()) return { ok: false, reason: 'superseded' };
       return { ok: false, reason: 'failed', error };
     }
-    if (dead) return { ok: false, reason: 'gone' };
+    if (!mine()) {
+      // Deliberately touches nothing — in particular it does NOT disconnect.
+      // The newer attempt's `connect` already replaced the socket this one
+      // dialled, so this attempt has no socket of its own left to close, and
+      // closing the connection's CURRENT socket would cut the attempt that
+      // superseded it.
+      return { ok: false, reason: 'superseded' };
+    }
+    // This attempt's own answer. The machine id is what ITS connect resolved
+    // with, never "whatever the current socket says"; the hostname has to come
+    // off the connection because `Connection` does not return it per dial, and
+    // that is sound only because there is no await between the check above and
+    // this read — a superseded attempt never gets here at all.
     const machine = reported || connection.getMachineId() || '';
     const host = connection.getHostname() || '';
+    // The entry must still be there. A removal while we were authenticating is
+    // a decision; recording the connection that just succeeded would undo it
+    // and resurrect the entry through `recordServer`.
+    if (!loadServers(storage).some((s) => s.id === id)) {
+      dispose();
+      onRegistryChanged?.();
+      return { ok: false, reason: 'gone' };
+    }
     // RECORD, never activate: `recordServer` folds this connection into the
     // machine's canonical entry (and absorbs the twin an address-only entry
     // leaves behind) without moving CURRENT — recording and activating are
@@ -178,53 +234,71 @@ export function createServerRuntime(entry: ServerEntry, deps: ServerRuntimeDeps)
       // the same fact: this is not the server this runtime is for.
       connection.disconnect();
       adopt(machine, host);
-      const lost = !loadServers(storage).some((s) => s.id === id);
       // Two unknown entries racing to the same machine is the ordinary way
       // this happens, in either auth order: whichever authenticates first
       // becomes the machine's canonical entry and `recordServer` absorbs the
-      // other. The loser is not merely on the wrong address — its id no longer
-      // exists, so it can never become valid again. Disconnecting would leave
-      // a dialable handle, its liveness clock and anything that captured the
-      // dead id; dispose is terminal, so a late reply on that socket resolves
-      // nothing and `call` rejects.
-      if (lost) {
-        dispose();
-        onIdentityLost?.();
-      }
+      // other. If this id is one of the absorbed, it can never become valid
+      // again, so the handle must be terminal rather than merely
+      // disconnected — a disconnected one can dial back, keeps its liveness
+      // clock, and anything holding the dead id goes on addressing it.
+      if (!loadServers(storage).some((s) => s.id === id)) dispose();
+      // Whatever happened to this runtime, the entry SET may have changed:
+      // the membership layer reconciles, which is how a runtime absorbed
+      // while idle or mid-auth is released too.
+      onRegistryChanged?.();
       return { ok: false, reason: 'elsewhere', entry: canonical, machineId: machine, hostname: host };
     }
     known = canonical;
     adopt(machine, host);
+    onRegistryChanged?.();
+    // Reconciling may have dropped this runtime (its entry absorbed by a
+    // concurrent dial), and a disposed runtime must not report success.
+    if (!mine()) return { ok: false, reason: 'superseded' };
     return { ok: true, entry: canonical };
   }
 
-  async function probeHub(): Promise<void> {
+  async function probeHub(round: number): Promise<void> {
+    const mine = () => !dead && round === probed;
     try {
       await api.hubRooms();
-      if (!dead) caps = { ...caps, hub: true };
+      if (mine()) caps = { ...caps, hub: true };
     } catch (e: any) {
       // Only a definitive server answer (method not found: no Hub) may flip
       // the flag off. A timeout or a reconnect blip keeps the current value,
       // because false unmounts the always-mounted Hub and destroys the state
-      // it exists to preserve. App needed a switch-generation guard here; a
-      // runtime does not — the answer came over THIS runtime's connection, so
-      // it cannot be about another server.
-      if (!dead && e?.code === -32601) caps = { ...caps, hub: false };
+      // it exists to preserve.
+      //
+      // Two guards, and they answer different questions. `dead`: is this
+      // runtime still held? `round === probed`: is this the newest answer?
+      // App needs neither of ours and one of its own (`serverSwitch.owns`),
+      // because its module socket could move to another server mid-probe; a
+      // runtime's answer always came over its OWN connection, so it cannot be
+      // about another server — but it can be about an older moment of this
+      // one, and an old `method not found` must not unmount a Hub that a later
+      // probe confirmed after an upgrade or a reconnect (reviewer P2).
+      if (mine() && e?.code === -32601) caps = { ...caps, hub: false };
     }
   }
 
-  async function probeBackends(): Promise<void> {
+  async function probeBackends(round: number): Promise<void> {
+    const mine = () => !dead && round === probed;
     try {
       const r = await api.backendsList();
       const list = r?.backends;
-      if (!dead) caps = { ...caps, backends: Array.isArray(list) && list.length > 0 ? list : null };
+      // A present but EMPTY list is the server saying nothing useful, which
+      // `agents.ts` also reads as unknown rather than "this server has none".
+      if (mine()) caps = { ...caps, backends: Array.isArray(list) && list.length > 0 ? list : null };
     } catch {
-      if (!dead) caps = { ...caps, backends: null };
+      // A failure is not an answer, so it leaves the last one standing — the
+      // same rule as the Hub flag, and what "caps survive a reconnect of the
+      // same server" has to mean if it is to mean anything. Wiping to null on
+      // a blip made the list vanish from a page that had it a moment ago.
     }
   }
 
   async function probeCaps(): Promise<ServerCaps> {
-    await Promise.all([probeHub(), probeBackends()]);
+    const round = ++probed;
+    await Promise.all([probeHub(round), probeBackends(round)]);
     return caps;
   }
 

@@ -17,8 +17,9 @@
 
 {#each runtimes as runtime (runtime.id)}
   <!-- Keyed by the HANDLE, not by the id: a replacement runtime for the same
-       server must unmount the old owner before the new one mounts, while an
-       ordinary reconnect (same object) must not remount anything. -->
+       server swaps the owner, while an ordinary reconnect (the same object)
+       remounts nothing. The key gives the swap and not its ORDER — Svelte
+       creates the new branch first, which the mount test measures. -->
   {#key runtime}
     <ServerContextProvider {runtime}>
       <ServerContextConsumer label={runtime.id} />

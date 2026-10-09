@@ -9,7 +9,7 @@ import {
 } from '../core/connection.fixture.ts';
 import { createConnectionRegistry, type ConnectionSlot } from '../core/connection-registry.ts';
 import { createServerFleet } from './server-fleet.ts';
-import { createServerRuntime } from './server-runtime.ts';
+import { createServerRuntime, type ServerRuntime } from './server-runtime.ts';
 import { loadServers, type ServerEntry } from './servers.ts';
 
 installDoubles();
@@ -27,6 +27,13 @@ function mem(init: Record<string, string> = {}) {
 const entry = (over: Partial<ServerEntry> & { id: string; address: string }): ServerEntry =>
   ({ name: over.name ?? 'srv', token: 'tok', ...over });
 
+/** `include` declines an entry identity has let go of, so a test that means to
+ * get a runtime says so. */
+function got(runtime: ServerRuntime | undefined): ServerRuntime {
+  assert.ok(runtime, 'the entry is still in the saved registry');
+  return runtime;
+}
+
 /** A storage holding two saved servers, each knowing its machine. */
 function twoServers() {
   const a = entry({ id: 'a', name: 'alpha', address: 'ws://a:9899', token: 'tokA', machineId: 'm-a' });
@@ -43,8 +50,8 @@ test('two servers are online at the same time, each with its own transport', asy
   const { storage, a, b } = twoServers();
   const fleet = createServerFleet({ storage });
   try {
-    const ra = fleet.include(a);
-    const rb = fleet.include(b);
+    const ra = got(fleet.include(a));
+    const rb = got(fleet.include(b));
     assert.notEqual(ra.connection, rb.connection, 'one connection object each');
     assert.deepEqual(fleet.ids(), ['a', 'b']);
 
@@ -78,18 +85,37 @@ test('one entry is one runtime, and one machine is one runtime', async () => {
   const { storage, a } = twoServers();
   const fleet = createServerFleet({ storage });
   try {
-    const first = fleet.include(a);
+    const first = got(fleet.include(a));
     assert.equal(fleet.include(a), first, 'asking twice cannot mint a second client');
     // A caller holding a stale copy of the entry — a list read before a merge,
     // a different object with the same identity — must not open a second one.
     assert.equal(fleet.include({ ...a }), first, 'a copy of the entry is the same server');
-    await handshakePlain(first.connection, 'ws://a:9899', 'tokA', 'm-a');
+    // An id that is not in the saved registry is declined outright: identity
+    // has either removed it or absorbed it, and re-registering it would put a
+    // server back that `servers.ts` has let go of.
     assert.equal(
-      fleet.include(entry({ id: 'stale-id', address: 'ws://a-other:9899', machineId: 'm-a' })),
-      first,
-      'a second entry id for a machine that already has a runtime folds into it',
+      fleet.include(entry({ id: 'never-saved', address: 'ws://a-other:9899', machineId: 'm-a' })),
+      undefined,
+      'include declines an id the registry does not list',
     );
     assert.deepEqual(fleet.ids(), ['a'], 'still one runtime');
+  } finally {
+    fleet.dropAll();
+  }
+});
+
+test('two saved entries for one machine share one runtime', async () => {
+  // An unrepaired list can hold two entries claiming the same machine (the
+  // #318 case `repairServers` heals). Until it is healed, the fleet must not
+  // open two clients for one machine: identity is the machine.
+  const one = entry({ id: 'one', name: 'n1', address: 'ws://n1:9899', token: 'tok', machineId: 'm-a' });
+  const two = entry({ id: 'two', name: 'n2', address: 'ws://n2:9899', token: 'tok', machineId: 'm-a' });
+  const storage = mem({ tmux_servers: JSON.stringify([one, two]), tmux_server_current: 'one' });
+  const fleet = createServerFleet({ storage });
+  try {
+    const first = got(fleet.include(one));
+    assert.equal(fleet.include(two), first, 'the second entry folds into the machine s runtime');
+    assert.deepEqual(fleet.ids(), ['one']);
   } finally {
     fleet.dropAll();
   }
@@ -99,8 +125,8 @@ test('dropping one server leaves the other working', async () => {
   const { storage, a, b } = twoServers();
   const fleet = createServerFleet({ storage });
   try {
-    const ra = fleet.include(a);
-    const rb = fleet.include(b);
+    const ra = got(fleet.include(a));
+    const rb = got(fleet.include(b));
     const sa = await handshakePlain(ra.connection, 'ws://a:9899', 'tokA', 'm-a');
     const sb = await handshakePlain(rb.connection, 'ws://b:9899', 'tokB', 'm-b');
 
@@ -125,8 +151,8 @@ test('A going down and coming back does not touch B', async () => {
   const { storage, a, b } = twoServers();
   const fleet = createServerFleet({ storage });
   try {
-    const ra = fleet.include(a);
-    const rb = fleet.include(b);
+    const ra = got(fleet.include(a));
+    const rb = got(fleet.include(b));
     const sa = await handshakePlain(ra.connection, 'ws://a:9899', 'tokA', 'm-a');
     const sb = await handshakePlain(rb.connection, 'ws://b:9899', 'tokB', 'm-b');
 
@@ -160,7 +186,7 @@ test('dial records the machine that answered and adopts its hostname', async () 
   const fleet = createServerFleet({ storage });
   try {
     for (const [id, addr, machine, host] of [['d', 'ws://n:9899', 'm-d', 'new-host'], ['t', 'ws://t:9899', 'm-t', 'typed-host']] as const) {
-      const rt = fleet.include(loadServers(storage).find((s) => s.id === id)!);
+      const rt = got(fleet.include(loadServers(storage).find((s) => s.id === id)!));
       const dialing = rt.dial();
       const socket = MockWebSocket.instances.at(-1)!;
       socket.readyState = MockWebSocket.OPEN;
@@ -188,7 +214,7 @@ test('an address that now answers as another machine does not publish under the 
   const before = loadServers(storage);
   const fleet = createServerFleet({ storage });
   try {
-    const ra = fleet.include(a);
+    const ra = got(fleet.include(a));
     const dialing = ra.dial();
     const socket = MockWebSocket.instances.at(-1)!;
     socket.readyState = MockWebSocket.OPEN;
@@ -224,7 +250,7 @@ test('an entry that does not know its machine is merged before it publishes', as
   });
   const fleet = createServerFleet({ storage });
   try {
-    const rg = fleet.include(guess);
+    const rg = got(fleet.include(guess));
     const dialing = rg.dial();
     const socket = MockWebSocket.instances.at(-1)!;
     socket.readyState = MockWebSocket.OPEN;
@@ -255,8 +281,8 @@ test('two unknown entries racing to one machine leave one runtime, in either ord
     const storage = mem({ tmux_servers: JSON.stringify([one, two]), tmux_server_current: 'one' });
     const fleet = createServerFleet({ storage });
     try {
-      const r1 = fleet.include(one);
-      const r2 = fleet.include(two);
+      const r1 = got(fleet.include(one));
+      const r2 = got(fleet.include(two));
       assert.deepEqual(fleet.ids(), ['one', 'two'], 'two entries, two runtimes until they authenticate');
 
       // Both dials are in flight before either answer arrives.
@@ -330,12 +356,247 @@ test('a runtime releases itself when its entry is absorbed, with no fleet to hel
   }
 });
 
+test('an older dial whose promise already RESOLVED touches nothing (P1-b)', async () => {
+  // The case that matters, and the one a socket-driven test cannot reach:
+  // phase ① makes a new `connect` CANCEL an older dial, so driving this
+  // through real sockets only ever exercises the rejection path — which is
+  // exactly the shortcut the reviewer warned about. A `Connection` cannot
+  // un-resolve a promise whose continuation has not run, so here the connect
+  // promise is resolved by hand, D2 starts in the same turn, and only then
+  // does D1's continuation get to run.
+  const { storage, a } = twoServers();
+  const before = loadServers(storage);
+  let resolve1: (v: string) => void = () => {};
+  let resolve2: (v: string) => void = () => {};
+  let turn = 0;
+  let disconnects = 0;
+  const slot = {
+    connection: {
+      connect: () => new Promise<string>((r) => { if (++turn === 1) resolve1 = r; else resolve2 = r; }),
+      disconnect: () => { disconnects++; },
+      dispose: () => {},
+      // The LIVE socket is A's — which is what a stale attempt would read if
+      // it took its identity from the connection instead of its own result.
+      getMachineId: () => 'm-a',
+      getHostname: () => 'alpha-host',
+    },
+    api: {},
+  } as unknown as ConnectionSlot;
+  const runtime = createServerRuntime(a, { storage, slot });
+
+  const d1 = runtime.dial();
+  const d2 = runtime.dial();
+  // D1 authenticated as machine B, and its promise settles first.
+  resolve1('m-b');
+  resolve2('m-a');
+  const [r1, r2] = [await d1, await d2];
+
+  assert.equal(r1.ok, false);
+  assert.equal(!r1.ok && r1.reason, 'superseded',
+    'not elsewhere, not a stale ok: the attempt no longer owns the runtime');
+  assert.equal(r2.ok, true, 'and the attempt that does own it succeeds');
+  assert.equal(disconnects, 0,
+    'the superseded attempt did NOT disconnect — its own socket is already gone, and the live one is D2 s');
+  // No identity write from the stale attempt.
+  const after = loadServers(storage);
+  assert.equal(after.find((s) => s.id === 'b')?.address, before.find((s) => s.id === 'b')?.address,
+    'B s entry never learned A s address');
+  assert.equal(after.find((s) => s.id === 'a')?.machineId, 'm-a', 'and A is still A s machine');
+});
+
+test('a dial takes its machine id from its own result, not from the socket', async () => {
+  // Production cannot make these two disagree — a current attempt's live
+  // socket IS its own socket — so a stub that disagrees is the only way to
+  // state WHICH source the code trusts. It matters because the one place they
+  // could diverge is a stale attempt reading the socket a newer dial opened.
+  const { storage, a } = twoServers();
+  const slot = {
+    connection: {
+      connect: async () => 'm-a',                 // this attempt reached A
+      disconnect: () => {}, dispose: () => {},
+      getMachineId: () => 'm-b',                  // the socket claims otherwise
+      getHostname: () => 'alpha-host',
+    },
+    api: {},
+  } as unknown as ConnectionSlot;
+  const result = await createServerRuntime(a, { storage, slot }).dial();
+  assert.equal(result.ok, true, 'the attempt s own answer decides');
+  assert.equal(result.ok && result.entry.id, 'a');
+  assert.equal(loadServers(storage).find((s) => s.id === 'b')?.address, 'ws://b:9899',
+    'B s entry was not touched by a machine id the attempt never reported');
+});
+
+test('a superseded dial that FAILED is also silent', async () => {
+  // Same rule on the other branch: the attempt that took over owns the
+  // outcome, so a late failure is not reported as this runtime's failure.
+  const { storage, a } = twoServers();
+  let reject1: (e: unknown) => void = () => {};
+  let resolve2: (v: string) => void = () => {};
+  let turn = 0;
+  const slot = {
+    connection: {
+      connect: () => new Promise<string>((res, rej) => { if (++turn === 1) reject1 = rej; else resolve2 = res; }),
+      disconnect: () => {}, dispose: () => {},
+      getMachineId: () => 'm-a', getHostname: () => 'alpha-host',
+    },
+    api: {},
+  } as unknown as ConnectionSlot;
+  const runtime = createServerRuntime(a, { storage, slot });
+
+  const d1 = runtime.dial();
+  const d2 = runtime.dial();
+  reject1(new Error('connection timeout'));
+  resolve2('m-a');
+  const [r1, r2] = [await d1, await d2];
+  assert.equal(!r1.ok && r1.reason, 'superseded', 'not "failed": it is not this runtime s failure any more');
+  assert.equal(r2.ok, true);
+});
+
+test('a late dial whose socket was cancelled reports superseded, not failure', async () => {
+  // The same situation through real sockets, which is the path production
+  // takes: phase ① cancels the older dial, so D1 comes back as a rejection.
+  // It must still be reported as superseded and must not close D2's socket.
+  const { storage, a } = twoServers();
+  const fleet = createServerFleet({ storage });
+  try {
+    const ra = got(fleet.include(a));
+    const d1 = ra.dial();
+    const s1 = MockWebSocket.instances.at(-1)!;
+    s1.readyState = MockWebSocket.OPEN;
+    s1.message({ server_nonce: '00'.repeat(16) });
+
+    const d2 = ra.dial();
+    const s2 = MockWebSocket.instances.at(-1)!;
+    assert.notEqual(s2, s1, 'the second dial opened its own socket');
+    s2.readyState = MockWebSocket.OPEN;
+    s2.message({ server_nonce: '00'.repeat(16) });
+    s2.message({ result: { authenticated: true, machine_id: 'm-a', hostname: 'alpha-host' } });
+
+    assert.equal((await d2).ok, true, 'D2 is the dial that owns the runtime');
+    const late = await d1;
+    assert.equal(!late.ok && late.reason, 'superseded');
+    assert.equal(s2.readyState, MockWebSocket.OPEN, 'D2 s socket was not closed');
+    assert.equal(ra.connection.isConnected(), true);
+  } finally {
+    fleet.dropAll();
+  }
+});
+
+test('an entry removed mid-dial is not resurrected by the connection that succeeded', async () => {
+  const { storage, a } = twoServers();
+  const fleet = createServerFleet({ storage });
+  try {
+    const ra = got(fleet.include(a));
+    const dialing = ra.dial();
+    const socket = MockWebSocket.instances.at(-1)!;
+    socket.readyState = MockWebSocket.OPEN;
+    socket.message({ server_nonce: '00'.repeat(16) });
+
+    // The user removes the server while it is authenticating. That is a
+    // decision, and recording the connection would undo it.
+    storage.setItem('tmux_servers', JSON.stringify(loadServers(storage).filter((s) => s.id !== 'a')));
+    socket.message({ result: { authenticated: true, machine_id: 'm-a', hostname: 'alpha-host' } });
+
+    const result = await dialing;
+    assert.equal(!result.ok && result.reason, 'gone');
+    assert.deepEqual(loadServers(storage).map((s) => s.id), ['b'], 'the entry stays removed');
+    assert.equal(fleet.get('a'), undefined, 'and the fleet let the runtime go');
+    await assert.rejects(ra.api.listSessions(), /connection disposed/u);
+  } finally {
+    fleet.dropAll();
+  }
+});
+
+test('a runtime absorbed while idle or mid-auth is released by the fleet (P1-c)', async () => {
+  // `recordServer` absorbs every twin of the machine that just authenticated,
+  // so A's successful dial can delete B's entry. B has no occasion to discover
+  // that: it may never have dialled, or still be authenticating. Membership
+  // therefore follows the entry set, reconciled after every recordServer.
+  for (const state of ['idle', 'authenticating'] as const) {
+    const known = entry({ id: 'known', name: 'n1', address: 'ws://n1:9899', token: 'tok', machineId: 'm-a' });
+    const guess = entry({ id: 'guess', name: 'n1', address: 'ws://n1:9899', token: 'tok' });
+    const storage = mem({ tmux_servers: JSON.stringify([known, guess]), tmux_server_current: 'known' });
+    const registry = createConnectionRegistry();
+    const fleet = createServerFleet({ storage, registry });
+    try {
+      const rk = got(fleet.include(known));
+      const rg = got(fleet.include(guess));
+      assert.deepEqual(fleet.ids(), ['known', 'guess']);
+
+      let guessSocket: MockWebSocket | undefined;
+      let guessDial: Promise<unknown> | undefined;
+      if (state === 'authenticating') {
+        guessDial = rg.dial();
+        guessSocket = MockWebSocket.instances.at(-1)!;
+        guessSocket.readyState = MockWebSocket.OPEN;
+        guessSocket.message({ server_nonce: '00'.repeat(16) });   // no auth answer yet
+      }
+
+      // A authenticates. recordServer stamps m-a on `known` and absorbs the
+      // address twin `guess`.
+      const dialing = rk.dial();
+      const ks = MockWebSocket.instances.at(-1)!;
+      ks.readyState = MockWebSocket.OPEN;
+      ks.message({ server_nonce: '00'.repeat(16) });
+      ks.message({ result: { authenticated: true, machine_id: 'm-a', hostname: 'n1-host' } });
+      assert.equal((await dialing).ok, true, `A owns the machine (${state})`);
+
+      assert.deepEqual(loadServers(storage).map((s) => s.id), ['known'], 'one entry');
+      assert.deepEqual(fleet.ids(), ['known'], `the absorbed runtime is gone from the fleet (${state})`);
+      assert.equal(registry.get('guess'), undefined, 'and from the registry');
+      await assert.rejects(rg.api.listSessions(), /connection disposed/u, 'its handle is terminal');
+      await assert.rejects(rg.connection.connect('ws://n1:9899', 'tok'), /connection disposed/u,
+        'so it cannot dial its way back');
+      if (guessSocket) {
+        assert.equal(guessSocket.readyState, MockWebSocket.CLOSED, 'its half-finished auth was cancelled');
+        // A reply already on that wire must not recreate the entry.
+        guessSocket.message({ result: { authenticated: true, machine_id: 'm-late', hostname: 'ghost' } });
+        await settle();
+        assert.equal(!(await guessDial as any).ok, true);
+        assert.deepEqual(loadServers(storage).map((s) => s.id), ['known'], 'the late answer built nothing');
+      }
+      // And a stale list cannot put it back.
+      assert.equal(fleet.include(guess), undefined, 'include declines an entry identity has let go of');
+      assert.deepEqual(fleet.ids(), ['known']);
+    } finally {
+      fleet.dropAll();
+    }
+  }
+});
+
+test('the reverse direction: the unknown entry authenticates first', async () => {
+  const known = entry({ id: 'known', name: 'n1', address: 'ws://n1:9899', token: 'tok', machineId: 'm-a' });
+  const guess = entry({ id: 'guess', name: 'n1', address: 'ws://n1:9899', token: 'tok' });
+  const storage = mem({ tmux_servers: JSON.stringify([known, guess]), tmux_server_current: 'known' });
+  const fleet = createServerFleet({ storage });
+  try {
+    const rk = got(fleet.include(known));
+    const rg = got(fleet.include(guess));
+    const dialing = rg.dial();
+    const socket = MockWebSocket.instances.at(-1)!;
+    socket.readyState = MockWebSocket.OPEN;
+    socket.message({ server_nonce: '00'.repeat(16) });
+    socket.message({ result: { authenticated: true, machine_id: 'm-a', hostname: 'n1-host' } });
+    const result = await dialing;
+
+    // `known` already holds m-a, so it is the canonical entry whichever side
+    // authenticates: identity is the machine, not the order of arrival.
+    assert.equal(!result.ok && result.reason === 'elsewhere' && result.entry.id, 'known');
+    assert.deepEqual(loadServers(storage).map((s) => s.id), ['known']);
+    assert.deepEqual(fleet.ids(), ['known'], 'the loser left both maps');
+    assert.ok(rk.connection, 'and the survivor is untouched');
+    await assert.rejects(rg.api.listSessions(), /connection disposed/u);
+  } finally {
+    fleet.dropAll();
+  }
+});
+
 test('an entry whose machine is new keeps its own id and gets stamped', async () => {
   const fresh = entry({ id: 'fresh', name: 'ws://n:9899', address: 'ws://n:9899', token: 'tokN' });
   const storage = mem({ tmux_servers: JSON.stringify([fresh]), tmux_server_current: 'fresh' });
   const fleet = createServerFleet({ storage });
   try {
-    const rt = fleet.include(fresh);
+    const rt = got(fleet.include(fresh));
     const dialing = rt.dial();
     const socket = MockWebSocket.instances.at(-1)!;
     socket.readyState = MockWebSocket.OPEN;
@@ -354,7 +615,7 @@ test('a removed entry is not dialled from a stale address', async () => {
   const { storage, a } = twoServers();
   const fleet = createServerFleet({ storage });
   try {
-    const ra = fleet.include(a);
+    const ra = got(fleet.include(a));
     storage.setItem('tmux_servers', JSON.stringify(loadServers(storage).filter((s) => s.id !== 'a')));
     const sockets = MockWebSocket.instances.length;
     const result = await ra.dial();
@@ -371,8 +632,8 @@ test('caps are the answer of the server that was asked', async () => {
   const { storage, a, b } = twoServers();
   const fleet = createServerFleet({ storage });
   try {
-    const ra = fleet.include(a);
-    const rb = fleet.include(b);
+    const ra = got(fleet.include(a));
+    const rb = got(fleet.include(b));
     const sa = await handshakePlain(ra.connection, 'ws://a:9899', 'tokA', 'm-a');
     const sb = await handshakePlain(rb.connection, 'ws://b:9899', 'tokB', 'm-b');
     assert.deepEqual(ra.caps(), { hub: null, backends: null }, 'unasked is not "no"');
@@ -400,11 +661,11 @@ test('caps are the answer of the server that was asked', async () => {
   }
 });
 
-test('a transient failure leaves the Hub flag alone; an empty list is unknown', async () => {
+test('a transient failure leaves BOTH caps alone; an empty list is unknown', async () => {
   const { storage, a } = twoServers();
   const fleet = createServerFleet({ storage });
   try {
-    const ra = fleet.include(a);
+    const ra = got(fleet.include(a));
     const sa = await handshakePlain(ra.connection, 'ws://a:9899', 'tokA', 'm-a');
     // findLast, not find: the second probe sends new requests, and answering
     // the first probe's stale id would leave these pending until the RPC
@@ -423,16 +684,63 @@ test('a transient failure leaves the Hub flag alone; an empty list is unknown', 
     assert.equal(ra.caps().hub, true);
     assert.deepEqual(ra.caps().backends?.map((x) => x.name), ['kiro']);
 
-    // A reconnect blip must not unmount the Hub and destroy its state.
+    // A reconnect blip must not unmount the Hub and destroy its state, and
+    // must not empty a backend list the page already has: a failure is not an
+    // answer, so the last real one stands. That is what "caps survive a
+    // reconnect of the same server" has to mean.
     const again = ra.probeCaps();
     await settle();
     answer('hub_rooms', { error: { code: -32000, message: 'timeout' } });
-    // A server that answers with an EMPTY list has told us nothing useful —
-    // `agents.ts` treats that as unknown, and so does this.
-    answer('backends_list', { result: { backends: [] } });
+    answer('backends_list', { error: { code: -32000, message: 'timeout' } });
     await again;
     assert.equal(ra.caps().hub, true, 'only a definitive no flips it off');
-    assert.equal(ra.caps().backends, null, 'an empty list is unknown, not "this server has none"');
+    assert.deepEqual(ra.caps().backends?.map((x) => x.name), ['kiro'], 'and the list is still there');
+
+    // A server that answers with an EMPTY list IS answering, and `agents.ts`
+    // reads that as unknown rather than "this server has none".
+    const third = ra.probeCaps();
+    await settle();
+    answer('hub_rooms', { result: { rooms: {} } });
+    answer('backends_list', { result: { backends: [] } });
+    await third;
+    assert.equal(ra.caps().backends, null);
+  } finally {
+    fleet.dropAll();
+  }
+});
+
+test('a slower probe cannot overwrite a newer answer', async () => {
+  // Two probes overlap — a reconnect while one is in flight, or an upgrade.
+  // The older `method not found` must not unmount a Hub the newer probe has
+  // just confirmed (reviewer P2): `dead` says whether the runtime is held,
+  // not whether an answer is current.
+  const { storage, a } = twoServers();
+  const fleet = createServerFleet({ storage });
+  try {
+    const ra = got(fleet.include(a));
+    const sa = await handshakePlain(ra.connection, 'ws://a:9899', 'tokA', 'm-a');
+    const ids = (method: string) => sa.texts().filter((t: any) => t.method === method).map((t: any) => t.id);
+
+    const older = ra.probeCaps();
+    await settle();
+    const newer = ra.probeCaps();
+    await settle();
+    const [hubOld, hubNew] = ids('hub_rooms');
+    const [backOld, backNew] = ids('backends_list');
+
+    // The newer probe answers first: this server HAS the Hub.
+    sa.message({ id: hubNew, result: { rooms: {} } });
+    sa.message({ id: backNew, result: { backends: [{ name: 'kiro' }] } });
+    await newer;
+    assert.equal(ra.caps().hub, true);
+
+    // Then the older one arrives, from before the upgrade, saying there is no
+    // such method.
+    sa.message({ id: hubOld, error: { code: -32601, message: 'no such method' } });
+    sa.message({ id: backOld, result: { backends: [] } });
+    await older;
+    assert.equal(ra.caps().hub, true, 'the stale no did not unmount the Hub');
+    assert.deepEqual(ra.caps().backends?.map((x) => x.name), ['kiro'], 'nor empty the list');
   } finally {
     fleet.dropAll();
   }
@@ -442,7 +750,7 @@ test('a probe in flight when the runtime is dropped settles without publishing',
   const { storage, a } = twoServers();
   const fleet = createServerFleet({ storage });
   try {
-    const ra = fleet.include(a);
+    const ra = got(fleet.include(a));
     await handshakePlain(ra.connection, 'ws://a:9899', 'tokA', 'm-a');
     const probing = ra.probeCaps();
     await settle();
@@ -494,7 +802,7 @@ test('the registry is the lifetime, the fleet is the membership', async () => {
   const registry = createConnectionRegistry();
   const fleet = createServerFleet({ storage, registry });
   try {
-    const ra = fleet.include(a);
+    const ra = got(fleet.include(a));
     fleet.include(b);
     assert.equal(registry.get('a')?.connection, ra.connection, 'the runtime uses the registry s slot');
     fleet.drop('a');
@@ -521,8 +829,8 @@ test('a frame sealed for one server resolves nothing on the other', async () => 
     const srvA = new FakeE2eServer('tokA', 2, 'm-a', 'alpha-host');
     const srvB = new FakeE2eServer('tokB', 2, 'm-b', 'beta-host');
     try {
-      const ra = fleet.include(a);
-      const rb = fleet.include(b);
+      const ra = got(fleet.include(a));
+      const rb = got(fleet.include(b));
       const sa = await handshake(ra.connection, srvA, 'ws://a:9899', 'tokA');
       const sb = await handshake(rb.connection, srvB, 'ws://b:9899', 'tokB');
       assert.equal(ra.machineId(), 'm-a');

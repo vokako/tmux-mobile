@@ -26,7 +26,14 @@
 //     a different app depending on which machine they are looking at. The
 //     registry's own keys (`tmux_servers`, CURRENT, `tmux_machines`) and the
 //     active mirror (`tmux_address`, `tmux_token`, `tmux_socket`) pass through
-//     too: their home is the `ServerEntry`, which already is per server.
+//     too, because their home is the `ServerEntry`.
+//
+// Passing them through is a COMPATIBILITY decision, not a claim that those
+// credentials are now scoped by server. They are not: `tmux_address`,
+// `tmux_token` and `tmux_machine_id`'s live spelling still describe whichever
+// server is current. So handing this view to the existing reconnect machine
+// would not scope it — ②b must give reconnect (and anything else reading the
+// connection config) a reader that resolves the ENTRY by id.
 //
 // Not wired into production yet: ②a ships this and its tests; the ②b commit
 // that switches every live read and write over is what adopts it.

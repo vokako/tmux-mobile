@@ -15,9 +15,9 @@
 //     user looked at another server meanwhile.
 //   - split-screen falls out of it. Each cell wraps its own provider, so two
 //     cells on two servers need no extra mechanism.
-//   - it is also all Svelte gives us: `getContext` works during component
-//     initialisation and nowhere else. Reading it inside a handler or after an
-//     `await` is not a style question, it returns nothing.
+//   - it is also all Svelte gives us: `getContext` is only valid during
+//     component initialisation. Reading it inside a handler or after an
+//     `await` is a lifecycle error, not a style question.
 //
 // Three things must NOT use this, and take an explicit api or serverId
 // instead (reviewer P2): framework helpers that are not components
@@ -41,12 +41,16 @@ const KEY = Symbol('tmm.server-runtime');
  * Bind this subtree to one server. Call it during the initialisation of the
  * component that OWNS the subtree.
  *
- * ②b's contract on top of this: the subtree is keyed by the runtime HANDLE's
- * lifetime (`{#key runtime}`), so a new runtime for the same cell, target or
- * serverId unmounts the old owner — clearing its subscriptions and
- * invalidating landings aimed at it — before the new one mounts, while an
- * ordinary reconnect inside one runtime (the handle is the same object) never
- * remounts anything.
+ * ②b's contract on top of this: the subtree's owner is the runtime HANDLE, so
+ * a replacement runtime for the same cell, target or serverId swaps the owner
+ * while an ordinary reconnect inside one runtime (the handle is the same
+ * object) remounts nothing.
+ *
+ * Keying on the handle gives the swap, NOT its order: Svelte creates the new
+ * branch before destroying the old one (measured in
+ * server-context.mount.test.ts). "The old owner is torn down — subscriptions
+ * cleared, landings aimed at it invalidated — before the new one mounts" is a
+ * separate, explicit step ②b has to sequence itself.
  */
 export function setServerRuntime(runtime: ServerRuntime): void {
   setContext(KEY, runtime);

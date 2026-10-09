@@ -259,11 +259,14 @@ in production, no serverId on any runtime reference, no change to parking
 Aggregate switch are phases ② and ③.
 
 One correction to how phase ① was described (reviewer P2, 2026-10-09): it was
-not a strictly zero-behaviour change. `dispose()` now settles a dial still in
-flight immediately, where the old module let its connect timeout reject the
-promise later. Nothing in production could observe it — the facade's one slot
-is never disposed — but "zero behaviour change in Single mode" is the wrong
-claim for it; "every existing Single-mode regression still passes, byte for
+not a strictly zero-behaviour change. `cancelDialing` settles a dial still in
+flight AT ONCE on three paths — `dispose()`, `disconnect()` and a `connect()`
+that supersedes an earlier one — where the old module left the promise for its
+connect timeout to reject seconds later. Only `dispose` is unobservable in
+production (the facade's one slot is never disposed); the other two are
+reachable in Single mode, so a server switch or a disconnect during a dial now
+rejects immediately instead of late. "Zero behaviour change in Single mode" is
+the wrong claim; "every existing Single-mode regression still passes, byte for
 byte" is the one the evidence supports.
 
 ## A name stopped being an address (board #335 ②)
@@ -335,15 +338,33 @@ Identity, which is the reason a runtime exists rather than a field on
   and authenticated as one that already has an entry (a migrated
   address-history row). The old entry's name, token and address are untouched
   either way.
-- **A merged-away runtime is released, not just disconnected.** Two unknown
-  entries racing to the same machine (two migrated address-history rows) is the
-  ordinary way a duplicate appears, in either auth order: the first to
-  authenticate becomes the canonical entry and `recordServer` absorbs the
-  other. The loser's id no longer exists, so its runtime disposes itself and
-  tells the fleet to forget the key. Disconnecting would leave a handle that can
-  dial again, a liveness clock still ticking and anything that captured the dead
-  id; after dispose a reply already on that wire resolves nothing and `call`
-  rejects.
+- **One dial is one attempt.** A runtime may dial more than once, and a
+  `Connection` can only reject a dial that has not SETTLED — it cannot
+  un-resolve a promise whose continuation has not run. So every dial captures
+  an attempt number before its first await, and a continuation that is no
+  longer the current attempt returns `superseded` having touched NOTHING: it
+  does not record, adopt, report an identity, or disconnect. Not disconnecting
+  is the subtle half — the newer attempt's `connect` already replaced the
+  socket this one dialled, so closing the connection's current socket would cut
+  the attempt that superseded it. The machine id comes from the attempt's own
+  `connect` result rather than from "whatever the current socket says". An
+  entry removed while a dial was authenticating is NOT resurrected by
+  recording the connection that just succeeded. This is the same ownership bug
+  as #315's old `onAddress` continuation reconnecting to another machine, and
+  a liveness flag cannot stand in for attempt identity.
+- **Membership follows the entry set, reconciled after every `recordServer`.**
+  That call is the one moment the saved set can change: it stamps a machine
+  onto an entry and absorbs every twin of the survivor, which deletes entries
+  belonging to OTHER runtimes. So the fleet reconciles against `servers.ts` —
+  it never merges by address itself — and drops every runtime whose entry has
+  gone. Letting each runtime discover its own loss was not enough: a runtime
+  that has not dialled yet, or is still authenticating, has no occasion to
+  discover anything and would sit in the fleet holding a socket for a server
+  that no longer exists. `include` also declines an entry that is not in the
+  saved registry, so a stale list cannot put an absorbed server back. A
+  released runtime is terminal, not merely disconnected: a disconnected handle
+  can dial again, keeps its liveness clock, and a reply already on its wire
+  could recreate the entry identity has just absorbed.
 - **Recording is never activating.** A dial writes through `recordServer` and
   `adoptHostname` only; CURRENT and the live mirror keys stay the switch
   path's, or a background server could take the screen.
@@ -359,12 +380,17 @@ would reconnect to the wrong machine. It needs one scoped target reader, which
 is ②b's commit; a key-remapping storage proxy would be a second mechanism to
 delete two commits later.
 
-One simplification falls out of binding the API to a connection: App's capability
-probe needs a switch-generation guard (`serverSwitch.owns(intent)`) because the
-module socket could move to another server while `hub_rooms` was in flight. A
-runtime's probe needs none — the answer came over that runtime's own
-connection, so it cannot be about another server. Only the "was this runtime
-dropped" guard remains.
+Capabilities need two guards, and they answer different questions: is this
+runtime still held, and is this the NEWEST answer. App needs neither of those
+and one of its own (`serverSwitch.owns`), because its module socket could move
+to another server mid-probe. A runtime's answer always came over its own
+connection, so it cannot be about another server — but it can be about an
+older moment of this one, and an old `method not found` must not unmount a Hub
+a later probe confirmed after an upgrade or a reconnect. A failed probe is not
+an answer at all: it leaves the last real one standing, for the Hub flag and
+for the backend list alike, which is what "caps survive a reconnect of the same
+server" has to mean. Only a server that answers with an empty list makes the
+list unknown again.
 
 ### One slot per server, and the fold that gets there
 
@@ -396,13 +422,23 @@ serverId throws instead of falling back to the unprefixed keys, because that
 fallback would write one server's drafts where every server reads them, and
 only on the path where CURRENT has not resolved yet.
 
-`migrateServerState(storage)` is the one-time fold: idempotent without a
-"migrated" flag (it recognises a slot that already holds the live value), the
-ACTIVE value wins over the current server's own older park, every other
-server's park is left alone because it is already in its final home, and with
-no resolved CURRENT it is a no-op that says so rather than guessing a slot. It
-does not clear the unprefixed keys, so a client rolled back to a build from
-before #335 finds the state it left.
+`migrateServerState(storage)` is the one-time fold, and its completion is
+RECORDED rather than inferred. The first version compared values instead, which
+is only idempotent while nothing else writes the slot: the moment the slot is
+the live home, a second run overwrites a newer resident value with the stale
+unprefixed one. Two markers, because completion has two sides —
+`tmux_state_layout` says the INPUTS have been consumed, so a CURRENT that
+changes later can never re-attribute A's leftover live values to B, and
+`tmux_state_layout::<id>` says that server's SLOT is in the new layout. A
+version, not a boolean, so a later layout change can tell whose fold it was.
+On the one run that reads them, the ACTIVE value wins over the current
+server's own older park; every other server's park is left alone because it is
+already in its final home; with no resolved CURRENT it is a no-op that says so
+and marks nothing, so a later run still folds. The markers are written AFTER
+the fold, so a crash halfway leaves the inputs readable and the next run redoes
+the whole thing rather than half of it. It does not clear the unprefixed keys,
+so a client rolled back to a build from before #335 finds the state it left;
+deleting them belongs to the ②b commit that stops writing them.
 
 The fold is NOT enabled in ②a, and that sequencing is a rule rather than
 caution: `parkFrom` writes `<key>::<id>` — the very string a resident slot
@@ -682,12 +718,18 @@ entry instead of publishing under this id, so an address that has come to
 reach another machine cannot route that machine's panes into this entry's
 views. A dial RECORDS and never ACTIVATES — CURRENT and the live mirror keys
 belong to the switch path, or a background server could take the screen. The
-fleet matches by entry id and machine id only; one machine never gets two
-runtimes, and a runtime whose entry is absorbed into another machine's
-disposes itself and has the fleet forget its id — a merely disconnected handle
-can dial again and keeps its liveness clock ticking.
-`server-fleet.source.test.ts` fails if `address`, the ws.ts
-facade or `localStorage` appears in either module. Capabilities are the asked
+fleet matches by entry id and machine id only, and MEMBERSHIP FOLLOWS THE
+ENTRY SET: it reconciles against `servers.ts` after every `recordServer`,
+because that call absorbs the survivor's twins and so can delete entries
+belonging to other runtimes — including ones that have not dialled yet or are
+still authenticating, which have no occasion to notice. A released runtime is
+terminal, never merely disconnected, and `include` declines an id the saved
+registry does not list. Each dial carries an ATTEMPT identity captured before
+its first await: a superseded continuation records nothing, adopts nothing,
+reports nothing and above all disconnects nothing, since the socket it dialled
+has already been replaced by the one that superseded it. An entry removed
+mid-dial is not resurrected. `server-fleet.source.test.ts` fails if `address`,
+the ws.ts facade or `localStorage` appears in either module. Capabilities are the asked
 server's answer and `null` means "not answered yet" — a timeout must not flip
 `hub` off, because false unmounts the always-mounted Hub and destroys the state
 it exists to preserve.
@@ -704,8 +746,14 @@ second copy of the per-project semantics — those stay in `hub-prefs` and
 STATE is scoped: the person's and the window's preferences (theme, fonts,
 zoom, language, shortcuts, notification switches, feed level, sidebar) pass
 through, and so do the registry keys and the active mirror, whose home is the
-`ServerEntry`. An empty serverId throws rather than falling back to the
-unprefixed keys. `migrateServerState` is idempotent with no flag, lets the
+`ServerEntry` — which is a compatibility decision about a storage view, not a
+claim that those credentials are scoped by server, so ②b still owes reconnect
+and the connection config an entry-scoped reader. An empty serverId throws
+rather than falling back to the unprefixed keys. `migrateServerState` records
+its completion in two markers (the inputs are consumed; this server's slot is
+converted) rather than inferring it from values, because value comparison
+stops being idempotent the moment the slot is the live home — it would
+overwrite a newer resident value with the stale unprefixed one. It lets the
 ACTIVE value win over the current server's older park, keeps every other
 server's park, and no-ops when CURRENT is unresolved. It must be enabled in
 the SAME commit that moves every live read and write: `parkFrom` writes the
