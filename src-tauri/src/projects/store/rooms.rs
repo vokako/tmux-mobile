@@ -202,6 +202,81 @@ impl Store {
         Ok(rows.filter_map(Result::ok).collect())
     }
 
+    /// The v31 shape (also a heal floor, board #334): the human's read mark
+    /// per room. One row per room because a server has one human reader
+    /// today; every client of that human reads and writes the same row.
+    pub(super) fn ensure_hub_read(&self) -> Result<(), String> {
+        self.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS hub_read (
+                   room TEXT PRIMARY KEY,
+                   seq  INTEGER NOT NULL,
+                   ts   INTEGER NOT NULL
+                 );",
+            )
+            .map_err(|e| format!("ensure hub_read: {e}"))
+    }
+
+    /// The stored read mark of `room`, `(seq, ts)`.
+    pub fn hub_read_mark(&self, room: &str) -> Result<Option<(i64, i64)>, String> {
+        self.conn
+            .prepare_cached("SELECT seq, ts FROM hub_read WHERE room = ?1")
+            .and_then(|mut st| st.query_row(rusqlite::params![room], |r| Ok((r.get(0)?, r.get(1)?))).optional())
+            .map_err(|e| format!("read hub_read: {e}"))
+    }
+
+    /// v31 only (board #334): every room that already has messages starts
+    /// READ to its head — the upgrade counts as "read up to now", because a
+    /// per-client mark was the only read state before and a fresh client
+    /// lost it. Runs in the migration transaction, never on heal: a room
+    /// born later starts without a mark and every message in it counts.
+    pub(super) fn seed_hub_read(&self) -> Result<(), String> {
+        self.conn
+            .execute_batch(
+                "INSERT OR IGNORE INTO hub_read (room, seq, ts)
+                   SELECT room, MAX(seq), MAX(ts) FROM hub_msgs GROUP BY room;",
+            )
+            .map_err(|e| format!("seed hub_read: {e}"))
+    }
+
+    /// `(seq, ts)` of `room`'s newest message, `None` for an empty room.
+    pub fn hub_room_head(&self, room: &str) -> Result<Option<(i64, i64)>, String> {
+        self.conn
+            .prepare_cached("SELECT seq, ts FROM hub_msgs WHERE room = ?1 ORDER BY seq DESC LIMIT 1")
+            .and_then(|mut st| st.query_row(rusqlite::params![room], |r| Ok((r.get(0)?, r.get(1)?))).optional())
+            .map_err(|e| format!("read room head: {e}"))
+    }
+
+    /// Move `room`'s read mark FORWARD (board #334) and return where it now
+    /// is. The SERVER resolves the mark: a `seq` is clamped to the room's
+    /// newest message (a cache from a wiped database cannot hide the next
+    /// messages), a legacy `ts`-only mark becomes the newest seq at or before
+    /// it, and the stored `ts` is always the resolved message's, never a
+    /// client clock. An older mark is a no-op: the row only grows.
+    pub fn hub_mark_read(&self, room: &str, seq: Option<i64>, ts: i64) -> Result<Option<(i64, i64)>, String> {
+        let resolved: Option<(i64, i64)> = self
+            .conn
+            .query_row(
+                "SELECT seq, ts FROM hub_msgs
+                  WHERE room = ?1 AND (CASE WHEN ?2 IS NULL THEN ts <= ?3 ELSE seq <= ?2 END)
+                  ORDER BY seq DESC LIMIT 1",
+                rusqlite::params![room, seq, ts],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| format!("resolve read mark: {e}"))?;
+        if let Some((seq, ts)) = resolved {
+            self.conn
+                .execute(
+                    "INSERT INTO hub_read (room, seq, ts) VALUES (?1, ?2, ?3)
+                     ON CONFLICT(room) DO UPDATE SET seq = MAX(seq, excluded.seq), ts = MAX(ts, excluded.ts)",
+                    rusqlite::params![room, seq, ts],
+                )
+                .map_err(|e| format!("write hub_read: {e}"))?;
+        }
+        self.hub_read_mark(room)
+    }
+
     /// The page of `room` AROUND one of its messages (board #322, the jump
     /// window): up to `limit / 2` rows at or after `seq` and the rest before
     /// it, oldest first. seq is global across rooms, so `before_seq = seq + N`

@@ -9,7 +9,7 @@ use super::registry::{DEFAULT_KIMI_SYSTEM, DEFAULT_OMP_MODEL, DEFAULT_OMP_SYSTEM
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 30;
+const SCHEMA_VERSION: i64 = 31;
 
 impl Store {
     /// Ensure the durable half of Board editability exists, then
@@ -702,6 +702,12 @@ impl Store {
             // rows have none: 0.
             self.ensure_delivery_ask_at()?;
         }
+        if version < 31 {
+            // v31 (board #334): the human's read mark per room, shared by
+            // every client; every existing room starts read to its head.
+            self.ensure_hub_read()?;
+            self.seed_hub_read()?;
+        }
         Ok(())
     }
 
@@ -991,6 +997,34 @@ mod tests {
         store.insert_held_delivery("s", "w1", "ctx\n\nline", 5, 200, "m9").unwrap();
         assert_eq!(store.held_deliveries("s", "w1").unwrap()[0].shown(), "line\n\nctx");
         store.ensure_delivery_ask_at().unwrap();
+    }
+
+    /// v30 -> v31 (board #334): every room that already spoke starts read
+    /// to its head (old history is read), a room born after the upgrade has
+    /// no mark (every message counts), and the heal floor recreates a
+    /// missing table EMPTY — seeding is the migration's, once.
+    #[test]
+    fn v30_rooms_start_read_to_their_head() {
+        let scratch = crate::tmux::Scratch::new("store-v31");
+        let path = std::path::Path::new(&scratch.path()).join("state.db");
+        {
+            let store = Store::open(&path).unwrap();
+            store.conn.execute_batch("DROP TABLE hub_read; PRAGMA user_version = 30;").unwrap();
+            store.hub_append("proj:old", "o1", 10, "lead", "[]", "msg", "old one").unwrap();
+            store.hub_append("proj:old", "o2", 20, "lead", "[]", "msg", "old two").unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        let head = store.hub_room_head("proj:old").unwrap().unwrap();
+        assert_eq!(store.hub_read_mark("proj:old").unwrap(), Some(head), "old history is read");
+        assert_eq!(store.hub_above("proj:old", Some(head.0), 0).unwrap().len(), 0);
+        let after = store.hub_append("proj:old", "o3", 30, "lead", "[]", "msg", "after upgrade").unwrap();
+        assert_eq!(store.hub_above("proj:old", Some(head.0), 0).unwrap()[0].0, after.seq, "a message after the upgrade counts");
+        store.hub_append("proj:new", "n1", 40, "lead", "[]", "msg", "new room").unwrap();
+        assert_eq!(store.hub_read_mark("proj:new").unwrap(), None, "a room born later is not baselined");
+        store.conn.execute_batch("DROP TABLE hub_read;").unwrap();
+        drop(store);
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.hub_read_mark("proj:old").unwrap(), None, "healed on open, empty");
     }
 
     /// The heal step, which is not hypothetical: a dev binary built in the

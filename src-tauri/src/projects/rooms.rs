@@ -260,6 +260,25 @@ pub fn unread(room: &str, after_seq: Option<i64>, after_ts: i64) -> Option<serde
     (count > 0).then(|| serde_json::json!({ "count": count, "first_seq": first, "last_seq": last }))
 }
 
+/// The human's read mark of `room` on this server (board #334), `(seq, ts)`.
+/// One reader per server: every client of the human shares it.
+pub fn read_mark(room: &str) -> Option<(i64, i64)> {
+    with_store(|s| s.hub_read_mark(room)).ok().flatten()
+}
+
+/// Move `room`'s read mark forward (resolved and clamped by the server,
+/// never backwards) and return where it now is. Only the human's clients
+/// call this (`hub_read`); an agent reading the room with `tmm log` is not
+/// the human reading it.
+pub fn mark_read(room: &str, seq: Option<i64>, ts: i64) -> Result<Option<(i64, i64)>, String> {
+    with_store(|s| s.hub_mark_read(room, seq, ts))
+}
+
+/// `(seq, ts)` of `room`'s newest message (the clamp for a client's mark).
+pub fn room_head(room: &str) -> Option<(i64, i64)> {
+    with_store(|s| s.hub_room_head(room)).ok().flatten()
+}
+
 fn is_hidden(room: &str, seq: i64, hidden: &[String]) -> bool {
     with_store(|s| s.hub_message_by_seq(room, seq))
         .ok()

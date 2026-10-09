@@ -130,7 +130,8 @@ impl Store {
         self.ensure_activity_requesters()?;
         self.ensure_delivery_command()?;
         self.ensure_delivery_ask_at()?;
-        self.ensure_wakes()
+        self.ensure_wakes()?;
+        self.ensure_hub_read()
     }
 
     // ---- archived messages ----------------------------------------------

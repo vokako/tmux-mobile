@@ -61,18 +61,64 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
     // first_seq, last_seq}}}` over the messages `rooms::news_kind` calls news.
     // A room with none is absent. Like `hub_rooms`, it is about many rooms,
     // so it answers before the session gate.
+    //
+    // The server's read mark (board #334, `hub_read`) is the shared truth:
+    // the watermark is the LATER of it and the client's cached one (a fresh
+    // client sends `{}` and inherits the server's; a cached mark not yet
+    // ACKed still counts for this client), and `marks` answers the PERSISTED
+    // mark of every asked room that has one — never that effective max — so
+    // the client's cache follows another client's reading.
     if req.method == "hub_unread" {
         let mut out = serde_json::Map::new();
+        let mut marks = serde_json::Map::new();
         if let Some(asked) = p.get("rooms").and_then(|v| v.as_object()) {
             for (room, mark) in asked.iter().take(256) {
-                let seq = mark.get("seq").and_then(|v| v.as_i64()).filter(|n| *n > 0);
-                let ts = mark.get("ts").and_then(|v| v.as_i64()).unwrap_or(0);
+                let mut seq = mark.get("seq").and_then(|v| v.as_i64()).filter(|n| *n > 0);
+                let mut ts = mark.get("ts").and_then(|v| v.as_i64()).unwrap_or(0);
+                // The client's cached mark is validated at the door: a seq or
+                // ts past the room's newest message cannot be a real read (a
+                // cache from a wiped or another database), so it is DROPPED,
+                // not clamped — clamped, a cache that keeps re-sending it
+                // would hide every next message as it arrives.
+                let Some((head_seq, head_ts)) = rooms::room_head(room) else { continue };
+                seq = seq.filter(|n| *n <= head_seq);
+                if ts > head_ts {
+                    ts = 0;
+                }
+                if let Some((s, t)) = rooms::read_mark(room) {
+                    seq = Some(seq.map_or(s, |c| c.max(s)));
+                    marks.insert(room.clone(), serde_json::json!({ "seq": s, "ts": t }));
+                }
                 if let Some(sum) = rooms::unread(room, seq, ts) {
                     out.insert(room.clone(), sum);
                 }
             }
         }
-        return Ok(serde_json::json!({ "rooms": out }));
+        return Ok(serde_json::json!({ "rooms": out, "marks": marks }));
+    }
+    // The human read a room (board #334): `{rooms: {"<room>": {seq} | {ts}}}`
+    // moves each room's ONE server-side mark forward — resolved by the server
+    // to a real message (a seq clamped to the room's newest, a legacy ts to
+    // the newest message at or before it), never backwards — and answers the
+    // PERSISTED marks, which are the client's ACK. The Hub calls it when a
+    // room is read and re-sends it until ACKed. `tmm` never calls it: an
+    // agent reading the room is not the human reading it. Many rooms, so it
+    // answers before the session gate.
+    if req.method == "hub_read" {
+        let mut marks = serde_json::Map::new();
+        if let Some(asked) = p.get("rooms").and_then(|v| v.as_object()) {
+            for (room, mark) in asked.iter().take(256) {
+                let seq = mark.get("seq").and_then(|v| v.as_i64()).filter(|n| *n > 0);
+                let ts = mark.get("ts").and_then(|v| v.as_i64()).unwrap_or(0).max(0);
+                if seq.is_none() && ts == 0 {
+                    continue;
+                }
+                if let Some((s, t)) = rooms::mark_read(room, seq, ts).map_err(RpcError::Internal)? {
+                    marks.insert(room.clone(), serde_json::json!({ "seq": s, "ts": t }));
+                }
+            }
+        }
+        return Ok(serde_json::json!({ "rooms": marks }));
     }
     // The board twin of `hub_rooms`: issue counts per column for EVERY
     // project's board, one grouped read (board #39) — the Board sidebar
@@ -1768,6 +1814,80 @@ mod tests {
         assert_eq!(v["rooms"][&room], serde_json::json!({ "count": 1, "first_seq": a["seq"], "last_seq": a["seq"] }), "the archived one is not unread");
         assert!(v["rooms"].get(&quiet).is_none(), "own words are never unread");
         let _ = b;
+    }
+
+    /// Board #334: ONE read mark per room on the server. `hub_read` only moves
+    /// forward and never past the room's newest message; `hub_unread` reads
+    /// from the later of the server's mark and the client's, so a fresh
+    /// client (no mark of its own) sees what the human has not read, and a
+    /// stale cache cannot resurrect what another client read.
+    #[test]
+    fn hub_read_is_one_monotonic_mark_and_the_default_watermark() {
+        crate::projects::tests::use_test_store();
+        let room = format!("proj:read-rpc-{}", uuid::Uuid::new_v4());
+        let m: Vec<_> = (0..4).map(|i| rooms::seed_msg(&room, &format!("r{i}-{room}"), 100 * (i + 1), "lead", &["human".into()], &format!("m{i}"))).collect();
+        let seq = |i: usize| m[i]["seq"].as_i64().unwrap();
+        let read = |mark: serde_json::Value| handle_hub_request(&req("hub_read", serde_json::json!({ "rooms": { &room: mark } })), None).result.unwrap()["rooms"][&room].clone();
+        let unread = |mark: serde_json::Value| handle_hub_request(&req("hub_unread", serde_json::json!({ "rooms": { &room: mark } })), None).result.unwrap();
+
+        // A fresh client, nothing read anywhere: the whole room.
+        let v = unread(serde_json::json!({}));
+        assert_eq!(v["rooms"][&room]["count"], 4);
+        assert!(v["marks"].get(&room).is_none(), "no server mark yet");
+
+        // One client reads to m1; a fresh client now inherits it.
+        assert_eq!(read(serde_json::json!({ "seq": seq(1), "ts": 200 })), serde_json::json!({ "seq": seq(1), "ts": 200 }));
+        let v = unread(serde_json::json!({}));
+        assert_eq!(v["rooms"][&room]["count"], 2, "the server's mark is the default watermark");
+        assert_eq!(v["marks"][&room], serde_json::json!({ "seq": seq(1), "ts": 200 }));
+        // A stale cached mark below the server's does not resurrect m1.
+        assert_eq!(unread(serde_json::json!({ "seq": seq(0) }))["rooms"][&room]["count"], 2);
+        // A cached mark ABOVE the server's (not yet pushed) wins for the count.
+        assert_eq!(unread(serde_json::json!({ "seq": seq(2) }))["rooms"][&room]["count"], 1);
+
+        // Never backwards.
+        assert_eq!(read(serde_json::json!({ "seq": seq(0), "ts": 100 })), serde_json::json!({ "seq": seq(1), "ts": 200 }));
+        // Never past what exists: a mark from a wiped database is clamped.
+        assert_eq!(read(serde_json::json!({ "seq": seq(3) + 1_000_000, "ts": 9_999 })), serde_json::json!({ "seq": seq(3), "ts": 400 }));
+        assert!(unread(serde_json::json!({}))["rooms"].get(&room).is_none(), "all read");
+        let later = rooms::seed_msg(&room, &format!("r9-{room}"), 500, "lead", &[], "after the clamp");
+        assert_eq!(unread(serde_json::json!({}))["rooms"][&room]["first_seq"], later["seq"], "the clamp did not hide the next message");
+    }
+
+    /// Board #334: the server resolves every mark. A legacy ts becomes the
+    /// newest message at or before it (and stores THAT message's ts, not the
+    /// client's clock); an empty mark and an empty room write nothing; a
+    /// future seq or ts carried by a stale cache in `hub_unread` is dropped
+    /// at the door (the server mark reads) and hides nothing, however often re-sent.
+    #[test]
+    fn the_server_resolves_every_mark_and_drops_impossible_ones() {
+        crate::projects::tests::use_test_store();
+        let room = format!("proj:push-{}", uuid::Uuid::new_v4());
+        let empty = format!("proj:empty-{}", uuid::Uuid::new_v4());
+        let a = rooms::seed_msg(&room, &format!("p0-{room}"), 1_000, "lead", &[], "a");
+        let b = rooms::seed_msg(&room, &format!("p1-{room}"), 2_000, "lead", &[], "b");
+        let ask = serde_json::json!({ "rooms": { &room: { "ts": 1_500 }, &empty: { "seq": 7 } } });
+        let v = handle_hub_request(&req("hub_read", ask), None).result.unwrap();
+        assert_eq!(v["rooms"][&room], serde_json::json!({ "seq": a["seq"], "ts": 1_000 }));
+        assert!(v["rooms"].get(&empty).is_none(), "nothing to have read");
+        assert!(rooms::read_mark(&empty).is_none());
+        let v = handle_hub_request(&req("hub_read", serde_json::json!({ "rooms": { &room: {} } })), None).result.unwrap();
+        assert!(v["rooms"].get(&room).is_none(), "an empty mark is not a read");
+        assert_eq!(rooms::read_mark(&room), Some((a["seq"].as_i64().unwrap(), 1_000)));
+
+        // A stale cache from a wiped database carries a future seq / ts.
+        let unread = |mark: serde_json::Value| handle_hub_request(&req("hub_unread", serde_json::json!({ "rooms": { &room: mark } })), None).result.unwrap();
+        assert_eq!(unread(serde_json::json!({ "seq": 9_000_000 }))["rooms"][&room]["first_seq"], b["seq"], "an impossible mark is dropped: the server's mark reads");
+        rooms::seed_msg(&room, &format!("p2-{room}"), 3_000, "lead", &[], "c");
+        assert_eq!(unread(serde_json::json!({ "seq": 9_000_000 }))["rooms"][&room]["count"], 2, "re-sent, the future seq still hides nothing (b and c)");
+        // A legacy future ts in a room the server has no mark for yet.
+        let fresh = format!("proj:fresh-{}", uuid::Uuid::new_v4());
+        rooms::seed_msg(&fresh, &format!("f0-{fresh}"), 1_000, "lead", &[], "f0");
+        let ask = |mark: serde_json::Value| handle_hub_request(&req("hub_unread", serde_json::json!({ "rooms": { &fresh: mark } })), None).result.unwrap();
+        assert_eq!(ask(serde_json::json!({ "ts": 9_000_000 }))["rooms"][&fresh]["count"], 1, "a future ts is dropped too");
+        assert_eq!(ask(serde_json::json!({ "ts": 1_000 }))["rooms"].get(&fresh), None, "a real ts mark still reads");
+        // The answer's mark is the PERSISTED one, never the effective max.
+        assert_eq!(unread(serde_json::json!({ "seq": 9_000_000 }))["marks"][&room], serde_json::json!({ "seq": a["seq"], "ts": 1_000 }));
     }
 
     /// Board #322: `around_seq` pages THIS room around a message, even when
