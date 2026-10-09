@@ -75,13 +75,14 @@ const LEVEL_KEY = 'tmux_notify_level';
  * those ring. Three rungs, each a superset of the one before; the stored
  * values are the pre-#334 ones, so nobody's setting moves:
  * - `done`    — "Finished": a `[tmm done]` summary, or an agent moving a
- *               board issue to review/done.
- * - `replies` — "To me": plus every reply addressed to you (the default).
+ *               board issue to review/done. The default (board #333, owner:
+ *               "默认的 notification 可以是 finish 而不是所有的 reply").
+ * - `replies` — "To me": plus every reply addressed to you.
  * - `all`     — "To me + progress": plus status notes addressed to you.
  * Agent↔agent replies and unaddressed notes are room unread, never the bell. */
 export type NotifyLevel = 'done' | 'replies' | 'all';
 export const NOTIFY_LEVELS: readonly NotifyLevel[] = ['done', 'replies', 'all'];
-export const DEFAULT_LEVEL: NotifyLevel = 'replies';
+export const DEFAULT_LEVEL: NotifyLevel = 'done';
 
 /** A message's replay-stable identity: the id when the server gave one, else
  * the from/ts/body triple (what mergeMessages itself dedups by). */
@@ -206,12 +207,14 @@ export function setNotifyEnabled(on: boolean): void {
   try { localStorage.setItem(ENABLED_KEY, on ? 'on' : 'off'); } catch { /* private mode */ }
 }
 
-/** The persisted level; anything unknown (an older build, a typo) reads as
- * the default so a stale key can never silence or flood. */
+/** The persisted level. Every legal stored value is recognised by name, so a
+ * stored choice survives a change of default (a `replies` persisted before
+ * #333 stays `replies`); only an absent or unknown value (an older build, a
+ * typo) reads as the default, so a stale key can never silence or flood. */
 export function notifyLevel(): NotifyLevel {
   try {
     const v = localStorage.getItem(LEVEL_KEY);
-    return v === 'done' || v === 'all' ? v : DEFAULT_LEVEL;
+    return (NOTIFY_LEVELS as readonly (string | null)[]).includes(v) ? (v as NotifyLevel) : DEFAULT_LEVEL;
   } catch {
     return DEFAULT_LEVEL;
   }

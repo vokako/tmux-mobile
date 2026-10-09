@@ -4,22 +4,19 @@ import { PAGES, agentsLivesInSettings, defaultPage, restoreNav, restorePage, ret
 
 test('a saved tab is restored, and only a known one', () => {
   for (const p of PAGES) {
-    assert.equal(restorePage(p, false), p, `${p} survives a reload`);
-    assert.equal(restorePage(p, true), p);
+    assert.equal(restorePage(p), p, `${p} survives a reload`);
   }
   // The tab used to be dropped unless a terminal target was saved with it, so
   // reading the chat and refreshing landed on the device default.
-  assert.equal(restorePage('hub', true), 'hub', 'a phone may sit on the chat');
-  assert.equal(restorePage('terminal', false), 'terminal', 'a desktop may sit on the terminal');
+  assert.equal(restorePage('hub'), 'hub', 'a phone may sit on the chat');
+  assert.equal(restorePage('terminal'), 'terminal', 'a desktop may sit on the terminal');
 });
 
-test('anything else falls back to the device default', () => {
+test('anything else falls back to the default, Chat (#333)', () => {
   for (const bad of [undefined, null, '', 'crew', 'Hub', 42, {}, []]) {
-    assert.equal(restorePage(bad, true), 'terminal', `${JSON.stringify(bad)} on a phone`);
-    assert.equal(restorePage(bad, false), 'hub', `${JSON.stringify(bad)} on a desktop`);
+    assert.equal(restorePage(bad), 'hub', `${JSON.stringify(bad)} lands on Chat`);
   }
-  assert.equal(defaultPage(true), 'terminal');
-  assert.equal(defaultPage(false), 'hub');
+  assert.equal(defaultPage(), 'hub', 'Chat on every form factor, phone included (#333)');
 });
 
 test('retarget follows a renamed session, and only that session', () => {
@@ -54,11 +51,11 @@ test('a saved `agents` comes back as Settings on touch, never as a stranded page
 test('restoreNav is restorePage everywhere else, on both devices', () => {
   for (const p of PAGES) {
     if (p === 'agents') continue;
-    assert.deepEqual(restoreNav(p, true), { page: restorePage(p, true), settingsTab: null }, `${p} on a phone`);
-    assert.deepEqual(restoreNav(p, false), { page: restorePage(p, false), settingsTab: null }, `${p} on a desktop`);
+    assert.deepEqual(restoreNav(p, true), { page: restorePage(p), settingsTab: null }, `${p} on a phone`);
+    assert.deepEqual(restoreNav(p, false), { page: restorePage(p), settingsTab: null }, `${p} on a desktop`);
   }
   for (const bad of [undefined, null, '', 'Agents', 'crew', 42, {}, ['agents']]) {
-    assert.deepEqual(restoreNav(bad, true), { page: 'terminal', settingsTab: null }, `${JSON.stringify(bad)} on a phone`);
+    assert.deepEqual(restoreNav(bad, true), { page: 'hub', settingsTab: null }, `${JSON.stringify(bad)} on a phone`);
     assert.deepEqual(restoreNav(bad, false), { page: 'hub', settingsTab: null }, `${JSON.stringify(bad)} on a desktop`);
   }
   // 'agents' is still a real page name — the redirect is about the DEVICE, not

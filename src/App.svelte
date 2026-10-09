@@ -687,7 +687,9 @@
     reconnectMachine.cancel();
     connected = true;
     serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
-    page = 'terminal';
+    // The device default (Chat), never a hard-coded Terminal (board #333); a
+    // hubless server falls back to Terminal through the redirect above.
+    page = defaultPage();
     localStorage.removeItem('tmux_disconnected');
     // A manual connect from Settings reaches a server with EMPTY subscription
     // state, while Terminals stay mounted across the disconnect and keep their
@@ -1200,7 +1202,7 @@
       const nav = restoreNav(s.page, layout.isTouchDevice);
       page = nav.page;
       if (nav.settingsTab) prefsOpenReq = { tab: nav.settingsTab, n: ++prefsOpenSeq };
-    } catch { page = defaultPage(layout.isTouchDevice); }
+    } catch { page = defaultPage(); }
   }
 
   // Auto-reconnect and restore state on page load

@@ -16,11 +16,11 @@ This is a **running-client** notification path for browser/PWA/webview. It does 
 
 Settings → Notifications carries a level, persisted to `tmux_notify_level`, three nested rungs over the bell (board #334; the stored values did not change):
 
-- **Finished** (`done`): an agent's board move to review/done, plus `[tmm done]` notes.
-- **To me** (`replies`, default): Finished plus every reply addressed to you.
+- **Finished** (`done`, default since #333): an agent's board move to review/done, plus `[tmm done]` notes.
+- **To me** (`replies`): Finished plus every reply addressed to you.
 - **To me + progress** (`all`): To me plus `[tmm status …]` notes addressed to you.
 
-Only a finished task, or a reply / status note addressed to you, can ever ring or reach the bell; agents talking to each other count as room unread only. App narration and the human's own messages are never news at any level. An unknown stored value reads as the default.
+Only a finished task, or a reply / status note addressed to you, can ever ring or reach the bell; agents talking to each other count as room unread only. App narration and the human's own messages are never news at any level. Every legal stored value is kept when the default changes (a stored `replies` stays `replies`); only an absent or unknown value reads as the default.
 
 ## What counts as news
 

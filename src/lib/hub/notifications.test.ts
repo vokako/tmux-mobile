@@ -11,7 +11,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   notifiable, notifyText, excerpt, cueDue, msgKey, sift, playCue, notifyNews,
-  isAway, roomProjectName, systemNotify, taskFinished, DEFAULT_LEVEL, NOTIFY_LEVELS,
+  isAway, roomProjectName, systemNotify, taskFinished, DEFAULT_LEVEL, NOTIFY_LEVELS, notifyLevel, setNotifyLevel,
   CUE_COOLDOWN_MS, CUE_SRC, SEEN_CAP, newsKind, bellKind,
   type FeedMsg, type NotifyState, type NotifyEnv, type NotifyLevel,
 } from './notifications.ts';
@@ -32,9 +32,10 @@ function harness(enabled = true) {
 // ─── Layer 2: the news gate ─────────────────────────────────────────────────
 
 test('notifiable: an agent message to you while away is news; one to another agent is not (#334)', () => {
-  assert.equal(notifiable([{ from: 'builder-2', body: 'done with the parser', ts: 5, to: ['human'] }], away).length, 1);
-  assert.equal(notifiable([{ from: 'builder-2', body: 'over to you', ts: 5, to: ['validator'] }], away).length, 0);
-  assert.equal(notifiable([{ from: 'builder-2', body: 'to the room', ts: 5 }], away).length, 0);
+  const toMe = { ...away, level: 'replies' as const };
+  assert.equal(notifiable([{ from: 'builder-2', body: 'done with the parser', ts: 5, to: ['human'] }], toMe).length, 1);
+  assert.equal(notifiable([{ from: 'builder-2', body: 'over to you', ts: 5, to: ['validator'] }], toMe).length, 0);
+  assert.equal(notifiable([{ from: 'builder-2', body: 'to the room', ts: 5 }], toMe).length, 0);
 });
 
 test('notifiable: the first page is history, never news', () => {
@@ -91,7 +92,7 @@ test('notifiable: the LEVEL is three nested rungs over the bell — Finished ⊂
   assert.deepEqual(bodies('done'), ['[tmm done] shipped it', '[tmm] board #3 doing → review — Task']);
   assert.deepEqual(bodies('replies'), ['a reply to you', '[tmm done] shipped it', '[tmm] board #3 doing → review — Task']);
   assert.deepEqual(bodies('all'), ['a reply to you', '[tmm done] shipped it', '[tmm] board #3 doing → review — Task', '[tmm status working] still at it']);
-  assert.equal(DEFAULT_LEVEL, 'replies');
+  assert.equal(DEFAULT_LEVEL, 'done', 'Finished is the default (#333)');
   assert.deepEqual(notifiable(batch, away), notifiable(batch, { ...away, level: DEFAULT_LEVEL }), 'no level = the default');
   assert.deepEqual([...NOTIFY_LEVELS], ['done', 'replies', 'all'], 'the Settings row offers them in rising order');
 });
@@ -117,7 +118,7 @@ test('sift: splits never-seen, remembers everything, stays bounded', () => {
 test('notifyNews: the same batch replayed alerts exactly once', () => {
   const st = fresh();
   const { fired, effects } = harness();
-  const batch: FeedMsg[] = [{ from: 'builder-2', ts: 100, body: 'reply', to: ['human'] }];
+  const batch: FeedMsg[] = [{ from: 'builder-2', ts: 100, body: '[tmm done] reply' }];
   assert.equal(notifyNews(batch, { ...away, project: 'p' }, st, effects), true);
   assert.equal(notifyNews(batch, { ...away, project: 'p' }, st, effects), false); // inclusive since_ts re-pull
   assert.equal(fired.cue, 1);
@@ -423,4 +424,19 @@ test('the bell is per MESSAGE, not per turn: a review move then a reply to you a
   assert.deepEqual(recorded, ['t1-move', 't1-final'], 'no turn identity on a message: no merge');
   notifyNews([{ id: 't2-final', from: 'dev', body: 'and the docs too', to: ['human'] }], ctx, st, effects);
   assert.deepEqual(recorded, ['t1-move', 't1-final', 't2-final'], 'the next turn is not suppressed');
+});
+
+test('the default level is Finished only when nothing is stored; every stored choice survives (#333)', () => {
+  const store = new Map<string, string>();
+  const prev = (globalThis as any).localStorage;
+  (globalThis as any).localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } };
+  try {
+    assert.equal(notifyLevel(), 'done', 'a fresh install');
+    for (const level of NOTIFY_LEVELS) {
+      setNotifyLevel(level);
+      assert.equal(notifyLevel(), level, `a stored ${level} is kept`);
+    }
+    store.set('tmux_notify_level', 'loud');
+    assert.equal(notifyLevel(), 'done', 'an unknown value reads as the default');
+  } finally { (globalThis as any).localStorage = prev; }
 });

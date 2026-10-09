@@ -782,3 +782,12 @@ test('every connect path runs the one server handshake, which loads backends_lis
   const outside = source.replace(/function serverReady\(\) \{[\s\S]*?\n  \}/u, '');
   assert.doesNotMatch(outside, /^\s*(?:probeHub|loadBackends)\(\);/mu, 'no path does half the handshake');
 });
+
+test('a connect lands on the default page, Chat — never a hard-coded Terminal (#333)', () => {
+  const connected = source.match(/function onConnected\(switched = false\) \{[\s\S]*?\n  \}/u)?.[0] ?? '';
+  assert.ok(connected, 'onConnected found');
+  assert.match(connected, /page = defaultPage\(\);/u);
+  assert.doesNotMatch(connected, /page = 'terminal'/u);
+  // The one hubless fallback stays: Chat on a server without the Hub becomes Terminal.
+  assert.match(source, /if \(\(page === 'hub' \|\| page === 'agents' \|\| page === 'board'\) && hubState\.probed && !hubState\.available\) page = 'terminal';/u);
+});

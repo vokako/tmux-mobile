@@ -8,10 +8,12 @@
 export const PAGES = ['terminal', 'hub', 'files', 'board', 'sessions', 'agents', 'team', 'prefs', 'settings'] as const;
 export type Page = (typeof PAGES)[number];
 
-/** The default when there is nothing to restore: a phone opens on the terminal
- * (it is the reason the app exists on a phone), a desktop on the Hub. */
-export function defaultPage(isTouchDevice: boolean): Page {
-  return isTouchDevice ? 'terminal' : 'hub';
+/** The default when there is nothing to restore: Chat (the Hub) on every
+ * form factor (owner, 2026-10-09, board #333: "整个应用一打开的时候 默认已打开
+ * 的窗口应该是第一个 chat 页面 而不是 terminal 页面"). A server without the
+ * Hub falls back to Terminal through App's one hubless redirect. */
+export function defaultPage(): Page {
+  return 'hub';
 }
 
 /**
@@ -21,10 +23,10 @@ export function defaultPage(isTouchDevice: boolean): Page {
  * `settings` is deliberately restorable — it is a real page (the connect card
  * lives there), and a user who left it open is not lost.
  */
-export function restorePage(saved: unknown, isTouchDevice: boolean): Page {
+export function restorePage(saved: unknown): Page {
   return typeof saved === 'string' && (PAGES as readonly string[]).includes(saved)
     ? (saved as Page)
-    : defaultPage(isTouchDevice);
+    : defaultPage();
 }
 
 /**
@@ -60,7 +62,7 @@ export function restoreNav(
   if (saved === 'agents' && agentsLivesInSettings(isTouchDevice)) {
     return { page: 'prefs', settingsTab: 'agents' };
   }
-  return { page: restorePage(saved, isTouchDevice), settingsTab: null };
+  return { page: restorePage(saved), settingsTab: null };
 }
 
 /**
