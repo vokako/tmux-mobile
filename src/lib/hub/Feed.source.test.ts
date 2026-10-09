@@ -559,3 +559,10 @@ test('a held bubble lifts by shadow only: no backdrop blur behind its rounded co
   assert.doesNotMatch(source, /\.msg\.held \{[^}]*backdrop-filter/u);
   assert.match(source, /\.msg\.held \.bubble \{ box-shadow: 0 6px 20px rgba\(0, 0, 0, 0\.28\); \}/u);
 });
+
+test('a sender run drops the header, never the bubble (#331)', () => {
+  assert.match(source, /\{@const cont = continuesRun\(blocks\[i - 1\], b\)\}/u, 'ONE grouping rule, from hub.ts');
+  assert.match(source, /<div class="msg" class:me=\{m\.from === 'human'\} class:cont /u);
+  assert.match(source, /\{#if m\.from !== 'human' && !cont\}/u, 'only the header is dropped');
+  assert.match(source, /\.msg\.cont \{ margin-top: -6px; \}/u, 'a tighter gap, not a second bubble species');
+});

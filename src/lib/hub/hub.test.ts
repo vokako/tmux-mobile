@@ -3,7 +3,7 @@ import { ALL_TARGET, teamTarget } from './hub-composer.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import type { FeedBlock } from './hub.ts';
-import { wakeLine, localWhen, gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markMentions, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, HUMAN, parseQuote, quotePreview, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, runtimeLabel, agentHue, AGENT_HUES, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand, foldedCommandArgs, inputModeSwitch } from './hub.ts';
+import { wakeLine, localWhen, gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markMentions, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, pickDrawerAgent, addressed, addressedTeam, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, HUMAN, parseQuote, quotePreview, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, runtimeLabel, agentHue, AGENT_HUES, echoContains, echoTruncated, PROMPT_ECHO_MAX, sentCommand, foldedCommandArgs, inputModeSwitch, continuesRun, RUN_GAP_MS } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 import { renderMarkdown } from '../core/markdown.ts';
 import { drawerWindowPills, mentionPalette, rosterGroups, rosterMarker, sortAgentsForRoster, stoppedGroups } from './hub.ts';
@@ -1988,4 +1988,32 @@ test('drawerWindowPills: the shell window stays first and out of +N; other shell
   assert.deepEqual(names(agentsOnly), ['a', 'b']);
   assert.equal(agentsOnly.folded, 0);
   assert.deepEqual(drawerWindowPills([], false, none), { pills: [], folded: 0 });
+});
+
+test('continuesRun: one sender\'s adjacent messages form a run; anything else starts a new one (#331)', () => {
+  const t0 = new Date(2026, 9, 9, 12, 0).getTime();
+  const msg = (from: string, ts: number, body = 'x', to: string[] = []): FeedBlock => ({ type: 'msg', ts, msg: { id: `${from}${ts}`, from, ts, to, body }, delivered: false });
+  const a = msg('dev', t0);
+  assert.equal(continuesRun(undefined, a), false, 'the first block');
+  assert.equal(continuesRun(a, msg('dev', t0 + 1_000)), true, 'same sender, adjacent');
+  assert.equal(continuesRun(a, msg('dev', t0 + RUN_GAP_MS)), true, 'at the gap');
+  assert.equal(continuesRun(a, msg('dev', t0 + RUN_GAP_MS + 1)), false, 'past the gap');
+  assert.equal(continuesRun(a, msg('qa', t0 + 1_000)), false, 'another sender');
+  assert.equal(continuesRun(msg('human', t0), msg('human', t0 + 1)), false, 'your own bubbles have no header to drop');
+  assert.equal(continuesRun(a, msg('dev', t0 + 1, '[tmm status working] busy')), false, 'a status note keeps its header');
+  assert.equal(continuesRun(a, msg('dev', t0 + 1, 'over to you', ['human'])), false, 'a reply to you starts its own run');
+  assert.equal(continuesRun(msg('dev', t0, 'x', ['human']), msg('dev', t0 + 1)), true, 'and what follows it continues it');
+  const sys: FeedBlock = { type: 'sys', ts: t0 + 1, key: 's', items: ['dev stopped'] };
+  assert.equal(continuesRun(sys, msg('dev', t0 + 2)), false, 'a sys line in between ends the run');
+  const late = new Date(2026, 9, 9, 23, 58).getTime();
+  assert.equal(continuesRun(msg('dev', late), msg('dev', late + 4 * 60_000)), false, 'a day break ends it');
+  // Through feedBlocks: a sys line between two replies breaks; the chat level drops it and they join.
+  const feed = [
+    { id: 1, ts: t0, from: 'dev', body: 'one' },
+    { id: 2, ts: t0 + 1, from: 'dev', body: '[tmm] dev restarted' },
+    { id: 3, ts: t0 + 2, from: 'dev', body: 'two' },
+  ];
+  const runs = (level: 'chat' | 'status') => { const b = feedBlocks(feed, [], level); return b.map((x, i) => continuesRun(b[i - 1], x)); };
+  assert.deepEqual(runs('status'), [false, false, false]);
+  assert.deepEqual(runs('chat'), [false, true]);
 });

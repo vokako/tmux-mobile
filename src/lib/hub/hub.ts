@@ -1427,6 +1427,28 @@ export function noteStateColor(state: string): string {
  * reader, which is exactly the reader who asked for it ("我希望在有新日期的
  * 地方能有一个标注", owner 2026-08-20).
  */
+/** How far apart two bubbles of one sender may be and still read as one
+ * run (board #331). */
+export const RUN_GAP_MS = 5 * 60_000;
+
+/** Whether feed block `b` CONTINUES the run of the block before it (board
+ * #331, owner 2026-10-09: "如果一个 Agent 连续发了好几条消息，那么这个 Agent 的
+ * 名字只写一次就行了…消息气泡依次列出"): both are agent messages from the same
+ * sender, adjacent in the feed (any other block between them — a sys line, a
+ * prompt, a note, a progress line — ends the run), on the same day and at
+ * most RUN_GAP_MS apart. A message that carries its own header meaning
+ * starts a new run: a status note (its header wears the state badge) and a
+ * reply addressed to the human (it is the one the reader is looking for).
+ * The human's own bubbles have no header, so they never form runs. */
+export function continuesRun(prev: FeedBlock | undefined, b: FeedBlock): boolean {
+  if (!prev || prev.type !== 'msg' || b.type !== 'msg') return false;
+  const from = b.msg?.from ?? '';
+  if (!from || from === 'human' || prev.msg?.from !== from) return false;
+  if (b.ts - prev.ts > RUN_GAP_MS || b.ts < prev.ts || !sameDay(prev.ts, b.ts)) return false;
+  if (statusNote(b.msg?.body) || (Array.isArray(b.msg?.to) && b.msg.to.includes('human'))) return false;
+  return true;
+}
+
 export function sameDay(a: number, b: number): boolean {
   const da = new Date(a);
   const db = new Date(b);

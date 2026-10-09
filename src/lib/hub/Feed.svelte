@@ -17,7 +17,7 @@
   import { createDoubleTapDetector } from '../terminal/terminal-keyboard.ts';
   import { heldAnchor, readingDirection, refoldEligible, sameReadingSize } from './hub-reading.ts';
   import { FONT_CHANGE_EVENT } from '../app/fonts.svelte.ts';
-  import { parseQuote, TAIL_GAP, bottomGap, tailAfterScroll, markMentions, mentionedAgents, splitImages, toolColor, pickAnchor, toolEventParts, elideTail, foldedCommandArgs, foldLines, statusNote, noteStateColor, runtimeLabel, agentHue, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, perLineOf, STEPS_ROWS, stateIsLive } from './hub.ts';
+  import { parseQuote, TAIL_GAP, bottomGap, tailAfterScroll, markMentions, mentionedAgents, splitImages, toolColor, pickAnchor, toolEventParts, elideTail, foldedCommandArgs, foldLines, statusNote, noteStateColor, runtimeLabel, agentHue, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, continuesRun, perLineOf, STEPS_ROWS, stateIsLive } from './hub.ts';
 
   let {
     blocks = [], agents = [], managedNames = [], selected = '', visible = false, compact = false,
@@ -832,10 +832,14 @@
              feed itself is the scroller now). It rejoins the anchor pool
              when folded again. -->
         {@const pinned = isAsk && askKey === key && !expanded[key]}
+        <!-- A run of one sender (board #331): the header once, on the first
+             bubble; the rest sit closer, headerless. Each bubble keeps its
+             own time, actions, quote and jump anchor. -->
+        {@const cont = continuesRun(blocks[i - 1], b)}
         <!-- A block that arrives after the room settled rises in
              (motion.md principle 10: transform/opacity only — the tail
              math measures nothing different). -->
-        <div class="msg" class:me={m.from === 'human'} class:appear-rise={b.ts > openedAt}
+        <div class="msg" class:me={m.from === 'human'} class:cont class:appear-rise={b.ts > openedAt}
           class:ask-top={pinned && askEdge === 'top'}
           class:ask-bottom={pinned && askEdge === 'bottom'}
           class:held={pinned && askHeld}
@@ -857,7 +861,7 @@
                the system's selection gesture and its compatibility
                click never open the row. The accessible path to the row
                is the meta-trailer button below. -->
-          {#if m.from !== 'human'}
+          {#if m.from !== 'human' && !cont}
             <!-- The sender heads the bubble from OUTSIDE it (board #292,
                  owner 2026-10-01: "Agent 的名字在气泡外边…名字后面有灰色的
                  文字表示它是 runtime"): the name, then what it runs on in
@@ -1113,6 +1117,10 @@
      unified it with the Terminal's) — only the feed placement lives here. */
   .to-bottom { right: 14px; bottom: 12px; z-index: 7; }
   .msg { position: relative; display: flex; flex-direction: column; max-width: var(--msg-max); }
+  /* A run's later bubbles (board #331) sit 4px under the one before instead
+     of the feed's 10px (9px compact) gap: one speaker, one block. */
+  .msg.cont { margin-top: -6px; }
+  :global(.hub-root.compact) .msg.cont { margin-top: -5px; }
   /* The centre's jump landed here (board #322): one accent ring that fades
      out on the shared tempo — no new keyframe, no layout change. */
   .msg, .sys-item { transition: box-shadow var(--t-move) ease; }

@@ -118,3 +118,32 @@ test('a standalone run is an agent bubble holding the lane; it is open while run
     assert.ok(q('.steps.open'), 'and opens on its head');
   } finally { await idle.close(); }
 });
+
+// Board #331: one sender's consecutive bubbles show the name once; each
+// bubble keeps its own time and action row.
+test('a run of one sender shows its header once; every bubble keeps its own actions (#331)', async (context) => {
+  const t0 = new Date(2026, 9, 9, 12, 0).getTime();
+  const blocks = feedBlocks([
+    { id: 'a', ts: t0, from: 'dev', body: 'one' },
+    { id: 'b', ts: t0 + 1_000, from: 'dev', body: 'two' },
+    { id: 'c', ts: t0 + 2_000, from: 'dev', body: 'three' },
+    { id: 'd', ts: t0 + 3_000, from: 'qa', body: 'mine now' },
+    { id: 'e', ts: t0 + 4_000, from: 'dev', body: 'back' },
+  ], [], 'chat', (n) => n);
+  const app = await (await compiled).mount(context, {
+    props: { selected: 'fixture', roomReady: true, visible: true, blocks, managedNames: ['dev', 'qa'],
+      agents: [{ name: 'dev', window: 0, managed: true, agent: 'kiro', state: 'idle' }, { name: 'qa', window: 1, managed: true, agent: 'codex', state: 'idle' }] },
+    setup(window) { window.Element.prototype.getAnimations = () => []; window.HTMLCanvasElement.prototype.getContext = () => null; },
+    modules: [],
+  });
+  try {
+    for (let i = 0; i < 4; i++) await app.flush();
+    const msgs = [...app.document.querySelectorAll<HTMLElement>('.msg')];
+    assert.deepEqual(msgs.map((m) => m.dataset.msg), ['a', 'b', 'c', 'd', 'e']);
+    assert.deepEqual(msgs.map((m) => m.querySelector('.m-who')?.textContent ?? ''), ['dev', '', '', 'qa', 'dev'], 'the name once per run');
+    assert.deepEqual(msgs.map((m) => m.classList.contains('cont')), [false, true, true, false, false]);
+    assert.ok(msgs.every((m) => m.querySelector('.m-meta, .bubble')), 'every bubble is still a bubble');
+    msgs[2]!.querySelector<HTMLElement>('.m-body')!.click(); await app.flush();
+    assert.equal(app.document.querySelectorAll('.m-acts').length, 1, 'a continued bubble opens its own action row');
+  } finally { await app.close(); }
+});
