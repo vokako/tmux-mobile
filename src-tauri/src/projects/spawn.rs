@@ -141,7 +141,8 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
 
     tmux::ensure_session(req.session, &workspace)?;
     let pane = tmux::new_named_window(req.session, &window_name, &workspace)?;
-    std::thread::sleep(std::time::Duration::from_millis(800));
+    // Type only once the shell shows its prompt (board #325), never on a timer.
+    tmux::wait_for_shell(&pane, tmux::SHELL_READY);
 
     let prefix = env
         .iter()

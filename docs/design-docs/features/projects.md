@@ -378,6 +378,24 @@ can reach it without a DOM.
 
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
 
+### A fresh pane is typed into only after its shell shows a prompt (2026-10-09, #325)
+
+Every line typed into a pane tmm just created — `up`'s first-window `cd` and
+slot command, a re-created slot window on agent restart, a spawn's
+`. launch-<agent>.sh` — goes through `tmux::wait_for_shell(pane, SHELL_READY)`
+first: poll every 50 ms until the cursor sits past column 0 on its row and the
+screen and cursor are unchanged across two polls, bounded at 5 s, after which it
+logs and types anyway (never a hang; a dead pane returns at once). Owner report
+on clawdbjs (macOS, zsh 5.9 login shell + starship, project test): every agent
+Restart came back as a bare prompt showing `. …/launch-kiro.sh%` — the restart
+path (`create_or_keep` → `run_slot_command`) typed right after `new-window`,
+the tty echoed the bytes, then zsh's line-editor init discarded the pending
+input and drew its prompt mid-line. Spawn only worked because of a fixed 800 ms
+sleep, which is a race and is gone. `tmux.rs`'s
+`a_line_typed_into_a_fresh_pane_lands_only_after_the_prompt` runs a real shell
+behind a 1 s init that flushes the tty input queue: typed at once the line is
+lost; through the wait it runs.
+
 ### Confirmed process and project actions settle before closing (2026-09-12, #167 batch 1)
 
 Sessions and Projects own the confirmed target, synchronous busy state and a

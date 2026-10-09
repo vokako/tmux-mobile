@@ -1129,6 +1129,53 @@ pub fn new_named_window(session: &str, name: &str, cwd: &str) -> Result<String, 
     Ok(out.trim().to_string())
 }
 
+/// How long a fresh pane may take to show its prompt before typing anyway.
+pub const SHELL_READY: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Wait until the shell in a FRESH pane has drawn its prompt, so a line
+/// typed into it lands (board #325). Bytes that reach the pty before the
+/// shell's line editor is up are echoed by the tty and then lost: zsh's zle
+/// init (and any rc step that reads or flushes the terminal) discards the
+/// pending input, and the window is left at a bare prompt — measured on
+/// clawdbjs (macOS, zsh 5.9 login shell + starship) 2026-10-09: every agent
+/// restart typed `. launch-<agent>.sh` into nothing. A fixed sleep only
+/// races a slow init.
+///
+/// Ready = the cursor sits after something on its row (a prompt ends with
+/// the cursor past column 0; a banner line ends at column 0) and the screen
+/// and cursor are unchanged across two polls, so a prompt still being
+/// drawn is waited out. Bounded by `deadline`: on timeout (an empty PS1, a
+/// shell that never settles) it returns false and the caller types anyway —
+/// never a hang. A dead pane returns false at once.
+pub fn wait_for_shell(pane: &str, deadline: std::time::Duration) -> bool {
+    let start = std::time::Instant::now();
+    let mut last: Option<String> = None;
+    loop {
+        let state = run_tmux(&["display-message", "-p", "-t", pane, "#{pane_dead} #{cursor_x} #{cursor_y}"]);
+        let Ok(state) = state else { return false };
+        let mut it = state.split_whitespace();
+        let (dead, x) = (it.next() == Some("1"), it.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0));
+        if dead {
+            return false;
+        }
+        if x > 0 {
+            let screen = run_tmux(&["capture-pane", "-p", "-t", pane]).unwrap_or_default();
+            let now = format!("{state}\n{screen}");
+            if last.as_deref() == Some(now.as_str()) {
+                return true;
+            }
+            last = Some(now);
+        } else {
+            last = None;
+        }
+        if start.elapsed() >= deadline {
+            eprintln!("[tmux] {pane}: no shell prompt after {} ms — typing anyway", deadline.as_millis());
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 /// Rename the window at `target` (`session:index`, `session:^`, or a pane id).
 /// Used when reconciling a project: a freshly created session already owns one
 /// window named after the shell, and the first slot takes it over instead of
@@ -1503,6 +1550,51 @@ mod tests {
     /// paste-buffer, and the mode's bindings can even end it — so the send
     /// is refused before anything is typed, and the mode (a person reading
     /// scrollback) is left exactly as it was. The other pane is unaffected.
+    /// Board #325: a slow shell whose init DISCARDS pending input (zle init,
+    /// an rc step that flushes the tty) loses a line typed right after the
+    /// window opens; `wait_for_shell` waits for its prompt and the line runs.
+    /// The shell is real (`zsh -f -i`, else `sh -i`) behind a 1 s init that
+    /// sleeps, then flushes the tty input queue the way zle does.
+    #[test]
+    fn a_line_typed_into_a_fresh_pane_lands_only_after_the_prompt() {
+        let mut guard = Scratch::new("shellready");
+        let session = guard.session("s");
+        if ensure_session(&session, &guard.path()).is_err() { return }
+        let shell = if std::path::Path::new("/bin/zsh").exists() || std::path::Path::new("/usr/bin/zsh").exists() { "zsh -f -i" } else { "sh -i" };
+        let slow = format!("sleep 1; python3 -c 'import termios,sys; termios.tcflush(0, termios.TCIFLUSH)'; PS1='rdy> ' exec {shell}");
+        let open = |n: &str| {
+            let out = run_tmux(&["new-window", "-d", "-t", &exact_session(&session), "-n", n, "-P", "-F", "#{pane_id}", "sh", "-c", &slow]).unwrap();
+            out.trim().to_string()
+        };
+        let landed = |pane: &str, marker: &str| {
+            for _ in 0..60 {
+                let screen = run_tmux(&["capture-pane", "-p", "-t", pane]).unwrap_or_default();
+                if screen.lines().any(|l| l.trim() == marker) { return true; }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            false
+        };
+        // The line spells the marker only when it RUNS (the echo shows it split).
+        // Without the wait: typed into the flush, gone.
+        let raw = open("raw");
+        send_command(&raw, "echo MARK-$((6*7))-raw").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        let lost = !landed(&raw, "MARK-42-raw");
+        // With it: the prompt is waited for, the line runs.
+        let ready = open("ready");
+        let t = std::time::Instant::now();
+        assert!(wait_for_shell(&ready, SHELL_READY), "the prompt was seen");
+        assert!(t.elapsed() >= std::time::Duration::from_millis(900), "it waited out the slow init ({:?})", t.elapsed());
+        send_command(&ready, "echo MARK-$((6*7))-ready").unwrap();
+        assert!(landed(&ready, "MARK-42-ready"), "{}", run_tmux(&["capture-pane", "-p", "-t", &ready]).unwrap_or_default());
+        assert!(lost, "negative control: without the wait the line is lost ({})", run_tmux(&["capture-pane", "-p", "-t", &raw]).unwrap_or_default());
+        // Bounded: a pane that never shows a prompt returns false, no hang.
+        let mute = run_tmux(&["new-window", "-d", "-t", &exact_session(&session), "-P", "-F", "#{pane_id}", "sleep", "30"]).unwrap();
+        let t = std::time::Instant::now();
+        assert!(!wait_for_shell(mute.trim(), std::time::Duration::from_millis(400)));
+        assert!(t.elapsed() < std::time::Duration::from_secs(2));
+    }
+
     #[test]
     fn send_command_refuses_a_pane_in_copy_mode_and_leaves_the_mode() {
         let session = format!("tmm-copymode-{}", std::process::id());

@@ -100,6 +100,8 @@ fn create_or_keep(project: &Project, slot: &Slot) -> SlotResult {
     }
     match tmux::new_named_window(&project.session, &slot.window_name, &cwd) {
         Ok(pane) => {
+            // A fresh pane: type only once its shell shows a prompt (#325).
+            tmux::wait_for_shell(&pane, tmux::SHELL_READY);
             let mut result = SlotResult {
                 window_name: slot.window_name.clone(),
                 status: "created",
@@ -125,6 +127,8 @@ fn start_in_existing(project: &Project, slot: &Slot, target: &str) -> SlotResult
         status: "created",
         error: None,
     };
+    // Only called for a session `up` just created: its first pane is fresh.
+    tmux::wait_for_shell(target, tmux::SHELL_READY);
     if !slot.cwd.is_empty() {
         if let Err(e) = tmux::send_command(target, &format!("cd {}", crate::shell::quote(&cwd))) {
             result.error = Some(e);
