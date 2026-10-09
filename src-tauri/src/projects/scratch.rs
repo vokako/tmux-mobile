@@ -199,10 +199,37 @@ pub fn ensure() -> Result<serde_json::Value, String> {
     // its %id at the END (#326 review): the string `first_pane` gave us is a
     // POSITION, and a pane created or killed beside ours while we worked
     // renumbers it, so handing back the pre-repair string could name a pane
-    // this call never checked. Reading it back from the id cannot.
-    let target = tmux::pane_format(&id, "#{session_name}:#{window_index}.#{pane_index}")
-        .ok_or_else(|| format!("the scratch terminal's pane {id} vanished while it was being prepared"))?;
+    // this call never checked. Reading it back from the id cannot — and the
+    // read carries the pane's SESSION, which is checked too: a `move-pane`
+    // into another session keeps the id valid, and an unchecked answer would
+    // have paired `session: tmm-scratch` with another session's pane and sent
+    // the client through the scratch door into it.
+    let target = target_in_our_session(
+        tmux::pane_format(&id, &format!("#{{session_name}}{SEP}#{{window_index}}.#{{pane_index}}")).as_deref(),
+        &name(),
+        &id,
+    )?;
     Ok(serde_json::json!({ "session": name(), "target": target }))
+}
+
+/// The one separator between the two fields of that read: a session name can
+/// contain spaces and colons-by-accident, so the target is REBUILT from the
+/// verified parts instead of split out of a joined string.
+const SEP: &str = "<TMM_SEP>";
+
+/// The verdict over that end-of-call read (pure, so the three failures are
+/// tested without tmux): the pane must still answer, and it must still be in
+/// the session we own. Anything else is an error, never a target.
+fn target_in_our_session(raw: Option<&str>, ours: &str, id: &str) -> Result<String, String> {
+    let raw = raw.ok_or_else(|| format!("the scratch terminal's pane {id} vanished while it was being prepared"))?;
+    let (session, pos) = raw
+        .split_once(SEP)
+        .filter(|(_, pos)| pos.contains('.'))
+        .ok_or_else(|| format!("the scratch terminal's pane {id} answered '{raw}', which is not a pane position"))?;
+    if session != ours {
+        return Err(format!("the scratch terminal's pane {id} is in session '{session}', not '{ours}'"));
+    }
+    Ok(format!("{session}:{pos}"))
 }
 
 fn first_pane() -> Result<String, String> {
@@ -234,6 +261,29 @@ pub fn kill() -> Result<serde_json::Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The end-of-call answer is checked, not merely non-empty (#326 review):
+    /// a `move-pane` into another session keeps the %id valid, so without the
+    /// session check the RPC would pair `session: tmm-scratch` with a foreign
+    /// pane and the client would act on another session through the scratch
+    /// door. Pure, so every refusal is pinned without racing a live call.
+    #[test]
+    fn the_answered_target_must_be_a_position_inside_our_own_session() {
+        let ok = target_in_our_session(Some("tmm-scratch<TMM_SEP>1.1"), "tmm-scratch", "%7");
+        assert_eq!(ok.unwrap(), "tmm-scratch:1.1");
+        // A session whose name contains a colon or a space still rebuilds
+        // correctly, because the target is assembled from the two fields.
+        assert_eq!(target_in_our_session(Some("my proj<TMM_SEP>2.3"), "my proj", "%7").unwrap(), "my proj:2.3");
+        // Moved out from under us.
+        let moved = target_in_our_session(Some("other<TMM_SEP>1.1"), "tmm-scratch", "%7").unwrap_err();
+        assert!(moved.contains("is in session 'other'") && moved.contains("not 'tmm-scratch'"), "{moved}");
+        // Gone, and malformed answers.
+        assert!(target_in_our_session(None, "tmm-scratch", "%7").unwrap_err().contains("vanished"));
+        for odd in ["", "tmm-scratch", "tmm-scratch<TMM_SEP>", "tmm-scratch<TMM_SEP>1", "1.1"] {
+            let e = target_in_our_session(Some(odd), "tmm-scratch", "%7").unwrap_err();
+            assert!(e.contains("not a pane position") || e.contains("is in session"), "{odd:?} -> {e}");
+        }
+    }
 
     #[test]
     fn ownership_is_existence_plus_our_mark_and_no_project() {

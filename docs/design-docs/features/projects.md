@@ -137,9 +137,17 @@ make a workspace. Two consequences fall out of that:
     read BACK from that id at the END of the call, never handed over as the
     pre-repair string: a pane created or killed beside ours while we work
     renumbers positions, so the earlier string could name a pane this call
-    never checked. That window needs a race to observe, so it is closed by
-    construction and pinned by "the answer names the pane we checked" rather
-    than by a failing control. A repeated ensure is pinned to keep the shell pid across
+    never checked. That read carries the pane's SESSION and it is
+    CHECKED: a `move-pane` into another session keeps the `%id` valid, and an
+    unchecked answer would have paired `session: tmm-scratch` with a foreign
+    pane — sending the client through the scratch door into another session,
+    with the two fields of one answer contradicting each other. The target is
+    rebuilt from the two verified fields (session name, then position), never
+    split out of a joined string, because a session name may contain spaces.
+    The verdict is a pure function, so every refusal — gone, malformed, moved
+    out — is pinned without racing a live call; the races themselves are
+    closed by construction and pinned by "the answer names the pane we
+    checked". A repeated ensure is pinned to keep the shell pid across
     three calls, across a running command, and across the review's exact race
     (observed dead, revived by another path, then repaired).
   - **Explicit Kill is still the only way to end it.** `pane-died` is a session
