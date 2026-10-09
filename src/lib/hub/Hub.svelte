@@ -586,14 +586,22 @@
     untrack(() => { void openAt(req); });
   });
   async function openAt({ alert, n }) {
-    if (alert.server && alert.server !== serverId()) { centre.failed(alert.key, t('hubJumpOtherServer')); return; }
-    const row = rows.find((r) => r.project.session === alert.session || roomKey(r) === alert.room);
-    if (!row) { centre.failed(alert.key, t('hubJumpNoProject')); return; }
+    // The request is CLAIMED before anything awaits, and every exit —
+    // including these preflight refusals — consumes the same `n` (finally).
+    // After an await the claim is re-checked BEFORE a new generation is
+    // minted, so a stale continuation can never take a newer request's (or
+    // a manual room switch's) reading away.
     jumpIntent = n;
     let g = 0;
-    const current = () => centre.isCurrent(n) && alive && visible && readGen === g && selected === row.project.session;
+    let row = null;
+    const claimed = () => centre.isCurrent(n) && jumpIntent === n && alive && visible && !!row && selected === row.project.session;
+    const current = () => claimed() && readGen === g;
     try {
+      if (alert.server && alert.server !== serverId()) { centre.failed(alert.key, t('hubJumpOtherServer')); return; }
+      row = rows.find((r) => r.project.session === alert.session || roomKey(r) === alert.room) ?? null;
+      if (!row) { centre.failed(alert.key, t('hubJumpNoProject')); return; }
       if (selected !== row.project.session) await selectProject(row.project.session);
+      if (!claimed()) return;
       g = newReading(); // this jump owns the visible feed from here on
       if (!current()) return;
       // A room-scoped reading filter that would hide the target is cleared

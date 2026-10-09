@@ -2914,3 +2914,89 @@ test('a jump is one-shot: leaving and returning never replays it; one pending wh
     assert.equal(app.document.querySelector('[data-msg="later"]'), null, 'no forced jump on return');
   } finally { await app.close(); }
 });
+
+test('a stale jump whose room switch is slow cannot void a newer jump in that room (#322 review r2)', { timeout: 60000 }, async (context) => {
+  let firstPage: ((v: unknown) => void) | null = null;
+  let around2: ((v: unknown) => void) | null = null;
+  const f = jumpFixture();
+  const rpc = { ...f.rpc,
+    hubLog: async (session: string, sinceTs = 0) => (session === 'other' && sinceTs === 0 && !firstPage ? new Promise((r) => { firstPage = r; }) : f.rpc.hubLog(session)),
+    hubLogAround: async (_s: string, seq: number) => (seq === 60
+      ? new Promise((r) => { around2 = r; })
+      : { has_more: true, newer_more: true, oldest_seq: 48, messages: f.around }) };
+  const app = await mountJump(context, rpc);
+  try {
+    await until(app, () => !!app.document.querySelector('.proj-row[aria-label^="other"]'));
+    const centre = centreOf(app);
+    centre.record(alertFor());
+    centre.record(alertFor('second', 60));
+    centre.requestJump(centre.items.find((a: { id: string }) => a.id === 'target')); // A → B, its room load hangs
+    await until(app, () => !!firstPage);
+    centre.requestJump(centre.items.find((a: { id: string }) => a.id === 'second')); // already in B, its page hangs
+    await until(app, () => !!around2);
+    firstPage!({ has_more: true, oldest_seq: 200, messages: f.tail }); // the stale jump's await returns first
+    for (let i = 0; i < 6; i++) await app.flush();
+    around2!({ has_more: true, newer_more: true, oldest_seq: 58, messages: [f.msg(58), { ...f.msg(60), id: 'second' }, f.msg(61)] });
+    await until(app, () => !!app.document.querySelector('.jump-hit[data-msg="second"]'));
+    const by = (id: string) => centre.items.find((a: { id: string }) => a.id === id);
+    assert.ok(app.document.querySelector('.jump-hit[data-msg="second"]'), 'the newest click lands');
+    assert.equal(by('second').viewed, true);
+    assert.equal(by('target').viewed, false);
+    assert.equal(centre.jump, null);
+  } finally { await app.close(); }
+});
+
+test('a preflight refusal (no project, another server) consumes the request: no replay on return (#322 review r2)', { timeout: 60000 }, async (context) => {
+  const f = jumpFixture();
+  const app = await mountJump(context, f.rpc);
+  const setVisible = async (v: boolean) => { app.window.__setVisible(v); for (let i = 0; i < 4; i++) await app.flush(); };
+  try {
+    await until(app, () => !!app.document.querySelector('.proj-row[aria-label^="other"]'));
+    const centre = centreOf(app);
+    const missing = { ...alertFor('lost', 5), key: 'proj:nowhere|lost', room: 'proj:nowhere', session: 'nowhere', project: 'nowhere' };
+    for (const a of [missing, alertFor('elsewhere', 9, 's2')]) {
+      centre.record(a);
+      centre.requestJump(centre.items.find((x: { key: string }) => x.key === a.key));
+      for (let i = 0; i < 6; i++) await app.flush();
+      const rec = centre.items.find((x: { key: string }) => x.key === a.key);
+      assert.equal(centre.jump, null, `${a.id}: the refused request is spent`);
+      assert.equal(rec.viewed, false);
+      assert.ok(rec.failed, `${a.id}: the row says why`);
+    }
+    await setVisible(false);
+    await setVisible(true);
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.equal(app.document.querySelector('.h1-text')?.textContent, 'fixture', 'no replay on return');
+  } finally { await app.close(); }
+});
+
+test('a first-page poll in flight when a jump lands at the tail cannot reset the cursor or splice in its page (#322 review r2, generation alone)', { timeout: 60000 }, async (context) => {
+  let first: ((v: unknown) => void) | null = null;
+  const befores: number[] = [];
+  const f = jumpFixture();
+  const rpc = { ...f.rpc,
+    hubLog: async (session: string, sinceTs = 0, _l = 100, beforeSeq = 0) => {
+      if (session !== 'other') return { has_more: false, messages: [] };
+      if (beforeSeq) { befores.push(beforeSeq); return { has_more: false, messages: [] }; }
+      if (sinceTs === 0 && !first) return new Promise((r) => { first = r; });
+      return { has_more: false, messages: [] };
+    },
+    // The page around the target reaches the room's newest message: no window.
+    hubLogAround: async () => ({ has_more: true, newer_more: false, oldest_seq: 48, messages: f.around }) };
+  const app = await mountJump(context, rpc);
+  try {
+    await until(app, () => !!app.document.querySelector('.proj-row[aria-label^="other"]'));
+    app.document.querySelector<HTMLElement>('.proj-row[aria-label^="other"] .proj-pick')!.click();
+    await until(app, () => !!first);
+    const centre = centreOf(app);
+    centre.record(alertFor());
+    centre.requestJump(centre.items[0]);
+    await until(app, () => !!app.document.querySelector('.jump-hit[data-msg="target"]'));
+    first!({ has_more: true, oldest_seq: 200, messages: f.tail });
+    for (let i = 0; i < 8; i++) await app.flush();
+    assert.equal(app.document.querySelector('[data-msg="id209"]'), null, 'the stale first page did not splice a gap into the feed');
+    app.document.querySelector<HTMLButtonElement>('.older-more')?.click();
+    for (let i = 0; i < 6; i++) await app.flush();
+    assert.equal(befores.at(-1), 48, 'the cursor is still the jump page\'s');
+  } finally { await app.close(); }
+});
