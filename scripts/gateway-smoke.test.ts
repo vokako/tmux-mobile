@@ -68,7 +68,7 @@ test('a competing install of the name is refused and the other unit is never sto
     const r = w.run();
     assert.notEqual(r.status, 0, r.stdout + r.stderr);
     const calls = await w.calls();
-    assert.doesNotMatch(calls, /systemctl .*(disable|stop|kill)/, calls);
+    assert.doesNotMatch(calls, /systemctl .*(disable|stop|kill|reset-failed)/, calls);
     assert.match(calls, /tmm gateway uninstall/, 'cleanup goes through the identity check');
     assert.match(r.stderr, /CLEANUP FAILED: not this tmm/);
     const kept = scratchKept(r.stderr);

@@ -6,8 +6,9 @@
 //! `gateway start --service` with THIS config root (the `XDG_CONFIG_HOME`
 //! base in the file's environment; never a token, never in argv). The plist
 //! is read as a structure (XML or binary; Label == the file's name, the
-//! whole ProgramArguments array); the unit by a strict line grammar (the
-//! last `Environment=` assignment of a key wins, as systemd reads it).
+//! whole ProgramArguments array, only the keys tmm writes); the unit by a
+//! strict, section-aware grammar that refuses anything it does not
+//! interpret (a key set twice, an escape the renderer never writes, …).
 //! Only a file that does not exist is absent; any other read or parse
 //! problem refuses. A file of our name that is not ours is refused with what
 //! it names — never adopted, overwritten or removed; `--replace` backs it up
@@ -33,7 +34,9 @@ use super::probe::Verdict;
 pub const LABEL: &str = "cc.voka.tmux-mobile";
 /// systemd user unit.
 pub const UNIT: &str = "tmux-mobile-gateway.service";
-/// How long install/restart wait for our instance to answer.
+/// The polling budget install/restart wait for our instance to answer: no
+/// new poll starts past it, so the wait ends within READY plus one poll
+/// (a probe is bounded at 1.5 s; the native queries have no timeout).
 pub const READY: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,7 +118,9 @@ fn unquote_arg(s: &str) -> Option<String> {
     let mut it = inner.chars();
     while let Some(c) = it.next() {
         match c {
-            '\\' => out.push(it.next()?),
+            // Only the escapes the renderer writes; systemd reads `\t`, `\n`,
+            // `\x..` … as other bytes, so any other escape is not ours.
+            '\\' => match it.next()? { c @ ('\\' | '"') => out.push(c), _ => return None },
             '%' => { if it.next()? != '%' { return None; } out.push('%'); }
             '$' => { if it.next()? != '$' { return None; } out.push('$'); }
             '"' => return None,
@@ -132,7 +137,9 @@ fn unquote_env(s: &str) -> Option<(String, String)> {
     let mut it = inner.chars();
     while let Some(c) = it.next() {
         match c {
-            '\\' => out.push(it.next()?),
+            // Only the escapes the renderer writes; systemd reads `\t`, `\n`,
+            // `\x..` … as other bytes, so any other escape is not ours.
+            '\\' => match it.next()? { c @ ('\\' | '"') => out.push(c), _ => return None },
             '%' => { if it.next()? != '%' { return None; } out.push('%'); }
             '"' => return None,
             c => out.push(c),
@@ -744,6 +751,13 @@ mod tests {
         assert!(unit_identity(&format!("{unit}ExecStartPre=/bin/true\n")).is_err(), "an extra pre-step is not ours");
         assert!(unit_identity(&format!("{unit}EnvironmentFile=/x\n")).is_err());
         assert!(unit_identity(&unit.replace("ExecStart=", "ExecStart=\"/x\" gateway start --service\nExecStart=")).is_err(), "two ExecStart");
+        // systemd decodes `\t`, `\n`, … to other bytes: only our own escapes
+        // (`\\`, `\"`) read back, so these name another exe / another root.
+        assert!(unit_identity(&unit.replace("\"/opt/tmm\"", "\"/opt/\\tmm\"")).is_err(), "\\t is a TAB to systemd");
+        assert!(unit_identity(&unit.replace("XDG_CONFIG_HOME=/home/u/.config", "XDG_CONFIG_HOME=/home/u/.co\\nfig")).is_err(), "\\n is a newline to systemd");
+        // systemd decodes `\t`, `\n`, … to other bytes: only our own escapes read back.
+        assert!(unit_identity(&unit.replace("\"/opt/tmm\"", "\"/opt/\\tmm\"")).is_err(), "\\t is a TAB to systemd, not /opt/tmm");
+        assert!(unit_identity(&unit.replace("XDG_CONFIG_HOME=/home/u/.config", "XDG_CONFIG_HOME=/home/u/.co\\nfig")).is_err(), "\\n is a newline to systemd");
         assert!(unit_identity(&unit.replace(" --service", "")).is_err(), "not the managed start");
         // plist: Label must be this name; the whole argv must be ours.
         let plist = render_plist(&s).unwrap();
@@ -1036,6 +1050,17 @@ mod tests {
         std::fs::write(&file, "[Service]\nExecStart=/usr/bin/node server.js\n").unwrap();
         assert!(uninstall(&sys, N).is_err() && file.exists(), "a hand-written unit is never removed");
         assert!(logs_command(&sys, N, false).is_err(), "logs follow the same identity check");
+        // A unit that only LOOKS like ours under a lax unescape: refused, and
+        // no native stop is ever issued for it.
+        let ours = render_systemd(&sys.spec(N)).unwrap();
+        for (what, from, to) in [("\\t in the exe", "\"/opt/tmm\"", "\"/opt/\\tmm\""), ("\\n in the root", ".config\"", ".co\\nfig\"")] {
+            let bad = ours.replacen(from, to, 1);
+            assert_ne!(bad, ours, "{what}: fixture applied");
+            std::fs::write(&file, &bad).unwrap();
+            _f.calls.borrow_mut().clear();
+            assert!(uninstall(&sys, N).is_err() && file.exists(), "{what}: refused, kept");
+            assert!(!_f.calls.borrow().iter().any(|c| c.contains("disable") || c.contains("stop")), "{what}: no stop: {:?}", _f.calls.borrow());
+        }
         assert!(install(&sys, "../../evil.service", false).is_err(), "a name cannot leave the service directory");
         std::fs::remove_dir_all(&home).ok();
     }

@@ -49,11 +49,15 @@ cleanup() {
     fi
     # Only through tmm's identity check: a unit that is not this run's is
     # refused there and left running.
-    if [ -e "$UNIT" ] && ! T gateway uninstall > "$S/uninstall.log" 2>&1; then
-      echo "SMOKE CLEANUP FAILED: $(tail -1 "$S/uninstall.log")" >&2
-      [ $rc -eq 0 ] && rc=1
+    if [ -e "$UNIT" ]; then
+      if T gateway uninstall > "$S/uninstall.log" 2>&1; then
+        # Only after OUR uninstall succeeded: the failed state is this run's.
+        systemctl --user reset-failed "$NAME" >/dev/null 2>&1 || true
+      else
+        echo "SMOKE CLEANUP FAILED: $(tail -1 "$S/uninstall.log")" >&2
+        [ $rc -eq 0 ] && rc=1
+      fi
     fi
-    systemctl --user reset-failed "$NAME" >/dev/null 2>&1 || true
   fi
   if [ $rc -ne 0 ] && [ -d "$S/evidence" ]; then
     cp -r "$S/evidence" "/tmp/gw323-smoke-evidence-$$" && echo "evidence kept in /tmp/gw323-smoke-evidence-$$" >&2
