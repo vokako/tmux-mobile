@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServerStore, isResidentKey } from './server-store.ts';
-import { LAYOUT_KEY, LAYOUT_VERSION, RESIDENT_KEYS, migrateServerState, residentKey } from './server-state-migration.ts';
+import { LAYOUT_KEY, LAYOUT_VERSION, RESIDENT_KEYS, layoutMark, migrateServerState, residentKey } from './server-state-migration.ts';
 import { PARKED_KEYS, parkFrom, pointTo } from './servers.ts';
 
 function mem(init: Record<string, string> = {}) {
@@ -166,7 +166,7 @@ test('the fold runs once, and a rerun never touches a newer resident value', () 
   const once = storage.dump();
 
   const second = migrateServerState(storage);
-  assert.deepEqual(second, { ran: false, reason: 'already-done', serverId: 'a', folded: [] });
+  assert.deepEqual(second, { ran: false, reason: 'already-done', serverId: 'a', folded: [], cleared: [] });
   assert.deepEqual(storage.dump(), once, 'the second run changes nothing');
 
   // A module that has moved to the new layout writes, and the fold runs again.
@@ -187,23 +187,85 @@ test('a CURRENT that changes later cannot re-attribute leftover inputs', () => {
 
   storage.setItem('tmux_server_current', 'b');
   const report = migrateServerState(storage);
-  assert.deepEqual(report, { ran: false, reason: 'already-done', serverId: 'b', folded: [] });
+  assert.deepEqual(report, { ran: false, reason: 'already-done', serverId: 'a', folded: [], cleared: [] },
+    'and it still names the server the inputs actually went to');
   assert.deepEqual(JSON.parse(storage.getItem('tmux_hub_drafts::b')!), bBefore, 'B is still B');
   assert.equal(storage.getItem('tmux_state::b'), JSON.stringify({ page: 'terminal', terminalTarget: 'work:2.1', terminalSession: 'work' }));
 });
 
-test('the marker records which layout, and both sides of the fold', () => {
+test('ONE marker write records both facts, so there is no window between them', () => {
+  // Two markers meant two writes: the per-server one lands, the global one
+  // fails, and then the server it folded into skips while the NEXT server to
+  // become current folds the same leftover inputs into its own slot. One write
+  // carries the layout AND which server received the inputs.
   const storage = preMigration();
   migrateServerState(storage);
-  // The unprefixed marker is about the INPUTS (consumed); the suffixed one is
-  // about one server's SLOT (in the new layout). A version, not a boolean, so
-  // a later layout change can tell whose fold it was.
-  assert.equal(storage.getItem(LAYOUT_KEY), LAYOUT_VERSION);
-  assert.equal(storage.getItem(residentKey(LAYOUT_KEY, 'a')), LAYOUT_VERSION);
-  assert.equal(storage.getItem(residentKey(LAYOUT_KEY, 'b')), null, 'B never received a fold');
+  assert.deepEqual(layoutMark(storage), { v: LAYOUT_VERSION, into: 'a' });
+  assert.equal(storage.getItem(residentKey(LAYOUT_KEY, 'a')), null, 'no second marker to go missing');
   // The marker is not a per-server key, so a server store does not rewrite it
   // on the way past.
   assert.equal(isResidentKey(LAYOUT_KEY), false);
+  // Unparseable is still "consumed": reading the inputs twice is worse than
+  // not knowing which fold ran.
+  const old = mem({ ...preMigration().dump(), [LAYOUT_KEY]: 'yes' });
+  assert.deepEqual(layoutMark(old), { v: 'yes', into: '' });
+  assert.equal(migrateServerState(old).reason, 'already-done');
+});
+
+test('a fold that cannot be recorded says so, and a later run records it', () => {
+  // `localStorage` has no transaction, so the honest boundary is: one write,
+  // and a report when even that fails. The caller must not switch servers on
+  // `unrecorded` — the inputs still read as unconsumed.
+  const storage = preMigration();
+  const real = storage.setItem.bind(storage);
+  storage.setItem = (k: string, v: string) => {
+    if (k === LAYOUT_KEY) throw new Error('QuotaExceededError');
+    real(k, v);
+  };
+  const first = migrateServerState(storage);
+  assert.equal(first.reason, 'unrecorded');
+  assert.equal(first.ran, true, 'the data DID move');
+  assert.deepEqual(JSON.parse(storage.getItem('tmux_hub_drafts::a')!), { work: 'half a line on A' });
+  assert.equal(layoutMark(storage), null, 'but nothing claims it is done');
+
+  storage.setItem = real;
+  const second = migrateServerState(storage);
+  assert.equal(second.reason, 'folded', 'the retry folds the same inputs again');
+  assert.deepEqual(layoutMark(storage), { v: LAYOUT_VERSION, into: 'a' });
+  assert.deepEqual(JSON.parse(storage.getItem('tmux_hub_drafts::a')!), { work: 'half a line on A' });
+});
+
+test('a CURRENT that names no saved server does not guess a slot', () => {
+  // An entry removed, or a value from an older build. Filing the live values
+  // under an id no server has is losing them quietly.
+  const storage = preMigration();
+  storage.setItem('tmux_server_current', 'ghost');
+  const before = storage.dump();
+  const report = migrateServerState(storage);
+  assert.deepEqual(report, { ran: false, reason: 'unknown-current', serverId: '', folded: [], cleared: [] });
+  assert.deepEqual(storage.dump(), before, 'no writes at all');
+  assert.equal(layoutMark(storage), null, 'and no completion marker');
+});
+
+test('a value the user CLEARED does not come back from the old park', () => {
+  // Arriving at a server surfaces its park as the live key, so from then on
+  // live and slot agree and any divergence is a live-side change: an absent
+  // live key means cleared, not unknown. Copying only the present keys made a
+  // cleared draft reappear the moment the slot became the live home.
+  const storage = preMigration();
+  // On A the user cleared the draft and closed the drawer; `::a` still holds
+  // what was there when they last left A.
+  storage.removeItem('tmux_hub_drafts');
+  storage.setItem('tmux_hub_drawer::a', JSON.stringify({ work: 'files' }));
+  storage.removeItem('tmux_hub_drawer');
+
+  const report = migrateServerState(storage);
+  assert.ok(report.cleared.includes('tmux_hub_drafts'), 'the fold reports what it cleared');
+  assert.ok(report.cleared.includes('tmux_hub_drawer'));
+  assert.equal(storage.getItem('tmux_hub_drafts::a'), null, 'the old draft is gone, as the user left it');
+  assert.equal(storage.getItem('tmux_hub_drawer::a'), null);
+  // B's own park is untouched: the live set speaks only for the current server.
+  assert.deepEqual(JSON.parse(storage.getItem('tmux_hub_drafts::b')!), { work: 'half a line on B' });
 });
 
 test('a fold interrupted halfway leaves the inputs, and the next run redoes it all', () => {
@@ -242,22 +304,26 @@ test('with no current server the fold does nothing and says so', () => {
   storage.removeItem('tmux_server_current');
   const before = storage.dump();
   const report = migrateServerState(storage);
-  assert.deepEqual(report, { ran: false, reason: 'no-current', serverId: '', folded: [] });
+  assert.deepEqual(report, { ran: false, reason: 'no-current', serverId: '', folded: [], cleared: [] });
   assert.deepEqual(storage.dump(), before, 'not one key moved');
-  assert.equal(storage.getItem(LAYOUT_KEY), null, 'and nothing was marked, so a later run still folds');
+  assert.equal(layoutMark(storage), null, 'and nothing was marked, so a later run still folds');
 });
 
 test('a fresh client has nothing to fold', () => {
-  const storage = mem({ tmux_servers: '[]', tmux_server_current: 'only' });
+  // The entry has to exist: a CURRENT that resolves to nothing is the
+  // dangling case, which writes nothing at all.
+  const storage = mem({
+    tmux_servers: JSON.stringify([{ id: 'only', name: 'n', address: 'ws://n:9899', token: '' }]),
+    tmux_server_current: 'only',
+  });
   const report = migrateServerState(storage);
   assert.equal(report.ran, true);
   assert.deepEqual(report.folded, [], 'an absent live value is not evidence of an empty server');
   assert.deepEqual(storage.dump(), {
     tmux_server_current: 'only',
-    tmux_servers: '[]',
-    [LAYOUT_KEY]: LAYOUT_VERSION,
-    [residentKey(LAYOUT_KEY, 'only')]: LAYOUT_VERSION,
-  }, 'only the markers, so the empty client is not folded again either');
+    tmux_servers: JSON.stringify([{ id: 'only', name: 'n', address: 'ws://n:9899', token: '' }]),
+    [LAYOUT_KEY]: JSON.stringify({ v: LAYOUT_VERSION, into: 'only' }),
+  }, 'only the marker, so the empty client is not folded again either');
 });
 
 test('the fold survives a pre-#335 switch having happened in between', () => {
@@ -307,10 +373,11 @@ test('the legacy switch still owns the live keys, which is why the fold stays of
     'parkFrom overwrote the resident slot: one commit must move both sides');
 });
 
-test('the fold does not invent a slot for a key the server never had', () => {
+test('a key the server never had leaves no slot behind', () => {
   const storage = preMigration();
   storage.removeItem('tmux_hub_lead');            // A never chose a lead
-  migrateServerState(storage);
-  assert.equal(storage.getItem('tmux_hub_lead::a'), null,
-    'an absent live value leaves the slot absent, so a park under its own id stays the only copy');
+  const report = migrateServerState(storage);
+  assert.equal(storage.getItem('tmux_hub_lead::a'), null);
+  assert.ok(!report.folded.includes('tmux_hub_lead'));
+  assert.ok(!report.cleared.includes('tmux_hub_lead'), 'nothing to clear either');
 });

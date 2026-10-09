@@ -422,23 +422,45 @@ serverId throws instead of falling back to the unprefixed keys, because that
 fallback would write one server's drafts where every server reads them, and
 only on the path where CURRENT has not resolved yet.
 
-`migrateServerState(storage)` is the one-time fold, and its completion is
-RECORDED rather than inferred. The first version compared values instead, which
-is only idempotent while nothing else writes the slot: the moment the slot is
-the live home, a second run overwrites a newer resident value with the stale
-unprefixed one. Two markers, because completion has two sides —
-`tmux_state_layout` says the INPUTS have been consumed, so a CURRENT that
-changes later can never re-attribute A's leftover live values to B, and
-`tmux_state_layout::<id>` says that server's SLOT is in the new layout. A
-version, not a boolean, so a later layout change can tell whose fold it was.
-On the one run that reads them, the ACTIVE value wins over the current
-server's own older park; every other server's park is left alone because it is
-already in its final home; with no resolved CURRENT it is a no-op that says so
-and marks nothing, so a later run still folds. The markers are written AFTER
-the fold, so a crash halfway leaves the inputs readable and the next run redoes
-the whole thing rather than half of it. It does not clear the unprefixed keys,
-so a client rolled back to a build from before #335 finds the state it left;
-deleting them belongs to the ②b commit that stops writing them.
+`migrateServerState(storage)` is the one-time fold, and three of its rules
+were each a bug first.
+
+**Completion is recorded, in ONE write.** Comparing values instead is only
+idempotent while nothing else writes the slot: the moment the slot is the live
+home, a second run overwrites a newer resident value with the stale unprefixed
+one. Recording it in TWO markers — "the inputs are consumed" and "this
+server's slot is converted" — is no better, because two writes always leave a
+window: the per-server one lands, the global one fails, and then the server it
+folded into skips while the NEXT server to become current folds the same
+leftover inputs into its own slot. So there is one marker, one write, carrying
+both facts: the layout version and which server received the inputs. A marker
+that cannot be parsed still counts as consumed, because reading the inputs
+twice is worse than not knowing which fold ran. The marker is written AFTER the
+move, so a failure part-way leaves the inputs readable and the next run redoes
+the whole fold rather than half of it — and when the marker write itself fails,
+the report says `unrecorded` rather than `folded`, because `localStorage` has
+no transaction and the caller must not switch servers while the inputs still
+read as unconsumed.
+
+**The live set is authoritative in full, not just its present keys.** An absent
+live key means the value was CLEARED, and for the current server that is a
+conclusion rather than a guess: arriving at a server surfaces its park as the
+live key, so from that moment live and slot agree and any later divergence is a
+live-side change. Copying only the present keys made a cleared draft and a
+reset read-mark come back out of the old park the moment the slot became the
+live home. The fold therefore IS `parkFrom` — the switch's own "file this
+server's live keys under its id; an absent one clears the slot" — rather than a
+second loop that has to be taught the same rule. Every other server's park is
+untouched, because the live set speaks only for the current server.
+
+**CURRENT must resolve.** An empty CURRENT has no slot to fold into, and a
+CURRENT naming an id no saved server has is a slot nothing will ever read.
+Both are a reported no-op with no writes and no marker, so a later run still
+folds once a connect has resolved which server this is.
+
+It does not clear the unprefixed keys, so a client rolled back to a build from
+before #335 finds the state it left; deleting them belongs to the ②b commit
+that stops writing them.
 
 The fold is NOT enabled in ②a, and that sequencing is a rule rather than
 caution: `parkFrom` writes `<key>::<id>` — the very string a resident slot
@@ -750,12 +772,14 @@ through, and so do the registry keys and the active mirror, whose home is the
 claim that those credentials are scoped by server, so ②b still owes reconnect
 and the connection config an entry-scoped reader. An empty serverId throws
 rather than falling back to the unprefixed keys. `migrateServerState` records
-its completion in two markers (the inputs are consumed; this server's slot is
-converted) rather than inferring it from values, because value comparison
-stops being idempotent the moment the slot is the live home — it would
-overwrite a newer resident value with the stale unprefixed one. It lets the
-ACTIVE value win over the current server's older park, keeps every other
-server's park, and no-ops when CURRENT is unresolved. It must be enabled in
+its completion in ONE marker write carrying the layout and the server the
+inputs went to: inferring it from values stops being idempotent the moment the
+slot is the live home, and two markers leave a window in which one server skips
+while the next folds the same inputs. The fold IS `parkFrom`, so an absent live
+key CLEARS the slot — a cleared draft must not come back out of the old park —
+and a CURRENT that is empty or names no saved server writes nothing at all. A
+marker write that fails is reported as `unrecorded`, not as a completed fold.
+It must be enabled in
 the SAME commit that moves every live read and write: `parkFrom` writes the
 very string a resident slot uses, so a half-migrated client either overwrites
 a resident slot on the next switch or loses a live write to a reader that has
