@@ -844,6 +844,13 @@ export const hubMsgPurge = (session: string, ids: string[]) =>
  * project. */
 export const hubRooms = () =>
   call<{ rooms: Record<string, number>; states?: Record<string, string> }>('hub_rooms', {});
+/** A room's unread summary above the reader's watermark (board #322): the
+ * messages `rooms::news_kind` calls news. A room with none is absent. */
+export interface RoomUnread { count: number; first_seq: number; last_seq: number }
+/** The watermark per room: the last read seq, or a legacy ts. */
+export type ReadMark = { seq: number } | { ts: number };
+export const hubUnread = (rooms: Record<string, ReadMark>) =>
+  call<{ rooms: Record<string, RoomUnread> }>('hub_unread', { rooms });
 // ── Server system vitals (board #56) ────────────────────────────────────────
 /** One low-frequency reading of the machine the SERVER runs on (cpu/mem/root
  * disk — `src-tauri/src/system_status.rs` is the authority on the shape).

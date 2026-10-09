@@ -127,6 +127,28 @@ export function taskFinished(body: string | null | undefined): { id: string; to:
   return b && (b.to === 'review' || b.to === 'done') ? { id: b.id, to: b.to, title: b.title } : null;
 }
 
+/** What kind of news a message is — the ONE rule shared with the server's
+ * unread summary (`rooms::news_kind`, whose case table hub.test.ts runs here,
+ * board #322). Own words and app narration are none, except a board move to
+ * review/done; that and a `done` status note are `finished` (rings at every
+ * level); other status notes are `status` (progress, `all` only); anything
+ * else an agent says is a `reply`. */
+export type NewsKind = 'none' | 'reply' | 'status' | 'finished';
+export function newsKind(m: FeedMsg): NewsKind {
+  const from = m.from ?? '';
+  if (!from || from === 'human') return 'none';
+  if (systemLine(m.body) !== null) return taskFinished(m.body) ? 'finished' : 'none';
+  const note = statusNote(m.body);
+  if (note) return note.state === 'done' ? 'finished' : 'status';
+  return 'reply';
+}
+
+/** The kinds that RING at a level (notifications.md: done = finished only;
+ * replies adds replies; all adds progress notes). */
+export function levelKinds(level: NotifyLevel): ReadonlySet<NewsKind> {
+  return new Set<NewsKind>(level === 'done' ? ['finished'] : level === 'replies' ? ['finished', 'reply'] : ['finished', 'reply', 'status']);
+}
+
 /** Which of a batch's NEVER-SEEN messages deserve the reader's attention.
  * `first` marks a room's initial page (history, never news); `away` is the
  * reader-not-looking verdict computed by the caller from the live document.
@@ -134,15 +156,8 @@ export function taskFinished(body: string | null | undefined): { id: string; to:
  * agent's reply, its `[tmm done]` summary, and a board move to review/done. */
 export function notifiable(msgs: readonly FeedMsg[], opts: { first: boolean; away: boolean; level?: NotifyLevel }): FeedMsg[] {
   if (opts.first || !opts.away) return [];
-  const level = opts.level ?? DEFAULT_LEVEL;
-  return msgs.filter((m) => {
-    const from = m.from ?? '';
-    if (!from || from === 'human') return false;         // your own words
-    if (systemLine(m.body) !== null) return taskFinished(m.body) !== null; // narration, unless a task finished (every level)
-    const note = statusNote(m.body);
-    if (note) return note.state === 'done' || level === 'all'; // a done summary always; progress only at `all`
-    return level !== 'done';                             // a plain reply: replies / all
-  });
+  const kinds = levelKinds(opts.level ?? DEFAULT_LEVEL);
+  return msgs.filter((m) => kinds.has(newsKind(m)));
 }
 
 /** Title + body for the system notification. Composed from NAMES only —

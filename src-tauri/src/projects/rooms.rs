@@ -145,6 +145,116 @@ pub fn room_latest() -> serde_json::Value {
     serde_json::Value::Object(map)
 }
 
+/// What kind of news a message is — ONE rule for the room unread summary
+/// (`unread`), the client's unread dot and its notification centre (board
+/// #322; TS twin `newsKind` in hub/notifications.ts runs this file's case
+/// table, so the two cannot drift). Your own words are never news; app
+/// narration (`[tmm] `, and the retired `⚡ `/`✔ ` markers) is not news
+/// EXCEPT a board move to review/done; that and a `done` status note
+/// (`[tmm done]`) are "a task finished", which rings at every level; any
+/// other status note is progress (`all` only); everything else an agent
+/// says is a reply (notifications.md's levels, unchanged).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NewsKind {
+    None,
+    Reply,
+    Status,
+    Finished,
+}
+
+impl NewsKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            NewsKind::None => "none",
+            NewsKind::Reply => "reply",
+            NewsKind::Status => "status",
+            NewsKind::Finished => "finished",
+        }
+    }
+}
+
+/// The lifecycle markers (TS `systemLine`).
+const SYS_MARKERS: [&str; 3] = ["[tmm] ", "\u{26a1} ", "\u{2714} "];
+
+pub fn news_kind(sender: &str, body: &str) -> NewsKind {
+    if sender.is_empty() || sender == "human" {
+        return NewsKind::None;
+    }
+    if let Some(line) = SYS_MARKERS.iter().find_map(|m| body.strip_prefix(m)) {
+        return if board_finished(line.trim()) { NewsKind::Finished } else { NewsKind::None };
+    }
+    match status_note(body) {
+        Some("done") => NewsKind::Finished,
+        Some(_) => NewsKind::Status,
+        None => NewsKind::Reply,
+    }
+}
+
+/// `board #N <from> → review|done[ — title]` (TS `boardLine` + `taskFinished`).
+fn board_finished(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix("board #") else { return false };
+    let digits = rest.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digits == 0 {
+        return false;
+    }
+    let mut words = rest[digits..].strip_prefix(' ').unwrap_or("\u{0}").splitn(3, ' ');
+    let (Some(from), Some("\u{2192}"), Some(tail)) = (words.next(), words.next(), words.next()) else { return false };
+    if from.is_empty() || !from.chars().all(|c| c.is_ascii_lowercase()) {
+        return false;
+    }
+    let to: String = tail.chars().take_while(|c| c.is_ascii_lowercase()).collect();
+    let after = &tail[to.len()..];
+    (after.is_empty() || after.starts_with(" \u{2014}")) && (to == "review" || to == "done")
+}
+
+/// `[tmm status <word>] text` / `[tmm done] text` with non-empty text → the
+/// state word (TS `statusNote`).
+fn status_note(body: &str) -> Option<&str> {
+    let (state, rest) = if let Some(r) = body.strip_prefix("[tmm status ") {
+        let n = r.chars().take_while(|c| c.is_ascii_lowercase()).count();
+        if n == 0 {
+            return None;
+        }
+        (&r[..n], r[n..].strip_prefix(']')?)
+    } else {
+        ("done", body.strip_prefix("[tmm done]")?)
+    };
+    (!rest.trim().is_empty()).then_some(state)
+}
+
+/// The unread summary of one room above the reader's watermark (board #322):
+/// `{count, first_seq, last_seq}` over the messages `news_kind` calls news,
+/// archived ones excluded; `None` when there are none. Every row above the
+/// watermark is read (an indexed range on `(room, seq)`), so a run of own or
+/// narration lines can never hide an older reply.
+pub fn unread(room: &str, after_seq: Option<i64>, after_ts: i64) -> Option<serde_json::Value> {
+    let rows = with_store(|s| s.hub_above(room, after_seq, after_ts)).unwrap_or_default();
+    let hidden = crate::projects::archived_ids(room);
+    let mut count = 0;
+    let (mut first, mut last) = (0, 0);
+    for (seq, sender, body) in &rows {
+        if news_kind(sender, body) == NewsKind::None {
+            continue;
+        }
+        if !hidden.is_empty() && is_hidden(room, *seq, &hidden) {
+            continue;
+        }
+        if count == 0 {
+            first = *seq;
+        }
+        last = *seq;
+        count += 1;
+    }
+    (count > 0).then(|| serde_json::json!({ "count": count, "first_seq": first, "last_seq": last }))
+}
+
+fn is_hidden(room: &str, seq: i64, hidden: &[String]) -> bool {
+    with_store(|s| s.hub_message_by_seq(room, seq))
+        .ok()
+        .flatten()
+        .is_some_and(|m| hidden.iter().any(|h| *h == m.id))
+}
+
 /// Forget messages by id, for good — the irreversible half of deleting
 /// (`msg_archive` is the reversible half).
 pub fn delete_messages(room: &str, ids: &[String]) -> Result<usize, String> {
@@ -224,6 +334,67 @@ pub fn import_legacy() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Board #322: the ONE news case table. `hub.test.ts` reads these rows
+    /// out of this file and runs `newsKind` over them, so the unread summary
+    /// and the client's dot/centre cannot disagree: keep each row on one
+    /// line, `("<sender>", "<body>", "<kind>"),`.
+    #[test]
+    fn news_kind_is_one_rule() {
+        let cases: &[(&str, &str, &str)] = &[
+            ("human", "@lead go", "none"),
+            ("", "orphan", "none"),
+            ("lead", "here is the plan", "reply"),
+            ("lead", "[tmm] spawned dev", "none"),
+            ("lead", "[tmm] board #12 todo → doing — start", "none"),
+            ("lead", "[tmm] board #12 doing → review — ship it", "finished"),
+            ("lead", "[tmm] board #12 review → done", "finished"),
+            ("lead", "[tmm] board #x doing → review", "none"),
+            ("lead", "\u{26a1} board #3 doing → done — old marker", "finished"),
+            ("lead", "\u{2714} restarted dev", "none"),
+            ("lead", "[tmm done] shipped #12", "finished"),
+            ("lead", "[tmm status done] wrapped up", "finished"),
+            ("lead", "[tmm status running] compiling", "status"),
+            ("lead", "[tmm status running]   ", "reply"),
+            ("lead", "[tmm done]", "reply"),
+            ("lead", "[tmm]no space", "reply"),
+        ];
+        for (sender, body, want) in cases {
+            assert_eq!(news_kind(sender, body).as_str(), *want, "{sender}: {body:?}");
+        }
+    }
+
+    #[test]
+    fn unread_counts_news_above_the_watermark_however_much_noise_is_newer() {
+        crate::projects::tests::use_test_store();
+        let room = format!("proj:unread-{}", uuid::Uuid::new_v4());
+        let read = seed_msg(&room, &uuid::Uuid::new_v4().to_string(), 1_000, "lead", &[], "read already");
+        let mark = read["seq"].as_i64().unwrap();
+        assert!(unread(&room, Some(mark), 0).is_none(), "nothing above the watermark");
+        let reply = seed_msg(&room, &uuid::Uuid::new_v4().to_string(), 2_000, "lead", &[], "older reply");
+        // 30 own and narration rows land after it: they must not hide it.
+        for i in 0..30 {
+            let (from, body) = if i % 2 == 0 { ("human", "me again") } else { ("lead", "[tmm] board #1 todo → doing") };
+            seed_msg(&room, &uuid::Uuid::new_v4().to_string(), 3_000 + i, from, &[], body);
+        }
+        let sum = unread(&room, Some(mark), 0).expect("the reply is unread");
+        assert_eq!(sum["count"], 1);
+        assert_eq!(sum["first_seq"], reply["seq"]);
+        assert_eq!(sum["last_seq"], reply["seq"]);
+        // Two in one millisecond: both count, ordered by seq, not ts.
+        let a = seed_msg(&room, &uuid::Uuid::new_v4().to_string(), 9_000, "dev", &[], "[tmm done] a");
+        let b = seed_msg(&room, &uuid::Uuid::new_v4().to_string(), 9_000, "qa", &[], "b");
+        let sum = unread(&room, Some(mark), 0).unwrap();
+        assert_eq!(sum["count"], 3);
+        assert_eq!(sum["last_seq"], b["seq"]);
+        // Read to the tail: the watermark moves to the newest seq while the
+        // room's newest ts does not change, and the summary is empty.
+        assert!(unread(&room, b["seq"].as_i64(), 0).is_none());
+        assert!(unread(&room, a["seq"].as_i64(), 0).unwrap()["count"] == 1, "same-ms neighbour above a");
+        // A legacy ts watermark reads by ts.
+        assert_eq!(unread(&room, None, 8_999).unwrap()["count"], 2);
+        assert!(unread(&room, None, 9_000).is_none());
+    }
 
     #[test]
     fn a_posted_message_keeps_the_bus_wire_shape_and_pages_backwards() {

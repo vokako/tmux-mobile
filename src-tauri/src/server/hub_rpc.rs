@@ -55,6 +55,25 @@ fn dispatch_hub(req: &Request, notifications: Option<&crate::agent_notifications
         }
         return Ok(serde_json::json!({ "rooms": crate::projects::rooms::room_latest(), "states": states }));
     }
+    // The unread summary of every room the client asks about (board #322):
+    // `{rooms: {"<room>": {seq} | {ts}}}` — the reader's watermark, seq when
+    // it has one, a legacy ts otherwise — answers `{rooms: {"<room>": {count,
+    // first_seq, last_seq}}}` over the messages `rooms::news_kind` calls news.
+    // A room with none is absent. Like `hub_rooms`, it is about many rooms,
+    // so it answers before the session gate.
+    if req.method == "hub_unread" {
+        let mut out = serde_json::Map::new();
+        if let Some(asked) = p.get("rooms").and_then(|v| v.as_object()) {
+            for (room, mark) in asked.iter().take(256) {
+                let seq = mark.get("seq").and_then(|v| v.as_i64()).filter(|n| *n > 0);
+                let ts = mark.get("ts").and_then(|v| v.as_i64()).unwrap_or(0);
+                if let Some(sum) = rooms::unread(room, seq, ts) {
+                    out.insert(room.clone(), sum);
+                }
+            }
+        }
+        return Ok(serde_json::json!({ "rooms": out }));
+    }
     // The board twin of `hub_rooms`: issue counts per column for EVERY
     // project's board, one grouped read (board #39) — the Board sidebar
     // shows per-project counts and hides empty boards, and a per-project
@@ -1720,6 +1739,27 @@ mod tests {
         assert_eq!(row["todo"], 1);
         assert_eq!(row["doing"], 0, "zero-filled vocabulary over the wire");
         assert_eq!(row["total"], 1, "emptiness is one explicit field");
+    }
+
+    /// Board #322: the unread summary answers before the session gate, per
+    /// asked room, with archived messages excluded and quiet rooms absent.
+    #[test]
+    fn hub_unread_summarises_each_asked_room() {
+        crate::projects::tests::use_test_store();
+        let room = format!("proj:unread-rpc-{}", uuid::Uuid::new_v4());
+        let quiet = format!("proj:quiet-{}", uuid::Uuid::new_v4());
+        let base = rooms::seed_msg(&room, "u0", 100, "lead", &[], "seen");
+        let a = rooms::seed_msg(&room, "u1", 200, "lead", &[], "first");
+        let b = rooms::seed_msg(&room, "u2", 300, "dev", &[], "second");
+        rooms::seed_msg(&quiet, "q0", 100, "human", &[], "only me");
+        crate::projects::archive_msg(&room, "u2", 300, "dev", "second").unwrap();
+        let ask = serde_json::json!({ "rooms": { &room: { "seq": base["seq"] }, &quiet: { "ts": 0 } } });
+        let r = handle_hub_request(&req("hub_unread", ask), None);
+        assert!(r.error.is_none(), "{:?}", r.error.map(|e| e.message));
+        let v = r.result.unwrap();
+        assert_eq!(v["rooms"][&room], serde_json::json!({ "count": 1, "first_seq": a["seq"], "last_seq": a["seq"] }), "the archived one is not unread");
+        assert!(v["rooms"].get(&quiet).is_none(), "own words are never unread");
+        let _ = b;
     }
 
     /// A page can lose EVERY row to the archive filter, and the walk still has to

@@ -12,8 +12,8 @@ import { fileURLToPath } from 'node:url';
 import {
   notifiable, notifyText, excerpt, cueDue, msgKey, sift, playCue, notifyNews,
   isAway, roomProjectName, systemNotify, taskFinished, DEFAULT_LEVEL, NOTIFY_LEVELS,
-  CUE_COOLDOWN_MS, CUE_SRC, SEEN_CAP,
-  type FeedMsg, type NotifyState, type NotifyEnv,
+  CUE_COOLDOWN_MS, CUE_SRC, SEEN_CAP, newsKind,
+  type FeedMsg, type NotifyState, type NotifyEnv, type NotifyLevel,
 } from './notifications.ts';
 
 const away = { first: false, away: true };
@@ -324,4 +324,31 @@ test('the placeholder cue asset exists where CUE_SRC points', () => {
   assert.equal(wav.subarray(0, 4).toString(), 'RIFF');
   assert.ok(wav.length > 1000 && wav.length < 200_000, 'a short cue, not a soundtrack');
   assert.ok(SEEN_CAP >= 100, 'the seen memory holds a real conversation');
+});
+
+test('newsKind is the server\'s one rule: rooms.rs news_kind_is_one_rule, read here (#322)', () => {
+  const rust = readFileSync(new URL('../../../src-tauri/src/projects/rooms.rs', import.meta.url), 'utf8');
+  const table = rust.slice(rust.indexOf('fn news_kind_is_one_rule'), rust.indexOf('fn unread_counts_news_above'));
+  const rows = [...table.matchAll(/^\s*\(("(?:[^"\\]|\\.)*"), ("(?:[^"\\]|\\.)*"), "([a-z]+)"\),$/gmu)];
+  assert.ok(rows.length >= 16, `the shared table was found: ${rows.length} rows`);
+  // Rust's \u{XXXX} escape is JSON's \uXXXX.
+  const str = (lit: string) => JSON.parse(lit.replace(/\\u\{([0-9a-f]{4})\}/giu, '\\u$1')) as string;
+  for (const [, from, body, kind] of rows) {
+    assert.equal(newsKind({ from: str(from!), body: str(body!) }), kind, `${from}: ${body}`);
+  }
+});
+
+test('levels ring what they rang before #322: a legacy [tmm done] rings at done, replies and all', () => {
+  const msgs = [
+    { from: 'lead', body: '[tmm done] shipped' },
+    { from: 'lead', body: '[tmm] board #2 doing → review — x' },
+    { from: 'lead', body: 'a reply' },
+    { from: 'lead', body: '[tmm status running] busy' },
+    { from: 'lead', body: '[tmm] spawned dev' },
+    { from: 'human', body: 'me' },
+  ];
+  const bodies = (level: NotifyLevel) => notifiable(msgs, { ...away, level }).map((m) => m.body);
+  assert.deepEqual(bodies('done'), [msgs[0]!.body, msgs[1]!.body]);
+  assert.deepEqual(bodies('replies'), [msgs[0]!.body, msgs[1]!.body, msgs[2]!.body]);
+  assert.deepEqual(bodies('all'), [msgs[0]!.body, msgs[1]!.body, msgs[2]!.body, msgs[3]!.body]);
 });
