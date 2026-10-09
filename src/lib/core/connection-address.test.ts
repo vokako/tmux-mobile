@@ -34,19 +34,26 @@ test('the marker is a meta tag, read from the document', async () => {
   assert.equal(hostedByGateway(undefined), false);
 });
 
-test('local autofill fills only what nothing saved and nobody changed, field by field', async () => {
+test('local credentials go only to the local gateway, never next to a remote address', async () => {
   const { localAutofill } = await import('./connection-address.ts');
   const cfg = { url: 'wss://[::1]:9900', token: 'tok', tmux_socket: '/s' };
   const blank = { address: 'ws://127.0.0.1:9899', token: '', socket: '' };
   const none = { address: null, token: null, socket: null };
-  assert.deepEqual(localAutofill(none, blank, blank, cfg), { address: 'wss://[::1]:9900', token: 'tok', socket: '/s' }, 'a fresh app takes the local_url');
-  assert.deepEqual(
-    localAutofill({ address: 'ws://phone-server:9899', token: null, socket: null }, blank, blank, cfg),
-    { token: 'tok', socket: '/s' },
-    'a saved address with NO token keeps its address',
-  );
-  const typed = { ...blank, address: 'ws://typing-meanwhile' };
-  assert.deepEqual(localAutofill(none, blank, typed, cfg), { token: 'tok', socket: '/s' }, 'an address typed while the config loaded is kept');
-  assert.deepEqual(localAutofill({ address: 'a', token: 't', socket: 's' }, blank, blank, cfg), {}, 'everything saved: nothing filled');
-  assert.deepEqual(localAutofill(none, blank, blank, {}), {}, 'nothing to fill from');
+  assert.deepEqual(localAutofill(none, blank, blank, cfg), { address: 'wss://[::1]:9900', token: 'tok', socket: '/s' }, 'a fresh app: the local gateway, whole');
+  assert.deepEqual(localAutofill({ address: 'ws://remote:9899', token: null, socket: null }, blank, blank, cfg), {}, 'a saved REMOTE address with no token gets no local token or socket');
+  assert.deepEqual(localAutofill(none, blank, { ...blank, address: 'ws://remote:9899' }, cfg), {}, 'a remote address typed while the config loaded: nothing local');
+  assert.deepEqual(localAutofill({ address: 'wss://[::1]:9900', token: null, socket: null }, blank, blank, cfg), { token: 'tok', socket: '/s' }, 'a saved LOCAL address with empty fields is filled');
+  assert.deepEqual(localAutofill(none, blank, { ...blank, address: '[::1]:9900' }, { ...cfg, url: 'ws://[::1]:9900' }), { token: 'tok', socket: '/s' }, 'typed bare local host:port counts as local');
+  assert.deepEqual(localAutofill(none, blank, { ...blank, token: 'mine' }, cfg), { address: 'wss://[::1]:9900', socket: '/s' }, 'a token typed meanwhile is kept');
+  assert.deepEqual(localAutofill({ address: 'a', token: 't', socket: 's' }, blank, blank, cfg), {}, 'everything saved: nothing');
+  assert.deepEqual(localAutofill(none, blank, blank, {}), {}, 'no config: nothing');
+});
+
+test('moving away from the local gateway drops only the untouched auto-filled values', async () => {
+  const { dropAutofilled } = await import('./connection-address.ts');
+  const auto = { address: 'ws://127.0.0.1:9899', token: 'tok', socket: '/s' };
+  assert.deepEqual(dropAutofilled(auto, { address: 'ws://remote:9899', token: 'tok', socket: '/s' }), { clear: { token: '', socket: '' }, keep: null }, 'auto values do not follow to a remote');
+  assert.deepEqual(dropAutofilled(auto, { address: 'ws://remote:9899', token: 'typed', socket: '/s' }), { clear: { socket: '' }, keep: null }, 'a typed token stays');
+  assert.deepEqual(dropAutofilled(auto, { address: '127.0.0.1:9899', token: 'tok', socket: '/s' }), { clear: {}, keep: auto }, 'still local: nothing changes');
+  assert.deepEqual(dropAutofilled(null, { address: 'ws://remote', token: 'tok', socket: '' }), { clear: {}, keep: null }, 'nothing auto-filled (or a history pick forgot it): nothing cleared');
 });

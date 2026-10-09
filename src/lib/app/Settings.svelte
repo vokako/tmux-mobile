@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { connect, disconnect } from '../core/ws.ts';
-  import { defaultConnectionAddress, hostedByGateway, localAutofill, normalizeAddress as normalizeAddressFor, type LocalConfig } from '../core/connection-address.ts';
+  import { defaultConnectionAddress, dropAutofilled, hostedByGateway, localAutofill, normalizeAddress as normalizeAddressFor, type Autofilled, type LocalConfig } from '../core/connection-address.ts';
   import { isAndroid, isTauriDesktop, tauriReady } from '../core/platform.ts';
   import { activateConnected } from './servers.ts';
   import Icon from '../ui/Icon.svelte';
@@ -56,9 +56,21 @@
         if (fill.address !== undefined) address = fill.address;
         if (fill.token !== undefined) token = fill.token;
         if (fill.socket !== undefined) socket = fill.socket;
+        if ((fill.token !== undefined || fill.socket !== undefined) && cfg.url) autofilled = { address: cfg.url, token: fill.token, socket: fill.socket };
       })
       .catch(() => {});
   }
+
+  // Local credentials the autofill put in, and the local address they are
+  // for: they never follow the address to another server (a history pick
+  // forgets them first — its own token is the person's choice).
+  let autofilled = $state<Autofilled | null>(null);
+  $effect(() => {
+    const { clear, keep } = dropAutofilled(autofilled, { address, token, socket });
+    if (clear.token !== undefined) token = clear.token;
+    if (clear.socket !== undefined) socket = clear.socket;
+    if (keep !== autofilled) autofilled = keep;
+  });
 
   const normalizeAddress = (addr: string) => normalizeAddressFor(addr, location.protocol);
 
@@ -168,7 +180,7 @@
       <p class="subtitle">{t('connectTitle')}</p>
     </div>
 
-    <ConnectFields bind:address bind:token bind:socket bind:history onenter={() => { if (address && !connecting) doConnect(); }} />
+    <ConnectFields bind:address bind:token bind:socket bind:history onpick={() => { autofilled = null; }} onenter={() => { if (address && !connecting) doConnect(); }} />
 
     {#if error}
       <div class="error appear">{error}</div>

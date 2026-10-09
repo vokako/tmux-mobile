@@ -40,10 +40,17 @@ fn embed_ui() {
     let mut stack = vec![dist.clone()];
     while let Some(dir) = stack.pop() {
         for e in std::fs::read_dir(&dir).unwrap() {
-            let p = e.unwrap().path();
-            if p.is_dir() {
+            let e = e.unwrap();
+            let p = e.path();
+            // Never follow a link: one could pull a file from outside dist/
+            // into a public binary, or loop. A normal `vite build` has none.
+            let kind = e.file_type().unwrap();
+            if kind.is_symlink() {
+                panic!("embed-ui: {} is a symbolic link — dist/ must hold only regular files", p.display());
+            }
+            if kind.is_dir() {
                 stack.push(p);
-            } else if p.is_file() {
+            } else if kind.is_file() {
                 let rel = p.strip_prefix(&dist).unwrap().to_string_lossy().replace('\\', "/");
                 files.push((rel, p.canonicalize().unwrap()));
             }

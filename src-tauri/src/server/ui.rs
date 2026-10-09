@@ -16,8 +16,9 @@
 //! index.html gets `<meta name="tmm-gateway" content="1">` injected into the
 //! RESPONSE (the bytes on disk / in the binary are untouched): the page uses
 //! it to default its connection address to its own origin. It carries no
-//! token and no address. index.html and sw.js are `no-cache`; only the
-//! content-hashed files under `/assets/` are `immutable`.
+//! token and no address. index.html and sw.js are `no-cache`; only files Vite named by content
+//! hash (`assets/name-<hash>.ext`) are `immutable` — `public/` files keep
+//! their own names and revalidate.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -68,8 +69,13 @@ pub fn check(src: &Source) -> Result<&'static str, String> {
             if !d.is_absolute() {
                 return Err(format!("ui_dir {} is not an absolute path", d.display()));
             }
-            let root = d.canonicalize().map_err(|e| format!("ui_dir {} cannot be read ({})", d.display(), e.kind()))?;
-            std::fs::File::open(root.join("index.html")).map(|_| "dir").map_err(|e| format!("ui_dir {} has no readable index.html ({})", d.display(), e.kind()))
+            d.canonicalize().map_err(|e| format!("ui_dir {} cannot be read ({})", d.display(), e.kind()))?;
+            // The SAME resolution a request for / takes.
+            match resolve(src, "index.html") {
+                Found::File(_) => Ok("dir"),
+                Found::Refused => Err(format!("ui_dir {}: index.html leaves the directory (a link outside it)", d.display())),
+                Found::Missing => Err(format!("ui_dir {} has no readable index.html", d.display())),
+            }
         }
     }
 }
@@ -101,17 +107,33 @@ pub fn clean_path(target: &str) -> Option<String> {
     Some(decoded.trim_end_matches('/').to_string())
 }
 
-fn read(src: &Source, rel: &str) -> Option<Vec<u8>> {
+/// One file request against the source — what both `check` and every GET
+/// use. `Refused` (a link out of the root, not a regular file) is never
+/// mistaken for `Missing`, so it is never answered with the SPA page.
+enum Found {
+    File(Vec<u8>),
+    Missing,
+    Refused,
+}
+
+fn resolve(src: &Source, rel: &str) -> Found {
     match src {
-        Source::None => None,
-        Source::Embedded => lookup_embedded(rel).map(<[u8]>::to_vec),
+        Source::None => Found::Missing,
+        Source::Embedded => lookup_embedded(rel).map(|b| Found::File(b.to_vec())).unwrap_or(Found::Missing),
         Source::Dir(d) => {
-            let root = d.canonicalize().ok()?;
-            let full = root.join(rel).canonicalize().ok()?;
+            let Ok(root) = d.canonicalize() else { return Found::Missing };
+            let full = match root.join(rel).canonicalize() {
+                Ok(f) => f,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    // A dangling link is still a link: refused, not a route.
+                    return if std::fs::symlink_metadata(root.join(rel)).is_ok() { Found::Refused } else { Found::Missing };
+                }
+                Err(_) => return Found::Refused,
+            };
             if !full.starts_with(&root) || !full.is_file() {
-                return None;
+                return Found::Refused;
             }
-            std::fs::read(full).ok()
+            std::fs::read(full).map(Found::File).unwrap_or(Found::Refused)
         }
     }
 }
@@ -140,9 +162,29 @@ pub fn content_type(rel: &str) -> &'static str {
     }
 }
 
+/// Long cache ONLY for a name Vite gave a content hash (`name-<8 base64url
+/// chars>.ext` under assets/). `public/` files copied under their own names
+/// (assets/icon.svg, assets/notify.wav, …) change in place across versions,
+/// so they revalidate like everything else.
 fn cache_control(rel: &str) -> &'static str {
-    // Vite names every file under assets/ by its content hash.
-    if rel.starts_with("assets/") { "public, max-age=31536000, immutable" } else { "no-cache" }
+    if is_hashed_asset(rel) { "public, max-age=31536000, immutable" } else { "no-cache" }
+}
+
+pub fn is_hashed_asset(rel: &str) -> bool {
+    let Some(name) = rel.strip_prefix("assets/") else { return false };
+    if name.contains('/') {
+        return false;
+    }
+    // Vite's hash is the LAST 8 characters of the stem, after a '-', and is
+    // itself base64url (it may contain '-' or '_': `pdf-D-oSvAqu.js`).
+    let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
+    let b = stem.as_bytes();
+    if b.len() < 10 || b[b.len() - 9] != b'-' {
+        return false;
+    }
+    let hash = &b[b.len() - 8..];
+    hash.iter().all(|c| c.is_ascii_alphanumeric() || *c == b'_' || *c == b'-')
+        && hash.iter().any(|c| c.is_ascii_digit() || c.is_ascii_uppercase())
 }
 
 /// index.html with the hosted marker after `<head>` (or first, when none).
@@ -164,13 +206,14 @@ pub fn respond(src: &Source, target: &str, accept: &str) -> (u16, &'static str, 
     }
     let Some(rel) = clean_path(target) else { return not_found("not found") };
     let rel = if rel.is_empty() { "index.html".to_string() } else { rel };
-    let (rel, body) = match read(src, &rel) {
-        Some(b) => (rel, b),
-        None if is_navigation(&rel, accept) => match read(src, "index.html") {
-            Some(b) => ("index.html".to_string(), b),
-            None => return not_found("not found"),
+    let (rel, body) = match resolve(src, &rel) {
+        Found::File(b) => (rel, b),
+        // Only a route that does not EXIST falls back to the page.
+        Found::Missing if is_navigation(&rel, accept) => match resolve(src, "index.html") {
+            Found::File(b) => ("index.html".to_string(), b),
+            _ => return not_found("not found"),
         },
-        None => return not_found("not found"),
+        Found::Missing | Found::Refused => return not_found("not found"),
     };
     let body = if rel == "index.html" { with_marker(&body) } else { body };
     (200, content_type(&rel), cache_control(&rel), body)
@@ -207,7 +250,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("assets")).unwrap();
         std::fs::write(d.join("index.html"), "<!doctype html><html><head><title>t</title></head></html>").unwrap();
-        std::fs::write(d.join("assets/app-abc123.js"), "console.log(1)").unwrap();
+        std::fs::write(d.join("assets/app-BrQ0bpT6.js"), "console.log(1)").unwrap();
         std::fs::write(d.join("sw.js"), "self").unwrap();
         d
     }
@@ -231,8 +274,8 @@ mod tests {
         let html = String::from_utf8(b).unwrap();
         assert!(html.starts_with("<!doctype html><html><head><meta name=\"tmm-gateway\" content=\"1\"><title>"), "{html}");
         assert!(!std::fs::read_to_string(d.join("index.html")).unwrap().contains("tmm-gateway"), "the file on disk is untouched");
-        assert_eq!(respond(&src, "/assets/app-abc123.js", "*/*").1, "text/javascript; charset=utf-8");
-        assert_eq!(respond(&src, "/assets/app-abc123.js", "*/*").2, "public, max-age=31536000, immutable");
+        assert_eq!(respond(&src, "/assets/app-BrQ0bpT6.js", "*/*").1, "text/javascript; charset=utf-8");
+        assert_eq!(respond(&src, "/assets/app-BrQ0bpT6.js", "*/*").2, "public, max-age=31536000, immutable");
         assert_eq!(respond(&src, "/sw.js", "*/*").2, "no-cache", "the service worker is never cached long");
         std::fs::remove_dir_all(&d).ok();
     }
@@ -276,7 +319,58 @@ mod tests {
         assert_eq!(check(&Source::Dir(d.clone())), Ok("dir"));
         std::fs::remove_file(d.join("index.html")).unwrap();
         assert!(check(&Source::Dir(d.clone())).unwrap_err().contains("no readable index.html"), "a dir without index is not ok");
-        assert_eq!(respond(&Source::Dir(d.clone()), "/assets/app-abc123.js", "*/*").0, 404, "and serves nothing");
+        assert_eq!(respond(&Source::Dir(d.clone()), "/assets/app-BrQ0bpT6.js", "*/*").0, 404, "and serves nothing");
         std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn only_hashed_names_are_cached_for_a_year() {
+        for hashed in ["assets/index-BrQ0bpT6.js", "assets/addon-webgl-BrQ0bpT6.js", "assets/_baseUniq-DuDoN5nO.js", "assets/app-D8JWPuoC.css", "assets/pdf-D-oSvAqu.js", "assets/mermaid.core-BOavzzZ-.js", "assets/inter-latin-wght-normal-Dx4kXJAl.woff2"] {
+            assert!(is_hashed_asset(hashed), "{hashed}");
+        }
+        for stable in ["assets/icon.svg", "assets/notify.wav", "assets/kiro.svg", "assets/icon-dark.svg", "assets/open-claw.svg", "sw.js", "index.html", "assets/sub/x-BrQ0bpT6.js"] {
+            assert!(!is_hashed_asset(stable), "{stable}");
+        }
+        // Every file the repo ships under its own name (public/assets) revalidates.
+        let public = Path::new(env!("CARGO_MANIFEST_DIR")).join("../public/assets");
+        let names: Vec<String> = std::fs::read_dir(&public).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert!(names.len() > 3, "public/assets is read");
+        for n in &names {
+            assert!(!is_hashed_asset(&format!("assets/{n}")), "public/assets/{n} would be cached for a year");
+        }
+        let d = site("cache");
+        std::fs::write(d.join("assets/notify.wav"), "w").unwrap();
+        assert_eq!(respond(&Source::Dir(d.clone()), "/assets/notify.wav", "*/*").2, "no-cache");
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ui_info_and_get_agree_and_a_refused_link_never_becomes_the_page() {
+        // index.html is a link out of the root: check says no, GET / 404s.
+        let d = site("agree");
+        let outside = d.with_extension("outside.html");
+        std::fs::write(&outside, "<html><head></head>OUTSIDE</html>").unwrap();
+        std::fs::remove_file(d.join("index.html")).unwrap();
+        std::os::unix::fs::symlink(&outside, d.join("index.html")).unwrap();
+        let src = Source::Dir(d.clone());
+        assert!(check(&src).unwrap_err().contains("leaves the directory"));
+        assert_eq!(respond(&src, "/", "text/html").0, 404);
+        // index.html is a directory: same answer both ways.
+        std::fs::remove_file(d.join("index.html")).unwrap();
+        std::fs::create_dir(d.join("index.html")).unwrap();
+        assert!(check(&src).is_err());
+        assert_eq!(respond(&src, "/", "text/html").0, 404);
+        std::fs::remove_dir(d.join("index.html")).unwrap();
+        std::fs::write(d.join("index.html"), "<html><head></head></html>").unwrap();
+        // An extension-less link out of the root asked as a navigation: 404, not the page.
+        std::os::unix::fs::symlink("/etc", d.join("settings")).unwrap();
+        std::os::unix::fs::symlink(d.join("gone"), d.join("dangling")).unwrap();
+        assert_eq!(respond(&src, "/settings/hostname", "text/html").0, 404);
+        assert_eq!(respond(&src, "/settings", "text/html").0, 404, "a link to a dir outside is refused");
+        assert_eq!(respond(&src, "/dangling", "text/html").0, 404, "a dangling link is refused");
+        assert_eq!(respond(&src, "/real-route", "text/html").0, 200, "a route that does not exist still gets the page");
+        std::fs::remove_dir_all(&d).ok();
+        std::fs::remove_file(&outside).ok();
     }
 }
