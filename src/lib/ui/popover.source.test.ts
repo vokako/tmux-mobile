@@ -45,3 +45,30 @@ test('a right-click menu opens from the pointer’s TOP-LEFT; a trigger rect kee
   assert.match(projects, /openCtx\(\{ x: r\.right, y: r\.bottom, align: 'right' \}, row\)/u,
     'the dots dropdown stays flush with its trigger');
 });
+
+test('a popover opened from the RAIL clears the rail — one rule, derived from structure (#326)', async () => {
+  // Owner, 2026-10-09: "弹出的那个小窗口应该再往右一点 偏移开左边的侧边栏…小窗口
+  // 就把上面的区域覆盖住了 导致我没办法再去点其他按钮". The bell and the server
+  // switcher sit in the rail's bottom corner, so a menu placed BELOW them
+  // flipped above and clamped onto the rail itself.
+  const app = await readFile(new URL('../App.svelte', SRC), 'utf8');
+  // ONE definition, and it answers from the DOM: a trigger inside .rail opens
+  // beside the rail, and the box to clear is the rail's right edge — not the
+  // icon's, or the popover would still overlap the 46px column.
+  assert.match(app, /function popoverFrom\(el\) \{\s*\n\s*const anchor = anchorOf\(el\);\s*\n\s*const rail = el\?\.closest\?\.\('\.rail'\);\s*\n\s*return rail\s*\n?\s*\? \{ anchor: \{ \.\.\.anchor, right: anchorOf\(rail\)\.right \}, side: 'right' \}\s*\n?\s*: \{ anchor, side: 'below' \};/u,
+    'the rail case composes the anchor and names the side in one place');
+  // Both rail popovers read it; neither carries its own x rule.
+  for (const [what, re] of [
+    ['server picker', /\(\{ anchor: serverMenuAnchor, side: serverMenuSide \} = popoverFrom\(e\.currentTarget\)\);/u],
+    ['server picker on resize', /\(\{ anchor: serverMenuAnchor, side: serverMenuSide \} = popoverFrom\(origin\)\);/u],
+    ['notification centre', /const \{ anchor, side \} = popoverFrom\(centre\.anchor\);/u],
+  ] as const) assert.match(app, re, `${what} resolves its side through popoverFrom`);
+  assert.doesNotMatch(app, /side: 'right'(?![^\n]*popoverFrom)[\s\S]{0,40}menuPlacement/u, 'no caller hardcodes the side at a placement call');
+  // And each caps itself with the room the placement reported, which is what
+  // makes "beside the rail" survive a narrow forced-Desktop window.
+  assert.match(app, /style:--pop-maxw="\{serverMenuPos\.maxW\}px" style:--pop-maxh="\{serverMenuPos\.maxH\}px"/u);
+  assert.match(app, /style:--pop-maxw="\{centrePos\.maxW\}px" style:--pop-maxh="\{centrePos\.maxH\}px"/u);
+  // The grow origin reads the SAME side, so the intro starts at the edge the
+  // popover is actually placed against.
+  assert.match(app, /popOrigin\(serverMenuAnchor, serverMenuPos, 'right', serverMenuSide\)/u);
+});

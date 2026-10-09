@@ -39,7 +39,7 @@
   import { createServerSwitch } from './lib/app/server-switch.ts';
   import { forgetAll as forgetDownloadRows } from './lib/files/downloads.svelte.ts';
   import { hoverCard } from './lib/ui/hover.svelte.ts';
-  import { anchorOf, menuPlacement, popOrigin, viewBox } from './lib/ui/placement.ts';
+  import { anchorOf, menuPlacement, popOrigin, viewBox, POPOVER_EDGE, POPOVER_GAP } from './lib/ui/placement.ts';
   import HoverCard from './lib/ui/HoverCard.svelte';
   import ContextMenu from './lib/ui/ContextMenu.svelte';
   import CommandButton from './lib/ui/CommandButton.svelte';
@@ -761,6 +761,7 @@
   let serverList = $state([]);
   let serverCurId = $state('');
   let serverMenuAnchor = $state(null); // read by the menu's --pop-origin in the template
+  let serverMenuSide = $state('below');  // 'right' while the rail opened it (#326)
   let serverMenuTrigger = null;      // the control that opened it — not "outside"
   let serverMenuW = $state(0);
   let serverMenuH = $state(0);
@@ -793,10 +794,27 @@
     serverList = next;
   });
 
+  /** Where a popover opened by `el` goes — ONE definition, derived from
+   * structure (board #326). A control inside the RAIL opens BESIDE the rail:
+   * the box the popover must clear is that control's vertical span with the
+   * RAIL's own right edge, so the popover clears the whole 46px column and
+   * not merely the icon, and `side: 'right'` guarantees it by construction
+   * (placement.ts turns a narrow viewport into less ROOM, never into an x
+   * that slides back over the rail). Anything else keeps the dropdown
+   * reading: the same `centre` store opened from the Hub's header bell still
+   * drops below its trigger, with no second branch anywhere. */
+  function popoverFrom(el) {
+    const anchor = anchorOf(el);
+    const rail = el?.closest?.('.rail');
+    return rail
+      ? { anchor: { ...anchor, right: anchorOf(rail).right }, side: 'right' }
+      : { anchor, side: 'below' };
+  }
+
   function toggleServerMenu(e) {
     if (serverMenuOpen) { closeServerPicker(); return; }
     loadServerRegistry();
-    serverMenuAnchor = anchorOf(e.currentTarget);
+    ({ anchor: serverMenuAnchor, side: serverMenuSide } = popoverFrom(e.currentTarget));
     serverMenuTrigger = e.currentTarget;
     serverMenuW = 0; serverMenuH = 0;
     serverMenuOpen = true;
@@ -809,8 +827,8 @@
   }
   const serverMenuPos = $derived.by(() =>
     serverMenuOpen && serverMenuAnchor
-      ? menuPlacement(serverMenuAnchor, { w: serverMenuW, h: serverMenuH }, viewBox())
-      : { x: 0, y: 0 },
+      ? menuPlacement(serverMenuAnchor, { w: serverMenuW, h: serverMenuH }, viewBox(), POPOVER_GAP, POPOVER_EDGE, 'right', serverMenuSide)
+      : { x: 0, y: 0, maxW: 0, maxH: 0 },
   );
   $effect(() => {
     if (!serverMenuOpen || !serverMenuEl) return;
@@ -845,7 +863,7 @@
     };
     const onResize = () => {
       // The soft keyboard resizes a dialog containing its own editable field.
-      if ((menu.querySelector('.sm-rename') || modalOwnsInteraction()) && origin?.isConnected) serverMenuAnchor = anchorOf(origin);
+      if ((menu.querySelector('.sm-rename') || modalOwnsInteraction()) && origin?.isConnected) ({ anchor: serverMenuAnchor, side: serverMenuSide } = popoverFrom(origin));
       else closeServerPicker();
     };
     window.addEventListener('pointerdown', onDown, true);
@@ -870,11 +888,11 @@
   let centreEl = $state(null);
   let centreW = $state(0);
   let centreH = $state(0);
-  const centrePos = $derived.by(() =>
-    centre.anchor && centre.anchor.isConnected
-      ? menuPlacement(anchorOf(centre.anchor), { w: centreW, h: centreH }, viewBox())
-      : { x: 0, y: 0 },
-  );
+  const centrePos = $derived.by(() => {
+    if (!centre.anchor || !centre.anchor.isConnected) return { x: 0, y: 0, maxW: 0, maxH: 0 };
+    const { anchor, side } = popoverFrom(centre.anchor);
+    return menuPlacement(anchor, { w: centreW, h: centreH }, viewBox(), POPOVER_GAP, POPOVER_EDGE, 'right', side);
+  });
   $effect(() => {
     const origin = centre.anchor;
     if (!origin || !centreEl) return;
@@ -1858,7 +1876,8 @@
     <div class="server-menu menu-surface menu-list pop-layer" class:ready={serverMenuH > 0}
       role="dialog" aria-modal="false" aria-label={t('serversTitle')} tabindex="-1" id={serverPickerId}
       style:left="{serverMenuPos.x}px" style:top="{serverMenuPos.y}px"
-      style:--pop-origin={serverMenuAnchor ? popOrigin(serverMenuAnchor, serverMenuPos) : undefined}
+      style:--pop-maxw="{serverMenuPos.maxW}px" style:--pop-maxh="{serverMenuPos.maxH}px"
+      style:--pop-origin={serverMenuAnchor ? popOrigin(serverMenuAnchor, serverMenuPos, 'right', serverMenuSide) : undefined}
       bind:this={serverMenuEl} bind:offsetWidth={serverMenuW} bind:offsetHeight={serverMenuH}>
       <div class="menu-heading">{t('serversTitle')}</div>
       <ServerList bind:this={serverListEl} servers={serverList} currentId={serverCurId} link={serverLink} container={serverMenuEl}
@@ -1872,6 +1891,7 @@
     <div class="centre-menu menu-surface menu-list pop-layer" class:ready={centreH > 0}
       role="dialog" aria-modal="false" aria-label={t('notifyCentre')} tabindex="-1"
       style:left="{centrePos.x}px" style:top="{centrePos.y}px"
+      style:--pop-maxw="{centrePos.maxW}px" style:--pop-maxh="{centrePos.maxH}px"
       bind:this={centreEl} bind:offsetWidth={centreW} bind:offsetHeight={centreH}>
       <NotifyCentre onpick={(a) => { centre.close(); centre.requestJump(a); if (page !== 'hub') switchTab('hub'); }} />
     </div>
@@ -2208,15 +2228,21 @@
   }
   .tab-glyph { position: relative; }
   .tab-badge { position: absolute; top: -1px; right: -4px; border: 2px solid var(--nav-bg); }
+  /* --pop-maxw/--pop-maxh are the ROOM menuPlacement found at the position it
+     returned (#326). Beside the rail that room is what shrinks on a narrow
+     window — the popover scrolls inside itself rather than sliding back over
+     the rail — so each menu keeps its own preferred size and takes the room
+     as a second cap. */
   .centre-menu {
     position: fixed; z-index: 24; width: min(360px, calc(100vw / var(--ui-zoom, 1) - 16px));
-    max-height: min(520px, calc(100vh / var(--ui-zoom, 1) - 16px)); overflow-y: auto;
+    max-width: var(--pop-maxw, none);
+    max-height: min(520px, calc(100vh / var(--ui-zoom, 1) - 16px), var(--pop-maxh, 100vh)); overflow-y: auto;
   }
   .server-menu {
     position: fixed; z-index: 24; width: max-content;
-    min-width: min(220px, calc(100vw / var(--ui-zoom, 1) - 16px));
-    max-width: min(320px, calc(100vw / var(--ui-zoom, 1) - 16px));
-    max-height: calc(100vh / var(--ui-zoom, 1) - 16px); overflow-y: auto;
+    min-width: min(220px, calc(100vw / var(--ui-zoom, 1) - 16px), var(--pop-maxw, 100vw));
+    max-width: min(320px, calc(100vw / var(--ui-zoom, 1) - 16px), var(--pop-maxw, 100vw));
+    max-height: min(calc(100vh / var(--ui-zoom, 1) - 16px), var(--pop-maxh, 100vh)); overflow-y: auto;
     /* Visibility and the intro are the shared .pop-layer atom (app.css). */
   }
 

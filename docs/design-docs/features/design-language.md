@@ -989,6 +989,23 @@ press-scale/brightness details below do not override it.
   window, which also hears the layer's own list scrolling — each layer spares
   itself (a long Select closed the moment it was scrolled; review 2026-09-03;
   `ui/popover.source.test.ts`).
+- **A popover placed BESIDE its anchor, for the rail (2026-10-09, #326).**
+  `menuPlacement` takes `side: 'below' | 'right'` and returns the ROOM it
+  found with the position (`{x, y, maxW, maxH}`). The desktop rail's bell and
+  server switcher sit in the bottom-left corner, so a menu placed below them
+  flipped up and clamped onto the 8px margin — i.e. over the rail, hiding the
+  buttons the reader wanted next (owner: "小窗口就把上面的区域覆盖住了 导致我
+  没办法再去点其他按钮"). With `side: 'right'`, `x` is the anchor's right edge
+  plus the gap and is NEVER clamped back; a narrow window shrinks `maxW`
+  instead, and the caller caps itself with `--pop-maxw`/`--pop-maxh` and
+  scrolls inside. The box to clear is the CALLER's: App composes a rail
+  control's vertical span with the RAIL's right edge (`popoverFrom`, derived
+  from `el.closest('.rail')`), so the popover clears the whole 46px column and
+  the same `centre` store opened from the Hub's header bell still drops below.
+  The rail is not gated on 760px — a forced Desktop layout shows it in a
+  narrow window — so the guarantee is by construction, not by breakpoint.
+  `popOrigin` takes the same `side`: a beside-right popover grows from its
+  left edge.
 - **A click trigger may opt into staying clear (2026-09-11, #173).**
   `ContextMenu` accepts `at.keepTriggerClear` with a rect anchor. The shared
   `menuHeightLimit` caps height to the larger space above/below, rounded down

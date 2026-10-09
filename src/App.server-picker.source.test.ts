@@ -28,7 +28,11 @@ test('server picker owns border-box placement and a bounded native scroller (#16
     'background terminal output is not movement of the picker opener');
   const panel = /\.server-menu \{([^}]+)\}/u.exec(source)?.[1] ?? '';
   assert.match(panel, /width: max-content/u);
-  assert.match(panel, /max-height: calc\(100vh \/ var\(--ui-zoom, 1\) - 16px\)/u);
+  // Since #326 the viewport cap is joined by the ROOM menuPlacement found at
+  // the position it returned: beside the rail a narrow window shrinks the
+  // picker and scrolls it, instead of sliding it back over the rail.
+  assert.match(panel, /max-height: min\(calc\(100vh \/ var\(--ui-zoom, 1\) - 16px\), var\(--pop-maxh, 100vh\)\)/u);
+  assert.match(panel, /max-width: min\(320px, calc\(100vw \/ var\(--ui-zoom, 1\) - 16px\), var\(--pop-maxw, 100vw\)\)/u);
   assert.match(panel, /overflow-y: auto/u);
 });
 
