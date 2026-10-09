@@ -897,14 +897,14 @@ test("the Board's sidebar follows the shell-wide collapse with the Hub's reveal 
   assert.match(style, /\.sidebar:global\(\.pin-end\) \{ justify-self: end; \}/u);
 });
 
-test('a card names its assignee with the .ava tile in agentHue ink and the one live dot (board #293)', () => {
-  assert.match(source, /\{@const who = assigneeView\(i\.assignee, agents\)\}/u, 'one pure helper decides');
-  assert.match(source, /<span class="ava c-tile" style:background=\{who\.ink\}>/u, 'the app-wide .ava atom, filled with the agent ink');
+test('a card names its assignee with its backend icon, and the working dot only in doing (board #293, #327)', () => {
+  assert.match(source, /\{@const who = assigneeView\(i\.assignee, agents, s, backends\)\}/u, 'one pure helper decides, told the column');
+  assert.match(source, /<span class="c-tile"><img class="ava" src=\{who\.icon\} alt="" \/>/u, 'the backend face in the app-wide .ava atom');
+  assert.doesNotMatch(source, /c-tile" style:background|\.slice\(0, 1\)\.toUpperCase\(\)/u, 'no invented lettered tile on the board');
   assert.match(source, /\{#if who\.live\}<span class="c-live live-dot" aria-hidden="true"><\/span>\{\/if\}/u, 'the status language\u2019s own live cue');
   assert.match(source, /\.c-assignee \{ color: var\(--text2\); \}/u, 'the name in --text2, not accent');
-  // The agents are the poll Board already runs: no second hub_agents loop.
-  assert.equal((source.match(/hubAgents\(/gu) ?? []).length, 1);
-  assert.match(source, /agents\.map\(\(a\) => \(\{ value: a\.name, label: a\.name, ink: agentHue\(a\.name\) \}\)\)/u, 'the picker wears the same tile');
+  assert.equal((source.match(/hubAgents\(/gu) ?? []).length, 1, 'no second hub_agents loop');
+  assert.equal([...source.matchAll(/agents\.map\(\(a\) => \(\{ value: a\.name, label: a\.name, icon: backendIcon\(a\.agent\) \?\? undefined \}\)\)/gu)].length, 2, 'both pickers wear the same face');
 });
 
 test('images: one materialized body per submit, given to the save AND the brief; refused while uploading or failed (board #329)', () => {

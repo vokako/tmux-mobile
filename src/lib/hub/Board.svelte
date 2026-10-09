@@ -9,7 +9,8 @@
      terminal and Files. */
   import { boardList, boardGet, boardSave, boardNote, boardDelete, boardCounts, projectList, hubAgents, hubPost, hubRooms, type BoardIssue, type BoardCountRow, type HubAgent } from '../core/ws.ts';
   import { projectAgeLabel, sortRows } from '../projects/projects.ts';
-  import { boardStatusColor, localWhen, agentHue, splitImages } from './hub.ts';
+  import { boardStatusColor, localWhen, splitImages } from './hub.ts';
+  import { backendIcon } from '../core/agents.ts';
   import { createStager, attachPaste, type Stager } from './attachments.svelte.ts';
   import AttachStrip from './AttachStrip.svelte';
   import ChatImage from './ChatImage.svelte';
@@ -27,7 +28,7 @@
   import { feedbackPosition } from '../ui/feedback-position.ts';
   import { copyText } from '../core/clipboard.ts';
   import { scheduleCompletion } from '../ui/feedback-lifetime.ts';
-  import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, countsOf, applyCounts, visibleBoards, boardTitle, assignNotes, chipCols, assigneeView } from './board.ts';
+  import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, countsOf, applyCounts, visibleBoards, boardTitle, assignNotes, chipCols, assigneeView, rememberBackends } from './board.ts';
   import { messageActsSet, messageActsCopyLanded, messageActsCopyFailed, messageActsExpired, MESSAGE_ACTS_IDLE, type MessageActsState } from './message-actions.ts';
   import { scrollFade } from '../core/scrollFade.ts';
   import { flip } from 'svelte/animate';
@@ -385,9 +386,12 @@
       const a = await hubAgents(s);
       if (!current()) return;
       agents = a.agents.filter((x) => x.managed);
+      backends = rememberBackends(backends, agents);
     } catch { /* keep */ }
   }
   let agents = $state<HubAgent[]>([]);
+  /** name → backend, as last seen (board #327): a stopped agent keeps its icon. */
+  let backends = $state<Record<string, string>>({});
 
   // Poll while visible: agents move cards from their panes, and the human
   // should see it without touching anything. Same verdict rule as the rooms —
@@ -952,7 +956,7 @@
           {/each}
         </div>
         <Select value={draft.assignee} dense disabled={submitting}
-          options={[{ value: '', label: t('boardUnassigned') }, ...agents.map((a) => ({ value: a.name, label: a.name, ink: agentHue(a.name) }))]}
+          options={[{ value: '', label: t('boardUnassigned') }, ...agents.map((a) => ({ value: a.name, label: a.name, icon: backendIcon(a.agent) ?? undefined }))]}
           onchange={(v: string) => { if (!submitting) draft.assignee = v; }} />
         {#if sel.created_by}<span class="meta-bit">{t('boardOpenedBy')} <span class="m-name">{sel.created_by}</span></span>{/if}
       </div>
@@ -1060,7 +1064,7 @@
            is briefed the moment the issue exists (board #11). -->
       <div class="d-meta">
         <Select value={nAssignee} dense disabled={submitting}
-          options={[{ value: '', label: t('boardUnassigned') }, ...agents.map((a) => ({ value: a.name, label: a.name, ink: agentHue(a.name) }))]}
+          options={[{ value: '', label: t('boardUnassigned') }, ...agents.map((a) => ({ value: a.name, label: a.name, icon: backendIcon(a.agent) ?? undefined }))]}
           onchange={(v: string) => { if (!submitting) nAssignee = v; }} />
       </div>
       <!-- The body is MULTI-LINE, so Enter must stay a newline — the submit
@@ -1102,13 +1106,13 @@
                 #{i.id}
                 {#if i.created_by}· {t('boardBy')} {i.created_by}{/if}
                 {#if i.assignee}
-                  {@const who = assigneeView(i.assignee, agents)}
+                  {@const who = assigneeView(i.assignee, agents, s, backends)}
                   <!-- WHO is on it (board #293): the app's .ava tile in the
                        agent's own ink + the name; a dot on the tile's corner
                        while that agent is running (hub_agents, stateIsLive). -->
-                  {#if who?.ink}·
-                    <span class="c-who"><span class="ava c-tile" style:background={who.ink}>{who.name.slice(0, 1).toUpperCase()}{#if who.live}<span class="c-live live-dot" aria-hidden="true"></span>{/if}</span><span class="c-assignee">{who.name}</span></span>
-                  {:else}· <span class="c-assignee">@{i.assignee}</span>{/if}
+                  {#if who?.icon}·
+                    <span class="c-who"><span class="c-tile"><img class="ava" src={who.icon} alt="" />{#if who.live}<span class="c-live live-dot" aria-hidden="true"></span>{/if}</span><span class="c-assignee">{who.name}</span></span>
+                  {:else}· <span class="c-assignee">{who?.name === 'human' ? '@human' : who?.name ?? ''}</span>{/if}
                 {/if}
                 {#if noteCount(i)}· {noteCount(i)} <Icon name="chat" size={10} />{/if}
                 · {ago(i.updated_at)}
@@ -1332,11 +1336,11 @@
     overflow: hidden;
   }
   .c-meta { font-size: var(--fs-micro); color: var(--text3); display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
-  /* The assignee (board #293): the shared .ava tile filled with the agent's
-     ink, then its name in --text2. Its running dot sits on the tile's
-     top-right corner, the status language's own dot and live cue. */
+  /* The assignee (board #293, #327): the agent's BACKEND icon in the shared
+     .ava atom (the roster's avatar), then its name in --text2. The running
+     dot — only in DOING — sits on the icon's top-right corner. */
   .c-who { display: inline-flex; align-items: center; gap: 5px; }
-  .c-tile { position: relative; }
+  .c-tile { position: relative; display: inline-flex; }
   .c-live {
     position: absolute; top: -2px; right: -2px; width: 6px; height: 6px; border-radius: 50%;
     background: var(--accent); box-sizing: content-box; border: 1px solid var(--bg2);

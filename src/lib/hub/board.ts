@@ -98,7 +98,8 @@ export function rebaseDraft(
 // instead of waiting out the poll.
 
 import type { BoardCountRow } from '../core/ws.ts';
-import { agentHue, stateIsLive, HUMAN } from './hub.ts';
+import { stateIsLive, HUMAN } from './hub.ts';
+import { backendIcon } from '../core/agents.ts';
 
 export const BOARD_STATUSES = ['todo', 'doing', 'review', 'done'] as const;
 
@@ -223,19 +224,38 @@ export function chipCols(w: number, chip: number, gap: number): 1 | 2 | 4 {
   return 1;
 }
 
-/** WHO is on a card (board #293, owner 2026-10-01: "不同的 agent 分别在处理
- * 哪个，那个可视化比我们当前的看起来更好一些"): an agent assignee wears the
- * `.ava` tile in its own ink (`agentHue`, the feed's and roster's colour) and
- * its name; `live` is true only while that agent's hub_agents row is in a
- * running state (`stateIsLive`, the roster's and drawer's one definition), so
- * an idle, stopped or removed assignee has no dot. Board activity never lights
- * it. The human is not an agent: plain text, no tile. Unassigned: null. */
+/** WHO is on a card (board #293; #327, owner 2026-10-09: "这里你用的 logo 好
+ * 像又是自己发明的一个字母头像…就用他的头像就好…不要去发明新的头像"). An agent
+ * assignee wears its BACKEND's own icon (`backendIcon` — kiro, claude, codex…,
+ * the roster's and drawer's avatar) and its name. The backend comes from the
+ * agent's hub_agents row, or the one remembered from an earlier poll (a
+ * stopped agent keeps its face); one never seen has no picture to wear, so it
+ * is the name alone — never an invented lettered tile. `live` is the dot
+ * "working on THIS issue", so it is lit ONLY in the doing column, and only
+ * while that agent's row runs (`stateIsLive`); a card in todo, review or done
+ * never shows it (owner: "他好像还在处理这个已经完成的档的任务"). The human is
+ * not an agent: plain text, no picture. Unassigned: null. */
 export function assigneeView(
   assignee: string | null | undefined,
-  agents: readonly { name: string; state: string; managed?: boolean }[],
-): { name: string; ink: string | null; live: boolean } | null {
+  agents: readonly { name: string; state: string; managed?: boolean; agent?: string | null }[],
+  status: string,
+  known: Readonly<Record<string, string>> = {},
+): { name: string; icon: string | null; live: boolean } | null {
   if (!assignee) return null;
-  if (assignee === HUMAN) return { name: assignee, ink: null, live: false };
+  if (assignee === HUMAN) return { name: assignee, icon: null, live: false };
   const row = agents.find((a) => a.name === assignee && a.managed !== false);
-  return { name: assignee, ink: agentHue(assignee), live: !!row && stateIsLive(row.state) };
+  const backend = row?.agent || known[assignee] || null;
+  return { name: assignee, icon: backendIcon(backend), live: status === 'doing' && !!row && stateIsLive(row.state) };
+}
+
+/** Each managed agent's backend, as last seen: the poll's rows folded into
+ * what was known, so an agent that stops keeps its icon on the cards. */
+export function rememberBackends(known: Readonly<Record<string, string>>, agents: readonly { name: string; agent?: string | null; managed?: boolean }[]): Record<string, string> {
+  let out: Record<string, string> | null = null;
+  for (const a of agents) {
+    if (a.managed === false || !a.agent || known[a.name] === a.agent) continue;
+    out ??= { ...known };
+    out[a.name] = a.agent;
+  }
+  return out ?? (known as Record<string, string>);
 }

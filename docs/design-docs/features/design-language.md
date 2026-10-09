@@ -249,9 +249,10 @@ danger semantics.
   | `--agent-5` | #f472b6 | 5.7 | #be185d | 4.59 |
   | `--agent-6` | #60a5fa | 5.9 | #1d4ed8 | 5.10 |
 
-  A board card's assignee tile (board #293) is the `.ava` atom FILLED with
-  the same ink, so a card and a bubble from one agent match; its running dot
-  is the status language's `.live-dot`, not a second cue.
+  A board card's assignee is the agent's BACKEND icon in the `.ava` atom
+  (board #327 replaced #293's lettered tile in this ink: an avatar is the
+  agent's own face, never an invented letter); its running dot is the status
+  language's `.live-dot`, drawn only in the doing column.
   `--backend-*` stays the avatar fill and is NOT text ink: grok's #e2e8f0
   vanishes on the light canvas and codex's #94a3b8 reads as meta grey.
 - **The at-rest grey is ACHROMATIC, and "in motion" is not colour alone**: the

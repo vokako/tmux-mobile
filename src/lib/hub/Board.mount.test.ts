@@ -198,9 +198,9 @@ test('Board copy failure is persistent and retryable without a false Copied stat
   } finally { await app.close(); }
 });
 
-test('a card lights its assignee only while that agent runs, and follows the poll (board #293)', async context => {
+test('a card shows its assignee\u2019s backend icon, lit only in doing while that agent runs, and follows the poll (board #293, #327)', async context => {
   let state = 'working';
-  const assigned = { ...issue, assignee: 'builder' };
+  const assigned = { ...issue, assignee: 'builder', status: 'doing' };
   const app = await (await compiled).mount(context, {
     props: { session: 'fixture', visible: true },
     setup(window) { window.Element.prototype.getAnimations = () => []; },
@@ -213,10 +213,30 @@ test('a card lights its assignee only while that agent runs, and follows the pol
     await flush(app);
     const who = () => app.document.querySelector('.card .c-who');
     assert.equal(who()?.querySelector('.c-assignee')?.textContent, 'builder');
-    assert.equal(who()?.querySelector('.c-tile')?.textContent?.trim(), 'B');
-    assert.ok(who()?.querySelector('.c-live.live-dot'), 'running: the dot is lit');
+    assert.equal(who()?.querySelector('.c-tile img.ava')?.getAttribute('src'), '/assets/kiro.svg', 'the kiro icon, not a letter');
+    assert.equal(who()?.querySelector('.c-tile')?.textContent?.trim(), '', 'no invented lettered avatar');
+    assert.ok(who()?.querySelector('.c-live.live-dot'), 'running in DOING: the dot is lit');
     state = 'idle';
     await app.advance(8000); await flush(app);
     assert.equal(who()?.querySelector('.c-live'), null, 'idle after the next poll: no dot');
+  } finally { await app.close(); }
+});
+
+test('a done card keeps the face and never the working dot (board #327)', async context => {
+  const done = { ...issue, assignee: 'builder', status: 'done' };
+  const app = await (await compiled).mount(context, {
+    props: { session: 'fixture', visible: true },
+    setup(window) { window.Element.prototype.getAnimations = () => []; },
+    modules: [rpc({
+      boardList: async () => ({ issues: [done] }),
+      boardCounts: async () => ({ counts: { fixture: { todo: 0, doing: 0, review: 0, done: 1, total: 1 } } }),
+      hubAgents: async () => ({ agents: [{ window: 1, name: 'builder', command: 'kiro', agent: 'kiro', managed: true, state: 'working', detail: '', since: 0 }] }),
+    })],
+  });
+  try {
+    await flush(app);
+    const who = app.document.querySelector('.card .c-who');
+    assert.equal(who?.querySelector('img.ava')?.getAttribute('src'), '/assets/kiro.svg');
+    assert.equal(who?.querySelector('.c-live'), null, 'busy elsewhere is not working on THIS done issue');
   } finally { await app.close(); }
 });
