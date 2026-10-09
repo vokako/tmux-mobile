@@ -19,7 +19,7 @@ test('a start that fails after the page opened shows its reason at once (#323)',
     setup(window) {
       window.localStorage.setItem('tmux_locale', 'en');
       (window as unknown as { __TAURI__: unknown }).__TAURI__ = {
-        core: { invoke: (cmd: string) => { calls.push(cmd); return cmd === 'server_mode' ? Promise.resolve({ mode: 'starting', url: 'ws://127.0.0.1:9899' }) : Promise.reject(new Error(cmd)); } },
+        core: { invoke: (cmd: string) => { calls.push(cmd); return cmd === 'server_mode' ? Promise.resolve({ mode: 'starting', url: 'ws://127.0.0.1:9899', gen: 1, seq: 1 }) : Promise.reject(new Error(cmd)); } },
         event: { listen: (name: string, fn: (e: { payload: unknown }) => void) => { if (name === 'server_mode_changed') emit = (p) => fn({ payload: p }); return Promise.resolve(() => {}); } },
       };
     },
@@ -29,12 +29,12 @@ test('a start that fails after the page opened shows its reason at once (#323)',
     const note = () => app.document.querySelector('.config-note[role="status"]')?.textContent ?? '';
     assert.equal(note(), '', 'starting is no trouble');
     assert.ok(emit, 'subscribed to server_mode_changed');
-    emit({ mode: 'failed', url: 'ws://127.0.0.1:9899', reason: 'Address already in use' });
+    emit({ mode: 'failed', url: 'ws://127.0.0.1:9899', reason: 'Address already in use', gen: 1, seq: 3 });
     await app.flush();
     assert.equal(note(), 'This computer: Server failed · Address already in use');
-    emit({ mode: 'embedded', url: 'ws://127.0.0.1:9899' });
+    emit({ mode: 'embedded', url: 'ws://127.0.0.1:9899', gen: 1, seq: 2 });
     await app.flush();
-    assert.equal(note(), '', 'a later good state clears it');
+    assert.equal(note(), 'This computer: Server failed · Address already in use', 'an older embedded (seq 2) landing after failed (seq 3) changes nothing');
     assert.equal(calls.filter((c) => c === 'server_mode').length, 1, 'one read; the rest is events');
   } finally { await app.close(); }
 });

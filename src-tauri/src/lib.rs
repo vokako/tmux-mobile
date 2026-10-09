@@ -89,34 +89,65 @@ pub fn advance_mode(cur: Option<&(u64, ServerMode)>, gen: u64, next: ServerMode)
     }
 }
 
+/// What crosses to the webview, by `server_mode` and by every
+/// `server_mode_changed` event alike: the mode, its start generation, and
+/// `seq`, minted in the write lock for each APPLIED transition, so the
+/// frontend keeps only a strictly newer `seq` whatever order the read and
+/// the events arrive in (board #323 review).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ModeSnapshot {
+    #[serde(flatten)]
+    pub mode: ServerMode,
+    pub gen: u64,
+    pub seq: u64,
+}
+
+/// The locked state: the current `(gen, mode)` and the last `seq` minted.
+#[derive(Default)]
+pub struct ModeState {
+    cur: Option<(u64, ServerMode)>,
+    seq: u64,
+}
+
+impl ModeState {
+    /// Apply a transition (`advance_mode`) and return the snapshot to
+    /// publish, or None when refused. The caller publishes while it still
+    /// holds the lock, so publication order is seq order.
+    pub fn apply(&mut self, gen: u64, next: ServerMode) -> Option<ModeSnapshot> {
+        let (g, m) = advance_mode(self.cur.as_ref(), gen, next)?;
+        self.seq += 1;
+        self.cur = Some((g, m.clone()));
+        Some(ModeSnapshot { mode: m, gen: g, seq: self.seq })
+    }
+    pub fn snapshot(&self) -> Option<ModeSnapshot> {
+        self.cur.as_ref().map(|(g, m)| ModeSnapshot { mode: m.clone(), gen: *g, seq: self.seq })
+    }
+}
+
 #[cfg(feature = "gui")]
-static SERVER_MODE: std::sync::RwLock<Option<(u64, ServerMode)>> = std::sync::RwLock::new(None);
+static SERVER_MODE: std::sync::Mutex<ModeState> = std::sync::Mutex::new(ModeState { cur: None, seq: 0 });
 #[cfg(feature = "gui")]
 static APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
 
 /// Apply a transition and, when it applied, tell the webview
-/// (`server_mode_changed`, payload = the new mode). Before the window exists
-/// there is no one to tell; the frontend's first `server_mode` read covers it.
+/// (`server_mode_changed`, payload = the snapshot) INSIDE the lock, so no
+/// older snapshot can be published after a newer one. Before the window
+/// exists there is no one to tell; the frontend's first read covers it.
 #[cfg(all(feature = "gui", desktop))]
 fn set_server_mode(gen: u64, m: ServerMode) {
-    let applied = SERVER_MODE.write().ok().and_then(|mut g| {
-        let next = advance_mode(g.as_ref(), gen, m)?;
-        let mode = next.1.clone();
-        *g = Some(next);
-        Some(mode)
-    });
-    if let (Some(mode), Some(app)) = (applied, APP_HANDLE.get()) {
+    let Ok(mut st) = SERVER_MODE.lock() else { return };
+    if let (Some(snap), Some(app)) = (st.apply(gen, m), APP_HANDLE.get()) {
         use tauri::Emitter;
-        let _ = app.emit("server_mode_changed", mode);
+        let _ = app.emit("server_mode_changed", snap);
     }
 }
 
-/// The frontend's read of `ServerMode`, current at call time (a later
-/// failure is visible); `null` where there is none (mobile).
+/// The frontend's read: the current snapshot (same shape and seq as the
+/// events); `null` where there is none (mobile).
 #[cfg(feature = "gui")]
 #[tauri::command]
-fn server_mode() -> Option<ServerMode> {
-    SERVER_MODE.read().ok().and_then(|g| g.as_ref().map(|(_, m)| m.clone()))
+fn server_mode() -> Option<ModeSnapshot> {
+    SERVER_MODE.lock().ok().and_then(|st| st.snapshot())
 }
 
 #[cfg(feature = "gui")]
@@ -411,6 +442,15 @@ mod server_mode_tests {
         let failed = advance_mode(Some(&starting), 1, m("failed")).unwrap();
         assert!(advance_mode(Some(&failed), 1, m("embedded")).is_none(), "the late ready is refused");
         assert!(advance_mode(Some(&failed), 1, m("starting")).is_none(), "failed is terminal for its generation");
+        // The locked state mints one seq per APPLIED transition; a refused
+        // one mints none, and the snapshot carries the same seq.
+        let mut st = ModeState::default();
+        let s1 = st.apply(1, m("starting")).unwrap();
+        let s2 = st.apply(1, m("failed")).unwrap();
+        assert!(st.apply(1, m("embedded")).is_none(), "the late ready publishes nothing");
+        assert_eq!((s1.seq, s2.seq), (1, 2));
+        assert_eq!(st.snapshot().unwrap(), s2, "the read is the last published snapshot");
+        assert_eq!(serde_json::to_value(&s2).unwrap(), serde_json::json!({ "mode": "failed", "url": "u", "gen": 1, "seq": 2 }));
         // An older generation never overwrites a newer one; a newer one always applies.
         assert!(advance_mode(Some(&(2, m("starting"))), 1, m("embedded")).is_none());
         assert_eq!(advance_mode(Some(&failed), 2, m("starting")).unwrap().0, 2);

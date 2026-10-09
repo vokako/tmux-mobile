@@ -1,7 +1,7 @@
 // The local server's mode as reactive state (board #323); the types and
 // the wording rule are in server-mode.ts.
-import type { ServerMode } from './server-mode.ts';
-export { localServerLine, type ServerMode } from './server-mode.ts';
+import { newerMode, type ServerMode } from './server-mode.ts';
+export { localServerLine, newerMode, type ServerMode } from './server-mode.ts';
 
 type Tauri = { core?: { invoke(cmd: string): Promise<unknown> }; event?: { listen(name: string, fn: (e: { payload: unknown }) => void): Promise<unknown> } };
 
@@ -17,10 +17,9 @@ export const localServer = {
     started = true;
     void ready.then(async () => {
       const t = tauri();
-      await t?.event?.listen('server_mode_changed', (e) => { current = (e.payload as ServerMode) ?? null; });
-      const m = (await t?.core?.invoke('server_mode')) as ServerMode | null | undefined;
-      // An event that landed during the read is newer than the read.
-      if (current === null) current = m ?? null;
+      // ONE entry for both: only a strictly newer seq applies.
+      await t?.event?.listen('server_mode_changed', (e) => { current = newerMode(current, e.payload as ServerMode); });
+      current = newerMode(current, (await t?.core?.invoke('server_mode')) as ServerMode | null | undefined);
     }).catch(() => {});
   },
 };

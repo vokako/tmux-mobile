@@ -1,11 +1,18 @@
 // This computer's server, as the desktop app found it at start (board #323):
-// `server_mode` (lib.rs) answers the current mode, and every transition
-// (starting → embedded / failed) is pushed as the `server_mode_changed`
-// event. `localServer` subscribes ONCE, then reads once, so a transition
-// between the two is not lost (the event arrives after the read and wins);
-// no polling (the store is server-mode.svelte.ts). The wording rule here is pure.
+// `server_mode` (lib.rs) and every `server_mode_changed` event carry one
+// snapshot {mode, gen, seq}; `newerMode` keeps only a strictly newer seq, so
+// arrival order never matters. No polling. The wording rule is pure.
 
-export interface ServerMode { mode: 'embedded' | 'gateway' | 'occupied' | 'starting' | 'failed' | string; url: string; reason?: string }
+export interface ServerMode { mode: 'embedded' | 'gateway' | 'occupied' | 'starting' | 'failed' | string; url: string; reason?: string; gen?: number; seq?: number }
+
+/** Keep `next` only when it is strictly newer (board #323 review): the read
+ * and the events carry one `seq`, minted in Rust's lock, so whatever order
+ * they ARRIVE in, an older snapshot never replaces a newer one. A snapshot
+ * without a seq is never newer. */
+export function newerMode(cur: ServerMode | null, next: ServerMode | null | undefined): ServerMode | null {
+  if (!next || typeof next.seq !== 'number') return cur;
+  return !cur || (cur.seq ?? 0) < next.seq ? next : cur;
+}
 export type HoverLine = { label: string; value: string; tone?: 'ok' | 'warn' | 'danger' };
 
 /** The server card's "This computer" line, or null outside the desktop app.
