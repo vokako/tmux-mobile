@@ -1091,6 +1091,10 @@ name inside it reaches nobody (validator, #242: `/compact @b` offered
 
 Delivery itself needed no change for any CLI. One launch fix came out of it: a fresh omp home opened omp's setup wizard, where every typed line landed, so `render_omp` sets `OMP_SKIP_SETUP=1` ([agents-overview.md](agents-overview.md)). Some commands are recorded as views because they break delivery rather than park the pane: grok `/multiline` swaps Enter, codex `/vim` turns typed text into keystrokes, and `/statusline` (claude, codex) or grok `/minimal` change the footer the vitals sniffer reads.
 
+### One attachment pipeline for every editor (board #329, 2026-10-09)
+
+The staging that lived in `Hub.svelte` — the generation and per-job guard, the failed chip, the 1568px webp/jpeg encode, the 32 MiB file cap, the `.tmm/uploads/` layout with its self-gitignore, the `[img:n]`/`[file:n]` token at the caret — is `hub/attachments.svelte.ts` (`createStager(host)`, one per editor; `attachPaste(e, stage)` is the paste rule, Office text first). Its chips are `hub/AttachStrip.svelte`; the composer's reply chip renders through its `lead` snippet. Hub owns a stager for the room and keeps its send transaction: snapshot the set, DETACH it (`stager.pending = []`, never `clear()`, which revokes the thumbs and bumps the generation), revoke on success, restore on failure. The Board's three editors use the same stager (board.md § Images). Moved verbatim with one fix: `remove()` escapes the token as `/[[\]]/g`; the old `/[[\\]]/g` was a character class plus a literal `]`, so it never escaped `[img:1]` and the remove regex deleted ONE character of the text instead of the token (validator reproduced: `look [img:1] here` → `look [mg:1] here`). `Composer.source.test.ts` pins that upload, encode, the 1568 ceiling and the paste rule exist only in that module.
+
 ### Pure composer decisions (board #117, 2026-09-09)
 
 `hub-composer.ts` owns palette-backend selection, `ALL_TARGET`, attachment

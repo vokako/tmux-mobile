@@ -1,0 +1,251 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import type { TestContext } from 'node:test';
+import { compileMount } from '../test/mount.ts';
+
+// Board #329: images in the Board through the chat's ONE pipeline. The real
+// Board, the real stager, fake RPCs; the browser's encoder is stubbed in the
+// window (jsdom has no canvas), so the upload carries a fixed webp body.
+const compiled = compileMount(new URL('./Board.svelte', import.meta.url), [new URL('../core/ws.ts', import.meta.url)]);
+const WS = '/work/fixture';
+const REF = /!\[\]\(\/work\/fixture\/\.tmm\/uploads\/[a-z0-9]+-[a-z0-9]{8}\.webp\)/u;
+const issueA = { id: 1, title: 'A', body: 'Body A', status: 'todo', assignee: '', editable: true, created_at: 100, updated_at: 100, notes: [] };
+const issueB = { id: 2, title: 'B', body: 'Body B', status: 'todo', assignee: '', editable: true, created_at: 100, updated_at: 100, notes: [] };
+
+type Calls = { saves: any[]; notes: any[]; posts: any[]; uploads: string[] };
+type Opts = { issues?: any[]; upload?: (path: string) => Promise<unknown>; agents?: any[]; save?: (patch: any) => Promise<unknown> };
+async function mount(context: TestContext, opts: Opts = {}) {
+  const calls: Calls = { saves: [], notes: [], posts: [], uploads: [] };
+  const issues = opts.issues ?? [issueA, issueB];
+  let back!: () => boolean;
+  const app = await (await compiled).mount(context, {
+    props: { session: 'fixture', visible: true, onGoBack: (fn: typeof back) => back = fn },
+    setup(window) {
+      window.Element.prototype.getAnimations = () => [];
+      const w = window as any;
+      w.createImageBitmap = async () => ({ width: 10, height: 10, close() {} });
+      w.HTMLCanvasElement.prototype.getContext = () => ({ drawImage() {} });
+      w.HTMLCanvasElement.prototype.toBlob = function (cb: (b: Blob) => void) { cb(new w.Blob(['img'], { type: 'image/webp' })); };
+      w.URL.createObjectURL = () => 'blob:thumb';
+      w.URL.revokeObjectURL = () => {};
+    },
+    modules: [{
+      projectList: async () => ({ projects: [{ project: { id: 'fixture', session: 'fixture', name: 'Fixture', path: WS }, live: true }] }),
+      hubRooms: async () => ({ rooms: {} }),
+      boardCounts: async () => ({ counts: { fixture: { todo: issues.length, doing: 0, review: 0, done: 0, total: issues.length } } }),
+      hubAgents: async () => ({ agents: opts.agents ?? [] }),
+      boardList: async () => ({ issues }),
+      boardGet: async (_s: string, id: number) => issues.find((i) => i.id === id),
+      boardSave: async (_s: string, patch: any) => { calls.saves.push(patch); if (opts.save) await opts.save(patch); return { id: patch.id ?? 9 }; },
+      boardDelete: async () => ({}),
+      boardNote: async (_s: string, id: number, body: string) => { calls.notes.push({ id, body }); return {}; },
+      hubPost: async (_s: string, body: string) => { calls.posts.push(body); return {}; },
+      fsMkdir: async () => ({}),
+      fsUpload: async (path: string) => {
+        if (path.endsWith('/.gitignore')) return {};
+        calls.uploads.push(path);
+        return opts.upload ? opts.upload(path) : {};
+      },
+      fsDownloadHttp: async (path: string) => ({ url: `https://dl.test/?p=${encodeURIComponent(path)}` }),
+    }],
+  });
+  const flush = async () => { for (let i = 0; i < 10; i++) await app.flush(); };
+  await flush();
+  const q = <E extends Element>(sel: string) => app.document.querySelector<E>(sel);
+  const paste = async (target: HTMLElement) => {
+    const file = new app.window.File(['raw'], 'shot.png', { type: 'image/png' });
+    const event = new app.window.Event('paste', { bubbles: true, cancelable: true }) as any;
+    event.clipboardData = { items: [{ kind: 'file', getAsFile: () => file }], files: [file], getData: () => '' };
+    target.dispatchEvent(event);
+    await flush();
+  };
+  const type = async (el: HTMLTextAreaElement, v: string) => {
+    el.value = v; el.setSelectionRange(v.length, v.length);
+    el.dispatchEvent(new app.window.Event('input', { bubbles: true })); await flush();
+  };
+  return { ...app, calls, flush, q, paste, type, back: () => back() };
+}
+
+test('an image pasted into a new issue is a chip, and the saved body carries its ref', async (context) => {
+  const app = await mount(context, { agents: [{ name: 'alice', managed: true, state: 'idle' }] });
+  try {
+    app.q<HTMLButtonElement>('[aria-label="New issue"], .new-btn, [title="New issue"]')?.click();
+    await app.flush();
+    if (!app.q('.d-body-edit.fill')) {
+      // The page head's create entry (labels vary): any button that opens the form.
+      [...app.document.querySelectorAll<HTMLButtonElement>('button')].find((b) => /new/i.test(b.getAttribute('aria-label') ?? b.title ?? ''))?.click();
+      await app.flush();
+    }
+    const body = app.q<HTMLTextAreaElement>('.d-body-edit.fill')!;
+    assert.ok(body, 'the create form is open');
+    await app.type(body, 'See ');
+    await app.paste(body);
+    assert.equal(app.calls.uploads.length, 1, 'the shared pipeline uploaded it');
+    assert.ok(app.q('.pend-thumb img'), 'the thumbnail chip shows');
+    assert.equal(body.value, 'See [img:1]', 'the token at the caret');
+    await app.type(app.q<HTMLTextAreaElement>('.n-title')!, 'With a picture');
+    app.q<HTMLButtonElement>('.detail .icon-btn.go')!.click();
+    await app.flush();
+    assert.equal(app.calls.saves.length, 1);
+    assert.match(app.calls.saves[0].body, /^See /u);
+    assert.match(app.calls.saves[0].body, REF, 'the stored body has the ref, not the token');
+    assert.ok(!app.calls.saves[0].body.includes('[img:'), 'no token reaches the server');
+  } finally { await app.close(); }
+});
+
+test('while an image uploads, ✓ and Cmd+Enter create nothing, and leaving asks first', async (context) => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const app = await mount(context, { upload: () => gate.then(() => ({})) });
+  try {
+    [...app.document.querySelectorAll<HTMLButtonElement>('button')].find((b) => /new/i.test(b.getAttribute('aria-label') ?? b.title ?? ''))?.click();
+    await app.flush();
+    const body = app.q<HTMLTextAreaElement>('.d-body-edit.fill')!;
+    await app.type(body, 'Uploading ');
+    await app.paste(body);
+    const ok = app.q<HTMLButtonElement>('.detail .icon-btn.go')!;
+    assert.equal(ok.disabled, true, 'the button is closed while it uploads');
+    body.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true }));
+    await app.flush();
+    assert.equal(app.calls.saves.length, 0, 'the keyboard path refuses too');
+    // An image-only draft is unsaved work: Back asks instead of dropping it.
+    await app.type(body, '');
+    assert.equal(app.back(), true);
+    await app.flush();
+    assert.ok(app.q('[role=alertdialog]'), 'the shared discard confirm');
+    app.q<HTMLButtonElement>('.dlg-actions button:first-child')!.click(); // keep editing
+    await app.flush();
+    release(); await app.flush();
+    assert.ok(app.q('.pend-thumb'), 'kept: the upload landed in the draft it belongs to');
+    assert.equal(body.value, '[img:1]');
+    assert.equal(ok.disabled, false, 'an image-only body is content');
+  } finally { release(); await app.close(); }
+});
+
+test('a failed upload is a chip that blocks create; removing it takes the token whole and nothing else', async (context) => {
+  const app = await mount(context, { upload: async () => { throw new Error('disk full'); } });
+  try {
+    [...app.document.querySelectorAll<HTMLButtonElement>('button')].find((b) => /new/i.test(b.getAttribute('aria-label') ?? b.title ?? ''))?.click();
+    await app.flush();
+    const body = app.q<HTMLTextAreaElement>('.d-body-edit.fill')!;
+    await app.type(body, 'Keep imgs [here]');
+    await app.paste(body);
+    assert.ok(app.q('.pend-chip.err'), 'the failure is visible');
+    assert.equal(app.q<HTMLButtonElement>('.detail .icon-btn.go')!.disabled, true);
+    app.q<HTMLButtonElement>('.pend-chip.err .pend-x')!.click();
+    await app.flush();
+    assert.equal(app.q('.pend-chip.err'), null);
+    assert.equal(body.value, 'Keep imgs [here]', 'nothing of the text was touched');
+  } finally { await app.close(); }
+});
+
+test('removing a staged image removes its [img:n] token whole; body characters stay (the escape fix)', async (context) => {
+  const app = await mount(context);
+  try {
+    [...app.document.querySelectorAll<HTMLButtonElement>('button')].find((b) => /new/i.test(b.getAttribute('aria-label') ?? b.title ?? ''))?.click();
+    await app.flush();
+    const body = app.q<HTMLTextAreaElement>('.d-body-edit.fill')!;
+    await app.type(body, 'look i m g : 1 ');
+    await app.paste(body);
+    assert.equal(body.value, 'look i m g : 1 [img:1]');
+    app.q<HTMLButtonElement>('.pend-thumb .pend-x')!.click();
+    await app.flush();
+    assert.equal(body.value, 'look i m g : 1', 'the token and its one space go; the letters it is made of stay');
+  } finally { await app.close(); }
+});
+
+test('a note can be only an image; it posts the ref', async (context) => {
+  const app = await mount(context);
+  try {
+    app.q<HTMLButtonElement>('.card')!.click(); await app.flush();
+    const note = app.q<HTMLTextAreaElement>('.note-input')!;
+    await app.paste(note);
+    assert.equal(note.value, '[img:1]');
+    note.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await app.flush();
+    assert.equal(app.calls.notes.length, 1);
+    assert.match(app.calls.notes[0].body, new RegExp(`^${REF.source}$`, 'u'));
+    assert.equal(app.q('.pend-thumb'), null, 'persisted: the chip is gone');
+  } finally { await app.close(); }
+});
+
+test('an upload for issue A that lands after switching to B never enters B', async (context) => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const app = await mount(context, { upload: () => gate.then(() => ({})) });
+  try {
+    const cards = () => [...app.document.querySelectorAll<HTMLButtonElement>('.card')];
+    cards()[0]!.click(); await app.flush();
+    await app.paste(app.q<HTMLTextAreaElement>('.d-body-edit')!);
+    // Leaving A asks (an upload is unsaved work); discard, then open B.
+    assert.equal(app.back(), true); await app.flush();
+    app.q<HTMLButtonElement>('.dlg-actions button:last-child')!.click(); await app.flush();
+    cards()[1]!.click(); await app.flush();
+    assert.equal(app.q<HTMLTextAreaElement>('.d-body-edit')!.value, 'Body B');
+    release(); await app.flush();
+    assert.equal(app.q<HTMLTextAreaElement>('.d-body-edit')!.value, 'Body B', 'the old job did not write into B');
+    assert.equal(app.q('.pend-thumb'), null, 'nor add its chip');
+    assert.equal(app.q<HTMLButtonElement>('.note-add .icon-btn.go')!.disabled, true, 'nor hold B\u2019s note closed (its finally released only its own job)');
+  } finally { release(); await app.close(); }
+});
+
+test('saved images render through ChatImage in an editable issue; the Lightbox closes before the detail', async (context) => {
+  const withImg = { ...issueA, body: 'Before\n![](/work/fixture/.tmm/uploads/a-12345678.webp)\nAfter', notes: [{ author: 'bob', body: 'note ![](/work/fixture/.tmm/uploads/b-12345678.webp)', at: 100 }, { author: 'carol', body: 'one\n\n\n\ntwo', at: 101 }] };
+  const plain = { ...issueB, body: '  verbatim\n\n\n  body  ', editable: false };
+  const app = await mount(context, { issues: [withImg, plain] });
+  try {
+    const cards = () => [...app.document.querySelectorAll<HTMLButtonElement>('.card')];
+    assert.match(cards()[0]!.querySelector('.c-body')!.textContent ?? '', /^Before\s+After$/u, 'the card preview drops the ref');
+    assert.ok(!(cards()[0]!.textContent ?? '').includes('.tmm/uploads'), 'no path on a card');
+    cards()[0]!.click(); await app.flush();
+    const shots = app.document.querySelectorAll('.shots');
+    assert.equal(shots.length, 2, 'the body\u2019s and the note\u2019s images, each in the feed\u2019s strip');
+    assert.ok(!app.q('.n-text')!.textContent!.includes('.tmm/uploads'), 'the note shows its text, the image below');
+    assert.equal(app.document.querySelectorAll('.n-text')[1]!.textContent, 'one\n\n\n\ntwo', 'a note without images keeps its blank lines');
+    app.document.querySelector<HTMLButtonElement>('.shots .ci-link, .shots button')!.click();
+    await app.flush();
+    assert.ok(app.q('.lightbox, .lb, [class*="light"]'), 'the shared viewer opened');
+    assert.equal(app.back(), true); await app.flush();
+    assert.equal(app.q('.lightbox, .lb, [class*="light"]'), null, 'Back closed the viewer');
+    assert.ok(app.q('.detail'), '…and only the viewer: the detail stays');
+    assert.equal(app.back(), true); await app.flush();
+    cards()[1]!.click(); await app.flush();
+    assert.equal(app.q('.d-body-static')!.textContent, '  verbatim\n\n\n  body  ', 'a body without images is shown byte-for-byte');
+  } finally { await app.close(); }
+});
+
+test('a failed save keeps the staged image for the retry: one upload, the same ref saved', async (context) => {
+  let fail = true;
+  const app = await mount(context, { save: async () => { if (fail) { fail = false; throw new Error('db busy'); } } });
+  try {
+    app.q<HTMLButtonElement>('.card')!.click(); await app.flush();
+    const body = app.q<HTMLTextAreaElement>('.d-body-edit')!;
+    await app.type(body, 'Body A ');
+    await app.paste(body);
+    const ok = () => [...app.document.querySelectorAll<HTMLButtonElement>('.detail button')].find((b) => b.getAttribute('aria-label') === 'Save')!;
+    ok().click(); await app.flush();
+    assert.ok(app.q('.err'), 'the failure is shown');
+    assert.ok(app.q('.pend-thumb'), 'the staged image is still there');
+    assert.equal(body.value, 'Body A [img:1]', 'and its token');
+    ok().click(); await app.flush();
+    assert.equal(app.calls.uploads.length, 1, 'no second upload');
+    assert.equal(app.calls.saves.length, 2);
+    assert.equal(app.calls.saves[0].body, app.calls.saves[1].body, 'the retry saves the same text');
+    assert.match(app.calls.saves[1].body, REF);
+  } finally { await app.close(); }
+});
+
+test('deleting an issue drops its staged images; the next issue starts clean', async (context) => {
+  const app = await mount(context, { });
+  try {
+    const cards = () => [...app.document.querySelectorAll<HTMLButtonElement>('.card')];
+    cards()[0]!.click(); await app.flush();
+    await app.paste(app.q<HTMLTextAreaElement>('.d-body-edit')!);
+    assert.ok(app.q('.pend-thumb'));
+    app.q<HTMLButtonElement>('[aria-label="Delete issue"]')!.click(); await app.flush();
+    app.q<HTMLButtonElement>('.dlg-actions button:last-child')!.click(); await app.flush();
+    cards()[cards().length - 1]!.click(); await app.flush();
+    assert.ok(app.q('.d-body-edit'), 'another issue is open');
+    assert.equal(app.q('.pend-thumb'), null, 'no chip from the deleted issue');
+  } finally { await app.close(); }
+});

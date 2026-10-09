@@ -10,8 +10,8 @@ test('the issue detail is a DRAFT: explicit save, clean cancel, guarded exits (b
   // draft, never sel, and the save routes through draftPatch so untouched
   // fields stay off the wire.
   assert.match(source, /<input class="d-title-input" bind:value=\{draft\.title\}/u, 'the title edits the draft');
-  assert.match(source, /<textarea class="d-body-edit" bind:value=\{draft\.body\}/u, 'the body edits the draft');
-  assert.match(source, /const patch = draftPatch\(draft, draftBase\);/u,
+  assert.match(source, /<textarea class="d-body-edit" bind:this=\{bodyEl\} bind:value=\{draft\.body\}/u, 'the body edits the draft');
+  assert.match(source, /const patch = draftPatch\(saved, draftBase\);/u,
     'save diffs against the draft BASE — diffing the live issue ships stale untouched fields (#11 review)');
   assert.match(source, /onclick=\{saveDraft\}/u, 'save is a button, not a side effect');
   assert.match(source, /disabled=\{busy \|\| !draftValid\(draft\)\}/u, 'saving twice / a blank title is unclickable');
@@ -25,9 +25,9 @@ test('the issue detail is a DRAFT: explicit save, clean cancel, guarded exits (b
   // dialect: the back button, Escape, the phone's back gesture, a sidebar
   // project switch. Nothing silently discards.
   assert.match(source, /onclick=\{\(\) => guard\(\(\) => \(sel = null\)\)\}/u, 'the back button is guarded');
-  assert.match(source, /if \(sel && dirty\) \{ pendingDiscard = \(\) => \{ sel = null; \}; e\.stopPropagation\(\); return; \}/u,
+  assert.match(source, /if \(sel && \(dirty \|\| noteDirty\)\) \{ pendingDiscard = \(\) => \{ sel = null; \}; e\.stopPropagation\(\); return; \}/u,
     'Escape asks first while dirty');
-  assert.match(source, /if \(sel && dirty\) \{ pendingDiscard = \(\) => \{ sel = null; \}; return true; \}/u,
+  assert.match(source, /if \(sel && \(dirty \|\| noteDirty\)\) \{ pendingDiscard = \(\) => \{ sel = null; \}; return true; \}/u,
     'the back gesture asks first while dirty');
   assert.match(source, /function pick\(s: string\) \{\s*\n\s*guard\(/u, 'a sidebar switch asks first');
   assert.match(source, /<ConfirmDialog open=\{!!pendingDiscard\} danger=\{false\}/u,
@@ -62,7 +62,7 @@ test('assignment is ONE dispatch — the detail picker and the create dialog sha
   assert.match(source, /\.replace\('\{who\}', 'human'\)/u, 'the assigner is the subject at the front');
   assert.match(source, /const take = t\('boardAssignTake'\)\.replaceAll\('\{id\}', String\(id\)\);/u,
     'the instructions are their own i18n atom, filled per issue');
-  assert.match(source, /if \(assignee !== undefined\) await dispatchAssign\(sel\.id, assignee, draft\.title, draft\.body, Array\.isArray\(sel\.notes\) \? sel\.notes : \[\]\);/u,
+  assert.match(source, /if \(assignee !== undefined\) await dispatchAssign\(sel\.id, assignee, saved\.title, saved\.body, Array\.isArray\(sel\.notes\) \? sel\.notes : \[\]\);/u,
     'a ✓-confirmed assignee change routes through it (board #15) and carries the OPEN issue\u2019s thread (board #42)');
   assert.match(source, /if \(wantAssign && created != null\) await dispatchAssign\(created, wantAssign, wantTitle, wantBody\);/u,
     'create-with-assignee dispatches too — a fresh issue HAS no notes, so none ride (board #42)');
@@ -110,7 +110,7 @@ test('notes are a timeline: author + time header, content box below (reopened #1
   // trigger) but keeps its place and clothes: right of the author, one line.
   assert.match(source, /<div class="n-head">\s*<span class="n-author">\{n\.author\}<\/span>[\s\S]*?<button class="n-at"/u,
     'author left, time right, one header line');
-  assert.match(source, /<div class="n-text"[\s\S]*?onclick=\{\(\) => toggleNoteActs\(i\)\}>\{n\.body\.trim\(\)\}<\/div>/u,
+  assert.match(source, /<div class="n-text"[\s\S]*?onclick=\{\(\) => toggleNoteActs\(i\)\}>\{withImages\(n\.body\.trim\(\)\)\.text\}<\/div>/u,
     'the content is its own box below, trimmed');
   const style = source.slice(source.indexOf('<style>'));
   assert.match(style, /\.n-at \{[^}]*margin-left: auto/u, 'the time right-aligns');
@@ -124,7 +124,7 @@ test('a board\u2019s first fill unfolds its columns; a poll is a cut (motion.md 
   assert.match(source, /if \(!ready\) unfold\(\); \/\/ the first answer for this board, not a poll\s*\n\s*issues = r\.issues;\s*\n\s*ready = true;/u,
     'only the first answer after a project switch unfolds');
   assert.match(source, /justLoadedTimer = setTimeout\(\(\) => \{ justLoaded = false; \}, revealMs\(\)\);/u, 'cleared after one move plus the longest stagger');
-  assert.match(source, /ready = false; issues = \[\];[^\n]*\n\s*if \(justLoadedTimer\) clearTimeout\(justLoadedTimer\); justLoaded = false;/u, 'a switch mid-unfold cancels it');
+  assert.match(source, /ready = false; issues = \[\];[^\n]*\n(?:[^\n]*\n)*?\s*if \(justLoadedTimer\) clearTimeout\(justLoadedTimer\); justLoaded = false;/u, 'a switch mid-unfold cancels it');
 });
 
 test('a card\u2019s hover card says only what the card does not (motion.md principle 16, board #284)', () => {
@@ -455,7 +455,7 @@ test('the note reply wraps and grows — one autoGrow, chat keyboard semantics (
     'Enter sends; Shift+Enter and IME Enter do not');
   // Sending clears the bound value, and autoGrow's update refits — that is
   // the shrink-back path, so both halves must exist.
-  assert.match(source, /noteText = ''; await refetchSel\(\);/u, 'send clears the value');
+  assert.match(source, /noteText = ''; noteStage\.clear\(\); \/\/ persisted\s*await refetchSel\(\);/u, 'send clears the value');
   assert.match(source, /update: \(_v: string\) => fit\(\)/u, 'the action refits when the bound value changes');
   // The dress is the input's own (shared rule with the create title), the
   // box never shows a scrollbar while measuring, and the send button rides
@@ -631,8 +631,8 @@ test('every destructive/discarding path confirms through the SHARED dialog (boar
   // (explicit cancel, Escape, back, sidebar pick via guard) asks through the
   // SAME neutral dialog, a confirmed discard truly clears the form, and a
   // clean form navigates silently.
-  assert.match(source, /const createDirty = \$derived\(creating && !!\(nTitle\.trim\(\) \|\| nBody\.trim\(\) \|\| nAssignee\)\);/u);
-  assert.match(source, /if \(dirty \|\| createDirty\) pendingDiscard = action;/u, 'ONE guard covers both kinds of unsaved work');
+  assert.match(source, /const createDirty = \$derived\(creating && \(!!\(nTitle\.trim\(\) \|\| nBody\.trim\(\) \|\| nAssignee\) \|\| holds\(createStage\)\)\);/u);
+  assert.match(source, /if \(dirty \|\| noteDirty \|\| createDirty\) pendingDiscard = action;/u, 'ONE guard covers both kinds of unsaved work');
   assert.match(source, /aria-label=\{t\('cancel'\)\} onclick=\{\(\) => guard\(\(\) => \(creating = false\)\)\}/u,
     'the create form\u2019s explicit cancel goes through the guard');
   assert.match(source, /if \(creating && createDirty\) \{ pendingDiscard = \(\) => \{ creating = false; \}; e\.stopPropagation\(\); return; \}/u,
@@ -655,7 +655,7 @@ test('every destructive/discarding path confirms through the SHARED dialog (boar
   // and wipe it with no dialog at all. The gate blocks on BOTH kinds of
   // unsaved work and resumes the moment they clear; the other cur writes are
   // guard-wrapped (pick, the feed jump) or fire only while no board shows.
-  assert.match(source, /\$effect\(\(\) => \{ if \(session && \(!picked \|\| !cur\) && !dirty && !createDirty\) cur = session; \}\);/u,
+  assert.match(source, /\$effect\(\(\) => \{ if \(session && \(!picked \|\| !cur\) && !dirty && !noteDirty && !createDirty\) cur = session; \}\);/u,
     'the follow gate blocks dirty AND createDirty');
 });
 
@@ -666,13 +666,13 @@ test('titles are optional, and the WIRING honors it — not just the pure helper
 
   // 1) The create ENTRY and the create BUTTON both speak title||body — a
   //    body-only issue must be creatable from either path.
-  assert.match(source, /if \(!\(nTitle\.trim\(\) \|\| nBody\.trim\(\)\) \|\| busy\) return;/u,
+  assert.match(source, /if \(!\(nTitle\.trim\(\) \|\| nBody\.trim\(\)\) \|\| busy \|\| blocked\(createStage\)\) return;/u,
     'createIssue gates on title OR body');
-  assert.match(source, /disabled=\{!\(nTitle\.trim\(\) \|\| nBody\.trim\(\)\) \|\| busy\} onclick=\{createIssue\}/u,
+  assert.match(source, /disabled=\{!\(nTitle\.trim\(\) \|\| nBody\.trim\(\)\) \|\| busy \|\| blocked\(createStage\)\} onclick=\{createIssue\}/u,
     'the create button disables only when BOTH are empty');
 
   // 2) The card's title is the shared fallback, never the raw field…
-  assert.match(source, /<span class="c-title">\{issueRef\(i\)\}<\/span>/u,
+  assert.match(source, /<span class="c-title">\{issueRef\(cardText\(i\)\)\}<\/span>/u,
     'a titleless card wears its body excerpt via issueRef');
   assert.ok(!/<span class="c-title">\{i\.title\}<\/span>/u.test(source),
     'the raw i.title rendering must not return');
@@ -706,7 +706,7 @@ test('locked issue text is static selectable prose; the workflow stays live (boa
   // whether or not it accepts keys).
   assert.match(branches[0]![1]!, /<input class="d-title-input" bind:value=\{draft\.title\}/u, 'editable title is the input');
   assert.match(branches[0]![1]!, /\{:else if sel\.title\.trim\(\)\}\s*<div class="d-title-static">\{sel\.title\}<\/div>/u, 'locked title is static text');
-  assert.match(branches[1]![1]!, /<textarea class="d-body-edit" bind:value=\{draft\.body\}/u, 'editable body is the textarea');
+  assert.match(branches[1]![1]!, /<textarea class="d-body-edit" bind:this=\{bodyEl\} bind:value=\{draft\.body\}/u, 'editable body is the textarea');
   // trim() may only GATE the render — the output is the original, verbatim:
   // a CLI-written body's leading/trailing newlines are history too, and
   // pre-wrap makes them real (review blocker on ebda03b).
@@ -905,4 +905,23 @@ test('a card names its assignee with the .ava tile in agentHue ink and the one l
   // The agents are the poll Board already runs: no second hub_agents loop.
   assert.equal((source.match(/hubAgents\(/gu) ?? []).length, 1);
   assert.match(source, /agents\.map\(\(a\) => \(\{ value: a\.name, label: a\.name, ink: agentHue\(a\.name\) \}\)\)/u, 'the picker wears the same tile');
+});
+
+test('images: one materialized body per submit, given to the save AND the brief; refused while uploading or failed (board #329)', () => {
+  const save = source.slice(source.indexOf('async function saveDraft'), source.indexOf('async function createIssue'));
+  assert.match(save, /if \(!sel \|\| busy \|\| blocked\(bodyStage\)\) return;/u, 'save refuses while uploading/failed');
+  assert.match(save, /const saved = \{ \.\.\.draft, body: bodyStage\.body\(draft\.body\) \};/u, 'frozen at entry');
+  assert.match(save, /dispatchAssign\(sel\.id, assignee, saved\.title, saved\.body,/u, 'the brief carries the saved text');
+  const create = source.slice(source.indexOf('async function createIssue'), source.indexOf('async function addNote'));
+  assert.match(create, /const body = createStage\.body\(nBody\)\.trim\(\);/u);
+  assert.match(create, /boardSave\(cur, \{ title: nTitle\.trim\(\), body \}\)/u);
+  assert.match(create, /const wantBody = body;/u, 'assign-at-birth briefs the stored body');
+  const note = source.slice(source.indexOf('async function addNote'), source.indexOf('// ── Delete is CONFIRMED'));
+  assert.match(note, /blocked\(noteStage\)\) return;[\s\S]*const body = noteStage\.body\(noteText\)\.trim\(\);[\s\S]*await boardNote\(cur, id, body\);/u);
+  // The SAME atoms as the chat: one pipeline, one strip, one image, one viewer.
+  assert.match(source, /import \{ createStager, attachPaste, type Stager \} from '\.\/attachments\.svelte\.ts';/u);
+  assert.equal([...source.matchAll(/<AttachStrip /g)].length, 3, 'three editors, one strip');
+  assert.match(source, /<ChatImage \{src\}/u);
+  assert.match(source, /import Lightbox from '\.\.\/ui\/Lightbox\.svelte';/u);
+  assert.doesNotMatch(source, /fsUpload|canvas|createImageBitmap/u, 'no second upload path');
 });

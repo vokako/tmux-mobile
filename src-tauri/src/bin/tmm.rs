@@ -59,11 +59,11 @@ USAGE (agent):
   tmm spawn <agent> [--brief <text>]  spawn a registry agent into this project
   tmm spawn --team <team> [--brief <text>]  start a configured agent team (all members)
   tmm board [list]                    the project task board (kanban)
-  tmm board add "title" [--body <text>] [--assignee <name>]
+  tmm board add "title" [--body <text>] [--image <path|url>] [--assignee <name>]
   tmm board show <id>                 one issue with its note thread
   tmm board take <id>                 claim it: assignee = you, status = doing
   tmm board move <id> <todo|doing|review|done>
-  tmm board note <id> <text>          record progress/decisions ON the issue
+  tmm board note <id> <text> [--image <path|url>]  progress/decisions ON the issue
 
 USAGE (local helpers — no server/config access):
   tmm claude-statusline                render Claude Code official statusLine JSON from stdin
@@ -284,21 +284,11 @@ async fn main() {
             // markdown; the client resolves a local path through the file
             // service when it renders. Nothing is ever base64'd into a chat
             // message — the room is a log, not a blob store.
-            let images: Vec<String> = repeated
-                .iter()
-                .filter(|(k, _)| k == "image")
-                .map(|(_, v)| absolutize_ref(v))
-                .collect();
+            let images = image_refs(&repeated);
             if text.is_empty() && images.is_empty() {
                 fail(EXIT_USAGE, "send needs text: tmm send \"@reviewer 看一下\" [--image shot.png]");
             }
-            let mut body = text;
-            for src in &images {
-                if !body.is_empty() {
-                    body.push('\n');
-                }
-                body.push_str(&format!("![]({src})"));
-            }
+            let body = with_images(&text, &images);
             if !is_status && !has_address(&body) {
                 fail(EXIT_USAGE, "send needs a recipient such as @name, @all, or @human; use --status for ambient progress");
             }
@@ -568,12 +558,15 @@ async fn main() {
                     // The title is OPTIONAL (board #31): `tmm board add --body "…"`
                     // files a body-only issue. Something must be said, though.
                     let title = rest[1..].iter().filter(|a| !a.starts_with("--")).cloned().collect::<Vec<_>>().join(" ");
-                    let has_body = matches!(flags.get("body"), Some(Some(b)) if !b.trim().is_empty());
-                    if title.trim().is_empty() && !has_body {
-                        fail(EXIT_USAGE, "board add needs a title or a --body: tmm board add \"fix the login flow\" [--body <text>] [--assignee <name>]");
+                    let images = image_refs(&repeated);
+                    let given = match flags.get("body") { Some(Some(b)) => b.clone(), _ => String::new() };
+                    // An image is a body too (board #329): its ref, like tmm send's.
+                    let body = with_images(&given, &images);
+                    if title.trim().is_empty() && body.trim().is_empty() {
+                        fail(EXIT_USAGE, "board add needs a title or a --body: tmm board add \"fix the login flow\" [--body <text>] [--image <path|url>] [--assignee <name>]");
                     }
                     let mut params = json!({ "session": session, "title": title, "who": who });
-                    if let Some(Some(b)) = flags.get("body") { params["body"] = json!(b); }
+                    if !body.is_empty() { params["body"] = json!(body); }
                     if let Some(Some(a)) = flags.get("assignee") { params["assignee"] = json!(a); }
                     let r = rpc(&ctx, "hub_board_save", params).await;
                     if ctx.json { println!("{r}"); } else { println!("✓ #{} on the board", r.get("id").and_then(|v| v.as_i64()).unwrap_or(0)); }
@@ -599,9 +592,9 @@ async fn main() {
                             rpc(&ctx, "hub_board_save", json!({ "session": session, "id": id, "status": status, "who": who })).await
                         }
                         _ => {
-                            let text = rest[2..].join(" ");
+                            let text = with_images(&rest[2..].join(" "), &image_refs(&repeated));
                             if text.trim().is_empty() {
-                                fail(EXIT_USAGE, "board note needs text: tmm board note 3 \"blocked on the schema question\"");
+                                fail(EXIT_USAGE, "board note needs text or an image: tmm board note 3 \"blocked on the schema question\" [--image shot.png]");
                             }
                             rpc(&ctx, "hub_board_note", json!({ "session": session, "id": id, "body": text, "who": who })).await
                         }
@@ -1636,6 +1629,25 @@ fn split_flags(args: &[String]) -> (std::collections::HashMap<String, Option<Str
 /// through untouched; a filesystem path is made absolute against the agent's
 /// cwd, because the reader is a phone in another room and "./shot.png" means
 /// nothing there.
+/// Every `--image` given (repeatable), as references a reader can resolve.
+fn image_refs(repeated: &[(String, String)]) -> Vec<String> {
+    repeated.iter().filter(|(k, _)| k == "image").map(|(_, v)| absolutize_ref(v)).collect()
+}
+
+/// `text` with each image appended as a markdown reference on its own line
+/// — the ONE shape for chat messages, board bodies and notes (board #329).
+/// An image is a REFERENCE, never bytes.
+fn with_images(text: &str, images: &[String]) -> String {
+    let mut body = text.to_string();
+    for src in images {
+        if !body.is_empty() {
+            body.push('\n');
+        }
+        body.push_str(&format!("![]({src})"));
+    }
+    body
+}
+
 fn absolutize_ref(src: &str) -> String {
     let s = src.trim();
     if s.starts_with("http://") || s.starts_with("https://") || s.starts_with("data:") || s.starts_with('/') {
@@ -2173,6 +2185,22 @@ mod tests {
         ] });
         assert_eq!(managed_names(&agents), vec!["dev".to_string()]);
         assert!(managed_names(&json!({})).is_empty());
+    }
+
+    #[test]
+    fn board_images_are_references_in_the_body_like_send() {
+        // Board #329: `board add --image` / `board note --image` reuse send's
+        // shape exactly — one ref per line after the text, paths absolute.
+        let args: Vec<String> = ["board", "note", "3", "see", "--image", "/a.png", "--image", "https://x/b.png"]
+            .iter().map(|s| s.to_string()).collect();
+        let (_flags, pos, repeated) = split_flags(&args);
+        assert_eq!(pos, vec!["board", "note", "3", "see"]);
+        let refs = image_refs(&repeated);
+        assert_eq!(with_images("see", &refs), "see\n![](/a.png)\n![](https://x/b.png)");
+        assert_eq!(with_images("", &refs[..1]), "![](/a.png)", "an image alone is a whole note");
+        let rel = image_refs(&[("image".into(), "shot.png".into())]);
+        assert!(std::path::Path::new(rel[0].as_str()).is_absolute(), "a relative path is made absolute: {}", rel[0]);
+        assert_eq!(with_images("text", &[]), "text");
     }
 
     #[test]

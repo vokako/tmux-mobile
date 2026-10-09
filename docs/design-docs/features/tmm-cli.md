@@ -53,10 +53,10 @@ tmm log --grep <text> [--grep …] [--global]  search FULL history (any-match, b
 
 # the task board
 tmm board [list] | show <id>         the kanban; one issue + its note thread
-tmm board add "title" [--body <t>] [--assignee <n>]
+tmm board add "title" [--body <t>] [--image <path|url>] [--assignee <n>]
 tmm board take <id>                  claim: assignee = you, status = doing
 tmm board move <id> <todo|doing|review|done>
-tmm board note <id> <text>           record progress/decisions ON the issue
+tmm board note <id> <text> [--image <path|url>]  progress/decisions ON the issue (an image alone is a note)
 
 # teammates and projects
 tmm agent list                       windows + agent detection + derived state

@@ -9,7 +9,11 @@
      terminal and Files. */
   import { boardList, boardGet, boardSave, boardNote, boardDelete, boardCounts, projectList, hubAgents, hubPost, hubRooms, type BoardIssue, type BoardCountRow, type HubAgent } from '../core/ws.ts';
   import { projectAgeLabel, sortRows } from '../projects/projects.ts';
-  import { boardStatusColor, localWhen, agentHue } from './hub.ts';
+  import { boardStatusColor, localWhen, agentHue, splitImages } from './hub.ts';
+  import { createStager, attachPaste, type Stager } from './attachments.svelte.ts';
+  import AttachStrip from './AttachStrip.svelte';
+  import ChatImage from './ChatImage.svelte';
+  import Lightbox from '../ui/Lightbox.svelte';
   import type { ProjectRow } from '../projects/projects.ts';
   import { t, hanLang } from '../core/i18n.svelte.ts';
   import { onDestroy, untrack } from 'svelte';
@@ -54,7 +58,7 @@
   // here overrides it until the prop moves again.
   let cur = $state('');
   let viewGeneration = 0, readSequence = 0;
-  onDestroy(() => { viewGeneration++; readSequence++; setNoteActions(-1); });
+  onDestroy(() => { viewGeneration++; readSequence++; setNoteActions(-1); createStage.clear(); bodyStage.clear(); noteStage.clear(); });
   let picked = $state(false);      // a manual pick overrides the session follow
   // The Board sheet's own condition (≤760px — the old media gate, expressed
   // where the class is applied; see app.css .side-sheet).
@@ -74,7 +78,7 @@
   // ConfirmDialog. The board keeps its current project until the user
   // explicitly cancels/creates/saves; the effect reads both flags, so the
   // moment they clear it follows again.
-  $effect(() => { if (session && (!picked || !cur) && !dirty && !createDirty) cur = session; });
+  $effect(() => { if (session && (!picked || !cur) && !dirty && !noteDirty && !createDirty) cur = session; });
   // A jump from the feed's board line (board #13 follow-up): the request names
   // its OWN session — a manual pick may have parked this page on another
   // project, and the issue id is session-gated. The dirty-draft guard still
@@ -155,7 +159,8 @@
     onGoBack?.(() => {
       if (pendingDelete) { if (!busy) pendingDelete = null; return true; } // pending Back is consumed, not dismissed
       if (pendingDiscard) { pendingDiscard = null; return true; }
-      if (sel && dirty) { pendingDiscard = () => { sel = null; }; return true; }
+      if (shotView) { shotView = ''; return true; } // the viewer first, then the detail
+      if (sel && (dirty || noteDirty)) { pendingDiscard = () => { sel = null; }; return true; }
       if (creating && createDirty) { pendingDiscard = () => { creating = false; }; return true; }
       if (sel || creating) { sel = null; creating = false; return true; }
       // Compact bare list: back LIFTS the project drawer — the drawer is the
@@ -197,6 +202,17 @@
   // switching from one issue to another does not replay it.
   const drilled = $derived(!!sel || creating);
   let drillAnim = $state('');
+  // The viewer and the body/note stagers belong to the issue they were
+  // opened on. Most ways off an issue pass the guard (whose confirmed
+  // discard clears them); a confirmed DELETE does not, and drops the issue's
+  // staged images with it — never into the next issue opened.
+  let stagedFor: number | null = null;
+  $effect(() => {
+    const id = sel?.id ?? null;
+    if (id === stagedFor) return;
+    stagedFor = id;
+    untrack(() => { bodyStage.clear(); noteStage.clear(); shotView = ''; });
+  });
   let wasDrilled = false;
   $effect(() => { if (drilled !== wasDrilled) { drillAnim = drilled ? 'fwd' : 'back'; wasDrilled = drilled; } });
   /** How many notes the open issue had when it was opened (motion.md
@@ -209,6 +225,49 @@
   let nAssignee = $state('');
   let noteText = $state('');
   let busy = $state(false);
+  // ── Images (board #329): each editor owns a stager on the ONE pipeline the
+  // chat composer uses (attachments.svelte.ts) — paste or +, uploaded into
+  // THIS board's project, an [img:n] token at the caret, the ref swapped in
+  // at save. Staged attachments are DRAFT state: they join the leave guard
+  // below, and a stager is cleared only by a confirmed discard, a successful
+  // save, or a context change that already passed that guard (another issue,
+  // another project, the page's destruction on a server switch — clear()
+  // bumps its generation, so a late upload, its catch and its finally never
+  // touch the new context).
+  const projectPath = () => allProjects.find((r) => r.project.session === cur)?.project.path;
+  let createEl = $state<HTMLTextAreaElement | null>(null);
+  let bodyEl = $state<HTMLTextAreaElement | null>(null);
+  let noteEl = $state<HTMLTextAreaElement | null>(null);
+  const createStage = createStager({ ws: projectPath, getText: () => nBody, setText: (v) => { nBody = v; }, caret: () => createEl?.selectionStart, focus: () => createEl?.focus() });
+  const bodyStage = createStager({ ws: projectPath, getText: () => draft.body, setText: (v) => { draft.body = v; }, caret: () => bodyEl?.selectionStart, focus: () => bodyEl?.focus() });
+  const noteStage = createStager({ ws: projectPath, getText: () => noteText, setText: (v) => { noteText = v; }, caret: () => noteEl?.selectionStart, focus: () => noteEl?.focus() });
+  /** Staged or still uploading: unsaved work the guard protects. */
+  const holds = (st: Stager) => st.pending.length > 0 || st.attaching;
+  /** Not submittable while an upload runs or a failed chip stands. */
+  const blocked = (st: Stager) => st.attaching || st.failed;
+  let pickTarget: Stager | null = null;
+  let fileEl = $state<HTMLInputElement | null>(null);
+  function pickFor(st: Stager) { pickTarget = st; fileEl?.click(); }
+  async function onPickFiles(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const files = [...(input.files || [])];
+    input.value = ''; // same file re-pickable
+    const st = pickTarget; pickTarget = null;
+    if (st) await st.stage(files);
+  }
+  // The Lightbox (the shared viewer): opened from any image in the detail;
+  // Back and Escape close IT before the detail (backLayers order below).
+  let shotView = $state('');
+  /** Whose images these are: a viewer URL that arrives (it is signed at the
+   * tap, asynchronously) after the issue or project changed is dropped. */
+  const viewKey = () => `${cur}:${sel?.id ?? ''}`;
+  /** Body/note text and its images (the feed's own parser). Text without an
+   * image is returned BYTE-FOR-BYTE — history is shown verbatim (#28/#11);
+   * only a text that carries images is split. */
+  function withImages(text: string): { text: string; images: string[] } {
+    const parts = splitImages(text);
+    return parts.images.length ? parts : { text, images: [] };
+  }
   // ── The DRAFT (board #11): opening an issue edits a COPY; only the explicit
   // Save persists, Cancel restores, and every path that would drop unsaved
   // edits (back, Esc, sidebar switch, the phone's back gesture) goes through
@@ -220,15 +279,18 @@
   // against that would ship stale fields the user never touched (#11 review).
   let draftBase = $state(draftOf(null));
   let pendingDiscard = $state<null | (() => void)>(null);
-  const dirty = $derived(sel ? draftDirty(draft, draftBase) : false);
+  const dirty = $derived(sel ? draftDirty(draft, draftBase) || holds(bodyStage) : false);
+  // The note box is a draft too (board #329 review): typed text or a staged
+  // image under an open issue asks before it is dropped.
+  const noteDirty = $derived(!!sel && (!!noteText.trim() || holds(noteStage)));
   // The create form's typed-but-uncreated data is the same kind of unsaved
   // work as a dirty edit (board #29): any exit that would drop it — cancel,
   // Escape, back, a sidebar project pick — asks through the SAME guard, and
   // a clean form navigates without a pointless dialog.
-  const createDirty = $derived(creating && !!(nTitle.trim() || nBody.trim() || nAssignee));
+  const createDirty = $derived(creating && (!!(nTitle.trim() || nBody.trim() || nAssignee) || holds(createStage)));
   /** Run now, or park behind the discard confirm when unsaved work exists. */
   function guard(action: () => void) {
-    if (dirty || createDirty) pendingDiscard = action;
+    if (dirty || noteDirty || createDirty) pendingDiscard = action;
     else action();
   }
 
@@ -288,6 +350,8 @@
     void cur;
     viewGeneration++;
     sel = null; creating = false; ready = false; issues = []; noteText = ''; nTitle = ''; nBody = ''; nAssignee = ''; pendingDiscard = null; pendingDelete = null;
+    shotView = '';
+    untrack(() => { createStage.clear(); bodyStage.clear(); noteStage.clear(); });
     if (justLoadedTimer) clearTimeout(justLoadedTimer); justLoaded = false; // the unfold belongs to the board that loaded
     // untrack: this effect runs on `cur` — reading acts to bump its gen
     // would ALSO subscribe the effect to acts, and writing it back loops
@@ -393,8 +457,12 @@
    * rebase then normalizes: the server now carries the saved text, so base
    * catches up and the draft reads clean. */
   async function saveDraft() {
-    if (!sel || busy) return;
-    const patch = draftPatch(draft, draftBase);
+    if (!sel || busy || blocked(bodyStage)) return;
+    // ONE materialized body, frozen here: the [img:n] tokens become refs,
+    // and that SAME text is what boardSave stores and the assignment brief
+    // carries (board #329 review).
+    const saved = { ...draft, body: bodyStage.body(draft.body) };
+    const patch = draftPatch(saved, draftBase);
     if (!patch) return;
     busy = true;
     try {
@@ -407,13 +475,14 @@
       // A reassign from the detail view carries the OPEN issue's note thread
       // (board #42) — sel is the boardGet copy, so its notes are the array
       // (list rows only carry a count, which assignNotes treats as none).
-      if (assignee !== undefined) await dispatchAssign(sel.id, assignee, draft.title, draft.body, Array.isArray(sel.notes) ? sel.notes : []);
+      if (assignee !== undefined) await dispatchAssign(sel.id, assignee, saved.title, saved.body, Array.isArray(sel.notes) ? sel.notes : []);
       // The ✓ ANSWERS the edit (board #48 v2, owner: "点击对勾应该自动回到
       // 主页面，不用停留在详情页"): a successful save leaves the detail view
       // for the refreshed board. A FAILED save takes the catch instead —
       // the detail stays open with the error and the typed draft, because
       // a form that closes on failure eats the retry (createIssue's rule).
       err = '';
+      bodyStage.clear(); // persisted
       sel = null;
       await load();
     } catch (e) { err = String((e as Error)?.message ?? e); }
@@ -421,11 +490,12 @@
   }
   async function createIssue() {
     // Title OR body — the same not-contentless rule the server enforces.
-    if (!(nTitle.trim() || nBody.trim()) || busy) return;
+    if (!(nTitle.trim() || nBody.trim()) || busy || blocked(createStage)) return;
+    const body = createStage.body(nBody).trim(); // the one materialized body
     busy = true;
     let created: number | null = null;
     try {
-      created = (await boardSave(cur, { title: nTitle.trim(), body: nBody.trim() }))?.id ?? null;
+      created = (await boardSave(cur, { title: nTitle.trim(), body }))?.id ?? null;
     } catch (e) {
       // The CREATE failed: the form stays, retry is honest.
       err = String((e as Error)?.message ?? e);
@@ -437,8 +507,9 @@
     // born (#11 review). A failed dispatch is reported instead; the issue is
     // on the board and can be assigned from its detail view.
     const wantAssign = nAssignee;
-    const wantTitle = nTitle; const wantBody = nBody; // captured — the form clears before the dispatch
+    const wantTitle = nTitle; const wantBody = body; // captured — the form clears before the dispatch
     nTitle = ''; nBody = ''; nAssignee = ''; creating = false;
+    createStage.clear(); // persisted
     try {
       // Create-with-assignee reuses the ONE dispatch semantics: the field is
       // saved AND the assignment lands in the agent's pane (board #11).
@@ -450,9 +521,15 @@
     busy = false;
   }
   async function addNote() {
-    if (!sel || !noteText.trim() || busy) return;
+    if (!sel || !noteText.trim() || busy || blocked(noteStage)) return;
+    const body = noteStage.body(noteText).trim(); // frozen before the await
+    const id = sel.id;
     busy = true;
-    try { await boardNote(cur, sel.id, noteText.trim()); noteText = ''; await refetchSel(); } catch (e) { err = String((e as Error)?.message ?? e); }
+    try {
+      await boardNote(cur, id, body);
+      noteText = ''; noteStage.clear(); // persisted
+      await refetchSel();
+    } catch (e) { err = String((e as Error)?.message ?? e); }
     busy = false;
   }
   // ── Delete is CONFIRMED, and the request is CAPTURED (board #29): the
@@ -564,13 +641,22 @@
   // above — it stops propagation, so this handler never sees that press.)
   function onKey(e: KeyboardEvent) {
     if (e.key !== 'Escape') return;
+    if (shotView) return; // the Lightbox's own window handler closes it first
     if (pendingDiscard || pendingDelete) return; // the ConfirmDialog's own capture handler closes itself
     if (sideOpen) { sideOpen = false; e.stopPropagation(); return; }
-    if (sel && dirty) { pendingDiscard = () => { sel = null; }; e.stopPropagation(); return; }
+    if (sel && (dirty || noteDirty)) { pendingDiscard = () => { sel = null; }; e.stopPropagation(); return; }
     if (creating && createDirty) { pendingDiscard = () => { creating = false; }; e.stopPropagation(); return; }
     if (sel || creating) { sel = null; creating = false; e.stopPropagation(); }
   }
 
+  /** A card never shows a path (board #329): image refs leave the preview,
+   * and a body that was ONLY images reads as the localized word for one. */
+  function cardText<I extends { id?: number; title?: string; body?: string }>(i: I): I {
+    if (!i.body) return i;
+    const parts = withImages(i.body);
+    if (!parts.images.length) return i;
+    return { ...i, body: parts.text || `[${t('hubImage')}]` };
+  }
   const statusLabel = (s: string) => t(`boardStatus_${s}`);
   /** The SIDEBAR count chips' colours — the owner's four CATEGORICAL colours
    * in board order (2026-09-01, fourth ruling: "红 蓝 黄紫 吧，橙色和红色区
@@ -799,14 +885,30 @@
         {#if sel.created_by}<span class="meta-bit">{t('boardOpenedBy')} <span class="m-name">{sel.created_by}</span></span>{/if}
       </div>
       {#if sel.editable}
-        <textarea class="d-body-edit" bind:value={draft.body} use:autoGrow={draft.body} placeholder={t('boardBodyPh')} rows="3"></textarea>
+        <textarea class="d-body-edit" bind:this={bodyEl} bind:value={draft.body} use:autoGrow={draft.body} placeholder={t('boardBodyPh')} rows="3"
+          onpaste={(e) => attachPaste(e, (f) => bodyStage.stage(f))}></textarea>
+        <div class="attach-line">
+          <CommandButton variant="icon" icon="plus" label={t('hubAttach')} disabled={bodyStage.attaching}
+            pending={bodyStage.attaching} onclick={() => pickFor(bodyStage)} />
+          <AttachStrip pending={bodyStage.pending} onremove={(i) => bodyStage.remove(i)} onpreview={(u) => { shotView = u; }} />
+        </div>
+        <!-- The SAVED images (board #329): the refs already in the stored body,
+             seen through the feed's image atom; the chips above are only
+             what this edit adds (they become refs on ✓). -->
+        {@render shots(withImages(sel.body).images)}
       {:else if sel.body.trim()}
         <!-- The full body, VERBATIM (review blocker on ebda03b): this is the
              original history, so the display layer must not rewrite it —
              trim() only decides whether the field renders at all; the output
              is sel.body untouched, leading/trailing whitespace included
              (pre-wrap makes it real). -->
-        <div class="d-body-static">{sel.body}</div>
+        {@const parts = withImages(sel.body)}
+        {#if !parts.images.length}
+          <div class="d-body-static">{sel.body}</div>
+        {:else}
+          {#if parts.text}<div class="d-body-static">{parts.text}</div>{/if}
+          {@render shots(parts.images)}
+        {/if}
       {/if}
       <!-- The note thread as a TIMELINE (reopened #11): a header line — author
            in the accent ink, time right-aligned — and the content in its own
@@ -828,7 +930,7 @@
                    BUBBLE's corner, never the full row's far right. -->
               <div class="n-wrap">
                 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-                <div class="n-text" lang={hanLang(n.body)} oncontextmenu={(e) => { noteSelectionClicks.mark(e, i); }} onclick={() => toggleNoteActs(i)}>{n.body.trim()}</div>
+                <div class="n-text" lang={hanLang(n.body)} oncontextmenu={(e) => { noteSelectionClicks.mark(e, i); }} onclick={() => toggleNoteActs(i)}>{withImages(n.body.trim()).text}</div>
                 {#if acts.open === i}
                   <div class="m-acts appear">
                     <CommandButton iconOnly icon={acts.copied ? 'check' : 'copy'}
@@ -836,11 +938,15 @@
                   </div>
                 {/if}
               </div>
+              {@render shots(withImages(n.body).images)}
             </div>
           {/each}
         {/if}
       </div>
+      <AttachStrip pending={noteStage.pending} onremove={(i) => noteStage.remove(i)} onpreview={(u) => { shotView = u; }} />
       <div class="note-add">
+        <CommandButton variant="icon" icon="plus" label={t('hubAttach')} disabled={noteStage.attaching}
+          pending={noteStage.attaching} onclick={() => pickFor(noteStage)} />
         <!-- A textarea, not an input (board #28: "消息过长要自动帮我换行，
              现在是一直在一行里，前边都看不到了"): long text soft-wraps in
              the visible width and the box grows with it — the same shared
@@ -849,10 +955,11 @@
              composition's Enter commits the composition, never the note);
              clearing on send shrinks the box back through autoGrow's
              update. -->
-        <textarea class="note-input" rows="1" placeholder={t('boardNotePh')} bind:value={noteText}
+        <textarea class="note-input" rows="1" placeholder={t('boardNotePh')} bind:this={noteEl} bind:value={noteText}
           use:autoGrow={noteText}
-          onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); addNote(); } }}></textarea>
-        <button class="icon-btn go" title={t('save')} aria-label={t('save')} disabled={!noteText.trim() || busy} onclick={addNote}>
+          onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); addNote(); } }}
+          onpaste={(e) => attachPaste(e, (f) => noteStage.stage(f))}></textarea>
+        <button class="icon-btn go" title={t('save')} aria-label={t('save')} disabled={!noteText.trim() || busy || blocked(noteStage)} onclick={addNote}>
           <Icon name="check" size={14} />
         </button>
       </div>
@@ -866,7 +973,7 @@
         </button>
         <span class="d-title">{t('boardNew')}</span>
         <span class="spacer"></span>
-        <button class="icon-btn go" title={t('create')} aria-label={t('create')} disabled={!(nTitle.trim() || nBody.trim()) || busy} onclick={createIssue}>
+        <button class="icon-btn go" title={t('create')} aria-label={t('create')} disabled={!(nTitle.trim() || nBody.trim()) || busy || blocked(createStage)} onclick={createIssue}>
           <Icon name="check" size={14} />
         </button>
       </div>
@@ -891,8 +998,14 @@
            the ✓ — a trigger, not a second submit path — and an IME
            composition's Enter commits the candidate text, never the issue
            (the note box's precedent, board #28). -->
-      <textarea class="d-body-edit fill" placeholder={t('boardBodyPh')} bind:value={nBody}
-        onkeydown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.isComposing) { e.preventDefault(); createIssue(); } }}></textarea>
+      <textarea class="d-body-edit fill" placeholder={t('boardBodyPh')} bind:this={createEl} bind:value={nBody}
+        onkeydown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.isComposing) { e.preventDefault(); createIssue(); } }}
+        onpaste={(e) => attachPaste(e, (f) => createStage.stage(f))}></textarea>
+      <div class="attach-line">
+        <CommandButton variant="icon" icon="plus" label={t('hubAttach')} disabled={createStage.attaching}
+          pending={createStage.attaching} onclick={() => pickFor(createStage)} />
+        <AttachStrip pending={createStage.pending} onremove={(i) => createStage.remove(i)} onpreview={(u) => { shotView = u; }} />
+      </div>
     </div>
   {:else}
     <!-- ── the board: four fixed columns, cards in movement order ── -->
@@ -911,8 +1024,8 @@
               <!-- Titleless issues (board #31) wear their body excerpt as the
                    title (issueRef); the preview line then stays EMPTY — the
                    same text twice reads as a rendering bug. -->
-              <span class="c-title">{issueRef(i)}</span>
-              {#if i.body && i.title?.trim()}<span class="c-body">{i.body}</span>{/if}
+              <span class="c-title">{issueRef(cardText(i))}</span>
+              {#if i.body && i.title?.trim()}<span class="c-body">{cardText(i).body}</span>{/if}
               <span class="c-meta">
                 #{i.id}
                 {#if i.created_by}· {t('boardBy')} {i.created_by}{/if}
@@ -946,11 +1059,22 @@
     </div>
   {/if}
   </div>
+  {#snippet shots(images: string[], owner = viewKey())}
+    {#if images.length}
+      <div class="shots">
+        {#each images as src, k (`${k}-${src}`)}
+          <ChatImage {src} alt={t('hubImage')} onview={(u: string) => { if (owner === viewKey()) shotView = u; }} />
+        {/each}
+      </div>
+    {/if}
+  {/snippet}
+  <input type="file" multiple hidden bind:this={fileEl} onchange={onPickFiles} />
+  {#if shotView}<Lightbox src={shotView} onclose={() => { shotView = ''; }} />{/if}
   <ConfirmDialog open={!!pendingDiscard} danger={false} compact={narrowVp}
     confirmIcon="check"
     title={t('confirmDiscardTitle')} note={creating ? t('boardCreateDiscardNote') : t('boardDiscardNote')}
     confirmLabel={t('confirmDiscard')} cancelLabel={t('configKeepEditing')}
-    onconfirm={() => { const go = pendingDiscard; pendingDiscard = null; draft = { ...draftBase }; nTitle = ''; nBody = ''; nAssignee = ''; go?.(); }}
+    onconfirm={() => { const go = pendingDiscard; pendingDiscard = null; draft = { ...draftBase }; nTitle = ''; nBody = ''; nAssignee = ''; noteText = ''; createStage.clear(); bodyStage.clear(); noteStage.clear(); go?.(); }}
     oncancel={() => (pendingDiscard = null)} />
   <!-- Deleting is the DANGER confirmation (board #29): the dialog names the
        captured issue, nothing reaches boardDelete before the confirm, and
@@ -1280,6 +1404,10 @@
      flex-end, not center: centered, a five-line note strands the button in
      the middle of the text block. At one line the two are the same place. */
   .note-add { display: flex; gap: 6px; align-items: flex-end; }
+  /* The + and the staged chips under an editor (board #329: the composer's
+     atoms, nothing new); saved images use the feed's .shots strip. */
+  .attach-line { display: flex; align-items: flex-start; gap: 6px; flex-wrap: wrap; }
+  .shots { display: flex; flex: none; flex-direction: column; gap: 6px; margin-top: 6px; border-radius: var(--ui-radius-control); overflow: hidden; }
   /* The create form's title: a textarea so it can WRAP as it grows (autoGrow),
      but dressed exactly like the input it replaces — one line at rest, no
      manual resize handle, and no flex stretch in the column layout. */
