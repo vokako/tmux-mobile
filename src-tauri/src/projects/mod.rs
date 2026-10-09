@@ -29,6 +29,7 @@ pub mod reconcile;
 pub mod recovery;
 pub mod registry;
 pub mod rooms;
+pub mod scratch;
 pub(crate) mod skills;
 pub mod spawn;
 pub mod store;

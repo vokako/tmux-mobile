@@ -38,6 +38,9 @@ tmm send "@name <text>" --in 10m | --at 14:30   a WAKE: delivered then as "[wake
 tmm wake list [--all] · tmm wake cancel <id>   pending wakes; the setter or the human cancels
 tmm task start <name> --wake [@who] -- <cmd>   wake @who (default: you) when it ends by itself
 tmm send "<text>" --status           ambient progress; room-only, interrupts nobody
+tmm scratch [--kill]                 the desktop's scratch terminal session (#324): ensure it
+                                     (in $HOME, no project) and print its pane target, or kill it
+                                     — only ever OUR session; a name held by anything else refuses
 tmm send … --image <path|url>        attach an image by REFERENCE (repeatable)
 tmm log [--since <ts>] [--limit N] [-f]      read chat; --since exclusive (ms), -f follows
 tmm log --grep <text> [--grep …] [--global]  search FULL history (any-match, body+sender)

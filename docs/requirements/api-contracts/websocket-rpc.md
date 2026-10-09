@@ -55,6 +55,8 @@ JSON-RPC over WebSocket (`ws://` or `wss://`).
 | `list_sessions_with_panes` | — | `{sessions, panes}` — the two lists above in one round-trip (saves 1+N RPCs on the Sessions page). |
 | `new_session` | `name?`, `path?`, `command?` | OK |
 | `kill_session` | `name` | OK |
+| `scratch_session` | — | `{session, target}` — ensures the scratch terminal's session (board #324: `tmm-scratch`, in `$HOME`, marked `@tmm-scratch=1`, never a project) and answers its first window's first pane as `session:window.pane`; refuses with the reason when the name belongs to a plain session or a project |
+| `scratch_kill` | — | `{killed}` — kills the scratch session only when it is ours; `false` when absent; refuses when the name belongs to something else |
 | `new_window` | `session` | OK |
 | `kill_window` | `target` | OK |
 

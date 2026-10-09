@@ -85,6 +85,8 @@ USAGE (background tasks — LOCAL tmux only, no server needed, never exits 2):
                                       TMM_TASK_TTL_SECS overrides)
 
 USAGE (human or agent — self-management):
+  tmm scratch [--kill]                the desktop's scratch terminal session (no project):
+                                      ensure it and print its pane target, or kill it
   tmm agent list                      agents in this project and their states
   tmm agent interrupt <name>          cancel the turn it is running (Escape into its pane)
   tmm agent mode <name> queue|steer   switch a kiro agent's queue/steer mode for this session
@@ -372,6 +374,20 @@ async fn main() {
                 println!("{r}");
             } else {
                 println!("✓ sent");
+            }
+        }
+        // The scratch terminal's session (board #324): the same server entry
+        // the desktop panel uses, so an agent can open a scratch shell for a
+        // person. It belongs to no project, so no --project is needed.
+        ("scratch", _) => {
+            let kill = flags.contains_key("kill");
+            let r = rpc(&ctx, if kill { "scratch_kill" } else { "scratch_session" }, json!({})).await;
+            if ctx.json {
+                println!("{r}");
+            } else if kill {
+                println!("{}", if r["killed"].as_bool() == Some(true) { "✓ scratch session killed" } else { "no scratch session" });
+            } else {
+                println!("{}", r["target"].as_str().unwrap_or(""));
             }
         }
         ("log", _) => {

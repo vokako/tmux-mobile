@@ -53,6 +53,17 @@ make a workspace. Two consequences fall out of that:
   adopted (Team creates and kills its own, so a declaration would fight it); and a
   project you ARCHIVED is never re-adopted, or "remove from projects" would undo
   itself on the next tick.
+- **One session is not a project: the scratch terminal's** (board #324, owner
+  2026-10-09: "这个 Terminal 只是临时用的，并且跟你的项目没有关系"). It is
+  recognised by OWNERSHIP, never by name: `projects::scratch::owned` = the exact
+  session `tmm-scratch` exists AND carries the tmux session option
+  `@tmm-scratch=1` (set when `scratch::ensure` created it; a native tmux fact, no
+  new store) AND no project row declares that session — a project that is down
+  still holds its name. `auto_adopt_with` skips a session that is Ours. A plain
+  session or a project already holding the name is `Taken`: ensure and kill
+  refuse with the reason and never take it over, kill, rename or undeclare it,
+  and auto-adopt treats it like any other session. Project create suffixes and
+  rename refuses a live session name as before, so the two cannot share one.
 - **One create path.** The old "new session" form now creates a *project* and
   brings it up (`project_create` + `project_up`), so the second `+` in the
   Projects header is gone. A bare `new_session` would have been pointless anyway:

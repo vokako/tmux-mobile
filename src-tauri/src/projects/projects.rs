@@ -234,6 +234,11 @@ pub(super) fn auto_adopt_with(created: &[(String, u64)], ts: u64) -> Result<Vec<
         if known.contains(session) || ts.saturating_sub(*created_at) < SESSION_SETTLE_SECS {
             continue;
         }
+        // The scratch terminal's session is the one tmux session that is not
+        // a project (board #324) — by ownership, not by name.
+        if super::scratch::is_scratch(session) {
+            continue;
+        }
         match adopt_facts(session) {
             Ok(facts) => candidates.push((session, facts)),
             Err(e) => eprintln!("projects: cannot track session {session}: {e}"),

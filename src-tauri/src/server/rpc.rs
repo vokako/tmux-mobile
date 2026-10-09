@@ -219,6 +219,11 @@ fn dispatch(req: &Request, token: &str) -> Result<serde_json::Value, RpcError> {
             Ok(serde_json::json!({ "ok": true }))
         }
 
+        // The scratch terminal's session (board #324): ensure answers
+        // {session, target}; kill only ever kills OUR session.
+        "scratch_session" => crate::projects::scratch::ensure().map_err(RpcError::Internal),
+        "scratch_kill" => crate::projects::scratch::kill().map_err(RpcError::Internal),
+
         "kill_session" => {
             let name = param(p, "name")?;
             tmux::kill_session(name).map_err(RpcError::Internal)?;

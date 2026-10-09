@@ -1028,6 +1028,23 @@ pub fn kill_window(target: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// A user option of one session (`@name`), read through the exact target
+/// (display-message accepts `=name:`); None when unset or the session is gone.
+pub fn session_option(session: &str, option: &str) -> Option<String> {
+    let fmt = format!("#{{{option}}}");
+    run_tmux(&["display-message", "-t", &exact_session(session), "-p", &fmt])
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Set a user option on a session. `set-option` rejects the `=` exact form
+/// (see `exact_session`), so the caller must have just created or verified
+/// the session by its exact name.
+pub fn set_session_option(session: &str, option: &str, value: &str) -> Result<(), String> {
+    run_tmux(&["set-option", "-t", session, option, value]).map(|_| ())
+}
+
 /// True if a tmux session with this exact name exists.
 pub fn session_exists(session: &str) -> bool {
     run_tmux(&["has-session", "-t", &exact_session(session)]).is_ok()
