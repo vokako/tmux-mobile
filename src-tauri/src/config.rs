@@ -2,7 +2,7 @@ use serde::Deserialize;
 use serde_json;
 use std::path::PathBuf;
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Clone)]
 struct FileConfig {
     host: Option<String>,
     port: Option<u16>,
@@ -162,11 +162,29 @@ impl Config {
         Self::load_with(&|k| std::env::var(k).ok())
     }
 
-    /// What an installed gateway service runs with (board #323): config.toml
-    /// alone. The service does not inherit the installing shell's
-    /// `ENV_OVERRIDES`, so `tmm gateway` judges and probes this one.
+    /// What the installed gateway service runs with (board #323): config.toml
+    /// ALONE — `tmm gateway start --service` loads this, so whatever the user
+    /// manager's environment holds, the service and `tmm gateway status`
+    /// read the same thing. Creates a token / machine id on a first start,
+    /// as any start does.
     pub fn load_service() -> Self {
         Self::load_with(&|_| None)
+    }
+
+    /// The same file-only view, READ-ONLY: nothing is created (no token, no
+    /// machine id), so `status` never makes a machine look configured. A
+    /// missing token or id is empty.
+    pub fn peek_service() -> Self {
+        Self::peek_at(&dirs_next())
+    }
+
+    fn peek_at(dir: &std::path::Path) -> Self {
+        let file_cfg = std::fs::read_to_string(dir.join("config.toml"))
+            .ok()
+            .and_then(|s| toml::from_str::<FileConfig>(&s).ok())
+            .unwrap_or_default();
+        let machine_id = std::fs::read_to_string(dir.join("machine_id")).map(|s| s.trim().to_string()).unwrap_or_default();
+        Self::from_parts(&|_| None, file_cfg, String::new(), machine_id)
     }
 
     fn load_with(env: &dyn Fn(&str) -> Option<String>) -> Self {
@@ -176,13 +194,18 @@ impl Config {
             .unwrap_or_default();
 
         let token = env("TOKEN")
-            .or(file_cfg.token)
+            .or(file_cfg.token.clone())
             .unwrap_or_else(|| {
                 let t = uuid::Uuid::new_v4().to_string();
                 let _ = save_token(&t);
                 t
             });
 
+        Self::from_parts(env, file_cfg, token, load_or_create_machine_id())
+    }
+
+    fn from_parts(env: &dyn Fn(&str) -> Option<String>, file_cfg: FileConfig, token: String, machine_id: String) -> Self {
+        let token = if token.is_empty() { env("TOKEN").or(file_cfg.token.clone()).unwrap_or_default() } else { token };
         Config {
             host: env("HOST")
                 .or(file_cfg.host)
@@ -192,7 +215,7 @@ impl Config {
                 .or(file_cfg.port)
                 .unwrap_or(9899),
             token,
-            machine_id: load_or_create_machine_id(),
+            machine_id,
             tmux_socket: env("TMUX_SOCKET").or(file_cfg.tmux_socket),
             tls_cert: optional_env_override(env("TLS_CERT"), file_cfg.tls_cert),
             tls_key: optional_env_override(env("TLS_KEY"), file_cfg.tls_key),
@@ -280,6 +303,30 @@ fn harden_path_0600(_path: &std::path::Path) {}
 
 #[cfg(all(test, unix))]
 mod tests {
+
+    /// Board #323: the service view reads config.toml ALONE (the environment
+    /// is never consulted), and the read-only view creates nothing.
+    #[test]
+    fn the_service_view_ignores_the_environment_and_peeking_creates_nothing() {
+        let env = |k: &str| match k { "PORT" => Some("1".to_string()), "HOST" => Some("9.9.9.9".to_string()), "TOKEN" => Some("from-env".to_string()), _ => None };
+        let file = FileConfig { port: Some(19877), host: Some("127.0.0.1".into()), token: Some("from-file".into()), ..Default::default() };
+        let svc = Config::from_parts(&|_| None, file.clone(), String::new(), "m".into());
+        assert_eq!((svc.port, svc.host.as_str(), svc.token.as_str()), (19877, "127.0.0.1", "from-file"));
+        let shell = Config::from_parts(&env, file, String::new(), "m".into());
+        assert_eq!((shell.port, shell.host.as_str(), shell.token.as_str()), (1, "9.9.9.9", "from-env"), "an interactive load still honours overrides");
+        // peek: nothing written where nothing existed; a file is read as is.
+        let dir = dirs_next().join("peek-323");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = Config::peek_at(&dir);
+        assert!(p.token.is_empty() && p.machine_id.is_empty());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0, "status never configures a machine");
+        std::fs::write(dir.join("config.toml"), "port = 19878\ntoken = \"t\"\n").unwrap();
+        std::fs::write(dir.join("machine_id"), "mid\n").unwrap();
+        let p = Config::peek_at(&dir);
+        assert_eq!((p.port, p.token.as_str(), p.machine_id.as_str()), (19878, "t", "mid"));
+    }
+
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use std::sync::atomic::{AtomicUsize, Ordering};

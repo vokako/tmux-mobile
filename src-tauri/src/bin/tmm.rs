@@ -1388,63 +1388,82 @@ async fn resolve_project_id(ctx: &Ctx, name: &str) -> String {
 /// can never address the real one.
 async fn cmd_gateway(rest: &[String], flags: &Flags) {
     use tmux_mobile::gateway::{self, probe, service};
-    let name = std::env::var("TMM_GATEWAY_SERVICE").ok().filter(|s| !s.is_empty())
-        .unwrap_or_else(|| (if service::mac() { service::LABEL } else { service::UNIT }).to_string());
     let sub = rest.first().map(String::as_str).unwrap_or("");
-    // The service reads config.toml only; this shell's overrides do not reach it.
-    if sub != "start" {
-        let set: Vec<&str> = tmux_mobile::config::ENV_OVERRIDES.iter().copied().filter(|k| std::env::var_os(k).is_some()).collect();
-        if !set.is_empty() {
-            eprintln!("note: {} set in this shell — the service does not inherit them; it runs with {}", set.join(", "), tmux_mobile::config::config_dir().join("config.toml").display());
+    if sub == "start" {
+        // `--service` (the installed unit's argv): config.toml ALONE, so the
+        // service and `status` read the same thing.
+        let cfg = if flags.contains_key("service") { tmux_mobile::config::Config::load_service() } else { tmux_mobile::config::Config::load() };
+        if let Err(e) = gateway::start(cfg.clone()).await {
+            // A taken port says WHO holds it (never another port, never a kill).
+            let why = match probe::probe(&cfg).await {
+                probe::Verdict::Ours { url, .. } => format!("{e} — this machine's gateway already answers at {url}"),
+                probe::Verdict::Occupied(who) => format!("{e} — {who}"),
+                probe::Verdict::None => e,
+            };
+            fail(EXIT_ERR, &format!("gateway: {why}"));
         }
+        return;
     }
+    let mac = cfg!(target_os = "macos");
+    let name = std::env::var("TMM_GATEWAY_SERVICE").ok().filter(|s| !s.is_empty())
+        .unwrap_or_else(|| (if mac { service::LABEL } else { service::UNIT }).to_string());
+    if let Err(e) = service::valid_name(&name, mac) {
+        fail(EXIT_USAGE, &format!("TMM_GATEWAY_SERVICE: {e}"));
+    }
+    // The service reads config.toml only; this shell's overrides do not reach it.
+    let set: Vec<&str> = tmux_mobile::config::ENV_OVERRIDES.iter().copied().filter(|k| std::env::var_os(k).is_some()).collect();
+    if !set.is_empty() {
+        eprintln!("note: {} set in this shell — the service does not use them; it runs with {}", set.join(", "), tmux_mobile::config::config_dir().join("config.toml").display());
+    }
+    // Sys::real's probe builds its own runtime, so every call that may probe
+    // runs on a blocking thread, off this current-thread runtime.
     match sub {
-        "start" => {
-            let cfg = tmux_mobile::config::Config::load();
-            if let Err(e) = gateway::start(cfg.clone()).await {
-                // A taken port says WHO holds it (never another port, never a kill).
-                let why = match probe::probe(&cfg).await {
-                    probe::Verdict::Ours { url, .. } => format!("{e} — this machine's gateway already answers at {url}"),
-                    probe::Verdict::Occupied(who) => format!("{e} — {who}"),
-                    probe::Verdict::None => e,
-                };
-                fail(EXIT_ERR, &format!("gateway: {why}"));
-            }
-        }
         "" | "install" => {
             let replace = flags.contains_key("replace");
-            match service::install(&name, replace) {
-                Ok(done) => {
-                    let what = match done {
-                        service::Done::Installed => "installed and started".to_string(),
-                        service::Done::AlreadyRunning => "already installed and running".to_string(),
-                        service::Done::Started => "installed; started".to_string(),
-                        service::Done::Updated => "updated and restarted".to_string(),
-                        service::Done::Replaced(b) => format!("replaced (previous file kept at {})", b.display()),
-                    };
-                    println!("✓ {name}: {what}");
-                    print_status(&name, false).await;
-                }
+            let n = name.clone();
+            let r = tokio::task::spawn_blocking(move || {
+                let sys = service::Sys::real()?;
+                let done = service::install(&sys, &n, replace).map(|d| format!("{d:?}"))?;
+                println!("✓ {n}: {}", done_words(&done));
+                Ok::<bool, String>(print_status(&sys, &n, false))
+            }).await.unwrap_or_else(|e| Err(e.to_string()));
+            match r {
+                Ok(true) => {}
+                Ok(false) => fail(EXIT_ERR, "gateway: installed, but this machine's gateway does not answer"),
                 Err(e) => fail(EXIT_ERR, &format!("gateway install: {e}")),
             }
         }
-        "uninstall" => match service::uninstall(&name) {
+        "uninstall" => match tokio::task::spawn_blocking({ let n = name.clone(); move || service::Sys::real().and_then(|sys| service::uninstall(&sys, &n)) }).await.unwrap_or_else(|e| Err(e.to_string())) {
             Ok(true) => println!("✓ {name} removed"),
             Ok(false) => println!("{name} is not installed"),
             Err(e) => fail(EXIT_ERR, &format!("gateway uninstall: {e}")),
         },
-        "restart" => match service::restart(&name) {
-            Ok(()) => println!("✓ {name} restarted"),
-            Err(e) => fail(EXIT_ERR, &format!("gateway restart: {e}")),
-        },
+        "restart" => {
+            let n = name.clone();
+            let r = tokio::task::spawn_blocking(move || service::Sys::real().and_then(|sys| service::restart(&sys, &n)))
+                .await.unwrap_or_else(|e| Err(e.to_string()));
+            match r {
+                Ok(pid) => println!("✓ {name} restarted (pid {pid})"),
+                Err(e) => fail(EXIT_ERR, &format!("gateway restart: {e}")),
+            }
+        }
         "status" => {
-            let ok = print_status(&name, flags.contains_key("show-token")).await;
+            let n = name.clone();
+            let show = flags.contains_key("show-token");
+            let ok = tokio::task::spawn_blocking(move || service::Sys::real().map(|sys| print_status(&sys, &n, show)))
+                .await.ok().and_then(|r| r.ok()).unwrap_or(false);
             if !ok {
                 std::process::exit(EXIT_NOT_FOUND);
             }
         }
         "logs" => {
-            let (cmd, args) = service::logs_command(&name, flags.contains_key("f") || flags.contains_key("follow"));
+            let follow = flags.contains_key("f") || flags.contains_key("follow");
+            let found = tokio::task::spawn_blocking({ let n = name.clone(); move || service::Sys::real().and_then(|sys| service::logs_command(&sys, &n, follow)) })
+                .await.unwrap_or_else(|e| Err(e.to_string()));
+            let (cmd, args) = match found {
+                Ok(c) => c,
+                Err(e) => fail(EXIT_ERR, &format!("gateway logs: {e}")),
+            };
             let status = std::process::Command::new(&cmd).args(&args).status();
             if !matches!(status, Ok(s) if s.success()) {
                 fail(EXIT_ERR, &format!("gateway logs: {cmd} {} failed", args.join(" ")));
@@ -1454,18 +1473,29 @@ async fn cmd_gateway(rest: &[String], flags: &Flags) {
     }
 }
 
-/// The service state and the local probe's verdict; true when OUR gateway answers.
-async fn print_status(name: &str, show_token: bool) -> bool {
+fn done_words(debug: &str) -> String {
+    let pid = debug.split(|c: char| !c.is_ascii_digit()).find(|s| !s.is_empty()).unwrap_or("?");
+    if debug.starts_with("Installed") { format!("installed and answering (pid {pid})") }
+    else if debug.starts_with("AlreadyRunning") { format!("already installed and answering (pid {pid})") }
+    else if debug.starts_with("Started") { format!("installed; started and answering (pid {pid})") }
+    else if debug.starts_with("Updated") { format!("updated, restarted and answering (pid {pid})") }
+    else if debug.starts_with("Replaced") { format!("replaced and answering (pid {pid}); the previous file is kept — {debug}") }
+    else { debug.to_string() }
+}
+
+/// The service state and the local probe's verdict — read-only (nothing is
+/// created); true when OUR gateway answers.
+fn print_status(sys: &tmux_mobile::gateway::service::Sys, name: &str, show_token: bool) -> bool {
     use tmux_mobile::gateway::{probe, service};
-    let cfg = tmux_mobile::config::Config::load_service();
-    let (installed, pid) = service::state(name);
+    let cfg = tmux_mobile::config::Config::peek_service();
+    let (installed, pid) = service::state(sys, name);
     let svc = match (&installed, pid) {
         (Ok(true), Some(p)) => format!("installed, running (pid {p})"),
         (Ok(true), None) => "installed, not running".into(),
         (Ok(false), _) => "not installed".into(),
         (Err(e), _) => e.clone(),
     };
-    let verdict = probe::probe(&cfg).await;
+    let verdict = (sys.probe)();
     let answer = match &verdict {
         probe::Verdict::Ours { url, .. } => format!("answering at {url} (this machine)"),
         probe::Verdict::Occupied(why) => format!("occupied — {why}"),
@@ -1475,8 +1505,9 @@ async fn print_status(name: &str, show_token: bool) -> bool {
     println!("gateway   {answer}");
     println!("listen    {}:{}{}", cfg.host, cfg.port, if cfg.tls_cert.is_some() { " (TLS)" } else { "" });
     println!("config    {}", tmux_mobile::config::config_dir().display());
-    println!("connect   from the app: the address of this machine, port {}, and the token{}", cfg.port,
-        if show_token { format!(" {}", cfg.token) } else { " (tmm gateway status --show-token)".into() });
+    let token = if cfg.token.is_empty() { " (none yet — run tmm setup or tmm gateway)".to_string() }
+        else if show_token { format!(" {}", cfg.token) } else { " (tmm gateway status --show-token)".into() };
+    println!("connect   from the app: the address of this machine, port {}, and the token{token}", cfg.port);
     matches!(verdict, probe::Verdict::Ours { .. })
 }
 
