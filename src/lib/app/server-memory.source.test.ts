@@ -29,7 +29,9 @@ const PER_SERVER: Record<string, Record<string, RegExp>> = {
   'core/agents.ts': { backendCatalog: /setServedBackends\(null\)/u },
   'ui/hover.svelte.ts': { shown: /hoverCard\.hide\(\)/u, hiddenAt: /hoverCard\.hide\(\)/u },
   // Re-read from the parked keys after pointTo (comeUp), not reset here.
-  'hub/hub-prefs.svelte.ts': { state: /./u },
+  // Since #335 ②a-4 it is an INSTANCE of createHubPrefs(storage); ②b builds
+  // each runtime's on that server's scoped store.
+  'hub/hub-prefs.svelte.ts': { hubPrefs: /./u },
   // The notification centre (board #322): its list is a parked key too,
   // re-read by centre.reload() beside hubPrefs on comeUp.
   'hub/notify-centre.svelte.ts': { state: /./u, jumps: /./u },
@@ -90,7 +92,7 @@ test('every module-level store is reset on a switch or named global (board 315)'
   }
   for (const instance of [
     'files/downloads.svelte.ts:downloadStore', 'core/agents.ts:backendCatalog',
-    'files/Files.svelte:memory',
+    'files/Files.svelte:memory', 'hub/hub-prefs.svelte.ts:hubPrefs',
   ]) {
     assert.ok(found.includes(instance), `the scan sees the factory instance ${instance}`);
   }
