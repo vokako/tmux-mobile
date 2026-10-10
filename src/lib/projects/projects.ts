@@ -147,22 +147,51 @@ export function projectAgeLabel(
  * The `talk` argument stays optional for project-only servers without Hub
  * support; production Chat, Terminal and Board all pass the same grouped map.
  *
- * `compareRows` is the rule itself, exported because a union over several
- * servers has to INTERLEAVE already-ordered lists with the same comparator
- * this sorts by (board #335 ②a-5). Anything that re-derives the clock —
- * `projectUpdatedMs`, for instance, which falls back to `last_seen_at` and
- * is right for the AGE LABEL and wrong for ordering — can reorder a single
+ * `compareRowsWithClock` is the rule itself, exported because a union over
+ * several servers has to INTERLEAVE already-ordered lists with the same
+ * comparator this sorts by (board #335 ②a-5) — and has to measure each row by
+ * its OWN server's clock, since `proj:app` on two machines is two rooms.
+ * Anything that re-derives the clock — `projectUpdatedMs`, for instance, which
+ * falls back to `last_seen_at` and is right for the AGE LABEL and wrong for
+ * ordering — can reorder a single server's list.
+ */
+/**
+ * A row together with the activity clock of the SERVER it came from.
+ *
+ * One list may hold rows from several servers (board #335 ②a-5), and a room
+ * id is only unique WITHIN a server: `proj:app` on two machines is two
+ * different rooms with two different last-message times, which a single
+ * room→ts map cannot express. So the clock travels with the row, and a
+ * cross-server comparison reads each side's own.
+ */
+export interface RowWithClock {
+  row: ProjectRow;
+  /** That server's `hub_rooms` answer: room id → last message, ms. */
+  talk: Record<string, number>;
+}
+
+/** The activity a row is ordered by, from ITS server's clock. */
+function activityOf({ row, talk }: RowWithClock): number {
+  return Math.max(
+    talk[row.project.room ?? `proj:${row.project.session}`] ?? 0,
+    (row.project.last_up_at ?? row.project.created_at ?? 0) * 1000,
+  );
+}
+
+/**
+ * THE ordering rule, in its source-qualified form: open first, then by
+ * activity, each row measured by its own server's clock. Everything else here
+ * is a wrapper on it — one definition, so a union cannot drift from a single
  * server's list.
  */
+export function compareRowsWithClock(a: RowWithClock, b: RowWithClock): number {
+  if (a.row.live !== b.row.live) return a.row.live ? -1 : 1;
+  return activityOf(b) - activityOf(a);
+}
+
+/** The same rule for ONE server, whose rows all share a clock. */
 export function compareRows(talk: Record<string, number> = {}): (a: ProjectRow, b: ProjectRow) => number {
-  const activity = (r: ProjectRow) => Math.max(
-    talk[r.project.room ?? `proj:${r.project.session}`] ?? 0,
-    (r.project.last_up_at ?? r.project.created_at ?? 0) * 1000,
-  );
-  return (a, b) => {
-    if (a.live !== b.live) return a.live ? -1 : 1;
-    return activity(b) - activity(a);
-  };
+  return (a, b) => compareRowsWithClock({ row: a, talk }, { row: b, talk });
 }
 
 export function sortRows(rows: ProjectRow[], talk: Record<string, number> = {}): ProjectRow[] {

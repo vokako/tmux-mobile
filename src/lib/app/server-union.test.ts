@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { contributors, unionRows, type ServerSlice } from './server-union.ts';
 import { issueRef, projectRef, refKey, sessionRef } from './refs.ts';
-import { compareRows, projectUpdatedMs, sortRows, type Project, type ProjectRow } from '../projects/projects.ts';
+import { compareRows, compareRowsWithClock, projectUpdatedMs, sortRows, type Project, type ProjectRow } from '../projects/projects.ts';
 
 const project = (over: Partial<Project> & { id: string; session: string }): Project => ({
   name: over.session, path: `/srv/${over.session}`, adopted: false, autostart: false,
@@ -20,10 +20,20 @@ const row = (id: string, session: string, over: Partial<Project> & { live?: bool
 const slice = <T,>(serverId: string, order: number, items: T[], over: Partial<ServerSlice<T>> = {}): ServerSlice<T> =>
   ({ serverId, name: serverId.toUpperCase(), order, ok: true, items, ...over });
 
-/** The projects list's own comparator — the very function it sorts by. */
-const projectSpec = (talk: Record<string, number> = {}) => ({
+/**
+ * The real Projects adapter: the domain's own source-qualified comparator,
+ * reached with EACH server's own room clock. `talkBy` is serverId → that
+ * server's `hub_rooms` answer, because a room id is unique only within a
+ * server — one shared map cannot say that `proj:app` is busy on B and quiet
+ * on A.
+ */
+const projectSpec = (talkBy: Record<string, Record<string, number>> = {}) => ({
   ref: (serverId: string, r: ProjectRow) => projectRef(serverId, r.project.id),
-  compare: compareRows(talk),
+  compare: (a: { serverId: string; item: ProjectRow }, b: { serverId: string; item: ProjectRow }) =>
+    compareRowsWithClock(
+      { row: a.item, talk: talkBy[a.serverId] ?? {} },
+      { row: b.item, talk: talkBy[b.serverId] ?? {} },
+    ),
 });
 
 test('one server contributing is that server s list, untagged', () => {
@@ -63,13 +73,14 @@ test('ONE server s order is never changed, whatever the comparator says', () => 
 
 test('two servers interleave by the projects list s own rule', () => {
   // Open first, then by activity, newest first — and across servers, not
-  // server by server. The rank comes from projects.ts's own functions.
-  const talk = { 'proj:a-chat': 3000, 'proj:b-chat': 5000 };
+  // server by server. The comparator is projects.ts's own.
+  const talkA = { 'proj:a-chat': 3000 };
+  const talkB = { 'proj:b-chat': 5000 };
   const a = [row('a1', 'a-open', { live: true }), row('a2', 'a-chat')];
   const b = [row('b1', 'b-open', { live: true }), row('b2', 'b-chat')];
   const union = unionRows(
-    [slice('a', 0, sortRows(a, talk)), slice('b', 1, sortRows(b, talk))],
-    projectSpec(talk),
+    [slice('a', 0, sortRows(a, talkA)), slice('b', 1, sortRows(b, talkB))],
+    projectSpec({ a: talkA, b: talkB }),
   );
   assert.deepEqual(union.rows.map((r) => `${r.serverId}:${r.item.project.id}`),
     ['a:a1', 'b:b1', 'b:b2', 'a:a2'],
@@ -114,6 +125,79 @@ test('the mode can decide the tag outright', () => {
     { ...projectSpec(), showSource: false },
   );
   assert.deepEqual(hidden.rows.map((r) => r.tag), [null, null], 'and a view may suppress it');
+});
+
+test('the busier of two IDENTICAL projects wins, measured on its own server', () => {
+  // The reviewer's counter-example, and the reason the comparator takes the
+  // source. A and B each have a project that is identical in every field —
+  // same id, session, room, up/created — so the ONLY thing that can order
+  // them is each server's own room clock. A single shared room→ts map cannot
+  // even express the difference: both rooms are called `proj:app`.
+  // The activity floor is `last_up_at * 1000` (rows are seconds, the bus is
+  // ms), so the clocks have to be ABOVE it or they decide nothing — the first
+  // version of this fixture used talk=1000/9000 against a 100s up time and
+  // both sides came out equal, which proved nothing.
+  const upSec = 100;
+  const floorMs = upSec * 1000;
+  const quiet = floorMs + 1_000;
+  const busy = floorMs + 9_000;
+  const same = () => row('p1', 'app', { last_up_at: upSec, created_at: upSec });
+  const slices = [slice('a', 0, [same()]), slice('b', 1, [same()])];
+
+  // B is busier, AND it is later in the saved order — so a correct answer has
+  // to override the tie-break, not fall back to it.
+  const bBusier = unionRows(slices, projectSpec({
+    a: { 'proj:app': quiet },
+    b: { 'proj:app': busy },
+  }));
+  assert.deepEqual(bBusier.rows.map((r) => r.serverId), ['b', 'a'],
+    'B talked more recently, so B heads the list despite being the later server');
+
+  // Swap the clocks and the order swaps with them.
+  const aBusier = unionRows(slices, projectSpec({
+    a: { 'proj:app': busy },
+    b: { 'proj:app': quiet },
+  }));
+  assert.deepEqual(aBusier.rows.map((r) => r.serverId), ['a', 'b']);
+
+  // With no clocks at all they are genuinely equal, and only then does the
+  // saved order decide.
+  assert.deepEqual(unionRows(slices, projectSpec()).rows.map((r) => r.serverId), ['a', 'b']);
+  // And the one shared map the old adapter closed over cannot express this at
+  // all: both rooms are `proj:app`, so whatever it holds, the two rows read
+  // the same activity and fall back to the saved order.
+  const shared = { 'proj:app': busy };
+  const bothFromOneMap = unionRows(slices, {
+    ref: (serverId: string, r: ProjectRow) => projectRef(serverId, r.project.id),
+    compare: (x, y) => compareRowsWithClock({ row: x.item, talk: shared }, { row: y.item, talk: shared }),
+  });
+  assert.deepEqual(bothFromOneMap.rows.map((r) => r.serverId), ['a', 'b'],
+    'one room map makes the busier server invisible — which is the bug');
+});
+
+test('each server s own list keeps its own order while they interleave', () => {
+  // The same collision inside each server: two projects called `app` and
+  // `app-2` on both machines, ordered differently on each by their own clock.
+  // The union must interleave them without disturbing either sequence.
+  const talkA = { 'proj:app': 9_000_000, 'proj:app-2': 1_000_000 };
+  const talkB = { 'proj:app': 2_000_000, 'proj:app-2': 8_000_000 };
+  const rows = () => [row('p1', 'app'), row('p2', 'app-2')];
+  const a = sortRows(rows(), talkA);
+  const b = sortRows(rows(), talkB);
+  assert.deepEqual(a.map((r) => r.project.session), ['app', 'app-2'], 'A s own order');
+  assert.deepEqual(b.map((r) => r.project.session), ['app-2', 'app'], 'B s own order, the other way');
+
+  const union = unionRows([slice('a', 0, a), slice('b', 1, b)], projectSpec({ a: talkA, b: talkB }));
+  assert.deepEqual(union.rows.map((r) => `${r.serverId}:${r.item.project.session}`),
+    ['a:app', 'b:app-2', 'b:app', 'a:app-2'],
+    'interleaved by activity across servers, each server s sequence intact');
+  // And each server's rows appear in exactly the order that server gave.
+  for (const [id, own] of [['a', a], ['b', b]] as const) {
+    assert.deepEqual(
+      union.rows.filter((r) => r.serverId === id).map((r) => r.item.project.session),
+      own.map((r) => r.project.session),
+      `${id} s sequence is untouched`);
+  }
 });
 
 test('a server that has not answered yet is simply absent', () => {

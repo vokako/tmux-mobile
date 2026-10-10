@@ -54,6 +54,17 @@ export interface ServerSlice<T> {
   items: readonly T[];
 }
 
+/** An item together with the server it came from. The comparator takes these
+ * rather than bare items, because a cross-server comparison usually needs the
+ * source: a room id, a session name and an issue number are unique only
+ * WITHIN a server, so the clock or table a domain measures by is the SOURCE
+ * server's. Losing the source here is how `proj:app` on two machines came to
+ * be read off one room map (reviewer P1, 2026-10-10). */
+export interface Sourced<T> {
+  serverId: ServerId;
+  item: T;
+}
+
 /** A row of a union list. */
 export interface UnionRow<T, R extends Ref> {
   serverId: ServerId;
@@ -78,15 +89,20 @@ export interface UnionSpec<T, R extends Ref> {
   /** How to name an item of this slice on its server. */
   ref: (serverId: ServerId, item: T) => R;
   /**
-   * The DOMAIN's own comparator — the function it sorts its own list by
-   * (`projects.compareRows(talk)`). Used ONLY to decide which slice's head
-   * comes next; a slice is never re-sorted, so a comparator that disagreed
-   * with the given order would still not change any single server's list.
+   * The DOMAIN's own comparator, in its source-qualified form
+   * (`projects.compareRowsWithClock`, reached through an adapter that supplies
+   * each server's own `talk`). Used ONLY to decide which slice's head comes
+   * next; a slice is never re-sorted, so a comparator that disagreed with the
+   * given order would still not change any single server's list.
+   *
+   * It takes both heads WITH their servers. A bare `(a: T, b: T)` could not
+   * express "the more active of two projects both called `app`", because the
+   * activity of each is in its own server's room map.
    *
    * Omit it for a list whose order IS the server's answer (tmux's session
    * order): the slices are then concatenated in server order.
    */
-  compare?: (a: T, b: T) => number;
+  compare?: (a: Sourced<T>, b: Sourced<T>) => number;
   /**
    * Show the source tag? Defaults to "more than one server is in this list",
    * which is the SOURCE SET and not how many answered — a server dropping out
@@ -124,8 +140,11 @@ export function unionRows<T, R extends Ref>(
 
   // A k-way merge: each step takes the head that the DOMAIN's comparator puts
   // first, ties going to the earlier server. Each slice is consumed in its own
-  // order, so no server's list can be reordered by this.
+  // order, so no server's list can be reordered by this. Every head carries
+  // its server, so the comparator can measure it by that server's own clock.
   const at = live.map(() => 0);
+  const head = (i: number): Sourced<T> =>
+    ({ serverId: live[i]!.serverId, item: live[i]!.items[at[i]!]! });
   const rows: UnionRow<T, R>[] = [];
   const total = live.reduce((n, s) => n + s.items.length, 0);
   for (let taken = 0; taken < total; taken++) {
@@ -134,7 +153,7 @@ export function unionRows<T, R extends Ref>(
       if (at[i]! >= live[i]!.items.length) continue;
       if (pick < 0) { pick = i; continue; }
       // Strictly less only: an equal head leaves the earlier server in front.
-      if (spec.compare(live[i]!.items[at[i]!]!, live[pick]!.items[at[pick]!]!) < 0) pick = i;
+      if (spec.compare(head(i), head(pick)) < 0) pick = i;
     }
     rows.push(make(live[pick]!, live[pick]!.items[at[pick]!]!));
     at[pick]!++;
