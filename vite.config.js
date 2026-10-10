@@ -47,11 +47,12 @@ function allowCompactXtermLines() {
 // Agent task worktrees live INSIDE the checkout, in its gitignored worktree/
 // (#342, docs/conventions/development.md § Agent worktree isolation). Vite
 // reads the whole root, so without this the dev server serving this checkout
-// also watches every worktree — a fresh one cost the supervised server 705
-// inotify watches, and one that has built Rust adds a target/ the size of this
-// checkout's (58k entries) — and its dependency scan crawls each worktree's
-// index.html as another app. Anchored at THIS config's directory, so a
-// worktree's own Vite ignores only a worktree/ nested inside it.
+// also watches every worktree — measured: one fresh worktree cost the
+// supervised server 705 inotify watches; estimated, not measured: one that has
+// built Rust would add roughly what this checkout's own target/ holds (58,215
+// entries) — and its dependency scan crawls each worktree's index.html as
+// another app. Anchored at THIS config's directory, so a worktree's own Vite
+// ignores only a worktree/ nested inside it.
 const AGENT_WORKTREES = fileURLToPath(new URL('./worktree', import.meta.url));
 
 export function createViteConfig(command, env = process.env) {

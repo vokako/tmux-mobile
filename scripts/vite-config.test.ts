@@ -19,11 +19,12 @@ test('production build does not parse the development backend port', () => {
 
 test('agent worktrees inside the checkout are neither watched nor scanned (#342)', async () => {
   // Task worktrees live at <repo>/worktree/<agent>-<task>. Without these two
-  // entries the dev server serving the checkout watched every worktree (705
-  // inotify watches for one fresh worktree; a built one adds a 58k-entry
-  // target/) and its dependency scan crawled each worktree's index.html as a
-  // second app. Measured on a private Vite with a nested worktree/: 304 → 0
-  // watches there, and the scan stopped following its import.
+  // entries the dev server serving the checkout watched every worktree
+  // (measured: 705 inotify watches for one fresh worktree; estimated, not
+  // measured: a Rust-built one would add about the checkout's own target/,
+  // 58,215 entries) and its dependency scan crawled each worktree's
+  // index.html as a second app. Measured on a private Vite with a nested
+  // worktree/: 304 → 0 watches there, and the scan stopped following its import.
   const { fileURLToPath } = await import('node:url');
   const here = fileURLToPath(new URL('../worktree', import.meta.url));
   const config = createViteConfig('serve', {});
