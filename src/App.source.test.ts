@@ -566,9 +566,34 @@ test('one system-vitals strip serves desktop sidebar and an open phone drawer (b
   assert.match(ctl, /use:hoverInfo=\{\(\) => \{ const key = shortcutsOn \? shortcuts\.get\('toggleScratch'\) : ''/u,
     'the hover card still names it and its shortcut');
   assert.match(source, /--sys-ctl: 20px;/u, 'a mouse target that fits the 24px bar');
-  assert.match(source, /@media \(any-pointer: coarse\) \{\s*\n\s*main\.with-rail \{\s*\n\s*--sys-ctl: var\(--control-height\);\s*\n\s*--sys-sidebar-h: calc\(var\(--control-height\) \+ 4px\);/u,
-    'a coarse pointer takes the control to --control-height and the bar grows with it — scoped to the rail layout, so the phone drawer\u2019s row does not move');
+  // The bar and its control NEVER grow, on any pointer type (owner,
+  // 2026-10-10: "现在把那一栏整体撑得特别高…需要维持得小一点"). #326 let a
+  // coarse pointer take the control to --control-height and grew the bar with
+  // it, so a desktop that merely REPORTS coarse — a touchscreen laptop in the
+  // desktop layout, a trackpad answering coarse — showed a 48px strip to a
+  // user holding a mouse. The control is rendered only where the layout says
+  // there is no touch user, so what a coarse pointer gets is a bigger HIT
+  // AREA, bounded by the bar's own box.
+  assert.equal((source.match(/--sys-sidebar-h: /gu) ?? []).length, 1, 'one declaration of the bar height, nothing overrides it');
+  assert.equal((source.match(/--sys-ctl: /gu) ?? []).length, 1, 'and one of the control size');
+  const coarse = [...source.matchAll(/@media \(any-pointer: coarse\) \{([\s\S]*?)\n  \}/gu)].map((m) => m[1] ?? '');
+  assert.equal(coarse.length, 1, 'the one coarse block this file has (the scan must keep finding it)');
+  for (const block of coarse) {
+    assert.doesNotMatch(block, /--sys-ctl|--sys-sidebar-h|main\.with-rail/u,
+      'no pointer type resizes the bar or its control');
+    assert.match(block, /\.sys-scratch::after \{[^}]*position: absolute;[^}]*inset: -2px -6px;/u,
+      'a coarse pointer gets the hit area instead, inside the bar: 2px of its padding, 6px of dead space sideways');
+  }
+  assert.match(source, /\.sys-scratch \{[^}]*position: relative;/u, 'which needs the control to be the offset parent');
   assert.match(source, /\.sys-scratch \{[^}]*width: var\(--sys-ctl\); height: var\(--sys-ctl\)/u, 'one token sizes both');
+  // The paint is gone at rest and appears for hover and press only (owner,
+  // 2026-10-10: "那个背景不用一直显示，就是我鼠标移上去，或者我点击的时候能
+  // 看到的形状"), in the icon-only family's own two states (.icon-btn).
+  assert.match(source, /\.sys-scratch \{[^}]*background: none;/u, 'no background at rest');
+  assert.match(source, /\.sys-scratch:hover \{ color: var\(--text\); background: var\(--surface2\); \}/u, 'hover wash');
+  assert.match(source, /\.sys-scratch:active \{ color: var\(--accent\); background: var\(--accent-bg\); \}/u, 'press wash');
+  assert.match(source, /\.sys-scratch\.open \{ color: var\(--accent\); \}/u,
+    'and an OPEN panel is ink only — a wash would be a background showing all the time');
   // #337: a 20px square with --control-radius (12) IS a circle, which the
   // owner stopped in #218/#219. The corner comes from the PAINT token and the
   // bar wears the existing dense-group setter that scales it to 5px — no raw

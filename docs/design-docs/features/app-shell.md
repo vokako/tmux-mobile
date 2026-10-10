@@ -101,11 +101,28 @@ Terminal 只是临时用的，并且跟你的项目没有关系". Desktop only (
   lands, and a toggle that appears a poll later is not a door.
   `--sys-ctl`/`--sys-sidebar-h` are ONE pair, because every desktop sidebar
   reserves that height as bottom padding and the bar clips its own content: a
-  mouse gets a 20px target inside the unchanged 24px bar (its vertical padding
-  gives way, not its height), and `@media (any-pointer: coarse)` takes the
-  control to `--control-height` (44px) with the bar growing to match — scoped
-  to `main.with-rail`, so the phone drawer's status row, which carries no
-  control, does not move. **Consequence, accepted:** the bar retracts with the
+  mouse gets a 20px target inside the 24px bar (its vertical padding gives way,
+  not its height). **Both numbers are fixed on every pointer type** (owner,
+  2026-10-10: "现在把那一栏整体撑得特别高，不是我想要的，需要维持得小一点";
+  board #339). #326 let `@media (any-pointer: coarse)` take the control to
+  `--control-height` and grew the bar to match, for a touch device running the
+  desktop layout. Measured on the shipped build with `any-pointer: coarse`
+  emulated at a 1440px viewport: the strip went 24px → **48px** and the control
+  20px → 44px, which also truncated the readings beside it ("38/6…",
+  "0.7/…") — and a desktop merely REPORTS coarse when it has a touchscreen it
+  is not being used with, or a trackpad that answers coarse. The control is
+  rendered only where the layout says there is no touch user
+  (`{#if !layout.isTouchDevice}`), so the bar has no reason to carry a
+  touch-sized box. A coarse pointer gets a bigger HIT AREA instead
+  (`.sys-scratch::after`, `inset: -2px -6px` → 24×32), bounded by the bar's own
+  box: an overlay taller than the strip would take clicks from the sidebar
+  content above it, where this control is not. Its paint stays 20px with the
+  dense-group corner, and the background is there for **hover and press only**
+  — the icon-only family's two states (`.icon-btn`: `--surface2` wash, then the
+  `--accent-bg` press wash), gone at rest, with an OPEN panel marked by accent
+  INK rather than a wash, because a wash is a background that shows all the
+  time: "那个背景不用一直显示，就是我鼠标移上去，或者我点击的时候能看到的形状".
+  **Consequence, accepted:** the bar retracts with the
   primary sidebar (`.with-rail.side-collapsed .sys-sidebar`, owner #200
   "左侧边栏收起的时候，底下的系统状态显示也要收起"), so the control retracts with
   it; the shortcut is the door that is always open.
@@ -183,7 +200,10 @@ the effect tracking the phase, no destroy bump);
 head-only Escape and App's mount inside the key; since #326 also the right
 dock's `--sat` and `translateX(100%)`, the two edge icons, and the open effect's
 `ready ? focus : ensure`. `App.source.test.ts` pins the rail WITHOUT a scratch
-control and the status bar WITH one, including the coarse-pointer growth.
+control and the status bar WITH one, including that NO pointer type overrides
+`--sys-ctl`/`--sys-sidebar-h` (one declaration of each), that the one coarse
+block carries the hit area and not a resize, and the control's rest/hover/press
+paint (#339).
 
 ## The tab slide belongs to the swipe, not to the app
 

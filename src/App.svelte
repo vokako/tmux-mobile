@@ -2162,7 +2162,17 @@
        padding, so a bar that grew past the reservation would cover the last
        row, and the bar clips its own content. A mouse gets a 20px target
        inside the unchanged 24px bar (the readings are one line of --fs-micro,
-       so the bar's vertical padding gives way, not its height). */
+       so the bar's vertical padding gives way, not its height).
+       Both numbers are FIXED, on every pointer type (owner, 2026-10-10:
+       "现在把那一栏整体撑得特别高，不是我想要的，需要维持得小一点"). #326 let
+       a coarse pointer take the control to --control-height and grew the bar
+       with it; on a desktop that merely REPORTS coarse — a touchscreen laptop
+       in the desktop layout, a trackpad that answers coarse — that turned the
+       24px strip into 48px for a user holding a mouse. The control is
+       rendered only when the layout says there is no touch user
+       (`{#if !layout.isTouchDevice}`), so the bar has no reason to carry a
+       touch-sized box; a coarse pointer gets a bigger HIT AREA instead, and
+       it stays inside the bar (.sys-scratch::after). */
     --sys-ctl: 20px;
     --sys-sidebar-h: 24px;
     display: flex;
@@ -2260,20 +2270,42 @@
   .rail-bell { position: relative; }
   /* The scratch terminal's toggle, in the system status bar (#326). The bar
      is a quiet monitor readout, so the control is quiet too: borderless, the
-     icon-only hover wash, accent ink while the panel is open. It sizes from
-     the shared control tokens rather than a literal, so the bar reserves room
-     for it instead of clipping it, and a touch tablet running the desktop
-     layout still gets a 44px target (--control-height is 44 on a coarse
-     pointer, design-language §3). */
+     icon-only hover and press washes, accent ink while the panel is open. It
+     sizes from `--sys-ctl` rather than a literal, so the bar reserves room
+     for it instead of clipping it — one fixed 20px square, because the bar
+     stays 24px whatever the pointer reports (#339; a coarse pointer gets the
+     hit area below, not a bigger box).
+
+     Icon-only, so it wears the shared grammar: no drawn frame, the paint
+     appears on hover and press and is gone at rest (owner, 2026-10-10:
+     "那个背景不用一直显示，就是我鼠标移上去，或者我点击的时候能看到的形状"),
+     and the corner is the dense-group PAINT token — 5px on this 20px square,
+     a rounded rectangle, where --control-radius would draw a circle (#337).
+     The OPEN panel is accent INK only: a wash would be a background showing
+     all the time, which is what the owner asked not to have. */
   .sys-scratch {
+    position: relative;
     flex: none; margin-left: auto; display: grid; place-items: center;
     width: var(--sys-ctl); height: var(--sys-ctl); padding: 0;
     border: 0; border-radius: var(--control-paint-radius); background: none;
     color: var(--text3); cursor: pointer;
     transition: color var(--t-fast), background var(--t-fast);
+    -webkit-tap-highlight-color: transparent;
   }
   .sys-scratch:hover { color: var(--text); background: var(--surface2); }
+  /* Press: the accent wash the icon-only family already uses (.icon-btn). */
+  .sys-scratch:active { color: var(--accent); background: var(--accent-bg); }
   .sys-scratch.open { color: var(--accent); }
+  /* A pointer that reports coarse gets a bigger hit area, never a bigger
+     paint and never a taller bar. It stops at the bar's own box — 24px tall,
+     and sideways only into the padding and the gap that are already dead
+     space — because an overlay larger than the strip would take clicks from
+     the sidebar content ABOVE it, where this control is not. */
+  @media (any-pointer: coarse) {
+    .sys-scratch::after {
+      content: ''; position: absolute; inset: -2px -6px;
+    }
+  }
   @media (prefers-reduced-motion: reduce) { .sys-scratch { transition: none; } }
   .bell-badge {
     position: absolute; top: 3px; right: 2px; min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box;
@@ -2330,17 +2362,6 @@
   .with-rail .term-side,
   .with-rail :global(.files-left) {
     padding-bottom: var(--sys-sidebar-h);
-  }
-  /* A touch device running the DESKTOP layout still has to be able to hit the
-     control, so it takes the shared coarse control height (44px,
-     design-language §3) and the bar grows with it. Scoped to the rail layout:
-     the phone drawer's status row carries no control and its reserved height
-     must not move. */
-  @media (any-pointer: coarse) {
-    main.with-rail {
-      --sys-ctl: var(--control-height);
-      --sys-sidebar-h: calc(var(--control-height) + 4px);
-    }
   }
   .sys-sidebar {
     position: fixed;
