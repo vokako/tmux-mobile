@@ -108,16 +108,18 @@ Terminal 只是临时用的，并且跟你的项目没有关系". Desktop only (
   `--control-height` and grew the bar to match, for a touch device running the
   desktop layout. Measured on the shipped build with `any-pointer: coarse`
   emulated at a 1440px viewport: the strip went 24px → **48px** and the control
-  20px → 44px, which also truncated the readings beside it ("38/6…",
-  "0.7/…") — and a desktop merely REPORTS coarse when it has a touchscreen it
-  is not being used with, or a trackpad that answers coarse. The control is
-  rendered only where the layout says there is no touch user
-  (`{#if !layout.isTouchDevice}`), so the bar has no reason to carry a
-  touch-sized box. A coarse pointer gets a bigger HIT AREA instead
-  (`.sys-scratch::after`, `inset: -2px -6px` → 24×32), bounded by the bar's own
-  box: an overlay taller than the strip would take clicks from the sidebar
-  content above it, where this control is not. Its paint stays 20px with the
-  dense-group corner, and the background is there for **hover and press only**
+  20px → 44px, which also truncated the readings beside it ("38/6…", "0.7/…").
+  A pointer that reports coarse does not say a mouse is absent, so the DESKTOP
+  layout now keeps the compact strip the owner asked for, and a coarse pointer
+  gets a bigger HIT AREA instead (`.sys-scratch::after`, `inset: -2px -6px` →
+  24×32), bounded by the bar's own box: an overlay taller than the strip would
+  take clicks from the sidebar content above it, where this control is not.
+  A deliberate size trade-off, not a proof that nobody taps (review #339, P2):
+  the control hangs off `!layout.isTouchDevice`, which is an overridable LAYOUT
+  choice (`layout.svelte.ts`), so a touch user who forces Desktop reads false
+  here and gets the 20px paint with the wider hit box.
+  The paint stays 20px with the dense-group corner, and the background is
+  there for **hover and press only**
   — the icon-only family's two states (`.icon-btn`: `--surface2` wash, then the
   `--accent-bg` press wash), gone at rest, with an OPEN panel marked by accent
   INK rather than a wash, because a wash is a background that shows all the

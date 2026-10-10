@@ -2166,13 +2166,15 @@
        Both numbers are FIXED, on every pointer type (owner, 2026-10-10:
        "现在把那一栏整体撑得特别高，不是我想要的，需要维持得小一点"). #326 let
        a coarse pointer take the control to --control-height and grew the bar
-       with it; on a desktop that merely REPORTS coarse — a touchscreen laptop
-       in the desktop layout, a trackpad that answers coarse — that turned the
-       24px strip into 48px for a user holding a mouse. The control is
-       rendered only when the layout says there is no touch user
-       (`{#if !layout.isTouchDevice}`), so the bar has no reason to carry a
-       touch-sized box; a coarse pointer gets a bigger HIT AREA instead, and
-       it stays inside the bar (.sys-scratch::after). */
+       with it, which turned the 24px strip into 48px — measured — on any
+       machine whose pointer merely REPORTS coarse while a mouse is what is
+       being used. The DESKTOP layout therefore keeps the compact strip the
+       owner asked for, and a coarse pointer gets a bigger HIT AREA instead,
+       bounded by the bar (.sys-scratch::after).
+       A deliberate size trade-off, not a proof that nobody taps: the control
+       hangs off `!layout.isTouchDevice`, which is an overridable LAYOUT
+       choice (layout.svelte.ts), so a touch user who forces Desktop reads
+       false here and gets the 20px paint with the wider hit box. */
     --sys-ctl: 20px;
     --sys-sidebar-h: 24px;
     display: flex;
