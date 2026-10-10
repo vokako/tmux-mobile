@@ -47,12 +47,19 @@ test('the store keeps the storage layout and none of the semantics', async () =>
   }
 });
 
-test('nothing in ②a is wired into production', async () => {
+test('the ②a identity modules have no production consumer yet', async () => {
   // The revised scope: the capability ships, the switch-over is ②b. If any
   // existing module imported one of these, Single mode would have changed and
   // the review would be looking at the wrong diff.
+  //
+  // This is about the IDENTITY modules only — the ones that would give a
+  // consumer a second server. The per-server FACTORIES (downloads, the
+  // backend catalog, FilesMemory, hub prefs, the alert log) are deliberately
+  // not in this list: production calls each of them through its one default
+  // instance today, exactly as it called the module state they replaced, and
+  // "not wired into production" was the wrong phrase for that (reviewer P2).
   const added = ['refs.ts', 'server-runtime.ts', 'server-fleet.ts', 'server-store.ts',
-    'server-state-migration.ts', 'server-context.ts'];
+    'server-state-migration.ts', 'server-context.ts', 'server-union.ts'];
   const importers: string[] = [];
   for await (const file of glob('src/**/*.{ts,svelte}')) {
     if (/\.(test|fixture)\.(ts|svelte)$/u.test(file) || /\.test\.[a-z]+\.svelte$/u.test(file)) continue;
@@ -65,5 +72,5 @@ test('nothing in ②a is wired into production', async () => {
   }
   // The only allowed edges are among the five new modules themselves.
   assert.deepEqual(importers, [],
-    `②a is capability only; these consumers must wait for ②b:\n  ${importers.join('\n  ')}`);
+    `these are ②a capability only; their consumers wait for ②b:\n  ${importers.join('\n  ')}`);
 });
