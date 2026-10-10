@@ -39,8 +39,8 @@
 
 **Required**
 - Create a worktree before the first tracked-file edit:
-  `~/work/worktrees/<repo>/<agent>-<task>`, branch `agent/<agent>/<task>`.
-  Use absolute paths in commands.
+  `<repo>/worktree/<agent>-<task>` (gitignored, never outside the repository),
+  branch `agent/<agent>/<task>`. Use absolute paths in commands.
 - Commit bodies contain root cause, remedy, verification with device/version,
   related issue and co-author trailer.
 - New modules include `<module>.test.ts` in the same commit. Source-contract

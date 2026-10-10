@@ -204,12 +204,25 @@ history as containing a live signing key.
   is for reading, coordination and final integration only. A session already
   launched inside its task worktree uses that worktree; read-only work needs no
   extra checkout.
-- Keep one task per worktree. The local default is
-  `~/work/worktrees/<repo>/<agent>-<task>` with a branch such as
-  `agent/<agent>/<task>`, based on the intended integration HEAD. Use the
-  worktree's **absolute path** for every file tool, test, build and Git command;
-  a relative path from an agent process may still resolve to the launch
-  checkout.
+- Keep one task per worktree, at `<repo>/worktree/<agent>-<task>` — INSIDE the
+  launch checkout, in its gitignored `worktree/` directory, never outside the
+  repository (owner, 2026-10-10: "worktree直接在当前项目目录里建一个worktree的
+  目录，里边再建二级目录开发吧，不要放到外边"; the previous default,
+  `~/work/worktrees/<repo>/…`, was wiped externally at 14:26 that day and took
+  an uncommitted fix with it). Create it with a branch such as
+  `agent/<agent>/<task>`, based on the intended integration HEAD:
+  `git worktree add -b agent/<agent>/<task> <abs-repo>/worktree/<agent>-<task> <base>`.
+  Use the worktree's **absolute path** for every file tool, test, build and Git
+  command; a relative path from an agent process may still resolve to the
+  launch checkout.
+- What the location changes, measured with git 2.50.1 (2026-10-10, #342). Git
+  itself accepts a worktree anywhere inside the repository — tracked directory
+  or not. The `worktree/` ignore entry is what keeps the launch checkout clean:
+  without it the directory shows as untracked, and `git add -A` there stages a
+  worktree as an EMBEDDED REPOSITORY (a gitlink). `git clean -fdx` skips a
+  worktree ("Would skip repository"), but `git clean -ffdx` — double force —
+  removes the whole `worktree/` directory with every uncommitted change in it:
+  never run it in the launch checkout.
 - Verify and commit on the task branch. Only then fast-forward/cherry-pick the
   verified commit into the intended branch from the integration checkout. Keep
   the worktree until integration is confirmed, then remove it with
