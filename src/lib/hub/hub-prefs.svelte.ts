@@ -67,19 +67,76 @@ const valid = (v: string | null): v is FeedLevel => v === 'chat' || v === 'statu
  * under the leaving server's id on a switch. A test pins the two lists. */
 export const HUB_SERVER_KEYS = [PROJECT_KEY, DRAFT_KEY, SEEN_KEY, LEAD_KEY, DRAWER_KEY, ROSTER_EXPANDED_KEY];
 
-export function createHubPrefs(storage: Store) {
+/**
+ * The PERSON's and the WINDOW's Hub preferences, which have exactly ONE owner
+ * however many servers are on screen (reviewer P1, 2026-10-09).
+ *
+ * Giving each server's `createHubPrefs` its own `$state` for these looked
+ * right — they are stored unprefixed, so every scoped store reads and writes
+ * the same key — but a shared KEY is not shared STATE: with A and B both live,
+ * changing the feed level on A left B's copy stale until something rebuilt it.
+ * A test that creates B after A's writes cannot see that, which is how it got
+ * through.
+ *
+ * So these three live here, and `createHubPrefs` delegates to this owner
+ * rather than keeping a copy. The per-project maps stay per instance: those
+ * ARE per server.
+ */
+export interface AppPrefs {
+  readonly feedLevel: FeedLevel;
+  setFeedLevel(v: FeedLevel): void;
+  /** The desktop primary sidebar is collapsed (board #174) — SHELL-wide: the
+   * Hub's, the Terminal page's and the Board's sidebars and the system-status
+   * bar all read it (board #200). false = open. */
+  readonly sidebarCollapsed: boolean;
+  setSidebarCollapsed(v: boolean): void;
+  /** Tool-lane cap: how many rows a folded tool group shows before it scrolls. */
+  readonly stepsRows: number;
+  setStepsRows(v: number): void;
+}
+
+export function createAppPrefs(storage: Store): AppPrefs {
+  const stored = storage.getItem(FEED_LEVEL_KEY);
+  const state = $state({
+    // Tools are the default now that a run of them folds into one collapsible
+    // row: the reason to hide them was the wall of one-liners, not the content.
+    feedLevel: (valid(stored) ? stored : 'tools') as FeedLevel,
+    sidebarCollapsed: storage.getItem(SIDEBAR_KEY) === '1',
+    // Tool-lane cap in rows; the stored value passes the same clamp as the
+    // setter so an old or hand-edited entry cannot render a broken lane.
+    stepsRows: clampStepsRows(storage.getItem(STEPS_ROWS_KEY) ?? STEPS_ROWS),
+  });
+  return {
+    get feedLevel() { return state.feedLevel; },
+    setFeedLevel(v) {
+      state.feedLevel = v;
+      storage.setItem(FEED_LEVEL_KEY, v);
+    },
+    get sidebarCollapsed() { return state.sidebarCollapsed; },
+    setSidebarCollapsed(v) {
+      state.sidebarCollapsed = v;
+      storage.setItem(SIDEBAR_KEY, v ? '1' : '0');
+    },
+    get stepsRows() { return state.stepsRows; },
+    setStepsRows(v) {
+      state.stepsRows = clampStepsRows(v);
+      storage.setItem(STEPS_ROWS_KEY, String(state.stepsRows));
+    },
+  };
+}
+
+/** The one owner. ②b passes THIS to every runtime's hub prefs. */
+export const appPrefs = createAppPrefs(localStorage);
+
+export function createHubPrefs(storage: Store, prefs: AppPrefs = appPrefs) {
   const readMap = <T,>(key: string): Record<string, T> => {
     try {
       const raw = JSON.parse(storage.getItem(key) ?? '{}');
       return raw && typeof raw === 'object' ? raw : {};
     } catch { return {}; }
   };
-  const stored = storage.getItem(FEED_LEVEL_KEY);
 
   const state = $state({
-    // Tools are the default now that a run of them folds into one collapsible
-    // row: the reason to hide them was the wall of one-liners, not the content.
-    feedLevel: (valid(stored) ? stored : 'tools') as FeedLevel,
     // Per project (tmux session): who the composer addresses by default. Survives
     // reloads because "who am I talking to" is part of where the user left off.
     leads: readMap<string>(LEAD_KEY),
@@ -92,10 +149,6 @@ export function createHubPrefs(storage: Store) {
     // Per project: the drawer partition that was open ('' / absent = closed).
     drawers: readMap<string>(DRAWER_KEY),
     rosterExpanded: readMap<boolean>(ROSTER_EXPANDED_KEY),
-    sidebarCollapsed: storage.getItem(SIDEBAR_KEY) === '1',
-    // Tool-lane cap in rows; the stored value passes the same clamp as the
-    // setter so an old or hand-edited entry cannot render a broken lane.
-    stepsRows: clampStepsRows(storage.getItem(STEPS_ROWS_KEY) ?? STEPS_ROWS),
   });
 
 
@@ -111,25 +164,14 @@ export function createHubPrefs(storage: Store) {
       state.drawers = readMap<string>(DRAWER_KEY);
       state.rosterExpanded = readMap<boolean>(ROSTER_EXPANDED_KEY);
     },
-    get feedLevel() { return state.feedLevel; },
-    setFeedLevel(v: FeedLevel) {
-      state.feedLevel = v;
-      storage.setItem(FEED_LEVEL_KEY, v);
-    },
-    /** The desktop primary sidebar is collapsed (board #174) — SHELL-wide: the
-     * Hub's, the Terminal page's and the Board's sidebars and the system-status
-     * bar all read it (board #200). false = open. */
-    get sidebarCollapsed() { return state.sidebarCollapsed; },
-    setSidebarCollapsed(v: boolean) {
-      state.sidebarCollapsed = v;
-      storage.setItem(SIDEBAR_KEY, v ? '1' : '0');
-    },
-    /** Tool-lane cap: how many rows a folded tool group shows before it scrolls. */
-    get stepsRows() { return state.stepsRows; },
-    setStepsRows(v: number) {
-      state.stepsRows = clampStepsRows(v);
-      storage.setItem(STEPS_ROWS_KEY, String(state.stepsRows));
-    },
+    /** The person's and the window's preferences, from their ONE owner — not
+     * a copy, so two servers on screen cannot disagree about them. */
+    get feedLevel() { return prefs.feedLevel; },
+    setFeedLevel(v: FeedLevel) { prefs.setFeedLevel(v); },
+    get sidebarCollapsed() { return prefs.sidebarCollapsed; },
+    setSidebarCollapsed(v: boolean) { prefs.setSidebarCollapsed(v); },
+    get stepsRows() { return prefs.stepsRows; },
+    setStepsRows(v: number) { prefs.setStepsRows(v); },
     /** The conversation that was open, '' when none was ever chosen. The caller
      * verifies it still exists — a project can be deleted between two visits. */
     get project() { return state.project; },

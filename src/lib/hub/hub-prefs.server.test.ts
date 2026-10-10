@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 (globalThis as any).localStorage = {
   getItem: () => null, setItem: () => {}, removeItem: () => {},
 };
-const { createHubPrefs, HUB_SERVER_KEYS } = await import('./hub-prefs.svelte.ts');
+const { createAppPrefs, createHubPrefs, HUB_SERVER_KEYS } = await import('./hub-prefs.svelte.ts');
 
 function mem(init: Record<string, string> = {}) {
   const m = new Map(Object.entries(init));
@@ -70,22 +70,54 @@ test('two servers keep their own draft, lead, read mark and drawer for one proje
   assert.equal(b.rosterExpanded('app'), false, 'B never expanded its roster');
 });
 
-test('the person s own preferences are the same whichever server is asked', () => {
-  // Feed level, the tool-row cap and the sidebar collapse are properties of
-  // the PERSON and the WINDOW. Scoping them would give the same human a
-  // different app depending on which machine they are looking at.
+test('a preference changed on one server is immediately true on the other', () => {
+  // The case the first version of this test missed by creating B only AFTER
+  // A's writes, which hid a real bug (reviewer P1): the feed level, the
+  // tool-row cap and the sidebar collapse are the PERSON's and the WINDOW's,
+  // so BOTH live instances must see a change at once. A shared KEY is not
+  // shared STATE — each factory used to keep its own copy, and B's went stale
+  // until something rebuilt it.
   const disk = mem();
-  const a = createHubPrefs(scoped(disk, 'a'));
+  const owner = createAppPrefs(disk);
+  const a = createHubPrefs(scoped(disk, 'a'), owner);
+  const b = createHubPrefs(scoped(disk, 'b'), owner);
+
+  a.setFeedLevel('status');
+  assert.equal(b.feedLevel, 'status', 'B is looking at the same person s app');
+  a.setStepsRows(7);
+  assert.equal(b.stepsRows, 7);
+  b.setSidebarCollapsed(true);
+  assert.equal(a.sidebarCollapsed, true, 'and it works in both directions');
+
+  // Still written where every server reads it, never behind one.
+  assert.ok(disk.keys().includes('tmux_hub_feed_level'));
+  assert.ok(!disk.keys().some((k) => k.startsWith('tmux_hub_feed_level::')));
+});
+
+test('a server s own maps stay isolated while the preferences are shared', () => {
+  // One owner for the person, one record per server, in the same pair of
+  // instances — the two halves must not have been collapsed into one.
+  const disk = mem();
+  const owner = createAppPrefs(disk);
+  const a = createHubPrefs(scoped(disk, 'a'), owner);
+  const b = createHubPrefs(scoped(disk, 'b'), owner);
+  a.setFeedLevel('chat');
+  a.setDraft('app', 'A only');
+  assert.equal(b.feedLevel, 'chat', 'shared');
+  assert.equal(b.draft('app'), '', 'isolated');
+});
+
+test('a late instance still reads the person s stored preferences', () => {
+  const disk = mem();
+  const a = createHubPrefs(scoped(disk, 'a'), createAppPrefs(disk));
   a.setFeedLevel('status');
   a.setStepsRows(7);
   a.setSidebarCollapsed(true);
-
-  const b = createHubPrefs(scoped(disk, 'b'));
-  assert.equal(b.feedLevel, 'status');
-  assert.equal(b.stepsRows, 7);
-  assert.equal(b.sidebarCollapsed, true);
-  assert.ok(disk.keys().includes('tmux_hub_feed_level'), 'written unscoped, where every server reads it');
-  assert.ok(!disk.keys().some((k) => k.startsWith('tmux_hub_feed_level::')), 'and never behind one server');
+  // A fresh owner, as a reload would build: the values come back off the disk.
+  const later = createHubPrefs(scoped(disk, 'b'), createAppPrefs(disk));
+  assert.equal(later.feedLevel, 'status');
+  assert.equal(later.stepsRows, 7);
+  assert.equal(later.sidebarCollapsed, true);
 });
 
 test('a rename follows the project on its own server only', () => {

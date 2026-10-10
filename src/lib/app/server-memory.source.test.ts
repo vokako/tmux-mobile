@@ -31,7 +31,7 @@ const PER_SERVER: Record<string, Record<string, RegExp>> = {
   // Re-read from the parked keys after pointTo (comeUp), not reset here.
   // Since #335 ②a-4 it is an INSTANCE of createHubPrefs(storage); ②b builds
   // each runtime's on that server's scoped store.
-  'hub/hub-prefs.svelte.ts': { hubPrefs: /./u },
+  'hub/hub-prefs.svelte.ts': { hubPrefs: /./u },   // the per-SERVER half
   // The notification centre (board #322): its list is a parked key too,
   // re-read by centre.reload() beside hubPrefs on comeUp.
   'hub/notify-centre.svelte.ts': { state: /./u, jumps: /./u },
@@ -42,6 +42,11 @@ const GLOBAL: Record<string, Record<string, string>> = {
   'hub/reveal.ts': { inFlight: 'a WeakMap on DOM nodes' },
   'app/leave-guards.ts': { guards: 'instances unregister on unmount' },
   'app/shortcuts.svelte.ts': { state: 'a preference' },
+  // The person's and the window's Hub preferences (feed level, tool-row cap,
+  // sidebar collapse). ONE owner however many servers are on screen, which is
+  // the point: a shared storage key is not shared state, and two live
+  // instances must not disagree about the same human's app (#335 ②a-4).
+  'hub/hub-prefs.svelte.ts': { appPrefs: 'the person\'s preferences, shared by every server' },
   'app/terminal-prefs.svelte.ts': { state: 'a preference' },
   'app/layout.svelte.ts': { mode: 'a preference' },
   'app/server-mode.svelte.ts': { current: 'THIS computer\'s own server, not the connected one', started: 'one subscription per page' },
