@@ -90,36 +90,120 @@ export function alertOf(m: FeedMsg & { seq?: number; room?: string; to?: unknown
   };
 }
 
-const storage = (): Store | null => (typeof localStorage === 'undefined' ? null : localStorage);
-const state = $state({ items: read(storage()), open: null as HTMLElement | null, jump: null as JumpRequest | null });
-let jumps = 0;
+// Two owners, because two kinds of state live here (board #335 ②a-4, the
+// same split hub-prefs needed):
+//
+//   the LIST is per SERVER. It lives in `tmux_hub_alerts`, one of servers.ts
+//     PARKED_KEYS, every entry already carries its `server`, and `reload()`
+//     existed only because a switch re-pointed the live key.
+//   the SURFACE is per WINDOW. There is one bell, one popover and one jump
+//     request in flight, however many servers are on screen — a second
+//     anchor would mean two popovers fighting over the same corner, and a
+//     per-server jump counter would let two requests both believe they are
+//     current.
+//
+// The union — one bell counting both servers — is a projection over the logs,
+// which is ②a-5's business, not a second list here.
+//
+// NOT YET WIRED PER RUNTIME, which is not the same as uncalled: production
+// reads `centre` below, which is one log plus the one surface, exactly as it
+// read the module state before.
 
-function save(next: Alert[]) {
-  if (next === state.items) return;
-  state.items = next;
-  try { storage()?.setItem(ALERTS_KEY, JSON.stringify(next)); } catch { /* private mode */ }
+/** One SERVER's alert list. */
+export interface AlertLog {
+  readonly items: readonly Alert[];
+  readonly unviewed: number;
+  record(alert: Alert): void;
+  markRoomRead(session: string, seq: number): void;
+  viewed(key: string): void;
+  failed(key: string, reason: string): void;
+  clear(): void;
+  /** Re-read this server's stored list. */
+  reload(): void;
 }
 
-export const centre = {
-  get items(): readonly Alert[] { return state.items; },
-  get unviewed(): number { return state.items.filter((a) => !a.viewed).length; },
-  record(alert: Alert) { save(withAlert(state.items, alert)); },
-  markRoomRead(session: string, seq: number) { save(readThrough(state.items, session, seq)); },
-  viewed(key: string) { save(state.items.map((a) => (a.key === key ? { ...a, viewed: true, failed: undefined } : a))); },
-  failed(key: string, reason: string) { save(state.items.map((a) => (a.key === key ? { ...a, failed: reason } : a))); },
-  clear() { save([]); },
-  /** After a server switch pointed the live key at another server's list. */
-  reload() { state.items = read(storage()); state.jump = null; state.open = null; },
-  /** The popover's anchor: whichever entry opened it (rail bell, Hub header). */
-  get anchor() { return state.open; },
-  toggle(trigger: HTMLElement) { state.open = state.open === trigger ? null : trigger; },
-  close() { state.open = null; },
-  /** A request for the Hub to open this entry's message; `n` makes a newer
+export function createAlertLog(storage: Store | null): AlertLog {
+  const state = $state({ items: read(storage) });
+
+  function save(next: Alert[]) {
+    if (next === state.items) return;
+    state.items = next;
+    try { storage?.setItem(ALERTS_KEY, JSON.stringify(next)); } catch { /* private mode */ }
+  }
+
+  return {
+    get items(): readonly Alert[] { return state.items; },
+    get unviewed(): number { return state.items.filter((a) => !a.viewed).length; },
+    record(alert) { save(withAlert(state.items, alert)); },
+    markRoomRead(session, seq) { save(readThrough(state.items, session, seq)); },
+    viewed(key) { save(state.items.map((a) => (a.key === key ? { ...a, viewed: true, failed: undefined } : a))); },
+    failed(key, reason) { save(state.items.map((a) => (a.key === key ? { ...a, failed: reason } : a))); },
+    clear() { save([]); },
+    reload() { state.items = read(storage); },
+  };
+}
+
+/** The ONE bell, popover and jump request of this window. */
+export interface CentreSurface {
+  /** The popover's anchor: whichever control opened it (rail bell, Hub
+   * header). */
+  readonly anchor: HTMLElement | null;
+  toggle(trigger: HTMLElement): void;
+  close(): void;
+  /** A request for the Hub to open an entry's message; `n` makes a newer
    * request supersede an older one still in flight. */
-  get jump(): JumpRequest | null { return state.jump; },
-  requestJump(alert: Alert) { state.jump = { alert, n: ++jumps }; },
-  isCurrent(n: number) { return state.jump?.n === n; },
+  readonly jump: JumpRequest | null;
+  requestJump(alert: Alert): void;
+  isCurrent(n: number): boolean;
   /** The request `n` is done (landed, failed, or invalidated): it is never
    * replayed. A newer request is left alone. */
-  consume(n: number) { if (state.jump?.n === n) state.jump = null; },
+  consume(n: number): void;
+  /** A switch (and, in ②b, dropping a runtime) invalidates anything aimed at
+   * the server being left. */
+  reset(): void;
+}
+
+export function createCentreSurface(): CentreSurface {
+  const state = $state({ open: null as HTMLElement | null, jump: null as JumpRequest | null });
+  let jumps = 0;
+  return {
+    get anchor() { return state.open; },
+    toggle(trigger) { state.open = state.open === trigger ? null : trigger; },
+    close() { state.open = null; },
+    get jump(): JumpRequest | null { return state.jump; },
+    requestJump(alert) { state.jump = { alert, n: ++jumps }; },
+    isCurrent(n) { return state.jump?.n === n; },
+    consume(n) { if (state.jump?.n === n) state.jump = null; },
+    reset() { state.jump = null; state.open = null; },
+  };
+}
+
+const storage = (): Store | null => (typeof localStorage === 'undefined' ? null : localStorage);
+
+/** This window's one surface. ②b passes THIS to every runtime's centre. */
+export const centreSurface = createCentreSurface();
+/** The app's one alert log, for as long as it looks at one server. */
+export const alertLog = createAlertLog(storage());
+
+/** What every consumer still imports: one server's log plus this window's
+ * surface, behind the shape the module always had. ②b gives each runtime its
+ * own log and keeps sharing the surface. */
+export const centre = {
+  get items(): readonly Alert[] { return alertLog.items; },
+  get unviewed(): number { return alertLog.unviewed; },
+  record(alert: Alert) { alertLog.record(alert); },
+  markRoomRead(session: string, seq: number) { alertLog.markRoomRead(session, seq); },
+  viewed(key: string) { alertLog.viewed(key); },
+  failed(key: string, reason: string) { alertLog.failed(key, reason); },
+  clear() { alertLog.clear(); },
+  /** After a server switch pointed the live key at another server's list: the
+   * list is re-read and anything aimed at the server being left is dropped. */
+  reload() { alertLog.reload(); centreSurface.reset(); },
+  get anchor() { return centreSurface.anchor; },
+  toggle(trigger: HTMLElement) { centreSurface.toggle(trigger); },
+  close() { centreSurface.close(); },
+  get jump(): JumpRequest | null { return centreSurface.jump; },
+  requestJump(alert: Alert) { centreSurface.requestJump(alert); },
+  isCurrent(n: number) { return centreSurface.isCurrent(n); },
+  consume(n: number) { centreSurface.consume(n); },
 };

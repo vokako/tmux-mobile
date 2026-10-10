@@ -33,8 +33,10 @@ const PER_SERVER: Record<string, Record<string, RegExp>> = {
   // each runtime's on that server's scoped store.
   'hub/hub-prefs.svelte.ts': { hubPrefs: /./u },   // the per-SERVER half
   // The notification centre (board #322): its list is a parked key too,
-  // re-read by centre.reload() beside hubPrefs on comeUp.
-  'hub/notify-centre.svelte.ts': { state: /./u, jumps: /./u },
+  // re-read by centre.reload() beside hubPrefs on comeUp. Since #335 ②a-4
+  // the list is an INSTANCE of createAlertLog(storage); the popover and the
+  // jump request are this WINDOW's and are listed as GLOBAL below.
+  'hub/notify-centre.svelte.ts': { alertLog: /./u },
 };
 const GLOBAL: Record<string, Record<string, string>> = {
   'core/markdown.ts': { cache: 'rendered HTML keyed by the message text itself' },
@@ -47,6 +49,11 @@ const GLOBAL: Record<string, Record<string, string>> = {
   // the point: a shared storage key is not shared state, and two live
   // instances must not disagree about the same human's app (#335 ②a-4).
   'hub/hub-prefs.svelte.ts': { appPrefs: 'the person\'s preferences, shared by every server' },
+  // One bell, one popover, one jump request in flight, however many servers
+  // are on screen: a second anchor would be two popovers in one corner, and a
+  // per-server jump counter would let two requests both think they are
+  // current. `centre.reload()` resets it when a server is left.
+  'hub/notify-centre.svelte.ts': { centreSurface: 'this WINDOW\'s bell and popover' },
   'app/terminal-prefs.svelte.ts': { state: 'a preference' },
   'app/layout.svelte.ts': { mode: 'a preference' },
   'app/server-mode.svelte.ts': { current: 'THIS computer\'s own server, not the connected one', started: 'one subscription per page' },
@@ -98,6 +105,7 @@ test('every module-level store is reset on a switch or named global (board 315)'
   for (const instance of [
     'files/downloads.svelte.ts:downloadStore', 'core/agents.ts:backendCatalog',
     'files/Files.svelte:memory', 'hub/hub-prefs.svelte.ts:hubPrefs',
+    'hub/notify-centre.svelte.ts:alertLog', 'hub/notify-centre.svelte.ts:centreSurface',
   ]) {
     assert.ok(found.includes(instance), `the scan sees the factory instance ${instance}`);
   }
