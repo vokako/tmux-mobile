@@ -222,7 +222,14 @@ history as containing a live signing key.
   worktree as an EMBEDDED REPOSITORY (a gitlink). `git clean -fdx` skips a
   worktree ("Would skip repository"), but `git clean -ffdx` — double force —
   removes the whole `worktree/` directory with every uncommitted change in it:
-  never run it in the launch checkout.
+  never run it in the launch checkout. The dev server serving the checkout
+  would also read `worktree/` — Vite watches the whole root, and its dependency
+  scan treats every worktree's `index.html` as another app — so
+  `vite.config.js` excludes it from both (measured on a private Vite with a
+  nested 304-entry `worktree/`: 304 → 0 watches there, and the scan stopped
+  following its imports; `scripts/vite-config.test.ts` pins it). `npm test`'s
+  globs and tsconfig's `include` are anchored at `src/`/`scripts/`, so they
+  never reach it.
 - Verify and commit on the task branch. Only then fast-forward/cherry-pick the
   verified commit into the intended branch from the integration checkout. Keep
   the worktree until integration is confirmed, then remove it with

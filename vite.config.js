@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { fileURLToPath } from 'node:url';
 import {
   DEV_DOWNLOAD_PATH,
   DEV_WEB_PORT,
@@ -43,6 +44,16 @@ function allowCompactXtermLines() {
   };
 }
 
+// Agent task worktrees live INSIDE the checkout, in its gitignored worktree/
+// (#342, docs/conventions/development.md § Agent worktree isolation). Vite
+// reads the whole root, so without this the dev server serving this checkout
+// also watches every worktree — a fresh one cost the supervised server 705
+// inotify watches, and one that has built Rust adds a target/ the size of this
+// checkout's (58k entries) — and its dependency scan crawls each worktree's
+// index.html as another app. Anchored at THIS config's directory, so a
+// worktree's own Vite ignores only a worktree/ nested inside it.
+const AGENT_WORKTREES = fileURLToPath(new URL('./worktree', import.meta.url));
+
 export function createViteConfig(command, env = process.env) {
   return {
     plugins: [allowCompactXtermLines(), svelte()],
@@ -50,6 +61,8 @@ export function createViteConfig(command, env = process.env) {
     // patch above would never apply in dev. Serve @xterm/xterm from source.
     optimizeDeps: {
       exclude: ['@xterm/xterm'],
+      // Vite's default entry glob, minus the agent worktrees.
+      entries: ['**/*.html', '!worktree/**'],
     },
     clearScreen: false,
     server: {
@@ -57,6 +70,7 @@ export function createViteConfig(command, env = process.env) {
       port: DEV_WEB_PORT,
       strictPort: true,
       allowedHosts: ['.ts.net', 'localhost'],
+      watch: { ignored: [`${AGENT_WORKTREES}/**`] },
       ...(command === 'serve' ? { proxy: devProxy(env) } : {}),
     },
   };
