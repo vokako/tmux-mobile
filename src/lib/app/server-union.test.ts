@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { contributors, unionRows, type ServerSlice } from './server-union.ts';
 import { issueRef, projectRef, refKey, sessionRef } from './refs.ts';
-import { projectUpdatedMs, sortRows, type Project, type ProjectRow } from '../projects/projects.ts';
+import { compareRows, projectUpdatedMs, sortRows, type Project, type ProjectRow } from '../projects/projects.ts';
 
 const project = (over: Partial<Project> & { id: string; session: string }): Project => ({
   name: over.session, path: `/srv/${over.session}`, adopted: false, autostart: false,
@@ -20,10 +20,10 @@ const row = (id: string, session: string, over: Partial<Project> & { live?: bool
 const slice = <T,>(serverId: string, order: number, items: T[], over: Partial<ServerSlice<T>> = {}): ServerSlice<T> =>
   ({ serverId, name: serverId.toUpperCase(), order, ok: true, items, ...over });
 
-/** The projects list's own rule, composed from its own functions. */
+/** The projects list's own comparator — the very function it sorts by. */
 const projectSpec = (talk: Record<string, number> = {}) => ({
   ref: (serverId: string, r: ProjectRow) => projectRef(serverId, r.project.id),
-  rank: (r: ProjectRow) => [r.live ? 1 : 0, projectUpdatedMs(r, talk)],
+  compare: compareRows(talk),
 });
 
 test('one server contributing is that server s list, untagged', () => {
@@ -33,6 +33,32 @@ test('one server contributing is that server s list, untagged', () => {
   assert.deepEqual(union.rows.map((r) => r.item.project.id), ['p1', 'p2']);
   assert.deepEqual(union.rows.map((r) => r.tag), [null, null], 'nothing to tell apart');
   assert.deepEqual(union.missing, []);
+});
+
+test('ONE server s order is never changed, whatever the comparator says', () => {
+  // The P1 this replaces a `rank` for. `projectUpdatedMs` falls back to
+  // `last_seen_at`, which `sortRows` deliberately ignores because the capturer
+  // rewrites it every tick — so the two clocks DISAGREE, and a union that
+  // ranked rows itself reordered a single server's list.
+  const stale = row('p1', 'stale', { last_up_at: 100, last_seen_at: 9_000 });
+  const recent = row('p2', 'recent', { last_up_at: 500, last_seen_at: 500 });
+  // The two clocks really do disagree on this pair.
+  const byUpdated = [stale, recent].slice().sort((a, b) => projectUpdatedMs(b) - projectUpdatedMs(a));
+  const bySortRows = sortRows([stale, recent]);
+  assert.notDeepEqual(byUpdated.map((r) => r.project.id), bySortRows.map((r) => r.project.id),
+    'the fixture is only meaningful if the two clocks differ');
+
+  const union = unionRows([slice('a', 0, bySortRows)], projectSpec());
+  assert.deepEqual(union.rows.map((r) => r.item.project.id), bySortRows.map((r) => r.project.id),
+    'the union hands back exactly what the domain ordered');
+
+  // And it holds for ANY given order, because a merge of one list cannot
+  // reorder it — even an order the comparator would not have produced.
+  const reversed = [...bySortRows].reverse();
+  assert.deepEqual(
+    unionRows([slice('a', 0, reversed)], projectSpec()).rows.map((r) => r.item.project.id),
+    reversed.map((r) => r.project.id),
+    'a merge of one list is that list, by construction');
 });
 
 test('two servers interleave by the projects list s own rule', () => {
@@ -62,9 +88,11 @@ test('equal rows fall in saved-server order, stably', () => {
   assert.deepEqual(ids(first), ['a:a1', 'a:a2', 'b:b1', 'b:b2']);
 });
 
-test('one server failing leaves the other s list whole', () => {
-  // The failure a shorter list would hide. B is asked and fails: A's rows all
-  // stay, and B is named so the view can say so.
+test('one server failing leaves the other s list whole, and still says whose it is', () => {
+  // Two failures in one: a shorter list with no explanation, and — the P1 —
+  // the source tag vanishing because only one server answered. In Aggregate
+  // mode with A and B included, B dropping must not make A's rows stop saying
+  // they are A's. The tag follows the SOURCE SET, not the answer count.
   const a = [row('a1', 'alpha', { live: true })];
   const union = unionRows(
     [slice('a', 0, a), slice('b', 1, [] as ProjectRow[], { ok: false })],
@@ -72,8 +100,20 @@ test('one server failing leaves the other s list whole', () => {
   );
   assert.deepEqual(union.rows.map((r) => r.item.project.id), ['a1']);
   assert.deepEqual(union.missing, ['b']);
-  assert.deepEqual(union.rows.map((r) => r.tag), [null],
-    'and with only one server answering there is still nothing to tag');
+  assert.deepEqual(union.rows.map((r) => r.tag), ['A'],
+    'B is still one of this list s servers, so A s rows are still labelled');
+});
+
+test('the mode can decide the tag outright', () => {
+  // Where the MODE rather than the count is what matters, ②b says so.
+  const a = [row('a1', 'alpha')];
+  const forced = unionRows([slice('a', 0, a)], { ...projectSpec(), showSource: true });
+  assert.deepEqual(forced.rows.map((r) => r.tag), ['A'], 'Aggregate with one server still labels');
+  const hidden = unionRows(
+    [slice('a', 0, a), slice('b', 1, [row('b1', 'beta')])],
+    { ...projectSpec(), showSource: false },
+  );
+  assert.deepEqual(hidden.rows.map((r) => r.tag), [null, null], 'and a view may suppress it');
 });
 
 test('a server that has not answered yet is simply absent', () => {
@@ -110,11 +150,13 @@ test('the tag appears only when more than one server contributes', () => {
   // list does not grow a tag the moment that server's first row arrives.
   const withEmpty = unionRows([slice('a', 0, a), slice('b', 1, [] as ProjectRow[])], projectSpec());
   assert.deepEqual(withEmpty.rows.map((r) => r.tag), ['A']);
+  const alone = unionRows([slice('a', 0, a)], projectSpec());
+  assert.deepEqual(alone.rows.map((r) => r.tag), [null], 'one server in the list, no tag');
   const both = unionRows([slice('a', 0, a), slice('b', 1, b)], projectSpec());
   assert.deepEqual(both.rows.map((r) => r.tag), ['A', 'B']);
 });
 
-test('without a rank each server s given order is kept', () => {
+test('without a comparator each server s given order is kept', () => {
   // A list whose order IS the server's answer — tmux's session order. The
   // union must not reorder it, only interleave by server.
   const union = unionRows(

@@ -146,16 +146,27 @@ export function projectAgeLabel(
  *
  * The `talk` argument stays optional for project-only servers without Hub
  * support; production Chat, Terminal and Board all pass the same grouped map.
+ *
+ * `compareRows` is the rule itself, exported because a union over several
+ * servers has to INTERLEAVE already-ordered lists with the same comparator
+ * this sorts by (board #335 ②a-5). Anything that re-derives the clock —
+ * `projectUpdatedMs`, for instance, which falls back to `last_seen_at` and
+ * is right for the AGE LABEL and wrong for ordering — can reorder a single
+ * server's list.
  */
-export function sortRows(rows: ProjectRow[], talk: Record<string, number> = {}): ProjectRow[] {
+export function compareRows(talk: Record<string, number> = {}): (a: ProjectRow, b: ProjectRow) => number {
   const activity = (r: ProjectRow) => Math.max(
     talk[r.project.room ?? `proj:${r.project.session}`] ?? 0,
     (r.project.last_up_at ?? r.project.created_at ?? 0) * 1000,
   );
-  return rows.slice().sort((a, b) => {
+  return (a, b) => {
     if (a.live !== b.live) return a.live ? -1 : 1;
     return activity(b) - activity(a);
-  });
+  };
+}
+
+export function sortRows(rows: ProjectRow[], talk: Record<string, number> = {}): ProjectRow[] {
+  return rows.slice().sort(compareRows(talk));
 }
 
 /**
