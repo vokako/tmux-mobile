@@ -107,6 +107,21 @@ test('a server s own maps stay isolated while the preferences are shared', () =>
   assert.equal(b.draft('app'), '', 'isolated');
 });
 
+test('the tool-row cap is clamped, on the way in and on the way out', () => {
+  // A stored value passes the same clamp as the setter, so an old or
+  // hand-edited entry cannot render a broken lane.
+  const disk = mem();
+  const owner = createAppPrefs(disk);
+  const a = createHubPrefs(scoped(disk, 'a'), owner);
+  a.setStepsRows(99999);
+  const capped = a.stepsRows;
+  assert.ok(capped < 99999, `the setter clamped it to ${capped}`);
+  assert.equal(disk.getItem('tmux_hub_steps_rows'), String(capped), 'and stored what it clamped to');
+
+  disk.setItem('tmux_hub_steps_rows', '99999');
+  assert.equal(createAppPrefs(disk).stepsRows, capped, 'a hand-edited value is clamped on read too');
+});
+
 test('a late instance still reads the person s stored preferences', () => {
   const disk = mem();
   const a = createHubPrefs(scoped(disk, 'a'), createAppPrefs(disk));
